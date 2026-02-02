@@ -31,6 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Displays warning when usage exceeds threshold
   - Displays alert when budget is exceeded
 
+- **Proactive Budget Notifications**: Agent automatically sends budget alerts to chat channels
+  - `BudgetMonitor` class monitors usage after each API call
+  - Sends alerts to Telegram/WhatsApp when budget thresholds are reached
+  - Cooldown mechanism prevents alert spam (1 hour between same alerts)
+  - Supports both daily and monthly budget monitoring
+
 ### Changed
 
 - `LLMResponse` dataclass now includes `cost_usd` field for per-request cost tracking
