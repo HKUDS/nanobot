@@ -158,6 +158,10 @@ def gateway(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the nanobot gateway."""
+    import os
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
     from nanobot.config.loader import load_config, get_data_dir
     from nanobot.bus.queue import MessageBus
     from nanobot.providers.litellm_provider import LiteLLMProvider
@@ -170,10 +174,44 @@ def gateway(
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
-    
+
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    
+
     config = load_config()
+
+    def start_health_server(host: str, health_port: int) -> ThreadingHTTPServer | None:
+        class HealthHandler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
+                if self.path in ("/", "/health", "/healthz", "/ready"):
+                    body = b"ok"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+            def log_message(self, format: str, *args) -> None:  # noqa: A002 - matches base signature
+                if os.getenv("NANOBOT_HTTP_LOG", "") == "1":
+                    super().log_message(format, *args)
+
+        try:
+            server = ThreadingHTTPServer((host, health_port), HealthHandler)
+        except OSError as exc:
+            console.print(
+                f"[yellow]Warning: Health server failed to start on {host}:{health_port}: {exc}[/yellow]"
+            )
+            return None
+
+        thread = Thread(target=server.serve_forever, name="nanobot-health", daemon=True)
+        thread.start()
+        console.print(f"[green]✓[/green] Health server: http://{host}:{health_port}/health")
+        return server
+
+    http_enabled = os.getenv("NANOBOT_HTTP_ENABLED", "1").lower() not in {"0", "false", "no", "off"}
+    health_server = start_health_server(config.gateway.host, port) if http_enabled else None
     
     # Create components
     bus = MessageBus()
@@ -263,6 +301,10 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+        finally:
+            if health_server:
+                health_server.shutdown()
+                health_server.server_close()
     
     asyncio.run(run())
 

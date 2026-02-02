@@ -32,6 +32,15 @@ elif [[ "$WRITE_CONFIG" == "auto" && ! -f "$CONFIG_FILE" ]]; then
 fi
 
 if [[ "$should_write" == "1" ]]; then
+  ALLOW_FROM_JSON=$(python - <<'PY'
+import json
+import os
+
+raw = os.getenv("TELEGRAM_ALLOW_FROM", "")
+items = [item.strip() for item in raw.split(",") if item.strip()]
+print(json.dumps(items))
+PY
+)
   cat > "$CONFIG_FILE" <<EOF
 {
   "providers": {
@@ -48,7 +57,7 @@ if [[ "$should_write" == "1" ]]; then
     "telegram": {
       "enabled": ${TELEGRAM_ENABLED:-true},
       "token": "${TELEGRAM_TOKEN:-}",
-      "allowFrom": [$(printf '%s' "${TELEGRAM_ALLOW_FROM:-}" | awk -F',' '{for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}}')]
+      "allowFrom": ${ALLOW_FROM_JSON}
     },
     "whatsapp": {
       "enabled": ${WHATSAPP_ENABLED:-false}
