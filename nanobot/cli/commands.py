@@ -606,16 +606,20 @@ def cron_run(
 def usage(
     days: int = typer.Option(7, "--days", "-d", help="Number of days to show"),
     today_only: bool = typer.Option(False, "--today", "-t", help="Show today only"),
+    by_model: bool = typer.Option(False, "--by-model", "-m", help="Show breakdown by model"),
+    by_channel: bool = typer.Option(False, "--by-channel", "-c", help="Show breakdown by channel"),
 ):
     """Show token usage and cost statistics."""
+    from nanobot.config.loader import load_config
     from nanobot.usage import UsageTracker
     
     tracker = UsageTracker()
+    config = load_config()
     
     if today_only:
-        _print_today_usage(tracker)
+        _print_today_usage(tracker, config, by_model, by_channel)
     else:
-        _print_usage_summary(tracker, days)
+        _print_usage_summary(tracker, days, config, by_model, by_channel)
 
 
 def _format_tokens(n: int) -> str:
@@ -627,7 +631,99 @@ def _format_tokens(n: int) -> str:
     return str(n)
 
 
-def _print_today_usage(tracker) -> None:
+def _check_budget_warning(tracker, config) -> None:
+    """Check and display budget warnings if thresholds are exceeded."""
+    usage_config = config.usage
+    
+    # Skip if no budgets configured
+    if usage_config.daily_budget_usd <= 0 and usage_config.monthly_budget_usd <= 0:
+        return
+    
+    warnings = []
+    
+    # Check daily budget
+    if usage_config.daily_budget_usd > 0:
+        today = tracker.get_today()
+        daily_pct = (today.total_cost_usd / usage_config.daily_budget_usd) * 100
+        
+        if daily_pct >= 100:
+            warnings.append(
+                f"[red bold]⚠ DAILY BUDGET EXCEEDED![/red bold] "
+                f"${today.total_cost_usd:.4f} / ${usage_config.daily_budget_usd:.4f} "
+                f"({daily_pct:.1f}%)"
+            )
+        elif daily_pct >= usage_config.warn_at_percent:
+            warnings.append(
+                f"[yellow]⚠ Daily budget warning:[/yellow] "
+                f"${today.total_cost_usd:.4f} / ${usage_config.daily_budget_usd:.4f} "
+                f"({daily_pct:.1f}%)"
+            )
+    
+    # Check monthly budget
+    if usage_config.monthly_budget_usd > 0:
+        monthly_cost = tracker.get_monthly_cost()
+        monthly_pct = (monthly_cost / usage_config.monthly_budget_usd) * 100
+        
+        if monthly_pct >= 100:
+            warnings.append(
+                f"[red bold]⚠ MONTHLY BUDGET EXCEEDED![/red bold] "
+                f"${monthly_cost:.4f} / ${usage_config.monthly_budget_usd:.2f} "
+                f"({monthly_pct:.1f}%)"
+            )
+        elif monthly_pct >= usage_config.warn_at_percent:
+            warnings.append(
+                f"[yellow]⚠ Monthly budget warning:[/yellow] "
+                f"${monthly_cost:.4f} / ${usage_config.monthly_budget_usd:.2f} "
+                f"({monthly_pct:.1f}%)"
+            )
+    
+    # Display warnings
+    if warnings:
+        console.print()
+        for w in warnings:
+            console.print(w)
+
+
+def _print_grouped_table(
+    title: str,
+    grouped_stats: dict,
+    sort_by: str = "cost_usd"
+) -> None:
+    """Print a table of grouped statistics."""
+    if not grouped_stats:
+        return
+    
+    # Sort by cost descending
+    sorted_items = sorted(
+        grouped_stats.values(),
+        key=lambda x: getattr(x, sort_by),
+        reverse=True
+    )
+    
+    console.print(f"\n[bold]{title}:[/bold]")
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Name", style="cyan")
+    table.add_column("Requests", justify="right")
+    table.add_column("Tokens", justify="right")
+    table.add_column("Cost", justify="right", style="green")
+    table.add_column("%", justify="right", style="dim")
+    
+    total_cost = sum(s.cost_usd for s in sorted_items)
+    
+    for stats in sorted_items:
+        pct = (stats.cost_usd / total_cost * 100) if total_cost > 0 else 0
+        table.add_row(
+            stats.name,
+            str(stats.requests),
+            _format_tokens(stats.total_tokens),
+            f"${stats.cost_usd:.4f}",
+            f"{pct:.1f}%"
+        )
+    
+    console.print(table)
+
+
+def _print_today_usage(tracker, config, by_model: bool = False, by_channel: bool = False) -> None:
     """Print today's usage statistics."""
     from nanobot.usage import DailySummary
     
@@ -648,9 +744,18 @@ def _print_today_usage(tracker) -> None:
     )
     console.print(f"  Cost:         [green]${summary.total_cost_usd:.4f}[/green]")
     console.print("═" * 50)
+    
+    # Show breakdowns if requested
+    if by_model:
+        _print_grouped_table("By Model", summary.by_model)
+    if by_channel:
+        _print_grouped_table("By Channel", summary.by_channel)
+    
+    # Check budget warnings
+    _check_budget_warning(tracker, config)
 
 
-def _print_usage_summary(tracker, days: int) -> None:
+def _print_usage_summary(tracker, days: int, config, by_model: bool = False, by_channel: bool = False) -> None:
     """Print usage summary for multiple days."""
     from nanobot.usage import DailySummary
     
@@ -689,6 +794,12 @@ def _print_usage_summary(tracker, days: int) -> None:
     
     console.print("\n" + "═" * 50)
     
+    # Show breakdowns if requested (from aggregate data)
+    if by_model and aggregate.by_model:
+        _print_grouped_table("By Model", aggregate.by_model)
+    if by_channel and aggregate.by_channel:
+        _print_grouped_table("By Channel", aggregate.by_channel)
+    
     # Show daily breakdown if there's data
     summaries = tracker.get_range(days)
     if summaries and len(summaries) > 1:
@@ -708,6 +819,9 @@ def _print_usage_summary(tracker, days: int) -> None:
             )
         
         console.print(table)
+    
+    # Check budget warnings
+    _check_budget_warning(tracker, config)
 
 
 # ============================================================================

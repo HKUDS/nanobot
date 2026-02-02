@@ -15,4 +15,4 @@ build/
 
 # Manual test scripts with API keys
 tests/test_usage_deepseek.py
-tests/test_pricing_verification.py
+tests/test_pricing_verification.pytests/test_usage_features.py

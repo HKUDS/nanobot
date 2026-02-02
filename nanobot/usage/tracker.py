@@ -170,6 +170,8 @@ class UsageTracker:
         Returns:
             Combined DailySummary (date field will be "aggregate")
         """
+        from nanobot.usage.models import GroupedStats
+        
         summaries = self.get_range(days)
         
         aggregate = DailySummary(date="aggregate")
@@ -179,5 +181,40 @@ class UsageTracker:
             aggregate.total_completion_tokens += s.total_completion_tokens
             aggregate.total_tokens += s.total_tokens
             aggregate.total_cost_usd += s.total_cost_usd
+            
+            # Merge model breakdowns
+            for model, stats in s.by_model.items():
+                if model not in aggregate.by_model:
+                    aggregate.by_model[model] = GroupedStats(name=model)
+                agg_stats = aggregate.by_model[model]
+                agg_stats.requests += stats.requests
+                agg_stats.prompt_tokens += stats.prompt_tokens
+                agg_stats.completion_tokens += stats.completion_tokens
+                agg_stats.total_tokens += stats.total_tokens
+                agg_stats.cost_usd += stats.cost_usd
+            
+            # Merge channel breakdowns
+            for channel, stats in s.by_channel.items():
+                if channel not in aggregate.by_channel:
+                    aggregate.by_channel[channel] = GroupedStats(name=channel)
+                agg_stats = aggregate.by_channel[channel]
+                agg_stats.requests += stats.requests
+                agg_stats.prompt_tokens += stats.prompt_tokens
+                agg_stats.completion_tokens += stats.completion_tokens
+                agg_stats.total_tokens += stats.total_tokens
+                agg_stats.cost_usd += stats.cost_usd
         
         return aggregate
+    
+    def get_monthly_cost(self) -> float:
+        """
+        Get total cost for the current month.
+        
+        Returns:
+            Total cost in USD for this month
+        """
+        from datetime import date
+        
+        today = date.today()
+        days_in_month = today.day  # Days from start of month to today
+        return self.get_total_cost(days_in_month)
