@@ -199,8 +199,10 @@ class TelegramChannel(BaseChannel):
         user = update.effective_user
         chat_id = message.chat_id
         
-        # Get sender identifier (prefer username, fallback to user_id)
-        sender_id = str(user.username or user.id)
+        # Use stable numeric ID, but keep username for allowlist compatibility
+        sender_id = str(user.id)
+        if user.username:
+            sender_id = f"{sender_id}|{user.username}"
         
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
