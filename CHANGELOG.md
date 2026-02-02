@@ -33,9 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Proactive Budget Notifications**: Agent automatically sends budget alerts to chat channels
   - `BudgetMonitor` class monitors usage after each API call
-  - Sends alerts to Telegram/WhatsApp when budget thresholds are reached
+  - Sends alerts to Telegram/WhatsApp when budget is **exceeded** (100%+)
   - Cooldown mechanism prevents alert spam (1 hour between same alerts)
   - Supports both daily and monthly budget monitoring
+
+- **Usage Tool**: Agent can now query its own resource consumption
+  - `UsageTool` allows agent to check token usage and costs
+  - Query by period: today, week, or month
+  - Breakdown by model or channel
+  - Budget status with visual indicators (✅ OK / ⚠️ WARNING / 🚨 EXCEEDED)
+  - Enables agent to make informed decisions about resource usage
 
 ### Changed
 

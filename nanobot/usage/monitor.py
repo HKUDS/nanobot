@@ -92,9 +92,14 @@ class BudgetMonitor:
         """Mark that we sent an alert."""
         self._last_alert[alert_type] = datetime.now()
     
-    def check_budgets(self) -> BudgetAlert | None:
+    def check_budgets(self, exceeded_only: bool = True) -> BudgetAlert | None:
         """
         Check current usage against budget thresholds.
+        
+        Args:
+            exceeded_only: If True, only alert when budget is exceeded (100%+).
+                          If False, also alert at warning threshold.
+                          Default True since Agent can use UsageTool for warnings.
         
         Returns:
             BudgetAlert if a threshold is exceeded and cooldown allows,
@@ -104,7 +109,7 @@ class BudgetMonitor:
         if self.config.daily_budget_usd <= 0 and self.config.monthly_budget_usd <= 0:
             return None
         
-        # Check daily budget (prioritize exceeded over warning)
+        # Check daily budget
         if self.config.daily_budget_usd > 0:
             today = self.tracker.get_today()
             daily_pct = (today.total_cost_usd / self.config.daily_budget_usd) * 100
@@ -119,7 +124,7 @@ class BudgetMonitor:
                         budget=self.config.daily_budget_usd,
                         percent=daily_pct,
                     )
-            elif daily_pct >= self.config.warn_at_percent:
+            elif not exceeded_only and daily_pct >= self.config.warn_at_percent:
                 alert_type = BudgetAlert.DAILY_WARNING
                 if self._can_alert(alert_type):
                     self._mark_alerted(alert_type)
@@ -145,7 +150,7 @@ class BudgetMonitor:
                         budget=self.config.monthly_budget_usd,
                         percent=monthly_pct,
                     )
-            elif monthly_pct >= self.config.warn_at_percent:
+            elif not exceeded_only and monthly_pct >= self.config.warn_at_percent:
                 alert_type = BudgetAlert.MONTHLY_WARNING
                 if self._can_alert(alert_type):
                     self._mark_alerted(alert_type)
