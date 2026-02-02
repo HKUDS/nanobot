@@ -1,5 +1,7 @@
 """Context builder for assembling agent prompts."""
 
+import base64
+import mimetypes
 from pathlib import Path
 from typing import Any
 
@@ -114,32 +116,53 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         self,
         history: list[dict[str, Any]],
         current_message: str,
-        skill_names: list[str] | None = None
+        skill_names: list[str] | None = None,
+        media: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Build the complete message list for an LLM call.
-        
+
         Args:
             history: Previous conversation messages.
             current_message: The new user message.
             skill_names: Optional skills to include.
-        
+            media: Optional list of local file paths for images/media.
+
         Returns:
             List of messages including system prompt.
         """
         messages = []
-        
+
         # System prompt
         system_prompt = self.build_system_prompt(skill_names)
         messages.append({"role": "system", "content": system_prompt})
-        
+
         # History
         messages.extend(history)
-        
-        # Current message
-        messages.append({"role": "user", "content": current_message})
-        
+
+        # Current message (with optional image attachments)
+        user_content = self._build_user_content(current_message, media)
+        messages.append({"role": "user", "content": user_content})
+
         return messages
+
+    def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
+        """Build user message content with optional base64-encoded images."""
+        if not media:
+            return text
+        
+        images = []
+        for path in media:
+            p = Path(path)
+            mime, _ = mimetypes.guess_type(path)
+            if not p.is_file() or not mime or not mime.startswith("image/"):
+                continue
+            b64 = base64.b64encode(p.read_bytes()).decode()
+            images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+        
+        if not images:
+            return text
+        return images + [{"type": "text", "text": text}]
     
     def add_tool_result(
         self,

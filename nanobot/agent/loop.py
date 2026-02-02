@@ -152,7 +152,8 @@ class AgentLoop:
         # Build initial messages (use get_history for LLM-formatted messages)
         messages = self.context.build_messages(
             history=session.get_history(),
-            current_message=msg.content
+            current_message=msg.content,
+            media=msg.media if msg.media else None,
         )
         
         # Agent loop
@@ -189,7 +190,8 @@ class AgentLoop:
                 
                 # Execute tools
                 for tool_call in response.tool_calls:
-                    logger.debug(f"Executing tool: {tool_call.name}")
+                    args_str = json.dumps(tool_call.arguments)
+                    logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
@@ -281,7 +283,8 @@ class AgentLoop:
                 )
                 
                 for tool_call in response.tool_calls:
-                    logger.debug(f"Executing tool: {tool_call.name}")
+                    args_str = json.dumps(tool_call.arguments)
+                    logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result

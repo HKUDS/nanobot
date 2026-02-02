@@ -74,6 +74,14 @@ cd nanobot
 pip install -e .
 ```
 
+**Install with uv**
+
+```bash
+uv venv
+source .venv/bin/activate
+uv pip install nanobot-ai
+```
+
 ## 🚀 Quick Start
 
 > [!TIP]
@@ -321,7 +329,11 @@ nanobot/
 └── cli/            # 🖥️ Commands
 ```
 
-## 🗺️ Roadmap
+## 🤝 Contribute & Roadmap
+
+PRs welcome! The codebase is intentionally small and readable. 🤗
+
+**Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 
 - [ ] **Multi-modal** — See and hear (images, voice, video)
 - [ ] **Long-term memory** — Never forget important context
@@ -329,13 +341,15 @@ nanobot/
 - [ ] **More integrations** — Discord, Slack, email, calendar
 - [ ] **Self-improvement** — Learn from feedback and mistakes
 
-**Want to help?** Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
+### Contributors
+
+<a href="https://github.com/HKUDS/nanobot/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=HKUDS/nanobot" />
+</a>
 
 ---
 
 ## ⭐ Star History
-
-*Community Growth Trajectory*
 
 <div align="center">
   <a href="https://star-history.com/#HKUDS/nanobot&Date">
@@ -346,12 +360,6 @@ nanobot/
     </picture>
   </a>
 </div>
-
----
-
-## 🤝 Contribute
-
-PRs welcome! The codebase is intentionally small and readable. 🤗
 
 <p align="center">
   <em> Thanks for visiting ✨ nanobot!</em><br><br>
