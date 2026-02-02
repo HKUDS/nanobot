@@ -69,6 +69,31 @@ Send a message to the user (used internally).
 message(content: str, channel: str = None, chat_id: str = None) -> str
 ```
 
+## Resource Monitoring
+
+### usage
+Check your token usage and cost statistics.
+```
+usage(period: str = "today", breakdown: str = "none") -> str
+```
+
+**Parameters:**
+- `period`: Time period to query - `"today"`, `"week"`, or `"month"`
+- `breakdown`: Show breakdown by `"model"`, `"channel"`, `"both"`, or `"none"`
+
+**Returns:**
+- Request count, token count, cost
+- Budget status (if configured)
+- Breakdown by model/channel (if requested)
+
+**Best Practices:**
+- Check usage periodically to be aware of resource consumption
+- If budget is at WARNING (80%+), consider:
+  - Using a cheaper model for simple tasks
+  - Being more concise in responses
+  - Notifying the user about budget status
+- If budget is EXCEEDED (100%+), inform the user immediately
+
 ## Scheduled Reminders (Cron)
 
 Use the `exec` tool to create scheduled reminders with `nanobot cron add`:
