@@ -168,11 +168,12 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram, WhatsApp, or Feishu — anytime, anywhere.
+Talk to your nanobot through Telegram, Discord, or WhatsApp — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
 | **Telegram** | Easy (just a token) |
+| **Discord** | Easy (bot token + intents) |
 | **WhatsApp** | Medium (scan QR) |
 | **Feishu** | Medium (app credentials) |
 
@@ -201,6 +202,46 @@ Talk to your nanobot through Telegram, WhatsApp, or Feishu — anytime, anywhere
 > Get your user ID from `@userinfobot` on Telegram.
 
 **3. Run**
+
+```bash
+nanobot gateway
+```
+
+</details>
+
+<details>
+<summary><b>Discord</b></summary>
+
+**1. Create a bot**
+- Go to https://discord.com/developers/applications
+- Create an application → Bot → Add Bot
+- Copy the bot token
+
+**2. Enable intents**
+- In the Bot settings, enable **MESSAGE CONTENT INTENT**
+- (Optional) Enable **SERVER MEMBERS INTENT** if you plan to use allow lists based on member data
+
+**3. Configure**
+
+```json
+{
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "token": "YOUR_BOT_TOKEN",
+      "allowFrom": ["YOUR_USER_ID"]
+    }
+  }
+}
+```
+
+**4. Invite the bot**
+- OAuth2 → URL Generator
+- Scopes: `bot`
+- Bot Permissions: `Send Messages`, `Read Message History`
+- Open the generated invite URL and add the bot to your server
+
+**5. Run**
 
 ```bash
 nanobot gateway
@@ -336,6 +377,11 @@ Config file: `~/.nanobot/config.json`
       "enabled": true,
       "token": "123456:ABC...",
       "allowFrom": ["123456789"]
+    },
+    "discord": {
+      "enabled": false,
+      "token": "YOUR_DISCORD_BOT_TOKEN",
+      "allowFrom": ["YOUR_USER_ID"]
     },
     "whatsapp": {
       "enabled": false
