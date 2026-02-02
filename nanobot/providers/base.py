@@ -20,6 +20,7 @@ class LLMResponse:
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
     finish_reason: str = "stop"
     usage: dict[str, int] = field(default_factory=dict)
+    cost_usd: float = 0.0  # Cost in USD from provider
     
     @property
     def has_tool_calls(self) -> bool:

@@ -598,6 +598,119 @@ def cron_run(
 
 
 # ============================================================================
+# Usage Commands
+# ============================================================================
+
+
+@app.command()
+def usage(
+    days: int = typer.Option(7, "--days", "-d", help="Number of days to show"),
+    today_only: bool = typer.Option(False, "--today", "-t", help="Show today only"),
+):
+    """Show token usage and cost statistics."""
+    from nanobot.usage import UsageTracker
+    
+    tracker = UsageTracker()
+    
+    if today_only:
+        _print_today_usage(tracker)
+    else:
+        _print_usage_summary(tracker, days)
+
+
+def _format_tokens(n: int) -> str:
+    """Format token count with thousands separator."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.2f}M"
+    elif n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
+
+
+def _print_today_usage(tracker) -> None:
+    """Print today's usage statistics."""
+    from nanobot.usage import DailySummary
+    
+    summary = tracker.get_today()
+    
+    console.print(f"\n{__logo__} Token Usage - Today ({summary.date})")
+    console.print("═" * 50)
+    
+    if summary.total_requests == 0:
+        console.print("[dim]No usage recorded today.[/dim]")
+        return
+    
+    console.print(f"  Requests:     {summary.total_requests}")
+    console.print(
+        f"  Tokens:       {_format_tokens(summary.total_tokens)} "
+        f"[dim](in: {_format_tokens(summary.total_prompt_tokens)} / "
+        f"out: {_format_tokens(summary.total_completion_tokens)})[/dim]"
+    )
+    console.print(f"  Cost:         [green]${summary.total_cost_usd:.4f}[/green]")
+    console.print("═" * 50)
+
+
+def _print_usage_summary(tracker, days: int) -> None:
+    """Print usage summary for multiple days."""
+    from nanobot.usage import DailySummary
+    
+    today = tracker.get_today()
+    aggregate = tracker.get_aggregate(days)
+    
+    console.print(f"\n{__logo__} Token Usage Summary")
+    console.print("═" * 50)
+    
+    # Today's stats
+    console.print(f"\n[bold]Today ({today.date}):[/bold]")
+    if today.total_requests == 0:
+        console.print("  [dim]No usage recorded today.[/dim]")
+    else:
+        console.print(f"  Requests:     {today.total_requests}")
+        console.print(
+            f"  Tokens:       {_format_tokens(today.total_tokens)} "
+            f"[dim](in: {_format_tokens(today.total_prompt_tokens)} / "
+            f"out: {_format_tokens(today.total_completion_tokens)})[/dim]"
+        )
+        console.print(f"  Cost:         [green]${today.total_cost_usd:.4f}[/green]")
+    
+    # Period stats
+    if days > 1:
+        console.print(f"\n[bold]Last {days} Days:[/bold]")
+        if aggregate.total_requests == 0:
+            console.print("  [dim]No usage recorded.[/dim]")
+        else:
+            console.print(f"  Requests:     {aggregate.total_requests}")
+            console.print(
+                f"  Tokens:       {_format_tokens(aggregate.total_tokens)} "
+                f"[dim](in: {_format_tokens(aggregate.total_prompt_tokens)} / "
+                f"out: {_format_tokens(aggregate.total_completion_tokens)})[/dim]"
+            )
+            console.print(f"  Cost:         [green]${aggregate.total_cost_usd:.4f}[/green]")
+    
+    console.print("\n" + "═" * 50)
+    
+    # Show daily breakdown if there's data
+    summaries = tracker.get_range(days)
+    if summaries and len(summaries) > 1:
+        console.print("\n[bold]Daily Breakdown:[/bold]")
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Date", style="dim")
+        table.add_column("Requests", justify="right")
+        table.add_column("Tokens", justify="right")
+        table.add_column("Cost", justify="right", style="green")
+        
+        for s in summaries:
+            table.add_row(
+                s.date,
+                str(s.total_requests),
+                _format_tokens(s.total_tokens),
+                f"${s.total_cost_usd:.4f}"
+            )
+        
+        console.print(table)
+
+
+# ============================================================================
 # Status Commands
 # ============================================================================
 

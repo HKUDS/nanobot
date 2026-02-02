@@ -19,6 +19,7 @@ from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
+from nanobot.usage import UsageTracker
 
 
 class AgentLoop:
@@ -52,6 +53,7 @@ class AgentLoop:
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
         self.tools = ToolRegistry()
+        self.tracker = UsageTracker()  # Token usage tracking
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -169,6 +171,16 @@ class AgentLoop:
                 model=self.model
             )
             
+            # Record token usage
+            if response.usage:
+                self.tracker.record(
+                    model=self.model,
+                    usage=response.usage,
+                    cost_usd=response.cost_usd,
+                    channel=msg.channel,
+                    session_key=msg.session_key,
+                )
+            
             # Handle tool calls
             if response.has_tool_calls:
                 # Add assistant message with tool calls
@@ -263,6 +275,16 @@ class AgentLoop:
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
+            
+            # Record token usage
+            if response.usage:
+                self.tracker.record(
+                    model=self.model,
+                    usage=response.usage,
+                    cost_usd=response.cost_usd,
+                    channel=origin_channel,
+                    session_key=session_key,
+                )
             
             if response.has_tool_calls:
                 tool_call_dicts = [

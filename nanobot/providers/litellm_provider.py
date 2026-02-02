@@ -142,11 +142,17 @@ class LiteLLMProvider(LLMProvider):
                 "total_tokens": response.usage.total_tokens,
             }
         
+        # Extract cost from LiteLLM response (uses live pricing from api.litellm.ai)
+        cost_usd = 0.0
+        if hasattr(response, "_hidden_params"):
+            cost_usd = response._hidden_params.get("response_cost", 0.0) or 0.0
+        
         return LLMResponse(
             content=message.content,
             tool_calls=tool_calls,
             finish_reason=choice.finish_reason or "stop",
             usage=usage,
+            cost_usd=cost_usd,
         )
     
     def get_default_model(self) -> str:
