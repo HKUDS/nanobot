@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `LiteLLMProvider` now extracts response cost from LiteLLM's hidden params
 - `AgentLoop` now records usage after each LLM API call
 - `Config` now includes `UsageConfig` for budget settings
+- Updated `workspace/TOOLS.md` with usage tool documentation
+- Updated `workspace/AGENTS.md` with resource awareness guidelines
+- Updated `README.md` with usage CLI commands and project structure
 
 ## [0.1.3] - 2025-02-01
 

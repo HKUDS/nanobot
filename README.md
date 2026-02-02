@@ -279,8 +279,35 @@ nanobot gateway
 | `nanobot agent` | Interactive chat mode |
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
+| `nanobot usage` | Show token usage and cost statistics |
+| `nanobot usage --by-model` | Show breakdown by model |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
+
+<details>
+<summary><b>Usage Tracking & Budget</b></summary>
+
+```bash
+# View usage statistics
+nanobot usage                    # Today + last 7 days
+nanobot usage --today            # Today only
+nanobot usage --days 30          # Last 30 days
+nanobot usage --by-model         # Breakdown by model
+nanobot usage --by-channel       # Breakdown by channel
+```
+
+Configure budget alerts in `~/.nanobot/config.json`:
+```json
+{
+  "usage": {
+    "daily_budget_usd": 5.00,
+    "monthly_budget_usd": 100.00,
+    "warn_at_percent": 80
+  }
+}
+```
+
+</details>
 
 <details>
 <summary><b>Scheduled Tasks (Cron)</b></summary>
@@ -309,7 +336,7 @@ nanobot/
 │   ├── memory.py   #    Persistent memory
 │   ├── skills.py   #    Skills loader
 │   ├── subagent.py #    Background task execution
-│   └── tools/      #    Built-in tools (incl. spawn)
+│   └── tools/      #    Built-in tools (incl. spawn, usage)
 ├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
 ├── channels/       # 📱 WhatsApp integration
 ├── bus/            # 🚌 Message routing
@@ -317,6 +344,7 @@ nanobot/
 ├── heartbeat/      # 💓 Proactive wake-up
 ├── providers/      # 🤖 LLM providers (OpenRouter, etc.)
 ├── session/        # 💬 Conversation sessions
+├── usage/          # 📊 Token usage tracking & budget alerts
 ├── config/         # ⚙️ Configuration
 └── cli/            # 🖥️ Commands
 ```
