@@ -12,3 +12,6 @@ build/
 *.pyz
 *.pywz
 *.pyzz
+implementation_plans/*
+.nanobot/*
+tasks/*

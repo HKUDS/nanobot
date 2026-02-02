@@ -1,0 +1,8 @@
+version: '3.8'
+
+services:
+  nanobot:
+    build: .
+    volumes:
+      - ./.nanobot:/home/nanobot/.nanobot
+    command: status
