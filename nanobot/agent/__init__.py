@@ -5,7 +5,8 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.compaction import ContextCompactor, compact_context
-from nanobot.agent.hindsight_memory import HindsightClient, HindsightMemoryStore
+from nanobot.agent.hindsight import HindsightClient, HindsightConfig, MemoryManager
+from nanobot.agent.hindsight_memory import HindsightMemoryStore
 
 __all__ = [
     "AgentLoop",
@@ -15,5 +16,7 @@ __all__ = [
     "ContextCompactor",
     "compact_context",
     "HindsightClient",
+    "HindsightConfig",
+    "MemoryManager",
     "HindsightMemoryStore",
 ]
