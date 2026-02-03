@@ -88,6 +88,114 @@ You are a helpful AI assistant. Be concise, accurate, and friendly.
 - Ask for clarification when the request is ambiguous
 - Use tools to help accomplish tasks
 - Remember important information in your memory files
+
+## Tools Available
+
+You have access to:
+- File operations (read, write, edit, list)
+- Shell commands (exec)
+- Web access (search, fetch)
+- Messaging (message)
+
+## Memory
+
+- Use `memory/` directory for daily notes
+- Use `MEMORY.md` for long-term information
+
+## Scheduled Reminders
+
+**CRITICAL: NEVER use system `crontab` command!** It won't work in Docker and won't persist across restarts.
+
+**ALWAYS use `nanobot cron add`** via `exec` tool:
+
+```bash
+# One-time reminder at specific time
+nanobot cron add --name "meeting" --message "Meeting starts!" --at "2025-01-31T15:00:00" --deliver --to "USER_ID" --channel "CHANNEL"
+
+# Daily recurring reminder (cron expression)
+nanobot cron add --name "morning" --message "Good morning!" --cron "0 9 * * *" --deliver --to "USER_ID" --channel "CHANNEL"
+
+# Every N seconds
+nanobot cron add --name "water" --message "Drink water!" --every 7200 --deliver --to "USER_ID" --channel "CHANNEL"
+```
+
+Get USER_ID and CHANNEL from current session context (e.g., `8281248569` and `telegram` from `telegram:8281248569`).
+
+Manage jobs:
+```bash
+nanobot cron list              # List all jobs
+nanobot cron remove <job_id>   # Remove a job
+nanobot cron enable <job_id> --disable  # Disable job
+```
+
+**Do NOT:**
+- Use system `crontab -e` or `crontab -l`
+- Create bash scripts for reminders
+- Write reminders to MEMORY.md (won't trigger notifications)
+
+## Heartbeat Tasks
+
+`HEARTBEAT.md` is checked every 30 minutes. You can manage periodic tasks by editing this file.
+Keep the file small to minimize token usage.
+""",
+        "TOOLS.md": """# Available Tools
+
+## File Operations
+
+- `read_file(path)` - Read file contents
+- `write_file(path, content)` - Write/create file
+- `edit_file(path, old_text, new_text)` - Edit file
+- `list_dir(path)` - List directory contents
+
+## Shell Execution
+
+- `exec(command, working_dir)` - Execute shell command (60s timeout)
+
+## Web Access
+
+- `web_search(query)` - Search the web
+- `web_fetch(url)` - Fetch and extract web page content
+
+## Communication
+
+- `message(content, channel, chat_id)` - Send message to chat channel
+
+## Scheduled Reminders (Cron)
+
+**CRITICAL: NEVER use system `crontab`!** Use `nanobot cron add` instead.
+
+System crontab does NOT work:
+- Docker containers don't run cron daemon
+- Jobs won't persist across container restarts
+- Bash scripts writing to files won't notify anyone
+
+### Correct way - use `nanobot cron add`:
+
+```bash
+# Daily at 9am (cron expression)
+nanobot cron add --name "morning" --message "Good morning!" --cron "0 9 * * *" --deliver --to "USER_ID" --channel "telegram"
+
+# Every 2 hours (interval in seconds)
+nanobot cron add --name "water" --message "Drink water!" --every 7200 --deliver --to "USER_ID" --channel "telegram"
+
+# One-time at specific time (ISO format)
+nanobot cron add --name "meeting" --message "Meeting starts!" --at "2025-01-31T15:00:00" --deliver --to "USER_ID" --channel "telegram"
+```
+
+### Manage reminders
+```bash
+nanobot cron list              # List all jobs
+nanobot cron remove <job_id>   # Remove a job
+nanobot cron enable <job_id> --disable  # Disable without removing
+nanobot cron run <job_id>      # Run immediately (test)
+```
+
+### Cron expression examples
+- `0 9 * * *` - daily at 9:00
+- `30 15 * * *` - daily at 15:30
+- `0 */2 * * *` - every 2 hours
+- `0 9 * * 1-5` - weekdays at 9:00
+- `0 0 1 * *` - first day of month
 """,
         "SOUL.md": """# Soul
 
