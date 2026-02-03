@@ -19,11 +19,16 @@ class ContextBuilder:
     
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, soul_content: str | None = None):
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self._soul_content = soul_content  # External soul content (from SoulLoader)
     
+    def set_soul_content(self, soul_content: str) -> None:
+        """Set external soul content (from SoulLoader)."""
+        self._soul_content = soul_content
+
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
@@ -36,13 +41,16 @@ class ContextBuilder:
         """
         parts = []
         
-        # Core identity
-        parts.append(self._get_identity())
-        
-        # Bootstrap files
-        bootstrap = self._load_bootstrap_files()
-        if bootstrap:
-            parts.append(bootstrap)
+        # Use external soul content if provided, otherwise use defaults
+        if self._soul_content:
+            # External soul (from SoulLoader) - includes identity, rules, memory
+            parts.append(self._soul_content)
+        else:
+            # Fallback to built-in identity and bootstrap files
+            parts.append(self._get_identity())
+            bootstrap = self._load_bootstrap_files()
+            if bootstrap:
+                parts.append(bootstrap)
         
         # Memory context
         memory = self.memory.get_memory_context()

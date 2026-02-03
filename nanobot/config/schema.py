@@ -38,6 +38,22 @@ class HindsightConfig(BaseModel):
     bank_id: str | None = None  # Defaults to workspace name
 
 
+class SoulConfig(BaseModel):
+    """Soul/personality configuration - loads .md files as system context."""
+    enabled: bool = True
+    path: str = "~/.nanobot/soul"  # Directory containing soul files
+    files: list[str] = Field(default_factory=lambda: [
+        "SOUL.md",      # Core personality & rules
+        "IDENTITY.md",  # Who the agent is
+        "USER.md",      # About the user
+        "MEMORY.md",    # Long-term curated memory
+        "AGENTS.md",    # Behavior rules
+        "TOOLS.md",     # Tool usage notes
+    ])
+    inject_datetime: bool = True  # Add current date/time to context
+    inject_runtime: bool = True   # Add runtime info (model, channel, etc)
+
+
 class AgentDefaults(BaseModel):
     """Default agent configuration."""
     workspace: str = "~/.nanobot/workspace"
@@ -47,6 +63,7 @@ class AgentDefaults(BaseModel):
     max_tool_iterations: int = 20
     compaction: CompactionConfig = Field(default_factory=CompactionConfig)
     hindsight: HindsightConfig = Field(default_factory=HindsightConfig)
+    soul: SoulConfig = Field(default_factory=SoulConfig)
 
 
 class AgentsConfig(BaseModel):

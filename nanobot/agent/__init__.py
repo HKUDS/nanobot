@@ -7,6 +7,7 @@ from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.compaction import ContextCompactor, compact_context
 from nanobot.agent.hindsight import HindsightClient, HindsightConfig, MemoryManager
 from nanobot.agent.hindsight_memory import HindsightMemoryStore
+from nanobot.agent.soul import SoulLoader, create_soul_loader
 
 __all__ = [
     "AgentLoop",
@@ -19,4 +20,6 @@ __all__ = [
     "HindsightConfig",
     "MemoryManager",
     "HindsightMemoryStore",
+    "SoulLoader",
+    "create_soul_loader",
 ]

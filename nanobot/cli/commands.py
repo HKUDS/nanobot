@@ -225,6 +225,11 @@ def gateway(
         hindsight_url = config.agents.defaults.hindsight.url
         console.print(f"[green]✓[/green] Hindsight memory: {hindsight_url}")
     
+    # Soul config
+    soul_config = config.agents.defaults.soul if config.agents.defaults.soul.enabled else None
+    if soul_config:
+        console.print(f"[green]✓[/green] Soul loaded from: {soul_config.path}")
+    
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -235,6 +240,7 @@ def gateway(
         max_context_tokens=config.agents.defaults.compaction.max_context_tokens,
         enable_compaction=config.agents.defaults.compaction.enabled,
         hindsight_url=hindsight_url,
+        soul_config=soul_config,
     )
     
     # Create cron service
@@ -333,6 +339,8 @@ def agent(
     if config.agents.defaults.hindsight.enabled:
         hindsight_url = config.agents.defaults.hindsight.url
     
+    soul_config = config.agents.defaults.soul if config.agents.defaults.soul.enabled else None
+    
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -341,6 +349,7 @@ def agent(
         max_context_tokens=config.agents.defaults.compaction.max_context_tokens,
         enable_compaction=config.agents.defaults.compaction.enabled,
         hindsight_url=hindsight_url,
+        soul_config=soul_config,
     )
     
     if message:

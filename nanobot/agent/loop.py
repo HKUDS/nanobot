@@ -3,7 +3,7 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from loguru import logger
 
@@ -20,6 +20,10 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.compaction import ContextCompactor, estimate_messages_tokens
 from nanobot.session.manager import SessionManager
+from nanobot.agent.soul import SoulLoader
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import SoulConfig
 
 
 class AgentLoop:
@@ -45,6 +49,7 @@ class AgentLoop:
         max_context_tokens: int = 128000,
         enable_compaction: bool = True,
         hindsight_url: str | None = None,
+        soul_config: "SoulConfig | None" = None,
     ):
         self.bus = bus
         self.provider = provider
@@ -54,6 +59,12 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.max_context_tokens = max_context_tokens
         self.enable_compaction = enable_compaction
+        
+        # Soul loader for personality/memory
+        self._soul_loader: SoulLoader | None = None
+        if soul_config and soul_config.enabled:
+            self._soul_loader = SoulLoader(soul_config)
+            logger.info(f"Soul loader enabled: {soul_config.path}")
         
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
@@ -180,6 +191,15 @@ class AgentLoop:
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(msg.channel, msg.chat_id)
+        
+        # Load soul content if enabled
+        if self._soul_loader:
+            soul_content = self._soul_loader.load(
+                channel=msg.channel,
+                model=self.model,
+                session_key=msg.session_key,
+            )
+            self.context.set_soul_content(soul_content)
         
         # Build initial messages (use get_history for LLM-formatted messages)
         messages = self.context.build_messages(
