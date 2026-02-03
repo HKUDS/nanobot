@@ -68,6 +68,9 @@ class AgentLoop:
         self.usage_tracker = UsageTracker()
         self.usage_monitor = UsageMonitor(self.usage_tracker, self.usage_config)
         
+        # Store shell security config
+        self.shell_security_config = config.tools.shell_security
+        
         self._running = False
         self._register_default_tools()
     
@@ -79,8 +82,13 @@ class AgentLoop:
         self.tools.register(EditFileTool())
         self.tools.register(ListDirTool())
         
-        # Shell tool
-        self.tools.register(ExecTool(working_dir=str(self.workspace)))
+        # Shell tool with security config
+        self.tools.register(ExecTool(
+            working_dir=str(self.workspace),
+            allowed_commands=self.shell_security_config.allowed_commands or None,
+            allowed_dirs=self.shell_security_config.allowed_dirs or None,
+            enable_blocklist=self.shell_security_config.enable_blocklist,
+        ))
         
         # Web tools
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))

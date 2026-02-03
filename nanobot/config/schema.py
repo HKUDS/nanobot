@@ -73,9 +73,17 @@ class WebToolsConfig(BaseModel):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
+class ShellSecurityConfig(BaseModel):
+    """Shell execution security configuration."""
+    enable_blocklist: bool = True  # Block dangerous command patterns
+    allowed_commands: list[str] = Field(default_factory=list)  # Allowlist mode (empty = all allowed)
+    allowed_dirs: list[str] = Field(default_factory=list)  # Directory fence (empty = no fence)
+
+
 class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
+    shell_security: ShellSecurityConfig = Field(default_factory=ShellSecurityConfig)
 
 
 class UsageConfig(BaseModel):
