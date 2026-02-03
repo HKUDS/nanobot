@@ -91,8 +91,7 @@ pip install nanobot-ai
 
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
-> You can also change the model to `minimax/minimax-m2` for lower cost.
+> Get API keys: [DashScope](https://dashscope.console.aliyun.com) (China) · [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
 
 **1. Initialize**
 
@@ -102,6 +101,7 @@ nanobot onboard
 
 **2. Configure** (`~/.nanobot/config.json`)
 
+For OpenRouter - recommended for global users:
 ```json
 {
   "providers": {
@@ -113,12 +113,21 @@ nanobot onboard
     "defaults": {
       "model": "anthropic/claude-opus-4-5"
     }
+  }
+}
+```
+
+For DashScope - recommended for China users:
+```json
+{
+  "providers": {
+    "dashscope": {
+      "apiKey": "sk-xxx"
+    }
   },
-  "tools": {
-    "web": {
-      "search": {
-        "apiKey": "BSA-xxx"
-      }
+  "agents": {
+    "defaults": {
+      "model": "qwen-plus"
     }
   }
 }
@@ -352,14 +361,15 @@ Config file: `~/.nanobot/config.json`
 > [!NOTE]
 > Groq provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
 
-| Provider | Purpose | Get API Key |
-|----------|---------|-------------|
-| `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
-| `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
-| `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
-| `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
-| `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
-| `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
+| Provider | Purpose | Models | Get API Key |
+|----------|---------|--------|-------------|
+| `dashscope` | LLM (China recommended) | `qwen-turbo`, `qwen-plus`, `qwen-max` | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
+| `openrouter` | LLM (access to all models) | All major models | [openrouter.ai](https://openrouter.ai) |
+| `anthropic` | LLM (Claude direct) | `claude-opus-4-5`, `claude-sonnet-4-5` | [console.anthropic.com](https://console.anthropic.com) |
+| `openai` | LLM (GPT direct) | `gpt-4o`, `gpt-4-turbo` | [platform.openai.com](https://platform.openai.com) |
+| `zhipu` | LLM (China) | `glm-4`, `glm-4-flash` | [open.bigmodel.cn](https://open.bigmodel.cn) |
+| `groq` | LLM + **Voice transcription** | Llama, Whisper | [console.groq.com](https://console.groq.com) |
+| `gemini` | LLM (Gemini direct) | `gemini-pro`, `gemini-ultra` | [aistudio.google.com](https://aistudio.google.com) |
 
 
 ### Security
