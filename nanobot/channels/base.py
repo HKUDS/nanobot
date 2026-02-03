@@ -1,32 +1,37 @@
 """Base channel interface for chat platforms."""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+
+if TYPE_CHECKING:
+    from nanobot.session import SessionManager
 
 
 class BaseChannel(ABC):
     """
     Abstract base class for chat channel implementations.
-    
+
     Each channel (Telegram, Discord, etc.) should implement this interface
     to integrate with the nanobot message bus.
     """
-    
+
     name: str = "base"
-    
-    def __init__(self, config: Any, bus: MessageBus):
+
+    def __init__(self, config: Any, bus: MessageBus, sessions: "SessionManager | None" = None):
         """
         Initialize the channel.
-        
+
         Args:
             config: Channel-specific configuration.
             bus: The message bus for communication.
+            sessions: Optional session manager for conversation history.
         """
         self.config = config
         self.bus = bus
+        self.sessions = sessions
         self._running = False
     
     @abstractmethod

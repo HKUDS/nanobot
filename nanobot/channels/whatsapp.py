@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -11,19 +11,27 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import WhatsAppConfig
 
+if TYPE_CHECKING:
+    from nanobot.session import SessionManager
+
 
 class WhatsAppChannel(BaseChannel):
     """
     WhatsApp channel that connects to a Node.js bridge.
-    
+
     The bridge uses @whiskeysockets/baileys to handle the WhatsApp Web protocol.
     Communication between Python and Node.js is via WebSocket.
     """
-    
+
     name = "whatsapp"
-    
-    def __init__(self, config: WhatsAppConfig, bus: MessageBus):
-        super().__init__(config, bus)
+
+    def __init__(
+        self,
+        config: WhatsAppConfig,
+        bus: MessageBus,
+        sessions: "SessionManager | None" = None,
+    ):
+        super().__init__(config, bus, sessions=sessions)
         self.config: WhatsAppConfig = config
         self._ws = None
         self._connected = False
@@ -112,6 +120,25 @@ class WhatsAppChannel(BaseChannel):
                 logger.info(f"Voice message received from {chat_id}, but direct download from bridge is not yet supported.")
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
             
+            # Handle /reset command
+            if content.strip() == "/reset":
+                session_key = f"whatsapp:{chat_id}"
+                if self.sessions:
+                    archived = self.sessions.archive(session_key)
+                    if archived:
+                        response = "✓ Session archived and reset.\nPrevious history saved."
+                    else:
+                        response = "✓ Session reset. (No previous history)"
+                else:
+                    response = "Session management not available."
+
+                await self.send(OutboundMessage(
+                    channel="whatsapp",
+                    chat_id=sender,  # Full JID
+                    content=response
+                ))
+                return  # Don't forward to agent
+
             await self._handle_message(
                 sender_id=chat_id,
                 chat_id=sender,  # Use full JID for replies

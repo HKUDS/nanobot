@@ -156,22 +156,45 @@ class SessionManager:
     def delete(self, key: str) -> bool:
         """
         Delete a session.
-        
+
         Args:
             key: Session key.
-        
+
         Returns:
             True if deleted, False if not found.
         """
         # Remove from cache
         self._cache.pop(key, None)
-        
+
         # Remove file
         path = self._get_session_path(key)
         if path.exists():
             path.unlink()
             return True
         return False
+
+    def archive(self, key: str) -> Path | None:
+        """
+        Archive a session by renaming with timestamp.
+
+        Example: telegram_123456.jsonl → telegram_123456_20260203_143022.jsonl
+
+        Returns:
+            Path to archived file, or None if session not found.
+        """
+        path = self._get_session_path(key)
+        if not path.exists():
+            return None
+
+        # Remove from cache
+        self._cache.pop(key, None)
+
+        # Rename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        archive_path = path.with_name(f"{path.stem}_{timestamp}.jsonl")
+        path.rename(archive_path)
+
+        return archive_path
     
     def list_sessions(self) -> list[dict[str, Any]]:
         """

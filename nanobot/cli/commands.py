@@ -166,6 +166,7 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
+    from nanobot.session import SessionManager
     
     if verbose:
         import logging
@@ -194,7 +195,10 @@ def gateway(
         api_base=api_base,
         default_model=config.agents.defaults.model
     )
-    
+
+    # Create shared session manager
+    sessions = SessionManager(config.workspace_path)
+
     # Create agent
     agent = AgentLoop(
         bus=bus,
@@ -202,7 +206,8 @@ def gateway(
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        brave_api_key=config.tools.web.search.api_key or None
+        brave_api_key=config.tools.web.search.api_key or None,
+        sessions=sessions
     )
     
     # Create cron service
@@ -238,7 +243,7 @@ def gateway(
     )
     
     # Create channel manager
-    channels = ChannelManager(config, bus)
+    channels = ChannelManager(config, bus, sessions=sessions)
     
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
