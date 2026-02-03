@@ -19,10 +19,22 @@ class TelegramConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
 
 
+class GoogleChatConfig(BaseModel):
+    """Google Chat channel configuration."""
+
+    enabled: bool = False
+    port: int = 18791
+    path: str = "/google_chat"
+    project_id: str = ""  # Still useful for logging/context but less critical for connection
+    credentials_file: str = ""  # Path to service account JSON
+    allow_from: list[str] = Field(default_factory=list)  # Allowed emails
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    google_chat: GoogleChatConfig = Field(default_factory=GoogleChatConfig)
 
 
 class AgentDefaults(BaseModel):
