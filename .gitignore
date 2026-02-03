@@ -14,3 +14,4 @@ docs/
 *.pywz
 *.pyzz
 uv.lock 
+!CONTRIBUTING_GUIDE.md
