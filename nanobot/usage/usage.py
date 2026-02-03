@@ -20,6 +20,38 @@ class UsageTool(Tool):
     name = "usage"
     description = "Query token usage, costs, and budget information for self-awareness"
 
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        """Get the tool parameters schema."""
+        return {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "enum": [
+                        "current_budget",
+                        "usage_today",
+                        "usage_week",
+                        "usage_month",
+                        "forecast",
+                        "alerts",
+                        "model_breakdown",
+                        "channel_breakdown"
+                    ],
+                    "description": "Type of usage information to retrieve"
+                },
+                "model_filter": {
+                    "type": "string",
+                    "description": "Optional filter by specific model (e.g., 'claude-3-5-sonnet')"
+                },
+                "channel_filter": {
+                    "type": "string",
+                    "description": "Optional filter by specific channel (cli, telegram, whatsapp)"
+                }
+            },
+            "required": ["query"]
+        }
+
     def __init__(self, tracker: UsageTracker, monitor: UsageMonitor):
         """
         Initialize the usage tool.
