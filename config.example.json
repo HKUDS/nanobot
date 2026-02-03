@@ -35,7 +35,7 @@
       "apiBase": null
     },
     "lazyllm": {
-      "apiKey": "YOUR_LAZYLLM_API_KEY",
+      "apiKey": "YOUR_OWN_API_KEY",
       "apiBase": null,
       "modelSource": "siliconflow",
       "modelId": "Pro/moonshotai/Kimi-K2.5",
