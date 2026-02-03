@@ -1,6 +1,7 @@
 """Usage tracking and storage."""
 
 import json
+import math
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -31,9 +32,32 @@ class UsageTracker:
             data_dir = Path.home() / ".nanobot"
         self.usage_dir = ensure_dir(data_dir / "usage")
     
+    def _normalize_date(self, date: str) -> str:
+        """
+        Validate and normalize a date string.
+        
+        Ensures the date is in YYYY-MM-DD format and represents a valid date.
+        This prevents path traversal attacks via malicious date strings.
+        
+        Args:
+            date: Date string to validate
+            
+        Returns:
+            Normalized YYYY-MM-DD string
+            
+        Raises:
+            ValueError: If date is not in valid YYYY-MM-DD format
+        """
+        try:
+            parsed = datetime.strptime(date, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("date must be in YYYY-MM-DD format") from exc
+        return parsed.strftime("%Y-%m-%d")
+    
     def _get_file_path(self, date: str) -> Path:
         """Get the file path for a specific date."""
-        return self.usage_dir / f"{date}.json"
+        safe_date = self._normalize_date(date)
+        return self.usage_dir / f"{safe_date}.json"
     
     def _today(self) -> str:
         """Get today's date string."""
@@ -78,13 +102,23 @@ class UsageTracker:
         Args:
             model: Model name (e.g., 'anthropic/claude-opus-4')
             usage: Dict with 'prompt_tokens', 'completion_tokens', 'total_tokens'
-            cost_usd: Cost in USD
+            cost_usd: Cost in USD (must be non-negative finite number)
             channel: Source channel (cli, telegram, whatsapp)
             session_key: Session identifier
         
         Returns:
             The created UsageRecord
+            
+        Raises:
+            ValueError: If cost_usd is invalid
         """
+        # Validate cost_usd
+        if not isinstance(cost_usd, (int, float)):
+            raise ValueError(f"cost_usd must be a number, got {type(cost_usd)}")
+        if cost_usd < 0 or not math.isfinite(cost_usd):
+            logger.warning(f"Invalid cost_usd value: {cost_usd}, defaulting to 0.0")
+            cost_usd = 0.0
+        
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
         

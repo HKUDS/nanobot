@@ -98,11 +98,12 @@ class UsageTool(Tool):
         if self._config.daily_budget_usd > 0 or self._config.monthly_budget_usd > 0:
             lines.append("")
             lines.append("### Budget Status")
+            warn_threshold = self._config.warn_at_percent
             
             if self._config.daily_budget_usd > 0:
                 today = self._tracker.get_today()
                 daily_pct = (today.total_cost_usd / self._config.daily_budget_usd) * 100
-                status = "⚠️ WARNING" if daily_pct >= 80 else "✅ OK"
+                status = "⚠️ WARNING" if daily_pct >= warn_threshold else "✅ OK"
                 if daily_pct >= 100:
                     status = "🚨 EXCEEDED"
                 lines.append(
@@ -113,7 +114,7 @@ class UsageTool(Tool):
             if self._config.monthly_budget_usd > 0:
                 monthly_cost = self._tracker.get_monthly_cost()
                 monthly_pct = (monthly_cost / self._config.monthly_budget_usd) * 100
-                status = "⚠️ WARNING" if monthly_pct >= 80 else "✅ OK"
+                status = "⚠️ WARNING" if monthly_pct >= warn_threshold else "✅ OK"
                 if monthly_pct >= 100:
                     status = "🚨 EXCEEDED"
                 lines.append(

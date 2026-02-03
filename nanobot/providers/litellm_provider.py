@@ -1,5 +1,6 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import logging
 import os
 from typing import Any
 
@@ -7,6 +8,8 @@ import litellm
 from litellm import acompletion
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+
+logger = logging.getLogger(__name__)
 
 
 class LiteLLMProvider(LLMProvider):
@@ -146,6 +149,11 @@ class LiteLLMProvider(LLMProvider):
         cost_usd = 0.0
         if hasattr(response, "_hidden_params"):
             cost_usd = response._hidden_params.get("response_cost", 0.0) or 0.0
+            if cost_usd == 0.0:
+                logger.debug(
+                    "LiteLLM response_cost unavailable for this model; "
+                    "cost tracking may be incomplete"
+                )
         
         return LLMResponse(
             content=message.content,

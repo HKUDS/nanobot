@@ -1,6 +1,6 @@
 """Budget monitoring and automatic alerting."""
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Callable, Awaitable
 
 from loguru import logger

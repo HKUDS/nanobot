@@ -88,7 +88,7 @@ usage(period: str = "today", breakdown: str = "none") -> str
 
 **Best Practices:**
 - Check usage periodically to be aware of resource consumption
-- If budget is at WARNING (80%+), consider:
+- If budget is at WARNING threshold (default 80%, configurable via `warn_at_percent`), consider:
   - Using a cheaper model for simple tasks
   - Being more concise in responses
   - Notifying the user about budget status
