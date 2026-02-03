@@ -41,7 +41,7 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
 
 class CronService:
     """Service for managing and executing scheduled jobs."""
-    
+
     def __init__(
         self,
         store_path: Path,
@@ -51,6 +51,8 @@ class CronService:
         self.on_job = on_job  # Callback to execute job, returns response text
         self._store: CronStore | None = None
         self._timer_task: asyncio.Task | None = None
+        self._file_watcher_task: asyncio.Task | None = None
+        self._last_file_mtime: float = 0
         self._running = False
     
     def _load_store(self) -> CronStore:
@@ -148,17 +150,53 @@ class CronService:
         """Start the cron service."""
         self._running = True
         self._load_store()
+        self._update_file_mtime()
         self._recompute_next_runs()
         self._save_store()
         self._arm_timer()
+        self._start_file_watcher()
         logger.info(f"Cron service started with {len(self._store.jobs if self._store else [])} jobs")
-    
+
     def stop(self) -> None:
         """Stop the cron service."""
         self._running = False
         if self._timer_task:
             self._timer_task.cancel()
             self._timer_task = None
+        if self._file_watcher_task:
+            self._file_watcher_task.cancel()
+            self._file_watcher_task = None
+
+    def _update_file_mtime(self) -> None:
+        """Update cached file modification time."""
+        try:
+            if self.store_path.exists():
+                self._last_file_mtime = self.store_path.stat().st_mtime
+        except OSError:
+            pass
+
+    def _start_file_watcher(self) -> None:
+        """Start background task to watch for file changes."""
+        async def watch_loop():
+            while self._running:
+                await asyncio.sleep(30)
+                if not self._running:
+                    break
+                try:
+                    if self.store_path.exists():
+                        current_mtime = self.store_path.stat().st_mtime
+                        if current_mtime > self._last_file_mtime:
+                            logger.info("Cron: jobs file changed, reloading...")
+                            self._last_file_mtime = current_mtime
+                            self._store = None  # Clear cache
+                            self._load_store()
+                            self._recompute_next_runs()
+                            self._arm_timer()
+                            logger.info(f"Cron: reloaded {len(self._store.jobs if self._store else [])} jobs")
+                except OSError as e:
+                    logger.warning(f"Cron: failed to check file: {e}")
+
+        self._file_watcher_task = asyncio.create_task(watch_loop())
     
     def _recompute_next_runs(self) -> None:
         """Recompute next run times for all enabled jobs."""
