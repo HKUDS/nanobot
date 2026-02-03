@@ -32,12 +32,16 @@ class SubagentManager:
         workspace: Path,
         bus: MessageBus,
         model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
         brave_api_key: str | None = None,
     ):
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
+        self.max_tokens = max_tokens
+        self.temperature = temperature
         self.brave_api_key = brave_api_key
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
     
@@ -119,6 +123,8 @@ class SubagentManager:
                     messages=messages,
                     tools=tools.get_definitions(),
                     model=self.model,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
                 )
                 
                 if response.has_tool_calls:
