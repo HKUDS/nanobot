@@ -377,28 +377,132 @@ def agent(
 
 @app.command()
 def compact(
-    session_id: str = typer.Option("cli:default", "--session", "-s", help="Session ID to compact"),
+    session_id: str = typer.Option(None, "--session", "-s", help="Session ID to compact (e.g. 'whatsapp:5512992247834' or 'cli:default')"),
+    all_sessions: bool = typer.Option(False, "--all", "-a", help="Compact ALL sessions"),
     show_summary: bool = typer.Option(True, "--summary/--no-summary", help="Show the generated summary"),
+    list_sessions: bool = typer.Option(False, "--list", "-l", help="List available sessions"),
 ):
-    """Force context compaction on a session."""
+    """Force context compaction on a session or all sessions.
+
+    Examples:
+        nanobot compact -s whatsapp:5512992247834
+        nanobot compact -s cli:default
+        nanobot compact --all
+        nanobot compact --list
+    """
     from nanobot.config.loader import load_config
-    from nanobot.session.manager import SessionManager
+    from nanobot.session.manager import SessionManager, normalize_session_id
     from nanobot.agent.compaction import (
         ContextCompactor,
         estimate_messages_tokens,
     )
-    
+
     config = load_config()
-    
-    # Load session
     sessions = SessionManager(config.workspace_path)
-    session = sessions.get(session_id)
-    
+
+    # List sessions mode
+    if list_sessions:
+        all_sessions = sessions.list_sessions()
+        if not all_sessions:
+            console.print("[yellow]No sessions found.[/yellow]")
+            raise typer.Exit(0)
+
+        console.print("\n[bold]Available sessions:[/bold]")
+        for s in all_sessions:
+            key = s.get("key", s.get("path", "unknown"))
+            updated = s.get("updated_at", "?")[:19] if s.get("updated_at") else "?"
+            console.print(f"  - [cyan]{key}[/cyan] (updated: {updated})")
+        raise typer.Exit(0)
+
+    # Compact all sessions mode
+    if all_sessions:
+        all_sess = sessions.list_sessions()
+        if not all_sess:
+            console.print("[yellow]No sessions found.[/yellow]")
+            raise typer.Exit(0)
+
+        console.print(f"\n[bold]Compacting {len(all_sess)} sessions...[/bold]\n")
+        
+        # Create provider once for all compactions
+        provider = _create_provider(config)
+        if provider is None:
+            console.print("[red]Error: No LLM provider configured.[/red]")
+            raise typer.Exit(1)
+
+        compactor = ContextCompactor(
+            provider=provider,
+            max_context_tokens=config.agents.defaults.compaction.max_context_tokens,
+            model=config.agents.defaults.model,
+        )
+
+        total_before = 0
+        total_after = 0
+        compacted_count = 0
+
+        for s in all_sess:
+            key = s.get("key", "unknown")
+            session = sessions._load(key)
+            if session is None:
+                console.print(f"  [yellow]⚠[/yellow] {key}: could not load")
+                continue
+
+            history = session.get_history()
+            if not history:
+                console.print(f"  [dim]○[/dim] {key}: empty, skipping")
+                continue
+
+            tokens_before = estimate_messages_tokens(history)
+            total_before += tokens_before
+            
+            console.print(f"  [dim]⟳[/dim] {key}: {len(history)} msgs, {tokens_before:,} tokens...")
+
+            async def do_compact_one():
+                compacted = await compactor.compact(history)
+                return compacted, compactor.get_summary_prompt()
+
+            compacted, summary = asyncio.run(do_compact_one())
+            tokens_after = estimate_messages_tokens(compacted)
+            total_after += tokens_after
+
+            # Save compacted state
+            if summary:
+                session.messages = []
+                session.add_message(
+                    role="system",
+                    content=f"[Prior conversation summary]\n{summary}"
+                )
+                sessions.save(session)
+                compacted_count += 1
+                console.print(f"  [green]✓[/green] {key}: {tokens_before:,} → summary")
+
+        reduction = ((total_before - total_after) / total_before * 100) if total_before > 0 else 0
+        console.print(f"\n[green]✓[/green] Compacted {compacted_count}/{len(all_sess)} sessions")
+        console.print(f"[bold]Total reduction:[/bold] {total_before:,} → {total_after:,} tokens ({reduction:.1f}%)")
+        raise typer.Exit(0)
+
+    # Require session ID if not listing or compacting all
+    if session_id is None:
+        console.print("[red]Error: --session/-s or --all is required.[/red]")
+        console.print("\nUsage examples:")
+        console.print("  nanobot compact -s whatsapp:5512992247834")
+        console.print("  nanobot compact -s cli:default")
+        console.print("  nanobot compact --all")
+        console.print("  nanobot compact --list")
+        raise typer.Exit(1)
+
+    # Normalize session ID (accepts whatsapp:number, whatsapp_number, etc.)
+    normalized_id = normalize_session_id(session_id)
+
+    # Load session
+    session = sessions._load(normalized_id)
+
     if session is None:
         console.print(f"[red]Session not found: {session_id}[/red]")
+        console.print(f"[dim](tried: {normalized_id})[/dim]")
         console.print("\nAvailable sessions:")
         for s in sessions.list_sessions():
-            console.print(f"  - {s}")
+            key = s.get("key", s.get("path", "unknown"))
+            console.print(f"  - {key}")
         raise typer.Exit(1)
     
     history = session.get_history()
@@ -426,22 +530,34 @@ def compact(
     )
     
     console.print("\n[dim]Compacting...[/dim]")
-    
+
     async def do_compact():
-        # Force compaction by setting a very low budget
+        # Force compaction - summarizes all messages
         compacted = await compactor.compact(history)
         return compacted, compactor.get_summary_prompt()
-    
+
     compacted, summary = asyncio.run(do_compact())
-    
+
     new_tokens = estimate_messages_tokens(compacted)
     reduction = ((current_tokens - new_tokens) / current_tokens * 100) if current_tokens > 0 else 0
-    
+
+    # Save the compacted state back to session
+    if summary:
+        # Clear old messages and add summary as system context
+        session.messages = []
+        session.add_message(
+            role="system",
+            content=f"[Prior conversation summary]\n{summary}"
+        )
+        sessions.save(session)
+        console.print(f"[green]✓[/green] Session updated with compacted context")
+
     console.print(f"\n[green]✓[/green] Compaction complete!")
-    console.print(f"[bold]New message count:[/bold] {len(compacted)}")
-    console.print(f"[bold]New token count:[/bold] {new_tokens:,}")
+    console.print(f"[bold]Original messages:[/bold] {len(history)}")
+    console.print(f"[bold]Original tokens:[/bold] {current_tokens:,}")
+    console.print(f"[bold]New tokens:[/bold] {new_tokens:,} (+ summary)")
     console.print(f"[bold]Reduction:[/bold] {reduction:.1f}%")
-    
+
     if show_summary and summary:
         console.print(f"\n[bold]Generated Summary:[/bold]")
         console.print(f"[dim]{summary[:2000]}{'...' if len(summary) > 2000 else ''}[/dim]")
