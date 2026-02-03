@@ -297,7 +297,8 @@ def agent(
 
     if not api_key and not is_bedrock and not api_base:
         console.print("[red]Error: No API key or local endpoint configured.[/red]")
-        console.print("Set an API key or configure a local endpoint in ~/.nanobot/config.json")
+        console.print("Set an API key in ~/.nanobot/config.json under providers.openrouter.apiKey")
+        console.print("Or configure a local endpoint under providers.vllm.apiBase")
         raise typer.Exit(1)
 
     bus = MessageBus()
