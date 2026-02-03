@@ -13,3 +13,4 @@ docs/
 *.pyz
 *.pywz
 *.pyzz
+uv.lock 

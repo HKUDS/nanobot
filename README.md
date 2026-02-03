@@ -80,12 +80,22 @@ cd nanobot
 pip install -e .
 ```
 
-**Install with uv**
+**Install with uv** (recommended)
 
 ```bash
-uv venv
-source .venv/bin/activate
-uv pip install nanobot-ai
+git clone https://github.com/HKUDS/nanobot.git
+cd nanobot
+uv sync
+uv run nanobot --help
+```
+
+Or activate the venv once:
+
+```bash
+uv sync
+.venv\Scripts\Activate.ps1  # Windows
+# or: source .venv/bin/activate  # Linux/Mac
+nanobot --help
 ```
 
 ## 🚀 Quick Start
