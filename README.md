@@ -18,7 +18,12 @@
 
 ## 📢 News
 
-- **2026-02-01** 🎉 nanobot launched! Welcome to try 🐈 nanobot!
+- **2025-02-03** 🔒 Security audit completed! See [SECURITY_AUDIT.md](./SECURITY_AUDIT.md) and [SECURITY.md](./SECURITY.md) for details.
+- **2025-02-01** 🎉 nanobot launched! Welcome to try 🐈 nanobot!
+
+> [!IMPORTANT]
+> **Security Notice**: If you're using nanobot in production, please review [SECURITY.md](./SECURITY.md) for security best practices.
+> Key actions: Configure `allowFrom` lists, secure your API keys, and keep dependencies updated.
 
 ## Key Features of nanobot:
 

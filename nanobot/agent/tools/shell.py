@@ -10,7 +10,8 @@ from nanobot.agent.tools.base import Tool
 
 # List of potentially dangerous command patterns
 DANGEROUS_PATTERNS = [
-    r'rm\s+-rf\s+/',  # rm -rf /
+    r'rm\s+-rf\s+/\s*$',  # rm -rf / (at root only)
+    r'rm\s+-rf\s+/(?![\w/])',  # rm -rf / followed by whitespace or end
     r':\(\)\{\s*:\|:&\s*\};:',  # fork bomb
     r'mkfs\.',  # format filesystem
     r'dd\s+if=.*\s+of=/dev/(sd|hd)',  # overwrite disk
