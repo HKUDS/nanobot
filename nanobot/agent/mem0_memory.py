@@ -112,37 +112,54 @@ class Mem0MemoryStore:
     def _init_memory(self) -> None:
         """Initialize mem0 Memory instance."""
         try:
-            # Get API key from environment
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if not api_key and self.config.llm_provider == "openai":
-                logger.warning("OPENAI_API_KEY not set, mem0 disabled")
-                return
+            # Get provider names from config (handle both Pydantic model and plain class)
+            llm_provider = getattr(self.config, "llm_provider", "openai")
+            llm_model = getattr(self.config, "llm_model", "gpt-4o-mini")
+            embedder_provider = getattr(self.config, "embedder_provider", "openai")
+            embedder_model = getattr(self.config, "embedder_model", "text-embedding-3-small")
+            storage_path_str = getattr(self.config, "storage_path", None)
 
-            # Configure mem0
-            llm_config = {"model": self.config.llm_model}
-            embedder_config = {"model": self.config.embedder_model}
+            # Configure LLM
+            llm_config = {"model": llm_model}
 
-            # Add API key if using OpenAI
-            if self.config.llm_provider == "openai" and api_key:
+            # Add API keys based on provider
+            if llm_provider == "openai":
+                api_key = os.environ.get("OPENAI_API_KEY")
+                if not api_key:
+                    logger.warning("OPENAI_API_KEY not set for mem0 LLM")
+                    return
                 llm_config["api_key"] = api_key
-            if self.config.embedder_provider == "openai" and api_key:
-                embedder_config["api_key"] = api_key
+            elif llm_provider == "groq":
+                api_key = os.environ.get("GROQ_API_KEY")
+                if not api_key:
+                    logger.warning("GROQ_API_KEY not set for mem0 LLM")
+                    return
+                llm_config["api_key"] = api_key
+
+            # Configure embedder
+            embedder_config = {"model": embedder_model}
+
+            if embedder_provider == "openai":
+                api_key = os.environ.get("OPENAI_API_KEY")
+                if api_key:
+                    embedder_config["api_key"] = api_key
+            # huggingface doesn't need API key - it runs locally
 
             mem0_config = {
                 "llm": {
-                    "provider": self.config.llm_provider,
+                    "provider": llm_provider,
                     "config": llm_config,
                 },
                 "embedder": {
-                    "provider": self.config.embedder_provider,
+                    "provider": embedder_provider,
                     "config": embedder_config,
                 },
                 "version": "v1.1",
             }
 
             # Add storage path if specified
-            if self.config.storage_path:
-                storage_path = Path(self.config.storage_path).expanduser()
+            if storage_path_str:
+                storage_path = Path(storage_path_str).expanduser()
                 storage_path.mkdir(parents=True, exist_ok=True)
                 mem0_config["vector_store"] = {
                     "provider": "qdrant",
@@ -153,7 +170,7 @@ class Mem0MemoryStore:
                 }
 
             self._memory = Memory.from_config(mem0_config)
-            logger.info(f"mem0 memory initialized (llm={self.config.llm_provider}, embedder={self.config.embedder_provider})")
+            logger.info(f"mem0 memory initialized (llm={llm_provider}, embedder={embedder_provider})")
             
         except Exception as e:
             logger.error(f"Failed to initialize mem0: {e}")

@@ -65,14 +65,16 @@ class SoulConfig(BaseModel):
 class Mem0Config(BaseModel):
     """mem0 semantic memory configuration."""
     enabled: bool = False
-    storage_path: str | None = None  # Path for vector DB, None = in-memory
-    llm_provider: str = "groq"  # groq, anthropic, openai, etc
-    llm_model: str = "llama-3.3-70b-versatile"  # Model for memory operations
-    embedder_provider: str = "huggingface"  # huggingface (free), openai, etc
-    embedder_model: str = "sentence-transformers/all-MiniLM-L6-v2"  # Embedding model
-    auto_add: bool = False  # Only add memories on explicit "lembre/anota/remember"
-    auto_recall: bool = True  # Auto-recall relevant memories before responding
-    recall_limit: int = 5  # Max memories to recall
+    storage_path: str | None = Field(default=None, alias="storagePath")  # Path for vector DB
+    llm_provider: str = Field(default="groq", alias="llmProvider")  # groq, anthropic, openai
+    llm_model: str = Field(default="llama-3.3-70b-versatile", alias="llmModel")
+    embedder_provider: str = Field(default="openai", alias="embedderProvider")  # openai, huggingface
+    embedder_model: str = Field(default="text-embedding-3-small", alias="embedderModel")
+    auto_add: bool = Field(default=False, alias="autoAdd")  # Only add on explicit commands
+    auto_recall: bool = Field(default=True, alias="autoRecall")  # Auto-recall before each turn
+    recall_limit: int = Field(default=5, alias="recallLimit")  # Max memories to recall
+
+    model_config = {"populate_by_name": True}
 
 
 class AgentDefaults(BaseModel):
