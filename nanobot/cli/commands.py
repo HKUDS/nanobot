@@ -230,6 +230,11 @@ def gateway(
     if soul_config:
         console.print(f"[green]✓[/green] Soul loaded from: {soul_config.path}")
     
+    # mem0 config
+    mem0_config = config.agents.defaults.mem0 if config.agents.defaults.mem0.enabled else None
+    if mem0_config:
+        console.print(f"[green]✓[/green] mem0 semantic memory enabled")
+    
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -241,6 +246,7 @@ def gateway(
         enable_compaction=config.agents.defaults.compaction.enabled,
         hindsight_url=hindsight_url,
         soul_config=soul_config,
+        mem0_config=mem0_config,
     )
     
     # Create cron service
@@ -340,6 +346,7 @@ def agent(
         hindsight_url = config.agents.defaults.hindsight.url
     
     soul_config = config.agents.defaults.soul if config.agents.defaults.soul.enabled else None
+    mem0_config = config.agents.defaults.mem0 if config.agents.defaults.mem0.enabled else None
     
     agent_loop = AgentLoop(
         bus=bus,
@@ -350,6 +357,7 @@ def agent(
         enable_compaction=config.agents.defaults.compaction.enabled,
         hindsight_url=hindsight_url,
         soul_config=soul_config,
+        mem0_config=mem0_config,
     )
     
     if message:

@@ -29,6 +29,8 @@ dependencies = [
     "rich>=13.0.0",
     "croniter>=2.0.0",
     "python-telegram-bot>=21.0",
+    "mem0ai>=1.0.3",
+    "anthropic>=0.77.1",
 ]
 
 [project.optional-dependencies]

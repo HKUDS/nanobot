@@ -102,16 +102,23 @@ class WhatsAppChannel(BaseChannel):
             # Incoming message from WhatsApp
             sender = data.get("sender", "")
             content = data.get("content", "")
-            
+
             # sender is typically: <phone>@s.whatsapp.net
             # Extract just the phone number as chat_id
             chat_id = sender.split("@")[0] if "@" in sender else sender
-            
+
+            # Apply prefix rules - filter and strip prefix if needed
+            filtered_content = self._apply_prefix_rules(chat_id, content)
+            if filtered_content is None:
+                logger.debug(f"Ignoring message from {chat_id} - missing required prefix")
+                return
+            content = filtered_content
+
             # Handle voice transcription if it's a voice message
             if content == "[Voice Message]":
                 logger.info(f"Voice message received from {chat_id}, but direct download from bridge is not yet supported.")
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
-            
+
             await self._handle_message(
                 sender_id=chat_id,
                 chat_id=sender,  # Use full JID for replies
@@ -139,3 +146,37 @@ class WhatsAppChannel(BaseChannel):
         
         elif msg_type == "error":
             logger.error(f"WhatsApp bridge error: {data.get('error')}")
+
+    def _apply_prefix_rules(self, phone: str, content: str) -> str | None:
+        """
+        Apply prefix rules to filter/strip messages.
+
+        Returns:
+            - The (possibly stripped) content if message should be processed
+            - None if message should be ignored
+        """
+        # Check if any prefix rule matches this phone number
+        for rule in self.config.prefix_rules:
+            if rule.phone in phone:
+                # This phone has a prefix rule
+                content_lower = content.lower().strip()
+                prefix_lower = rule.prefix.lower()
+
+                # Check if message starts with the required prefix
+                if content_lower.startswith(prefix_lower + " "):
+                    # Has prefix with space - strip it
+                    if rule.strip:
+                        stripped = content[len(rule.prefix):].strip()
+                        logger.info(f"Triggered by '{rule.prefix}' prefix from {phone}")
+                        return stripped
+                    return content
+                elif content_lower == prefix_lower:
+                    # Just the prefix alone - treat as greeting
+                    logger.info(f"Triggered by '{rule.prefix}' alone from {phone}")
+                    return "oi"
+                else:
+                    # Missing required prefix - ignore
+                    return None
+
+        # No prefix rule for this phone - allow all messages
+        return content

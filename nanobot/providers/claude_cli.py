@@ -202,9 +202,18 @@ class ClaudeCliProvider(LLMProvider):
         if session_id:
             args.extend(["--resume", session_id])
         
-        # Add system prompt if provided and this is a new session
+        # System prompt handling:
+        # Instead of --append-system-prompt (which fails with large content),
+        # we prefix the system instructions to the user prompt via stdin
+        effective_prompt = prompt
         if system_prompt and not session_id:
-            args.extend(["--append-system-prompt", system_prompt])
+            # Format: System instructions followed by user message
+            effective_prompt = f"""<system_context>
+{system_prompt}
+</system_context>
+
+User message:
+{prompt}"""
         
         # Clear Anthropic API key from environment to force CLI auth
         env = os.environ.copy()
@@ -224,9 +233,9 @@ class ClaudeCliProvider(LLMProvider):
         )
         
         try:
-            # Pass prompt via stdin
+            # Pass prompt via stdin (with system context if applicable)
             stdout, stderr = await asyncio.wait_for(
-                process.communicate(input=prompt.encode("utf-8")),
+                process.communicate(input=effective_prompt.encode("utf-8")),
                 timeout=self.timeout_seconds,
             )
         except asyncio.TimeoutError:

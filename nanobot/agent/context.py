@@ -42,11 +42,15 @@ class ContextBuilder:
         parts = []
         
         # Use external soul content if provided, otherwise use defaults
+        from loguru import logger
+        logger.debug(f"Building system prompt, soul_content length: {len(self._soul_content) if self._soul_content else 0}")
         if self._soul_content:
             # External soul (from SoulLoader) - includes identity, rules, memory
+            logger.info(f"Using soul content ({len(self._soul_content)} chars)")
             parts.append(self._soul_content)
         else:
             # Fallback to built-in identity and bootstrap files
+            logger.warning("No soul content, using default identity")
             parts.append(self._get_identity())
             bootstrap = self._load_bootstrap_files()
             if bootstrap:

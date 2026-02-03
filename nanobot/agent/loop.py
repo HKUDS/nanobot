@@ -21,6 +21,7 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.compaction import ContextCompactor, estimate_messages_tokens
 from nanobot.session.manager import SessionManager
 from nanobot.agent.soul import SoulLoader
+from nanobot.agent.mem0_memory import Mem0MemoryStore, Mem0Config
 
 if TYPE_CHECKING:
     from nanobot.config.schema import SoulConfig
@@ -50,6 +51,7 @@ class AgentLoop:
         enable_compaction: bool = True,
         hindsight_url: str | None = None,
         soul_config: "SoulConfig | None" = None,
+        mem0_config: "Mem0Config | None" = None,
     ):
         self.bus = bus
         self.provider = provider
@@ -65,6 +67,17 @@ class AgentLoop:
         if soul_config and soul_config.enabled:
             self._soul_loader = SoulLoader(soul_config)
             logger.info(f"Soul loader enabled: {soul_config.path}")
+        
+        # mem0 semantic memory
+        self._mem0: Mem0MemoryStore | None = None
+        if mem0_config and mem0_config.enabled:
+            self._mem0 = Mem0MemoryStore(
+                config=mem0_config,
+                workspace=workspace,
+                user_id="default",
+            )
+            if self._mem0.available:
+                logger.info("mem0 semantic memory enabled")
         
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
@@ -234,6 +247,16 @@ class AgentLoop:
             except Exception as e:
                 logger.debug(f"Memory recall failed: {e}")
         
+        # Recall relevant memories from mem0 (if available)
+        if self._mem0 and self._mem0.available:
+            try:
+                mem0_context = await self._mem0.recall_for_context(msg.content, user_id=msg.sender_id)
+                if mem0_context and messages and messages[0].get("role") == "system":
+                    messages[0]["content"] += f"\n\n{mem0_context}"
+                    logger.debug(f"mem0 recalled memories for context")
+            except Exception as e:
+                logger.debug(f"mem0 recall failed: {e}")
+        
         # Agent loop
         iteration = 0
         final_content = None
@@ -291,6 +314,14 @@ class AgentLoop:
         if self._memory:
             asyncio.create_task(self._memory.process_message({"role": "user", "content": msg.content}))
             asyncio.create_task(self._memory.process_message({"role": "assistant", "content": final_content}))
+        
+        # Store memories in mem0 (async, don't wait)
+        if self._mem0 and self._mem0.available:
+            conversation = [
+                {"role": "user", "content": msg.content},
+                {"role": "assistant", "content": final_content}
+            ]
+            asyncio.create_task(self._mem0.add_from_conversation(conversation, user_id=msg.sender_id))
         
         return OutboundMessage(
             channel=msg.channel,

@@ -5,11 +5,19 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 
+class PrefixRule(BaseModel):
+    """Prefix rule for filtering messages."""
+    phone: str  # Phone number (partial match, e.g., "992247834")
+    prefix: str  # Required prefix (e.g., "nano")
+    strip: bool = True  # Remove prefix before processing
+
+
 class WhatsAppConfig(BaseModel):
     """WhatsApp channel configuration."""
     enabled: bool = False
     bridge_url: str = "ws://localhost:3001"
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
+    prefix_rules: list[PrefixRule] = Field(default_factory=list)  # Require prefix from specific numbers
 
 
 class TelegramConfig(BaseModel):
@@ -54,6 +62,17 @@ class SoulConfig(BaseModel):
     inject_runtime: bool = True   # Add runtime info (model, channel, etc)
 
 
+class Mem0Config(BaseModel):
+    """mem0 semantic memory configuration."""
+    enabled: bool = False
+    storage_path: str | None = None  # Path for vector DB, None = in-memory
+    llm_provider: str = "anthropic"  # anthropic, openai, etc
+    llm_model: str = "claude-sonnet-4-20250514"  # Model for memory operations
+    auto_add: bool = True  # Auto-add memories after each conversation
+    auto_recall: bool = True  # Auto-recall relevant memories before responding
+    recall_limit: int = 5  # Max memories to recall
+
+
 class AgentDefaults(BaseModel):
     """Default agent configuration."""
     workspace: str = "~/.nanobot/workspace"
@@ -64,6 +83,7 @@ class AgentDefaults(BaseModel):
     compaction: CompactionConfig = Field(default_factory=CompactionConfig)
     hindsight: HindsightConfig = Field(default_factory=HindsightConfig)
     soul: SoulConfig = Field(default_factory=SoulConfig)
+    mem0: Mem0Config = Field(default_factory=Mem0Config)
 
 
 class AgentsConfig(BaseModel):
