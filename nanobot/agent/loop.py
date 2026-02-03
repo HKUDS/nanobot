@@ -18,6 +18,7 @@ from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.compaction import ContextCompactor, estimate_messages_tokens
 from nanobot.session.manager import SessionManager
 
 
@@ -40,7 +41,10 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         max_iterations: int = 20,
-        brave_api_key: str | None = None
+        brave_api_key: str | None = None,
+        max_context_tokens: int = 128000,
+        enable_compaction: bool = True,
+        hindsight_url: str | None = None,
     ):
         self.bus = bus
         self.provider = provider
@@ -48,6 +52,8 @@ class AgentLoop:
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
+        self.max_context_tokens = max_context_tokens
+        self.enable_compaction = enable_compaction
         
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
@@ -60,8 +66,34 @@ class AgentLoop:
             brave_api_key=brave_api_key,
         )
         
+        # Context compactor for long conversations
+        self._compactors: dict[str, ContextCompactor] = {}
+        
+        # Hindsight memory (optional)
+        self._memory = None
+        if hindsight_url:
+            try:
+                from nanobot.agent.hindsight_memory import HindsightMemoryStore
+                self._memory = HindsightMemoryStore(
+                    workspace=workspace,
+                    base_url=hindsight_url,
+                )
+                logger.info(f"Hindsight memory enabled: {hindsight_url}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Hindsight: {e}")
+        
         self._running = False
         self._register_default_tools()
+    
+    def _get_compactor(self, session_key: str) -> ContextCompactor:
+        """Get or create a context compactor for a session."""
+        if session_key not in self._compactors:
+            self._compactors[session_key] = ContextCompactor(
+                provider=self.provider,
+                max_context_tokens=self.max_context_tokens,
+                model=self.model,
+            )
+        return self._compactors[session_key]
     
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -156,6 +188,32 @@ class AgentLoop:
             media=msg.media if msg.media else None,
         )
         
+        # Apply compaction if enabled
+        if self.enable_compaction:
+            compactor = self._get_compactor(msg.session_key)
+            
+            # Check if we need to compact
+            current_tokens = estimate_messages_tokens(messages)
+            budget = int(self.max_context_tokens * 0.7)  # Leave room for response
+            
+            if current_tokens > budget:
+                logger.info(f"Compacting context: {current_tokens} tokens > {budget} budget")
+                messages = await compactor.maybe_compact(messages)
+                
+                # Inject summary into system prompt if available
+                summary_prompt = compactor.get_summary_prompt()
+                if summary_prompt and messages and messages[0].get("role") == "system":
+                    messages[0]["content"] += summary_prompt
+        
+        # Recall relevant memories from Hindsight (if available)
+        if self._memory:
+            try:
+                memory_context = await self._memory.recall_for_context(msg.content)
+                if memory_context and messages and messages[0].get("role") == "system":
+                    messages[0]["content"] += f"\n\n{memory_context}"
+            except Exception as e:
+                logger.debug(f"Memory recall failed: {e}")
+        
         # Agent loop
         iteration = 0
         final_content = None
@@ -208,6 +266,11 @@ class AgentLoop:
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
+        
+        # Store important memories (async, don't wait)
+        if self._memory:
+            asyncio.create_task(self._memory.process_message({"role": "user", "content": msg.content}))
+            asyncio.create_task(self._memory.process_message({"role": "assistant", "content": final_content}))
         
         return OutboundMessage(
             channel=msg.channel,

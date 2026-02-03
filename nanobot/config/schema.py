@@ -25,6 +25,19 @@ class ChannelsConfig(BaseModel):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
 
 
+class CompactionConfig(BaseModel):
+    """Context compaction configuration."""
+    enabled: bool = True
+    max_context_tokens: int = 128000  # Model's context window
+
+
+class HindsightConfig(BaseModel):
+    """Hindsight memory configuration."""
+    enabled: bool = False
+    url: str = "http://localhost:8888"
+    bank_id: str | None = None  # Defaults to workspace name
+
+
 class AgentDefaults(BaseModel):
     """Default agent configuration."""
     workspace: str = "~/.nanobot/workspace"
@@ -32,6 +45,8 @@ class AgentDefaults(BaseModel):
     max_tokens: int = 8192
     temperature: float = 0.7
     max_tool_iterations: int = 20
+    compaction: CompactionConfig = Field(default_factory=CompactionConfig)
+    hindsight: HindsightConfig = Field(default_factory=HindsightConfig)
 
 
 class AgentsConfig(BaseModel):

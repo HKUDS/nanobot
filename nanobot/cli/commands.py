@@ -220,13 +220,21 @@ def gateway(
         raise typer.Exit(1)
     
     # Create agent
+    hindsight_url = None
+    if config.agents.defaults.hindsight.enabled:
+        hindsight_url = config.agents.defaults.hindsight.url
+        console.print(f"[green]✓[/green] Hindsight memory: {hindsight_url}")
+    
     agent = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        brave_api_key=config.tools.web.search.api_key or None
+        brave_api_key=config.tools.web.search.api_key or None,
+        max_context_tokens=config.agents.defaults.compaction.max_context_tokens,
+        enable_compaction=config.agents.defaults.compaction.enabled,
+        hindsight_url=hindsight_url,
     )
     
     # Create cron service
@@ -321,11 +329,18 @@ def agent(
 
     bus = MessageBus()
     
+    hindsight_url = None
+    if config.agents.defaults.hindsight.enabled:
+        hindsight_url = config.agents.defaults.hindsight.url
+    
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        brave_api_key=config.tools.web.search.api_key or None
+        brave_api_key=config.tools.web.search.api_key or None,
+        max_context_tokens=config.agents.defaults.compaction.max_context_tokens,
+        enable_compaction=config.agents.defaults.compaction.enabled,
+        hindsight_url=hindsight_url,
     )
     
     if message:
@@ -672,6 +687,20 @@ def status():
             console.print(f"Claude CLI: [green]✓ enabled[/green] (model: {claude_cli.default_model})")
         else:
             console.print(f"Claude CLI: [dim]disabled[/dim]")
+        
+        # Compaction status
+        compaction = config.agents.defaults.compaction
+        if compaction.enabled:
+            console.print(f"Compaction: [green]✓ enabled[/green] (max {compaction.max_context_tokens:,} tokens)")
+        else:
+            console.print(f"Compaction: [dim]disabled[/dim]")
+        
+        # Hindsight status
+        hindsight = config.agents.defaults.hindsight
+        if hindsight.enabled:
+            console.print(f"Hindsight: [green]✓ enabled[/green] ({hindsight.url})")
+        else:
+            console.print(f"Hindsight: [dim]disabled[/dim]")
 
 
 if __name__ == "__main__":
