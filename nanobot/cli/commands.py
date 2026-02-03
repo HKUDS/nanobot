@@ -184,7 +184,7 @@ def gateway(
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
 
-    if not api_key and not is_bedrock:
+    if not api_key and not is_bedrock and not api_base:
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
         raise typer.Exit(1)
@@ -294,7 +294,7 @@ def agent(
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
 
-    if not api_key and not is_bedrock:
+    if not api_key and not is_bedrock and not api_base:
         console.print("[red]Error: No API key configured.[/red]")
         raise typer.Exit(1)
 
