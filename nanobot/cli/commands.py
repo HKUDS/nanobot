@@ -371,6 +371,83 @@ def agent(
 
 
 # ============================================================================
+# Compact Command
+# ============================================================================
+
+
+@app.command()
+def compact(
+    session_id: str = typer.Option("cli:default", "--session", "-s", help="Session ID to compact"),
+    show_summary: bool = typer.Option(True, "--summary/--no-summary", help="Show the generated summary"),
+):
+    """Force context compaction on a session."""
+    from nanobot.config.loader import load_config
+    from nanobot.session.manager import SessionManager
+    from nanobot.agent.compaction import (
+        ContextCompactor,
+        estimate_messages_tokens,
+    )
+    
+    config = load_config()
+    
+    # Load session
+    sessions = SessionManager(config.workspace_path)
+    session = sessions.get(session_id)
+    
+    if session is None:
+        console.print(f"[red]Session not found: {session_id}[/red]")
+        console.print("\nAvailable sessions:")
+        for s in sessions.list_sessions():
+            console.print(f"  - {s}")
+        raise typer.Exit(1)
+    
+    history = session.get_history()
+    if not history:
+        console.print(f"[yellow]Session {session_id} has no history to compact.[/yellow]")
+        raise typer.Exit(0)
+    
+    # Estimate current tokens
+    current_tokens = estimate_messages_tokens(history)
+    console.print(f"\n[bold]Session:[/bold] {session_id}")
+    console.print(f"[bold]Messages:[/bold] {len(history)}")
+    console.print(f"[bold]Estimated tokens:[/bold] {current_tokens:,}")
+    
+    # Create provider for summarization
+    provider = _create_provider(config)
+    if provider is None:
+        console.print("[red]Error: No LLM provider configured.[/red]")
+        raise typer.Exit(1)
+    
+    # Create compactor and run
+    compactor = ContextCompactor(
+        provider=provider,
+        max_context_tokens=config.agents.defaults.compaction.max_context_tokens,
+        model=config.agents.defaults.model,
+    )
+    
+    console.print("\n[dim]Compacting...[/dim]")
+    
+    async def do_compact():
+        # Force compaction by setting a very low budget
+        compacted = await compactor.compact(history)
+        return compacted, compactor.get_summary_prompt()
+    
+    compacted, summary = asyncio.run(do_compact())
+    
+    new_tokens = estimate_messages_tokens(compacted)
+    reduction = ((current_tokens - new_tokens) / current_tokens * 100) if current_tokens > 0 else 0
+    
+    console.print(f"\n[green]✓[/green] Compaction complete!")
+    console.print(f"[bold]New message count:[/bold] {len(compacted)}")
+    console.print(f"[bold]New token count:[/bold] {new_tokens:,}")
+    console.print(f"[bold]Reduction:[/bold] {reduction:.1f}%")
+    
+    if show_summary and summary:
+        console.print(f"\n[bold]Generated Summary:[/bold]")
+        console.print(f"[dim]{summary[:2000]}{'...' if len(summary) > 2000 else ''}[/dim]")
+
+
+# ============================================================================
 # Channel Commands
 # ============================================================================
 

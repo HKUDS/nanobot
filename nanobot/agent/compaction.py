@@ -363,6 +363,41 @@ class ContextCompactor:
         
         return kept
     
+    async def compact(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """
+        Force context compaction regardless of current size.
+        
+        Args:
+            messages: Current conversation messages.
+        
+        Returns:
+            Compacted message list.
+        """
+        if not messages:
+            return messages
+        
+        # Force compaction by summarizing messages
+        logger.info(f"Force compacting {len(messages)} messages")
+        
+        # Summarize all messages
+        summary = await summarize_in_stages(messages, self.provider, self.model)
+        
+        if summary:
+            if self.accumulated_summary:
+                self.accumulated_summary = (
+                    f"{self.accumulated_summary}\n\n"
+                    f"[More recent context]: {summary}"
+                )
+            else:
+                self.accumulated_summary = summary
+        
+        # Return empty list - the summary is in accumulated_summary
+        # which should be added to system prompt
+        return []
+    
     def get_summary_prompt(self) -> str | None:
         """Get the accumulated summary to include in system prompt."""
         if not self.accumulated_summary:
