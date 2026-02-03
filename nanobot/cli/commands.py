@@ -152,6 +152,38 @@ This file stores important information that should persist across sessions.
 # ============================================================================
 
 
+def _create_provider(config):
+    """Create the appropriate LLM provider based on config."""
+    from nanobot.providers.litellm_provider import LiteLLMProvider
+    from nanobot.providers.claude_cli import ClaudeCliProvider
+    
+    # Check if Claude CLI is enabled (uses subscription instead of API)
+    if config.use_claude_cli():
+        cli_config = config.get_claude_cli_config()
+        console.print(f"[cyan]Using Claude CLI provider (subscription mode)[/cyan]")
+        return ClaudeCliProvider(
+            default_model=cli_config.default_model,
+            command=cli_config.command,
+            timeout_seconds=cli_config.timeout_seconds,
+            working_dir=str(config.workspace_path),
+        )
+    
+    # Fall back to LiteLLM provider (API mode)
+    api_key = config.get_api_key()
+    api_base = config.get_api_base()
+    model = config.agents.defaults.model
+    is_bedrock = model.startswith("bedrock/")
+    
+    if not api_key and not is_bedrock:
+        return None  # Caller should handle this
+    
+    return LiteLLMProvider(
+        api_key=api_key,
+        api_base=api_base,
+        default_model=config.agents.defaults.model
+    )
+
+
 @app.command()
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
@@ -160,7 +192,6 @@ def gateway(
     """Start the nanobot gateway."""
     from nanobot.config.loader import load_config, get_data_dir
     from nanobot.bus.queue import MessageBus
-    from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.agent.loop import AgentLoop
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
@@ -178,22 +209,15 @@ def gateway(
     # Create components
     bus = MessageBus()
     
-    # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock)
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
-    model = config.agents.defaults.model
-    is_bedrock = model.startswith("bedrock/")
-
-    if not api_key and not is_bedrock:
-        console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
-        raise typer.Exit(1)
+    # Create provider
+    provider = _create_provider(config)
     
-    provider = LiteLLMProvider(
-        api_key=api_key,
-        api_base=api_base,
-        default_model=config.agents.defaults.model
-    )
+    if provider is None:
+        console.print("[red]Error: No API key configured and Claude CLI not enabled.[/red]")
+        console.print("Options:")
+        console.print("  1. Set API key in ~/.nanobot/config.json under providers.openrouter.apiKey")
+        console.print("  2. Enable Claude CLI: set providers.claude_cli.enabled = true")
+        raise typer.Exit(1)
     
     # Create agent
     agent = AgentLoop(
@@ -284,26 +308,18 @@ def agent(
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config
     from nanobot.bus.queue import MessageBus
-    from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.agent.loop import AgentLoop
     
     config = load_config()
     
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
-    model = config.agents.defaults.model
-    is_bedrock = model.startswith("bedrock/")
-
-    if not api_key and not is_bedrock:
-        console.print("[red]Error: No API key configured.[/red]")
+    # Create provider (supports Claude CLI or API)
+    provider = _create_provider(config)
+    
+    if provider is None:
+        console.print("[red]Error: No API key configured and Claude CLI not enabled.[/red]")
         raise typer.Exit(1)
 
     bus = MessageBus()
-    provider = LiteLLMProvider(
-        api_key=api_key,
-        api_base=api_base,
-        default_model=config.agents.defaults.model
-    )
     
     agent_loop = AgentLoop(
         bus=bus,
@@ -649,6 +665,13 @@ def status():
         console.print(f"Gemini API: {'[green]✓[/green]' if has_gemini else '[dim]not set[/dim]'}")
         vllm_status = f"[green]✓ {config.providers.vllm.api_base}[/green]" if has_vllm else "[dim]not set[/dim]"
         console.print(f"vLLM/Local: {vllm_status}")
+        
+        # Claude CLI status
+        claude_cli = config.providers.claude_cli
+        if claude_cli.enabled:
+            console.print(f"Claude CLI: [green]✓ enabled[/green] (model: {claude_cli.default_model})")
+        else:
+            console.print(f"Claude CLI: [dim]disabled[/dim]")
 
 
 if __name__ == "__main__":

@@ -45,6 +45,14 @@ class ProviderConfig(BaseModel):
     api_base: str | None = None
 
 
+class ClaudeCliConfig(BaseModel):
+    """Claude CLI provider configuration (uses Claude Code subscription)."""
+    enabled: bool = False
+    command: str = "claude"  # Path to claude CLI
+    default_model: str = "opus"  # opus, sonnet, haiku
+    timeout_seconds: int = 300
+
+
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -54,6 +62,7 @@ class ProvidersConfig(BaseModel):
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    claude_cli: ClaudeCliConfig = Field(default_factory=ClaudeCliConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -113,6 +122,14 @@ class Config(BaseSettings):
         if self.providers.vllm.api_base:
             return self.providers.vllm.api_base
         return None
+    
+    def use_claude_cli(self) -> bool:
+        """Check if Claude CLI provider should be used."""
+        return self.providers.claude_cli.enabled
+    
+    def get_claude_cli_config(self) -> ClaudeCliConfig:
+        """Get Claude CLI configuration."""
+        return self.providers.claude_cli
     
     class Config:
         env_prefix = "NANOBOT_"
