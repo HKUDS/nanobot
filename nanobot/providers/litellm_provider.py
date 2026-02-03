@@ -42,7 +42,9 @@ class LiteLLMProvider(LLMProvider):
                 os.environ["OPENROUTER_API_KEY"] = api_key
             elif self.is_vllm:
                 # vLLM/custom endpoint - uses OpenAI-compatible API
-                os.environ["HOSTED_VLLM_API_KEY"] = api_key
+                os.environ["OPENAI_API_KEY"] = api_key
+            elif "deepseek" in default_model:
+                os.environ.setdefault("DEEPSEEK_API_KEY", api_key)
             elif "anthropic" in default_model:
                 os.environ.setdefault("ANTHROPIC_API_KEY", api_key)
             elif "openai" in default_model or "gpt" in default_model:
@@ -106,6 +108,10 @@ class LiteLLMProvider(LLMProvider):
         # For Gemini, ensure gemini/ prefix if not already present
         if "gemini" in model.lower() and not model.startswith("gemini/"):
             model = f"gemini/{model}"
+        
+        # Force set env vars for the provider based on model
+        if "deepseek" in model:
+            os.environ["DEEPSEEK_API_KEY"] = self.api_key
         
         kwargs: dict[str, Any] = {
             "model": model,

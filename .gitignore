@@ -13,4 +13,5 @@ docs/
 *.pyz
 *.pywz
 *.pyzz
-poetry.lock
+.venv/
+__pycache__/
