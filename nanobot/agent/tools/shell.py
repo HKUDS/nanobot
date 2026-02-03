@@ -10,8 +10,7 @@ from nanobot.agent.tools.base import Tool
 
 # List of potentially dangerous command patterns
 DANGEROUS_PATTERNS = [
-    r'rm\s+-rf\s+/\s*$',  # rm -rf / (at root only)
-    r'rm\s+-rf\s+/(?![\w/])',  # rm -rf / followed by whitespace or end
+    r'rm\s+-rf\s+/(?:\s|$)',  # rm -rf / (at root, followed by space or end)
     r':\(\)\{\s*:\|:&\s*\};:',  # fork bomb
     r'mkfs\.',  # format filesystem
     r'dd\s+if=.*\s+of=/dev/(sd|hd)',  # overwrite disk
@@ -19,7 +18,7 @@ DANGEROUS_PATTERNS = [
 ]
 
 
-def _is_dangerous_command(command: str) -> tuple[bool, str | None]:
+def validate_command_safety(command: str) -> tuple[bool, str | None]:
     """
     Check if a command contains dangerous patterns.
     
@@ -85,7 +84,7 @@ class ExecTool(Tool):
     
     async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
         # Check for dangerous command patterns
-        is_dangerous, warning = _is_dangerous_command(command)
+        is_dangerous, warning = validate_command_safety(command)
         if is_dangerous:
             return f"Error: Refusing to execute dangerous command. {warning}"
         
