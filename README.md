@@ -205,6 +205,24 @@ docker run -it nanobot ollama list
 nanobot agent -m "Hello from local LLM!"
 ```
 
+### 🐳 Docker Usage
+
+For Docker users, use these commands instead:
+
+```bash
+# Check Ollama status
+docker-compose run --rm nanobot ollama status
+
+# List available models  
+docker-compose run --rm nanobot ollama list
+
+# Pull new models
+docker-compose run --rm nanobot ollama pull llama3.2
+
+# Chat with Ollama models
+docker-compose run --rm nanobot agent -m "Hello from local LLM!"
+```
+
 > [!TIP]
 > Popular models: `llama3.2`, `mistral`, `codellama`, `llama3.1:8b`
 > Ollama models run locally with zero API costs!

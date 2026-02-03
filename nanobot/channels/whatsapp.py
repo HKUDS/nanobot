@@ -33,14 +33,22 @@ class WhatsAppChannel(BaseChannel):
         import websockets
         
         bridge_url = self.config.bridge_url
+        bridge_token = self.config.bridge_token
         
+        # Append token if configured
+        if bridge_token:
+            separator = "&" if "?" in bridge_url else "?"
+            connect_url = f"{bridge_url}{separator}token={bridge_token}"
+        else:
+            connect_url = bridge_url
+            
         logger.info(f"Connecting to WhatsApp bridge at {bridge_url}...")
         
         self._running = True
         
         while self._running:
             try:
-                async with websockets.connect(bridge_url) as ws:
+                async with websockets.connect(connect_url) as ws:
                     self._ws = ws
                     self._connected = True
                     logger.info("Connected to WhatsApp bridge")

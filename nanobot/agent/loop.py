@@ -17,9 +17,9 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
-from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
-
+from nanobot.agent.subagent import SubagentManager
+from nanobot.usage import UsageTracker, UsageMonitor, UsageTool, UsageConfig
 
 class AgentLoop:
     """
@@ -61,7 +61,7 @@ class AgentLoop:
         )
         
         # Initialize usage tracking
-        from nanobot.usage import UsageTracker, UsageMonitor, UsageConfig, UsageTool
+        from nanobot.usage import UsageTracker, UsageMonitor, UsageConfig
         from nanobot.config.loader import load_config
         config = load_config()
         self.usage_config = config.usage

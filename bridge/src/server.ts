@@ -21,12 +21,12 @@ export class BridgeServer {
   private wa: WhatsAppClient | null = null;
   private clients: Set<WebSocket> = new Set();
 
-  constructor(private port: number, private authDir: string) {}
+  constructor(private port: number, private authDir: string, private authToken: string) {}
 
   async start(): Promise<void> {
-    // Create WebSocket server
-    this.wss = new WebSocketServer({ port: this.port });
-    console.log(`🌉 Bridge server listening on ws://localhost:${this.port}`);
+    // Create WebSocket server bound to localhost for security
+    this.wss = new WebSocketServer({ port: this.port, host: '127.0.0.1' });
+    console.log(`🌉 Bridge server listening on ws://127.0.0.1:${this.port}`);
 
     // Initialize WhatsApp client
     this.wa = new WhatsAppClient({
@@ -37,7 +37,18 @@ export class BridgeServer {
     });
 
     // Handle WebSocket connections
-    this.wss.on('connection', (ws) => {
+    this.wss.on('connection', (ws, req) => {
+      // Check for authentication
+      const url = new URL(req.url || '', `http://localhost:${this.port}`);
+      const token = url.searchParams.get('token');
+      const authHeader = req.headers['authorization'];
+
+      if (token !== this.authToken && authHeader !== `Bearer ${this.authToken}`) {
+        console.log('⛔ Rejected unauthorized connection attempt');
+        ws.close(1008, 'Unauthorized');
+        return;
+      }
+
       console.log('🔗 Python client connected');
       this.clients.add(ws);
 

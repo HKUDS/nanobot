@@ -9,6 +9,7 @@ class WhatsAppConfig(BaseModel):
     """WhatsApp channel configuration."""
     enabled: bool = False
     bridge_url: str = "ws://localhost:3001"
+    bridge_token: str = ""  # Authentication token for the bridge
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
 
 
@@ -57,7 +58,7 @@ class ProvidersConfig(BaseModel):
 
 class GatewayConfig(BaseModel):
     """Gateway/server configuration."""
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 18790
 
 
