@@ -189,6 +189,7 @@ class ClaudeCliProvider(LLMProvider):
             Dict with 'text', 'session_id', and optionally 'usage'.
         """
         # Build command arguments
+        # NOTE: Prompt must be passed via stdin (pipe), NOT as argument!
         args = [
             self.command,
             "-p",  # Print mode (non-interactive)
@@ -205,9 +206,6 @@ class ClaudeCliProvider(LLMProvider):
         if system_prompt and not session_id:
             args.extend(["--append-system-prompt", system_prompt])
         
-        # Add the prompt as the final argument
-        args.append(prompt)
-        
         # Clear Anthropic API key from environment to force CLI auth
         env = os.environ.copy()
         env.pop("ANTHROPIC_API_KEY", None)
@@ -215,9 +213,10 @@ class ClaudeCliProvider(LLMProvider):
         
         logger.debug(f"Running Claude CLI: {self.command} with model={model}")
         
-        # Run the CLI
+        # Run the CLI with prompt via stdin
         process = await asyncio.create_subprocess_exec(
             *args,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=self.working_dir,
@@ -225,8 +224,9 @@ class ClaudeCliProvider(LLMProvider):
         )
         
         try:
+            # Pass prompt via stdin
             stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
+                process.communicate(input=prompt.encode("utf-8")),
                 timeout=self.timeout_seconds,
             )
         except asyncio.TimeoutError:
@@ -285,7 +285,25 @@ class ClaudeCliProvider(LLMProvider):
         }
     
     def _extract_from_json(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Extract relevant fields from parsed JSON."""
+        """Extract relevant fields from parsed JSON.
+        
+        Claude CLI output format (--output-format json):
+        {
+            "type": "result",
+            "subtype": "success",
+            "result": "...",  # Main response text
+            "session_id": "...",
+            "usage": {...},
+            "total_cost_usd": 0.01,
+            ...
+        }
+        """
+        # Check for error
+        if data.get("is_error") or data.get("subtype") == "error":
+            error_msg = data.get("result") or data.get("error") or "Unknown error"
+            return {"text": f"Error: {error_msg}", "session_id": None, "usage": {}}
+        
+        # Get response text - "result" is the main field in Claude CLI JSON output
         text = (
             data.get("result") or
             data.get("response") or
@@ -303,7 +321,10 @@ class ClaudeCliProvider(LLMProvider):
             None
         )
         
+        # Extract usage info (Claude CLI format)
         usage = data.get("usage", {})
+        if data.get("total_cost_usd"):
+            usage["total_cost_usd"] = data["total_cost_usd"]
         
         return {
             "text": text,
