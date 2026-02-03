@@ -9,6 +9,7 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.auth import ClaudeOAuthManager
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 
@@ -19,6 +20,8 @@ CLAUDE_MODEL_ALIASES: dict[str, str] = {
     "opus-4": "opus",
     "claude-opus-4-5": "opus",
     "claude-opus-4": "opus",
+    "anthropic/claude-opus-4-5": "opus",  # Support LiteLLM format
+    "anthropic/claude-opus-4": "opus",
     "sonnet": "sonnet",
     "sonnet-4.5": "sonnet",
     "sonnet-4.1": "sonnet",
@@ -26,42 +29,51 @@ CLAUDE_MODEL_ALIASES: dict[str, str] = {
     "claude-sonnet-4-5": "sonnet",
     "claude-sonnet-4-1": "sonnet",
     "claude-sonnet-4-0": "sonnet",
+    "anthropic/claude-sonnet-4-5": "sonnet",  # Support LiteLLM format
+    "anthropic/claude-sonnet-4-1": "sonnet",
     "haiku": "haiku",
     "haiku-3.5": "haiku",
     "claude-haiku-3-5": "haiku",
+    "anthropic/claude-haiku-3-5": "haiku",  # Support LiteLLM format
 }
 
 
 class ClaudeCliProvider(LLMProvider):
     """
     LLM provider that uses the Claude CLI (Claude Code subscription).
-    
+
     This provider spawns the `claude` CLI process to interact with Claude,
     allowing use of Claude Max subscription instead of API credits.
+
+    Features automatic OAuth token refresh following OpenClaw patterns.
     """
-    
+
     def __init__(
         self,
         default_model: str = "opus",
         command: str = "claude",
         timeout_seconds: int = 300,
         working_dir: str | None = None,
+        auth_profile: str = "anthropic:default",
     ):
         """
         Initialize the Claude CLI provider.
-        
+
         Args:
             default_model: Default model to use (opus, sonnet, haiku).
             command: Path to claude CLI executable.
             timeout_seconds: Max time to wait for CLI response.
             working_dir: Working directory for CLI execution.
+            auth_profile: OAuth profile ID to use for authentication.
         """
         super().__init__(api_key=None, api_base=None)
         self.default_model = self._normalize_model(default_model)
         self.command = command
         self.timeout_seconds = timeout_seconds
         self.working_dir = working_dir
+        self.auth_profile = auth_profile
         self._session_ids: dict[str, str] = {}  # session_key -> claude_session_id
+        self._oauth_manager = ClaudeOAuthManager()
     
     def _normalize_model(self, model: str) -> str:
         """Normalize model name to Claude CLI format."""
@@ -215,10 +227,19 @@ class ClaudeCliProvider(LLMProvider):
 User message:
 {prompt}"""
         
-        # Clear Anthropic API key from environment to force CLI auth
+        # Get OAuth API key from manager (with automatic refresh)
         env = os.environ.copy()
-        env.pop("ANTHROPIC_API_KEY", None)
-        env.pop("ANTHROPIC_API_KEY_OLD", None)
+        api_key = await self._oauth_manager.get_api_key_for_profile(self.auth_profile)
+
+        if api_key:
+            # Use OAuth token
+            env["ANTHROPIC_API_KEY"] = api_key
+            logger.debug(f"Using OAuth token for {self.auth_profile}")
+        else:
+            # Fallback to CLI subscription (remove API key from environment)
+            env.pop("ANTHROPIC_API_KEY", None)
+            env.pop("ANTHROPIC_API_KEY_OLD", None)
+            logger.debug("Using CLI subscription mode")
         
         logger.debug(f"Running Claude CLI: {self.command} with model={model}")
         

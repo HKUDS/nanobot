@@ -7,10 +7,40 @@ No Docker required - runs embedded.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
+
+# Patterns that indicate user wants to store a memory
+MEMORY_INTENT_PATTERNS = [
+    r"\blembr[ae]\b",  # lembra, lembre
+    r"\banot[ae]\b",   # anota, anote
+    r"\bremember\b",
+    r"\bguard[ae]\b",  # guarda, guarde
+    r"\bnão esquec[ea]\b",
+    r"\bdon'?t forget\b",
+    r"\bsalv[ae]\b",   # salva, salve
+    r"\bmemorize\b",
+    r"\bmark down\b",
+    r"\bnote that\b",
+]
+
+def has_memory_intent(message: str) -> bool:
+    """Check if message indicates user wants to store a memory.
+
+    Args:
+        message: User message text
+
+    Returns:
+        True if memory intent detected
+    """
+    text = message.lower()
+    for pattern in MEMORY_INTENT_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return True
+    return False
 
 try:
     from mem0 import Memory
@@ -22,24 +52,30 @@ except ImportError:
 
 class Mem0Config:
     """Configuration for mem0 memory."""
-    
+
     def __init__(
         self,
         enabled: bool = False,
         storage_path: str | None = None,
-        llm_provider: str = "anthropic",
-        llm_model: str = "claude-sonnet-4-20250514",
-        auto_add: bool = True,
+        llm_provider: str = "openai",
+        llm_model: str = "gpt-4o-mini",
+        embedder_provider: str = "openai",
+        embedder_model: str = "text-embedding-3-small",
+        auto_add: bool = False,  # Only add on explicit commands
         auto_recall: bool = True,
         recall_limit: int = 5,
+        openai_api_key: str | None = None,  # Optional: override env var
     ):
         self.enabled = enabled
         self.storage_path = storage_path
         self.llm_provider = llm_provider
         self.llm_model = llm_model
+        self.embedder_provider = embedder_provider
+        self.embedder_model = embedder_model
         self.auto_add = auto_add  # Auto-add memories after each turn
         self.auto_recall = auto_recall  # Auto-recall before each turn
         self.recall_limit = recall_limit
+        self.openai_api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
 
 
 class Mem0MemoryStore:
@@ -76,17 +112,34 @@ class Mem0MemoryStore:
     def _init_memory(self) -> None:
         """Initialize mem0 Memory instance."""
         try:
+            # Get API key from environment
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if not api_key and self.config.llm_provider == "openai":
+                logger.warning("OPENAI_API_KEY not set, mem0 disabled")
+                return
+
             # Configure mem0
+            llm_config = {"model": self.config.llm_model}
+            embedder_config = {"model": self.config.embedder_model}
+
+            # Add API key if using OpenAI
+            if self.config.llm_provider == "openai" and api_key:
+                llm_config["api_key"] = api_key
+            if self.config.embedder_provider == "openai" and api_key:
+                embedder_config["api_key"] = api_key
+
             mem0_config = {
                 "llm": {
                     "provider": self.config.llm_provider,
-                    "config": {
-                        "model": self.config.llm_model,
-                    }
+                    "config": llm_config,
+                },
+                "embedder": {
+                    "provider": self.config.embedder_provider,
+                    "config": embedder_config,
                 },
                 "version": "v1.1",
             }
-            
+
             # Add storage path if specified
             if self.config.storage_path:
                 storage_path = Path(self.config.storage_path).expanduser()
@@ -98,9 +151,9 @@ class Mem0MemoryStore:
                         "path": str(storage_path / "qdrant"),
                     }
                 }
-            
+
             self._memory = Memory.from_config(mem0_config)
-            logger.info(f"mem0 memory initialized (provider={self.config.llm_provider})")
+            logger.info(f"mem0 memory initialized (llm={self.config.llm_provider}, embedder={self.config.embedder_provider})")
             
         except Exception as e:
             logger.error(f"Failed to initialize mem0: {e}")

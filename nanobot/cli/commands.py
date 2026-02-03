@@ -156,27 +156,38 @@ def _create_provider(config):
     """Create the appropriate LLM provider based on config."""
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.claude_cli import ClaudeCliProvider
-    
-    # Check if Claude CLI is enabled (uses subscription instead of API)
-    if config.use_claude_cli():
-        cli_config = config.get_claude_cli_config()
-        console.print(f"[cyan]Using Claude CLI provider (subscription mode)[/cyan]")
-        return ClaudeCliProvider(
-            default_model=cli_config.default_model,
-            command=cli_config.command,
-            timeout_seconds=cli_config.timeout_seconds,
-            working_dir=str(config.workspace_path),
-        )
-    
-    # Fall back to LiteLLM provider (API mode)
+
+    # Check for Claude CLI credentials (Claude Max/Pro subscription)
+    # NOTE: OAuth tokens cannot be used directly with Anthropic API.
+    # The Claude CLI is the correct intermediary - it handles OAuth internally.
+    claude_creds_path = Path.home() / ".claude" / ".credentials.json"
+    has_claude_creds = claude_creds_path.exists()
+
+    # Priority 1: Use Claude CLI if credentials exist (subscription mode)
+    # This works with Claude Max/Pro subscription via OAuth
+    if has_claude_creds:
+        import shutil
+        if shutil.which("claude"):
+            cli_config = config.get_claude_cli_config()
+            console.print(f"[green]Using Claude CLI provider (subscription mode)[/green]")
+            return ClaudeCliProvider(
+                default_model=cli_config.default_model,
+                command=cli_config.command,
+                timeout_seconds=cli_config.timeout_seconds,
+                working_dir=str(config.workspace_path),
+            )
+        else:
+            console.print(f"[yellow]Claude credentials found but 'claude' CLI not in PATH[/yellow]")
+
+    # Priority 2: Fall back to LiteLLM provider (API key mode)
     api_key = config.get_api_key()
     api_base = config.get_api_base()
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
-    
+
     if not api_key and not is_bedrock:
         return None  # Caller should handle this
-    
+
     return LiteLLMProvider(
         api_key=api_key,
         api_base=api_base,
@@ -852,6 +863,14 @@ def cron_run(
         console.print(f"[green]✓[/green] Job executed")
     else:
         console.print(f"[red]Failed to run job {job_id}[/red]")
+
+
+# ============================================================================
+# Auth Commands
+# ============================================================================
+
+from nanobot.commands import auth as auth_commands
+app.add_typer(auth_commands.app, name="auth")
 
 
 # ============================================================================

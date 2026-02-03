@@ -66,9 +66,11 @@ class Mem0Config(BaseModel):
     """mem0 semantic memory configuration."""
     enabled: bool = False
     storage_path: str | None = None  # Path for vector DB, None = in-memory
-    llm_provider: str = "anthropic"  # anthropic, openai, etc
-    llm_model: str = "claude-sonnet-4-20250514"  # Model for memory operations
-    auto_add: bool = True  # Auto-add memories after each conversation
+    llm_provider: str = "groq"  # groq, anthropic, openai, etc
+    llm_model: str = "llama-3.3-70b-versatile"  # Model for memory operations
+    embedder_provider: str = "huggingface"  # huggingface (free), openai, etc
+    embedder_model: str = "sentence-transformers/all-MiniLM-L6-v2"  # Embedding model
+    auto_add: bool = False  # Only add memories on explicit "lembre/anota/remember"
     auto_recall: bool = True  # Auto-recall relevant memories before responding
     recall_limit: int = 5  # Max memories to recall
 
