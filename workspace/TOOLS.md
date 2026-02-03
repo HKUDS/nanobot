@@ -71,28 +71,40 @@ message(content: str, channel: str = None, chat_id: str = None) -> str
 
 ## Scheduled Reminders (Cron)
 
-Use the `exec` tool to create scheduled reminders with `nanobot cron add`:
+**CRITICAL: NEVER use system `crontab`!** Use `nanobot cron add` instead.
 
-### Set a recurring reminder
+System crontab does NOT work:
+- Docker containers don't run cron daemon
+- Jobs won't persist across container restarts
+- Bash scripts writing to files won't notify anyone
+
+### Correct way - use `nanobot cron add`:
+
 ```bash
-# Every day at 9am
-nanobot cron add --name "morning" --message "Good morning! ☀️" --cron "0 9 * * *"
+# Daily at 9am (cron expression)
+nanobot cron add --name "morning" --message "Good morning!" --cron "0 9 * * *" --deliver --to "USER_ID" --channel "telegram"
 
-# Every 2 hours
-nanobot cron add --name "water" --message "Drink water! 💧" --every 7200
-```
+# Every 2 hours (interval in seconds)
+nanobot cron add --name "water" --message "Drink water!" --every 7200 --deliver --to "USER_ID" --channel "telegram"
 
-### Set a one-time reminder
-```bash
-# At a specific time (ISO format)
-nanobot cron add --name "meeting" --message "Meeting starts now!" --at "2025-01-31T15:00:00"
+# One-time at specific time (ISO format)
+nanobot cron add --name "meeting" --message "Meeting starts!" --at "2025-01-31T15:00:00" --deliver --to "USER_ID" --channel "telegram"
 ```
 
 ### Manage reminders
 ```bash
 nanobot cron list              # List all jobs
 nanobot cron remove <job_id>   # Remove a job
+nanobot cron enable <job_id> --disable  # Disable without removing
+nanobot cron run <job_id>      # Run immediately (test)
 ```
+
+### Cron expression examples
+- `0 9 * * *` - daily at 9:00
+- `30 15 * * *` - daily at 15:30
+- `0 */2 * * *` - every 2 hours
+- `0 9 * * 1-5` - weekdays at 9:00
+- `0 0 1 * *` - first day of month
 
 ## Heartbeat Task Management
 

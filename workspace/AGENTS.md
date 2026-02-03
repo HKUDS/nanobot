@@ -24,13 +24,34 @@ You have access to:
 
 ## Scheduled Reminders
 
-When user asks for a reminder at a specific time, use `exec` to run:
-```
-nanobot cron add --name "reminder" --message "Your message" --at "YYYY-MM-DDTHH:MM:SS" --deliver --to "USER_ID" --channel "CHANNEL"
-```
-Get USER_ID and CHANNEL from the current session (e.g., `8281248569` and `telegram` from `telegram:8281248569`).
+**CRITICAL: NEVER use system `crontab` command!** It won't work in Docker and won't persist across restarts.
 
-**Do NOT just write reminders to MEMORY.md** — that won't trigger actual notifications.
+**ALWAYS use `nanobot cron add`** via `exec` tool:
+
+```bash
+# One-time reminder at specific time
+nanobot cron add --name "meeting" --message "Meeting starts!" --at "2025-01-31T15:00:00" --deliver --to "USER_ID" --channel "CHANNEL"
+
+# Daily recurring reminder (cron expression)
+nanobot cron add --name "morning" --message "Good morning!" --cron "0 9 * * *" --deliver --to "USER_ID" --channel "CHANNEL"
+
+# Every N seconds
+nanobot cron add --name "water" --message "Drink water!" --every 7200 --deliver --to "USER_ID" --channel "CHANNEL"
+```
+
+Get USER_ID and CHANNEL from current session context (e.g., `8281248569` and `telegram` from `telegram:8281248569`).
+
+Manage jobs:
+```bash
+nanobot cron list              # List all jobs
+nanobot cron remove <job_id>   # Remove a job
+nanobot cron enable <job_id> --disable  # Disable job
+```
+
+**Do NOT:**
+- Use system `crontab -e` or `crontab -l`
+- Create bash scripts for reminders
+- Write reminders to MEMORY.md (won't trigger notifications)
 
 ## Heartbeat Tasks
 
