@@ -34,6 +34,46 @@ def main(
     pass
 
 
+def _create_provider(config):
+    """Create the appropriate provider based on configuration."""
+    api_key = config.get_api_key()
+    
+    # Check if Ollama is enabled and should be used
+    if api_key == "ollama" and config.ollama.enabled:
+        from nanobot.providers.ollama_provider import OllamaProvider
+        from nanobot.usage import UsageTracker
+        
+        tracker = UsageTracker()
+        provider = OllamaProvider(
+            api_base=config.ollama.api_base,
+            default_model=config.ollama.model,
+            timeout=config.ollama.timeout,
+            usage_tracker=tracker
+        )
+        return provider
+    
+    # Default to LiteLLM for cloud providers
+    if not api_key or api_key == "ollama":
+        console.print("[red]Error: No API key configured and Ollama not enabled.[/red]")
+        console.print("Set an API key in ~/.nanobot/config.json under providers.*.apiKey")
+        console.print("Or enable Ollama: set ollama.enabled to true")
+        raise typer.Exit(1)
+    
+    from nanobot.providers.litellm_provider import LiteLLMProvider
+    from nanobot.usage import UsageTracker
+    
+    api_base = config.get_api_base()
+    tracker = UsageTracker()
+    
+    provider = LiteLLMProvider(
+        api_key=api_key,
+        api_base=api_base,
+        default_model=config.agents.defaults.model,
+        usage_tracker=tracker
+    )
+    return provider
+
+
 # ============================================================================
 # Onboard / Setup
 # ============================================================================
@@ -178,20 +218,8 @@ def gateway(
     # Create components
     bus = MessageBus()
     
-    # Create provider (supports OpenRouter, Anthropic, OpenAI)
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
-    
-    if not api_key:
-        console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
-        raise typer.Exit(1)
-    
-    provider = LiteLLMProvider(
-        api_key=api_key,
-        api_base=api_base,
-        default_model=config.agents.defaults.model
-    )
+    # Create provider (supports Ollama, OpenRouter, Anthropic, OpenAI)
+    provider = _create_provider(config)
     
     # Create agent
     agent = AgentLoop(
@@ -287,19 +315,10 @@ def agent(
     
     config = load_config()
     
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
-    
-    if not api_key:
-        console.print("[red]Error: No API key configured.[/red]")
-        raise typer.Exit(1)
+    # Create provider (supports Ollama, OpenRouter, Anthropic, OpenAI)
+    provider = _create_provider(config)
     
     bus = MessageBus()
-    provider = LiteLLMProvider(
-        api_key=api_key,
-        api_base=api_base,
-        default_model=config.agents.defaults.model
-    )
     
     agent_loop = AgentLoop(
         bus=bus,
@@ -731,6 +750,145 @@ def usage(
 
 
 # ============================================================================
+# Ollama Commands
+# ============================================================================
+
+
+ollama_app = typer.Typer(help="Manage Ollama local models")
+app.add_typer(ollama_app, name="ollama")
+
+
+@ollama_app.command("status")
+def ollama_status():
+    """Check Ollama service status and available models."""
+    from nanobot.config.loader import load_config
+    from nanobot.providers.ollama_provider import OllamaProvider
+    
+    config = load_config()
+    
+    if not config.ollama.enabled:
+        console.print("[yellow]Ollama is not enabled in config.[/yellow]")
+        console.print("Enable it by setting 'ollama.enabled: true' in ~/.nanobot/config.json")
+        return
+    
+    console.print(f"{__logo__} Checking Ollama status...")
+    
+    provider = OllamaProvider(
+        api_base=config.ollama.api_base,
+        default_model=config.ollama.model,
+        timeout=config.ollama.timeout
+    )
+    
+    async def check_status():
+        status = await provider.check_status()
+        await provider.close()
+        return status
+    
+    import asyncio
+    status = asyncio.run(check_status())
+    
+    if status["available"]:
+        console.print("[green]✓[/green] Ollama service is running")
+        console.print(f"  Version: {status['version']}")
+        console.print(f"  Endpoint: {status['endpoint']}")
+        
+        if status["models"]:
+            console.print(f"  Available models: {len(status['models'])}")
+            for model in status["models"][:5]:  # Show first 5
+                console.print(f"    • {model}")
+            if len(status["models"]) > 5:
+                console.print(f"    ... and {len(status['models']) - 5} more")
+        else:
+            console.print("  [yellow]No models installed[/yellow]")
+            console.print("  Install models with: ollama pull <model_name>")
+    else:
+        console.print("[red]✗[/red] Ollama service is not available")
+        console.print(f"  Error: {status['error']}")
+        console.print("\nTroubleshooting:")
+        console.print("  1. Install Ollama: https://ollama.ai/download")
+        console.print("  2. Start Ollama: ollama serve")
+        console.print("  3. Pull a model: ollama pull llama3.2")
+
+
+@ollama_app.command("list")
+def ollama_list():
+    """List installed Ollama models."""
+    from nanobot.config.loader import load_config
+    from nanobot.providers.ollama_provider import OllamaProvider
+    
+    config = load_config()
+    
+    if not config.ollama.enabled:
+        console.print("[yellow]Ollama is not enabled in config.[/yellow]")
+        return
+    
+    console.print(f"{__logo__} Listing Ollama models...")
+    
+    provider = OllamaProvider(
+        api_base=config.ollama.api_base,
+        timeout=config.ollama.timeout
+    )
+    
+    async def list_models():
+        models = await provider.list_models()
+        await provider.close()
+        return models
+    
+    import asyncio
+    models = asyncio.run(list_models())
+    
+    if models:
+        table = Table(title="Installed Ollama Models")
+        table.add_column("Model Name", style="cyan")
+        table.add_column("Status", style="green")
+        
+        for model in sorted(models):
+            status = "[green]installed[/green]"
+            if model == config.ollama.model:
+                status = "[blue]default[/blue]"
+            table.add_row(model, status)
+        
+        console.print(table)
+    else:
+        console.print("[yellow]No models found.[/yellow]")
+        console.print("Install models with: ollama pull <model_name>")
+
+
+@ollama_app.command("pull")
+def ollama_pull(
+    model: str = typer.Argument(..., help="Model name to pull (e.g., 'llama3.2', 'mistral')"),
+):
+    """Pull (download) an Ollama model."""
+    import subprocess
+    
+    console.print(f"{__logo__} Pulling Ollama model: {model}")
+    console.print("This may take several minutes depending on model size...\n")
+    
+    try:
+        # Run ollama pull command
+        result = subprocess.run(
+            ["ollama", "pull", model],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        
+        console.print(f"[green]✓[/green] Successfully pulled model: {model}")
+        
+        if result.stdout:
+            console.print(f"[dim]{result.stdout.strip()}[/dim]")
+            
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Failed to pull model: {model}[/red]")
+        if e.stderr:
+            console.print(f"[dim]{e.stderr.strip()}[/dim]")
+        console.print("\nMake sure Ollama is installed and running.")
+    except FileNotFoundError:
+        console.print("[red]ollama command not found.[/red]")
+        console.print("Install Ollama from: https://ollama.ai/download")
+
+
+# ============================================================================
 # Status Commands
 # ============================================================================
 
@@ -766,6 +924,12 @@ def status():
         console.print(f"Gemini API: {'[green]✓[/green]' if has_gemini else '[dim]not set[/dim]'}")
         vllm_status = f"[green]✓ {config.providers.vllm.api_base}[/green]" if has_vllm else "[dim]not set[/dim]"
         console.print(f"vLLM/Local: {vllm_status}")
+        
+        # Ollama status
+        if config.ollama.enabled:
+            console.print(f"Ollama: [green]✓ enabled[/green] ({config.ollama.model})")
+        else:
+            console.print("Ollama: [dim]disabled[/dim]")
 
 
 if __name__ == "__main__":

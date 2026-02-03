@@ -83,6 +83,14 @@ class UsageConfig(BaseModel):
     alert_thresholds: list[float] = Field(default_factory=lambda: [0.5, 0.8, 1.0])
 
 
+class OllamaConfig(BaseModel):
+    """Ollama local model configuration."""
+    enabled: bool = False
+    api_base: str = "http://localhost:11434"
+    model: str = "llama3.2"
+    timeout: float = 120.0
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
@@ -91,6 +99,7 @@ class Config(BaseSettings):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     usage: UsageConfig = Field(default_factory=UsageConfig)
+    ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     
     @property
     def workspace_path(self) -> Path:
@@ -98,7 +107,11 @@ class Config(BaseSettings):
         return Path(self.agents.defaults.workspace).expanduser()
     
     def get_api_key(self) -> str | None:
-        """Get API key in priority order: OpenRouter > Anthropic > OpenAI > Gemini > Zhipu > vLLM."""
+        """Get API key in priority order: Ollama > OpenRouter > Anthropic > OpenAI > Gemini > Zhipu > vLLM."""
+        # Ollama doesn't use API keys, but we check if it's enabled
+        if self.ollama.enabled:
+            return "ollama"  # Special marker for Ollama
+        
         return (
             self.providers.openrouter.api_key or
             self.providers.anthropic.api_key or

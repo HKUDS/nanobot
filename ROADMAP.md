@@ -3,13 +3,23 @@
 ## ✅ Concluído
 
 ### Token Usage Tracking & Budget Monitoring
-- ✅ Rastreamento completo de uso de tokens LLM
+- ✅ Rastreamento completo de uso de tokens e monitoramento de custos
 - ✅ Comando CLI `nanobot usage` com estatísticas diárias/mensais
-- ✅ Monitoramento de orçamento com alertas configuráveis
-- ✅ Ferramenta de auto-consciência para o agente
-- ✅ Armazenamento de dados em `~/.nanobot/usage/YYYY-MM-DD.json`
-- ✅ Suporte a múltiplos provedores (Anthropic, OpenAI, Gemini, etc.)
-- ✅ Quebra de uso por modelo e canal
+- ✅ Monitoramento de orçamento mensal configurável com alertas
+- ✅ Armazenamento de dados de uso em `~/.nanobot/usage/YYYY-MM-DD.json`
+- ✅ Suporte a múltiplos provedores LLM (Anthropic, OpenAI, Gemini, Zhipu)
+- ✅ Quebra de uso por modelo e canal de comunicação
+- ✅ Ferramenta de auto-consciência `usage` para o agente
+- ✅ Preços atualizados para APIs LLM (até final de 2024)
+- ✅ Configuração de orçamento em `~/.nanobot/config.json`
+
+### Ollama Local Model Support
+- ✅ Provedor Ollama completo para modelos locais
+- ✅ Comando CLI `nanobot ollama` para gerenciamento de modelos
+- ✅ Integração com sistema de uso (custos zero para modelos locais)
+- ✅ Configuração via `~/.nanobot/config.json`
+- ✅ Suporte a modelos populares (Llama, Mistral, CodeLlama, etc.)
+- ✅ Verificação automática de status e disponibilidade
 
 ## 🚧 Em Desenvolvimento
 

@@ -62,6 +62,10 @@ def calculate_token_cost(
         "zhipu": {
             "glm-4": {"prompt": 0.00014, "completion": 0.00014},
             "glm-3-turbo": {"prompt": 0.00007, "completion": 0.00007},
+        },
+        "ollama": {
+            # Ollama models run locally - zero cost
+            "_default": {"prompt": 0.0, "completion": 0.0},
         }
     }
     

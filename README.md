@@ -126,6 +126,57 @@ nanobot agent -m "What is 2+2?"
 
 That's it! You have a working AI assistant in 2 minutes.
 
+## 🦙 Local Models (Ollama)
+
+Run nanobot with local Ollama models for privacy and zero-cost inference.
+
+**1. Install Ollama**
+
+```bash
+# macOS/Linux
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Windows
+# Download from: https://ollama.ai/download
+```
+
+**2. Configure** (`~/.nanobot/config.json`)
+
+```json
+{
+  "ollama": {
+    "enabled": true,
+    "apiBase": "http://localhost:11434",
+    "model": "llama3.2",
+    "timeout": 120.0
+  }
+}
+```
+
+**3. Pull a model**
+
+```bash
+nanobot ollama pull llama3.2
+# Or manually: ollama pull llama3.2
+```
+
+**4. Check status**
+
+```bash
+nanobot ollama status
+nanobot ollama list
+```
+
+**5. Chat**
+
+```bash
+nanobot agent -m "Hello from local LLM!"
+```
+
+> [!TIP]
+> Popular models: `llama3.2`, `mistral`, `codellama`, `llama3.1:8b`
+> Ollama models run locally with zero API costs!
+
 ## 🖥️ Local Models (vLLM)
 
 Run nanobot with your own local models using vLLM or any OpenAI-compatible server.
@@ -278,6 +329,12 @@ nanobot gateway
   "usage": {
     "monthlyBudgetUsd": 20.0,
     "alertThresholds": [0.5, 0.8, 1.0]
+  },
+  "ollama": {
+    "enabled": true,
+    "apiBase": "http://localhost:11434",
+    "model": "llama3.2",
+    "timeout": 120.0
   }
 }
 ```
@@ -296,6 +353,9 @@ nanobot gateway
 | `nanobot status` | Show status |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
+| `nanobot ollama status` | Check Ollama service status |
+| `nanobot ollama list` | List installed Ollama models |
+| `nanobot ollama pull <model>` | Download an Ollama model |
 
 <details>
 <summary><b>Scheduled Tasks (Cron)</b></summary>
