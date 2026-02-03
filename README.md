@@ -84,6 +84,16 @@ source .venv/bin/activate
 uv pip install nanobot-ai
 ```
 
+**Install with Docker**
+
+```bash
+# Build the Docker image
+docker build -t nanobot .
+
+# Or use docker-compose
+docker-compose build
+```
+
 ## 🚀 Quick Start
 
 > [!TIP]
@@ -139,9 +149,7 @@ curl -fsSL https://ollama.ai/install.sh | sh
 # Windows
 # Download from: https://ollama.ai/download
 ```
-
 **2. Configure** (`~/.nanobot/config.json`)
-
 ```json
 {
   "ollama": {
@@ -151,20 +159,38 @@ curl -fsSL https://ollama.ai/install.sh | sh
     "timeout": 120.0
   }
 }
+**2. Configure nanobot**
+
+```bash
+# Regular installation
+nanobot onboard  # Edit ~/.nanobot/config.json to enable ollama
+
+# Docker
+docker run -it -v ~/.nanobot:/root/.nanobot nanobot onboard
+# Then edit ~/.nanobot/config.json to enable ollama
 ```
 
 **3. Pull a model**
 
 ```bash
+# Regular installation
 nanobot ollama pull llama3.2
 # Or manually: ollama pull llama3.2
+
+# Docker
+docker run -it nanobot ollama pull llama3.2
 ```
 
 **4. Check status**
 
 ```bash
+# Regular installation
 nanobot ollama status
 nanobot ollama list
+
+# Docker
+docker run -it nanobot ollama status
+docker run -it nanobot ollama list
 ```
 
 **5. Chat**
