@@ -3,6 +3,8 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+from loguru import logger
+
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 
@@ -68,9 +70,10 @@ class BaseChannel(ABC):
         """
         allow_list = getattr(self.config, "allow_from", [])
         
-        # If no allow list, allow everyone
+        # Fail-closed: if no allow list is configured, deny access
+        # Users must explicitly configure allowed senders
         if not allow_list:
-            return True
+            return False
         
         sender_str = str(sender_id)
         if sender_str in allow_list:
@@ -102,6 +105,10 @@ class BaseChannel(ABC):
             metadata: Optional channel-specific metadata.
         """
         if not self.is_allowed(sender_id):
+            logger.warning(
+                f"Access denied for sender {sender_id} on channel {self.name}. "
+                f"Add them to allowFrom list in config to grant access."
+            )
             return
         
         msg = InboundMessage(

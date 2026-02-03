@@ -8,6 +8,34 @@ import shutil
 from nanobot.agent.tools.base import Tool
 
 
+def _validate_path(path: str, base_dir: Path | None = None) -> tuple[bool, Path | str]:
+    """
+    Validate path to prevent directory traversal attacks.
+    
+    Args:
+        path: The path to validate
+        base_dir: Optional base directory to restrict operations to
+        
+    Returns:
+        Tuple of (is_valid, resolved_path_or_error_message)
+    """
+    try:
+        file_path = Path(path).expanduser().resolve()
+        
+        # If base_dir is specified, ensure the path is within it
+        if base_dir is not None:
+            base_resolved = base_dir.resolve()
+            try:
+                # Check if file_path is relative to base_dir
+                file_path.relative_to(base_resolved)
+            except ValueError:
+                return False, f"Error: Path {path} is outside allowed directory"
+        
+        return True, file_path
+    except Exception as e:
+        return False, f"Error: Invalid path: {str(e)}"
+
+
 class ReadFileTool(Tool):
     """Tool to read file contents."""
     
@@ -34,7 +62,11 @@ class ReadFileTool(Tool):
     
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
-            file_path = Path(path).expanduser()
+            is_valid, result = _validate_path(path)
+            if not is_valid:
+                return str(result)
+            
+            file_path = result
             if not file_path.exists():
                 return f"Error: File not found: {path}"
             if not file_path.is_file():
@@ -78,7 +110,11 @@ class WriteFileTool(Tool):
     
     async def execute(self, path: str, content: str, **kwargs: Any) -> str:
         try:
-            file_path = Path(path).expanduser()
+            is_valid, result = _validate_path(path)
+            if not is_valid:
+                return str(result)
+            
+            file_path = result
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
             return f"Successfully wrote {len(content)} bytes to {path}"
@@ -122,7 +158,11 @@ class EditFileTool(Tool):
     
     async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
         try:
-            file_path = Path(path).expanduser()
+            is_valid, result = _validate_path(path)
+            if not is_valid:
+                return str(result)
+            
+            file_path = result
             if not file_path.exists():
                 return f"Error: File not found: {path}"
             
@@ -172,7 +212,11 @@ class ListDirTool(Tool):
     
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
-            dir_path = Path(path).expanduser()
+            is_valid, result = _validate_path(path)
+            if not is_valid:
+                return str(result)
+            
+            dir_path = result
             if not dir_path.exists():
                 return f"Error: Directory not found: {path}"
             if not dir_path.is_dir():
