@@ -21,9 +21,10 @@ class LiteLLMProvider(LLMProvider):
         self, 
         api_key: str | None = None, 
         api_base: str | None = None,
-        default_model: str = "anthropic/claude-opus-4-5"
+        default_model: str = "anthropic/claude-opus-4-5",
+        usage_tracker: Any = None
     ):
-        super().__init__(api_key, api_base)
+        super().__init__(api_key, api_base, usage_tracker)
         self.default_model = default_model
         
         # Detect OpenRouter by api_key prefix or explicit api_base
@@ -166,6 +167,28 @@ class LiteLLMProvider(LLMProvider):
             usage=usage,
         )
     
-    def get_default_model(self) -> str:
-        """Get the default model."""
-        return self.default_model
+    def _extract_provider_from_model(self, model: str) -> str:
+        """Extract provider name from model string for usage tracking."""
+        if "/" in model:
+            provider = model.split("/")[0]
+            # Map common prefixes to provider names
+            provider_map = {
+                "openrouter": "openrouter",
+                "anthropic": "anthropic", 
+                "openai": "openai",
+                "gemini": "gemini",
+                "zhipu": "zhipu",
+                "zai": "zhipu",
+                "hosted_vllm": "vllm"
+            }
+            return provider_map.get(provider, provider)
+        else:
+            # Fallback for models without prefix
+            if "claude" in model.lower():
+                return "anthropic"
+            elif "gpt" in model.lower() or model.startswith("openai/"):
+                return "openai"
+            elif "gemini" in model.lower():
+                return "gemini"
+            else:
+                return "unknown"

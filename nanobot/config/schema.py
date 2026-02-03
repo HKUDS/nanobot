@@ -77,6 +77,12 @@ class ToolsConfig(BaseModel):
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
 
 
+class UsageConfig(BaseModel):
+    """Usage tracking and budget configuration."""
+    monthly_budget_usd: float = 20.0
+    alert_thresholds: list[float] = Field(default_factory=lambda: [0.5, 0.8, 1.0])
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
@@ -84,6 +90,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    usage: UsageConfig = Field(default_factory=UsageConfig)
     
     @property
     def workspace_path(self) -> Path:

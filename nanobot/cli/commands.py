@@ -354,13 +354,23 @@ def channels_status():
     table = Table(title="Channel Status")
     table.add_column("Channel", style="cyan")
     table.add_column("Enabled", style="green")
-    table.add_column("Bridge URL", style="yellow")
+    table.add_column("Configuration", style="yellow")
     
+    # WhatsApp channel
     wa = config.channels.whatsapp
     table.add_row(
         "WhatsApp",
         "✓" if wa.enabled else "✗",
         wa.bridge_url
+    )
+    
+    # Telegram channel
+    tg = config.channels.telegram
+    token_display = f"{tg.token[:10]}..." if tg.token else "not configured"
+    table.add_row(
+        "Telegram",
+        "✓" if tg.enabled else "✗",
+        token_display
     )
     
     console.print(table)
@@ -597,6 +607,127 @@ def cron_run(
         console.print(f"[green]✓[/green] Job executed")
     else:
         console.print(f"[red]Failed to run job {job_id}[/red]")
+
+
+# ============================================================================
+# Usage Commands
+# ============================================================================
+
+
+@app.command()
+def usage(
+    period: str = typer.Option("month", "--period", "-p", help="Time period: today, week, month"),
+    model: str = typer.Option(None, "--model", "-m", help="Filter by specific model"),
+    channel: str = typer.Option(None, "--channel", "-c", help="Filter by specific channel"),
+    budget: bool = typer.Option(False, "--budget", "-b", help="Show budget status only"),
+    alerts: bool = typer.Option(False, "--alerts", "-a", help="Show budget alerts only"),
+):
+    """Show token usage statistics and budget information."""
+    from nanobot.usage import UsageTracker, UsageMonitor, UsageConfig
+    from nanobot.config.loader import load_config
+    
+    config = load_config()
+    usage_config = config.usage
+    tracker = UsageTracker()
+    monitor = UsageMonitor(tracker, usage_config)
+    
+    if budget:
+        # Show budget status only
+        status = monitor.get_budget_status()
+        console.print(f"[bold]Monthly Budget Status[/bold]\n")
+        console.print(f"Budget: [green]${status.monthly_budget_usd:.2f}[/green]")
+        console.print(f"Current Spend: [yellow]${status.current_spend_usd:.2f}[/yellow]")
+        console.print(f"Remaining: [cyan]${status.remaining_budget_usd:.2f}[/cyan]")
+        console.print(f"Utilization: [magenta]{status.utilization_percentage:.1f}%[/magenta]")
+        return
+    
+    if alerts:
+        # Show alerts only
+        alerts_list = monitor.get_budget_alerts()
+        if not alerts_list:
+            console.print("[green]✓ No budget alerts at this time[/green]")
+        else:
+            console.print("[bold red]Budget Alerts:[/bold red]")
+            for alert in alerts_list:
+                console.print(f"  ⚠️  {alert}")
+        return
+    
+    # Determine days based on period
+    if period == "today":
+        days = 1
+        period_name = "today"
+    elif period == "week":
+        days = 7
+        period_name = "this week"
+    elif period == "month":
+        days = 30
+        period_name = "this month"
+    else:
+        console.print(f"[red]Error: Invalid period '{period}'. Use: today, week, month[/red]")
+        raise typer.Exit(1)
+    
+    # Get usage summary
+    summary = tracker.get_usage_summary(
+        days=days,
+        model_filter=model,
+        channel_filter=channel
+    )
+    
+    console.print(f"[bold]Usage Summary ({period_name})[/bold]\n")
+    
+    if model or channel:
+        filters = []
+        if model:
+            filters.append(f"model: {model}")
+        if channel:
+            filters.append(f"channel: {channel}")
+        console.print(f"[dim]Filtered by: {', '.join(filters)}[/dim]\n")
+    
+    console.print(f"Total Tokens: [green]{summary['total_tokens']:,}[/green]")
+    console.print(f"Total Cost: [yellow]${summary['total_cost_usd']:.4f}[/yellow]")
+    console.print(f"API Calls: [cyan]{summary['record_count']}[/cyan]\n")
+    
+    # Model breakdown
+    if summary['model_breakdown']:
+        table = Table(title="Model Usage")
+        table.add_column("Model", style="cyan")
+        table.add_column("Tokens", style="green", justify="right")
+        table.add_column("Percentage", style="yellow", justify="right")
+        
+        for model_name, tokens in sorted(summary['model_breakdown'].items(), key=lambda x: x[1], reverse=True):
+            percentage = (tokens / summary['total_tokens'] * 100) if summary['total_tokens'] > 0 else 0
+            table.add_row(model_name, f"{tokens:,}", f"{percentage:.1f}%")
+        
+        console.print(table)
+        console.print()
+    
+    # Channel breakdown
+    if summary['channel_breakdown']:
+        table = Table(title="Channel Usage")
+        table.add_column("Channel", style="cyan")
+        table.add_column("Tokens", style="green", justify="right")
+        table.add_column("Percentage", style="yellow", justify="right")
+        
+        for channel_name, tokens in sorted(summary['channel_breakdown'].items(), key=lambda x: x[1], reverse=True):
+            percentage = (tokens / summary['total_tokens'] * 100) if summary['total_tokens'] > 0 else 0
+            table.add_row(channel_name, f"{tokens:,}", f"{percentage:.1f}%")
+        
+        console.print(table)
+        console.print()
+    
+    # Budget status
+    status = monitor.get_budget_status()
+    console.print(f"[bold]Budget Status[/bold]")
+    console.print(f"Monthly Budget: [green]${status.monthly_budget_usd:.2f}[/green]")
+    console.print(f"Current Spend: [yellow]${status.current_spend_usd:.2f}[/yellow]")
+    console.print(f"Remaining: [cyan]${status.remaining_budget_usd:.2f}[/cyan]")
+    console.print(f"Utilization: [magenta]{status.utilization_percentage:.1f}%[/magenta]")
+    
+    # Show alerts if any
+    if status.alerts:
+        console.print("\n[bold red]Alerts:[/bold red]")
+        for alert in status.alerts:
+            console.print(f"  ⚠️  {alert}")
 
 
 # ============================================================================

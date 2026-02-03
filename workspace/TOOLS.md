@@ -69,6 +69,40 @@ Send a message to the user (used internally).
 message(content: str, channel: str = None, chat_id: str = None) -> str
 ```
 
+## Usage Tracking & Self-Awareness
+
+### usage
+Query token usage, costs, and budget information for self-awareness and cost monitoring.
+```
+usage(query: str, model_filter: str = None, channel_filter: str = None) -> str
+```
+
+**Available queries:**
+- `"current_budget"`: Get current monthly budget status and alerts
+- `"usage_today"`: Show today's usage statistics
+- `"usage_week"`: Show this week's usage statistics  
+- `"usage_month"`: Show this month's usage statistics
+- `"forecast"`: Get usage forecast for remaining month
+- `"alerts"`: Show current budget alerts
+- `"model_breakdown"`: Usage breakdown by model
+- `"channel_breakdown"`: Usage breakdown by channel
+
+**Optional filters:**
+- `model_filter`: Filter results by specific model (e.g., "claude-3-5-sonnet")
+- `channel_filter`: Filter results by specific channel ("cli", "telegram", "whatsapp")
+
+**Examples:**
+```python
+# Check current budget status
+usage("current_budget")
+
+# Get today's usage for a specific model
+usage("usage_today", model_filter="claude-3-5-sonnet")
+
+# Get channel breakdown
+usage("channel_breakdown")
+```
+
 ## Scheduled Reminders (Cron)
 
 Use the `exec` tool to create scheduled reminders with `nanobot cron add`:

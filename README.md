@@ -58,6 +58,8 @@
   </tr>
 </table>
 
+💰 **Token Usage Tracking & Budget Monitoring**: Track LLM API consumption, set budget limits, receive alerts when approaching or exceeding thresholds.
+
 ## 📦 Install
 
 **Install from PyPi**
@@ -272,6 +274,10 @@ nanobot gateway
         "apiKey": "BSA..."
       }
     }
+  },
+  "usage": {
+    "monthlyBudgetUsd": 20.0,
+    "alertThresholds": [0.5, 0.8, 1.0]
   }
 }
 ```
@@ -285,6 +291,7 @@ nanobot gateway
 | `nanobot onboard` | Initialize config & workspace |
 | `nanobot agent -m "..."` | Chat with the agent |
 | `nanobot agent` | Interactive chat mode |
+| `nanobot usage` | Show token usage & budget stats |
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
 | `nanobot channels login` | Link WhatsApp (scan QR) |

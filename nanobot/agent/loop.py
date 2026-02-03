@@ -60,6 +60,14 @@ class AgentLoop:
             brave_api_key=brave_api_key,
         )
         
+        # Initialize usage tracking
+        from nanobot.usage import UsageTracker, UsageMonitor, UsageConfig, UsageTool
+        from nanobot.config.loader import load_config
+        config = load_config()
+        self.usage_config = config.usage
+        self.usage_tracker = UsageTracker()
+        self.usage_monitor = UsageMonitor(self.usage_tracker, self.usage_config)
+        
         self._running = False
         self._register_default_tools()
     
@@ -85,6 +93,10 @@ class AgentLoop:
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
+        
+        # Usage tool (for self-awareness)
+        usage_tool = UsageTool(self.usage_tracker, self.usage_monitor)
+        self.tools.register(usage_tool)
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -169,6 +181,30 @@ class AgentLoop:
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
+            
+            # Record usage if available
+            if response.usage:
+                from nanobot.usage.models import TokenUsage
+                token_usage = TokenUsage(
+                    prompt_tokens=response.usage.get('prompt_tokens', 0),
+                    completion_tokens=response.usage.get('completion_tokens', 0),
+                    total_tokens=response.usage.get('total_tokens', 0)
+                )
+                
+                # Extract provider from model
+                provider = self._extract_provider_from_model(self.model)
+                
+                # Calculate actual cost
+                cost_usd = token_usage.cost_usd(provider=provider, model=self.model)
+                
+                self.usage_tracker.record_usage(
+                    model=self.model,
+                    channel=msg.channel,
+                    session_key=session.key,
+                    token_usage=token_usage,
+                    cost_usd=cost_usd,
+                    provider=provider
+                )
             
             # Handle tool calls
             if response.has_tool_calls:
@@ -266,6 +302,30 @@ class AgentLoop:
                 model=self.model
             )
             
+            # Record usage if available
+            if response.usage:
+                from nanobot.usage.models import TokenUsage
+                token_usage = TokenUsage(
+                    prompt_tokens=response.usage.get('prompt_tokens', 0),
+                    completion_tokens=response.usage.get('completion_tokens', 0),
+                    total_tokens=response.usage.get('total_tokens', 0)
+                )
+                
+                # Extract provider from model
+                provider = self._extract_provider_from_model(self.model)
+                
+                # Calculate actual cost
+                cost_usd = token_usage.cost_usd(provider=provider, model=self.model)
+                
+                self.usage_tracker.record_usage(
+                    model=self.model,
+                    channel=origin_channel,
+                    session_key=session_key,
+                    token_usage=token_usage,
+                    cost_usd=cost_usd,
+                    provider=provider
+                )
+            
             if response.has_tool_calls:
                 tool_call_dicts = [
                     {
@@ -327,3 +387,29 @@ class AgentLoop:
         
         response = await self._process_message(msg)
         return response.content if response else ""
+    
+    def _extract_provider_from_model(self, model: str) -> str:
+        """Extract provider name from model string for usage tracking."""
+        if "/" in model:
+            provider = model.split("/")[0]
+            # Map common prefixes to provider names
+            provider_map = {
+                "openrouter": "openrouter",
+                "anthropic": "anthropic", 
+                "openai": "openai",
+                "gemini": "gemini",
+                "zhipu": "zhipu",
+                "zai": "zhipu",
+                "hosted_vllm": "vllm"
+            }
+            return provider_map.get(provider, provider)
+        else:
+            # Fallback for models without prefix
+            if "claude" in model.lower():
+                return "anthropic"
+            elif "gpt" in model.lower() or model.startswith("openai/"):
+                return "openai"
+            elif "gemini" in model.lower():
+                return "gemini"
+            else:
+                return "unknown"
