@@ -5,6 +5,8 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 
@@ -98,7 +100,13 @@ Only use the 'message' tool when you need to send a message to a specific chat c
 For normal conversation, just respond with text - do not call the message tool.
 
 Always be helpful, accurate, and concise. When using tools, explain what you're doing.
-When remembering something, write to {workspace_path}/memory/MEMORY.md"""
+When remembering something, write to {workspace_path}/memory/MEMORY.md
+
+## Tool Response Offloading
+To prevent context bloat, large tool responses will be automatically offloaded to the file system.
+When this happens, you will see a [TOOL RESPONSE OFFLOADED] message with a preview.
+If the preview is insufficient, use the `read_artifact(artifact_id)` tool to read the full content.
+Output from `read_artifact` is NEVER offloaded, so you can always see the full content safely."""
     
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""

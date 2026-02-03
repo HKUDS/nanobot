@@ -21,6 +21,13 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
 
 
+from nanobot.agent.tools.offloader import (
+    ToolResponseOffloader,
+    ReadArtifactTool, TailArtifactTool, SearchArtifactTool, ListArtifactsTool
+)
+
+from nanobot.config.schema import OffloadConfig
+
 class AgentLoop:
     """
     The agent loop is the core processing engine.
@@ -40,7 +47,8 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         max_iterations: int = 20,
-        brave_api_key: str | None = None
+        brave_api_key: str | None = None,
+        offload_config: OffloadConfig | None = None
     ):
         self.bus = bus
         self.provider = provider
@@ -58,7 +66,11 @@ class AgentLoop:
             bus=bus,
             model=self.model,
             brave_api_key=brave_api_key,
+            offload_config=offload_config
         )
+        
+        # Initialize output offloader
+        self.offloader = ToolResponseOffloader(workspace, config=offload_config)
         
         self._running = False
         self._register_default_tools()
@@ -85,6 +97,12 @@ class AgentLoop:
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
+        
+        # Artifact tools (for offloaded content)
+        self.tools.register(ReadArtifactTool(self.offloader))
+        self.tools.register(TailArtifactTool(self.offloader))
+        self.tools.register(SearchArtifactTool(self.offloader))
+        self.tools.register(ListArtifactsTool(self.offloader))
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -193,6 +211,20 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments)
                     logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    
+                    # Check for offloading
+                    if self.offloader.should_offload(tool_call.name, result):
+                        offload_res = self.offloader.offload(tool_call.name, result)
+                        result = offload_res.context_message
+                        
+                        # Notify user of offload (non-blocking)
+                        if self.bus:
+                            await self.bus.publish_outbound(OutboundMessage(
+                                channel=msg.channel,
+                                chat_id=msg.chat_id,
+                                content=f"📁 **Tool Response Offloaded**\nSaved `{offload_res.original_tokens}` tokens from `{tool_call.name}` to `{offload_res.artifact_id}`."
+                            ))
+                        
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -286,6 +318,12 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments)
                     logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    
+                    # Check for offloading
+                    if self.offloader.should_offload(tool_call.name, result):
+                        offload_res = self.offloader.offload(tool_call.name, result)
+                        result = offload_res.context_message
+                        
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
