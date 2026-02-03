@@ -18,6 +18,53 @@ app = typer.Typer(
 console = Console()
 
 
+def _create_provider(config):
+    """Create provider instance from config.providers.provider."""
+    provider_type = config.get_provider_type()
+
+    if provider_type == "lazyllm":
+        from nanobot.providers.lazyllm_provider import LazyLLMProvider
+
+        lazy_cfg = config.providers.lazyllm
+        if not lazy_cfg.model_source:
+            console.print("[red]Error: providers.lazyllm.modelSource is required.[/red]")
+            raise typer.Exit(1)
+        if not lazy_cfg.model_id:
+            console.print("[red]Error: providers.lazyllm.modelId is required.[/red]")
+            raise typer.Exit(1)
+
+        return LazyLLMProvider(
+            api_key=lazy_cfg.api_key or None,
+            api_base=lazy_cfg.api_base,
+            default_model=lazy_cfg.model_id,
+            source=lazy_cfg.model_source,
+            type=lazy_cfg.model_type,
+        )
+
+    from nanobot.providers.litellm_provider import LiteLLMProvider
+
+    api_key = config.get_api_key()
+    api_base = config.get_api_base()
+
+    if not api_key:
+        console.print("[red]Error: No API key configured.[/red]")
+        console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
+        raise typer.Exit(1)
+
+    return LiteLLMProvider(
+        api_key=api_key,
+        api_base=api_base,
+        default_model=config.agents.defaults.model,
+    )
+
+
+def _get_runtime_model(config) -> str:
+    """Get runtime model id according to active provider."""
+    if config.get_provider_type() == "lazyllm":
+        return config.providers.lazyllm.model_id
+    return config.agents.defaults.model
+
+
 def version_callback(value: bool):
     if value:
         console.print(f"{__logo__} nanobot v{__version__}")
@@ -160,7 +207,6 @@ def gateway(
     """Start the nanobot gateway."""
     from nanobot.config.loader import load_config, get_data_dir
     from nanobot.bus.queue import MessageBus
-    from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.agent.loop import AgentLoop
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
@@ -177,28 +223,15 @@ def gateway(
     
     # Create components
     bus = MessageBus()
-    
-    # Create provider (supports OpenRouter, Anthropic, OpenAI)
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
-    
-    if not api_key:
-        console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
-        raise typer.Exit(1)
-    
-    provider = LiteLLMProvider(
-        api_key=api_key,
-        api_base=api_base,
-        default_model=config.agents.defaults.model
-    )
+    provider = _create_provider(config)
+    runtime_model = _get_runtime_model(config)
     
     # Create agent
     agent = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
+        model=runtime_model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         brave_api_key=config.tools.web.search.api_key or None
     )
@@ -282,29 +315,19 @@ def agent(
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config
     from nanobot.bus.queue import MessageBus
-    from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.agent.loop import AgentLoop
     
     config = load_config()
     
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
-    
-    if not api_key:
-        console.print("[red]Error: No API key configured.[/red]")
-        raise typer.Exit(1)
-    
     bus = MessageBus()
-    provider = LiteLLMProvider(
-        api_key=api_key,
-        api_base=api_base,
-        default_model=config.agents.defaults.model
-    )
+    provider = _create_provider(config)
+    runtime_model = _get_runtime_model(config)
     
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
+        model=runtime_model,
         brave_api_key=config.tools.web.search.api_key or None
     )
     
@@ -621,6 +644,7 @@ def status():
     if config_path.exists():
         config = load_config()
         console.print(f"Model: {config.agents.defaults.model}")
+        console.print(f"Provider: {config.get_provider_type()}")
         
         # Check API keys
         has_openrouter = bool(config.providers.openrouter.api_key)
@@ -628,6 +652,7 @@ def status():
         has_openai = bool(config.providers.openai.api_key)
         has_gemini = bool(config.providers.gemini.api_key)
         has_vllm = bool(config.providers.vllm.api_base)
+        has_lazyllm_key = bool(config.providers.lazyllm.api_key)
         
         console.print(f"OpenRouter API: {'[green]✓[/green]' if has_openrouter else '[dim]not set[/dim]'}")
         console.print(f"Anthropic API: {'[green]✓[/green]' if has_anthropic else '[dim]not set[/dim]'}")
@@ -635,6 +660,10 @@ def status():
         console.print(f"Gemini API: {'[green]✓[/green]' if has_gemini else '[dim]not set[/dim]'}")
         vllm_status = f"[green]✓ {config.providers.vllm.api_base}[/green]" if has_vllm else "[dim]not set[/dim]"
         console.print(f"vLLM/Local: {vllm_status}")
+        console.print(f"LazyLLM API: {'[green]✓[/green]' if has_lazyllm_key else '[dim]not set[/dim]'}")
+        console.print(
+            f"LazyLLM Model: {config.providers.lazyllm.model_source}/{config.providers.lazyllm.model_id} ({config.providers.lazyllm.model_type})"
+        )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
+from typing import Literal
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
@@ -45,14 +46,25 @@ class ProviderConfig(BaseModel):
     api_base: str | None = None
 
 
+class LazyLLMConfig(BaseModel):
+    """LazyLLM provider configuration."""
+    api_key: str = ""
+    api_base: str | None = None
+    model_source: str = "siliconflow"
+    model_id: str = "Pro/moonshotai/Kimi-K2.5"
+    model_type: Literal["LLM", "VLM"] = "LLM"
+
+
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
+    provider: Literal["litellm", "lazyllm"] = "lazyllm"
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    lazyllm: LazyLLMConfig = Field(default_factory=LazyLLMConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -111,6 +123,10 @@ class Config(BaseSettings):
         if self.providers.vllm.api_base:
             return self.providers.vllm.api_base
         return None
+
+    def get_provider_type(self) -> Literal["litellm", "lazyllm"]:
+        """Get active provider type."""
+        return self.providers.provider
     
     class Config:
         env_prefix = "NANOBOT_"
