@@ -52,7 +52,9 @@ class LiteLLMProvider(LLMProvider):
             elif "gemini" in default_model.lower():
                 os.environ.setdefault("GEMINI_API_KEY", api_key)
             elif "zhipu" in default_model or "glm" in default_model or "zai" in default_model:
-                os.environ.setdefault("ZAI_API_KEY", api_key)
+                os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
+            elif "dashscope" in default_model or "qwen" in default_model.lower():
+                os.environ.setdefault("DASHSCOPE_API_KEY", api_key)
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
             elif "moonshot" in default_model or "kimi" in default_model:
@@ -100,18 +102,15 @@ class LiteLLMProvider(LLMProvider):
             model.startswith("openrouter/") or
             model.startswith("hosted_vllm/")
         ):
-            model = f"zai/{model}"
+            model = f"zhipu/{model}"
 
-        # For Moonshot/Kimi, ensure moonshot/ prefix (before vLLM check)
-        if ("moonshot" in model.lower() or "kimi" in model.lower()) and not (
-            model.startswith("moonshot/") or model.startswith("openrouter/")
+        # For DashScope/Qwen, ensure prefix is present
+        if ("qwen" in model.lower() or "dashscope" in model.lower()) and not (
+            model.startswith("dashscope/") or
+            model.startswith("openrouter/")
         ):
-            model = f"moonshot/{model}"
-
-        # For Gemini, ensure gemini/ prefix if not already present
-        if "gemini" in model.lower() and not model.startswith("gemini/"):
-            model = f"gemini/{model}"
-
+            model = f"dashscope/{model}"
+        
         # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
         # Convert openai/ prefix to hosted_vllm/ if user specified it
         if self.is_vllm:
