@@ -94,6 +94,12 @@ docker build -t nanobot .
 docker-compose build
 ```
 
+> [!NOTE]
+> **For development/updates**: If you modify the nanobot code, rebuild the image to include changes:
+> ```bash
+> docker build --no-cache -t nanobot .
+> ```
+
 ## 🚀 Quick Start
 
 > [!TIP]
