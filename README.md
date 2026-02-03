@@ -17,7 +17,7 @@
 
 ## 📢 News
 
-- **2025-02-01** 🎉 nanobot launched! Welcome to try 🐈 nanobot!
+- **2026-02-01** 🎉 nanobot launched! Welcome to try 🐈 nanobot!
 
 ## Key Features of nanobot:
 
@@ -60,19 +60,7 @@
 
 ## 📦 Install
 
-**Install with [uv](https://github.com/astral-sh/uv)** (recommended for speed)
-
-```bash
-uv tool install nanobot-ai
-```
-
-**Install from PyPi**
-
-```bash
-pip install nanobot-ai
-```
-
-**Install from source** (recommended for development)
+**Install from source** (latest features, recommended for development)
 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
@@ -80,12 +68,16 @@ cd nanobot
 pip install -e .
 ```
 
-**Install with uv**
+**Install with [uv](https://github.com/astral-sh/uv)** (stable, fast)
 
 ```bash
-uv venv
-source .venv/bin/activate
-uv pip install nanobot-ai
+uv tool install nanobot-ai
+```
+
+**Install from PyPI** (stable)
+
+```bash
+pip install nanobot-ai
 ```
 
 ## 🚀 Quick Start
@@ -274,7 +266,6 @@ Config file: `~/.nanobot/config.json`
 | `groq` | LLM + **Voice transcription** | Llama, Whisper | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | `gemini-pro`, `gemini-ultra` | [aistudio.google.com](https://aistudio.google.com) |
 
-> **Note**: Groq provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
 
 <details>
 <summary><b>Full config example</b></summary>
@@ -347,6 +338,9 @@ nanobot cron remove <job_id>
 
 ## 🐳 Docker
 
+> [!TIP]
+> The `-v ~/.nanobot:/root/.nanobot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
+
 Build and run nanobot in a container:
 
 ```bash
@@ -366,8 +360,6 @@ docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
 docker run -v ~/.nanobot:/root/.nanobot --rm nanobot agent -m "Hello!"
 docker run -v ~/.nanobot:/root/.nanobot --rm nanobot status
 ```
-
-> **Tip**: Mount `~/.nanobot` so your config and workspace persist across container restarts.
 
 ## 📁 Project Structure
 
