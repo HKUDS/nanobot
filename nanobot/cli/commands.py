@@ -65,8 +65,18 @@ def onboard():
     selected_provider = providers[int(choice) - 1] if choice.isdigit() and 1 <= int(choice) <= len(providers) else "OpenRouter"
     
     if selected_provider == "Zhipu AI (Z.AI)":
+        # Ask about coding plan
+        console.print("\n[dim]Z.AI offers two API plans:[/dim]")
+        console.print("  1. [cyan]Coding Plan[/cyan] - Optimized for code generation")
+        console.print("  2. [dim]General Plan[/dim] - General LLM access")
+        plan_choice = typer.prompt("Select your plan (1 or 2)", default="1")
+        is_coding = plan_choice == "1"
+        
         console.print("\n[bold]Select Zhipu AI model:[/bold]")
-        models = ["glm-4.7", "glm-4.7-flash", "glm-4.5-air", "glm-4.0"]
+        if is_coding:
+            models = ["glm-4.7", "glm-4.7-flash"]
+        else:
+            models = ["glm-4.7", "glm-4.7-flash", "glm-4.5-air", "glm-4.0"]
         for i, m in enumerate(models, 1):
             console.print(f"  {i}. {m}")
         model_choice = typer.prompt("Enter choice", default="1")
@@ -75,6 +85,7 @@ def onboard():
         
         api_key = typer.prompt("Enter your Zhipu AI API Key", hide_input=True)
         config.providers.zhipu.api_key = api_key
+        config.providers.zhipu.coding_plan = is_coding
     elif selected_provider == "Anthropic":
         config.agents.defaults.model = "anthropic/claude-3-5-sonnet-20240620"
         api_key = typer.prompt("Enter your Anthropic API Key", hide_input=True)

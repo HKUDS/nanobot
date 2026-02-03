@@ -43,6 +43,7 @@ class ProviderConfig(BaseModel):
     """LLM provider configuration."""
     api_key: str = ""
     api_base: str | None = None
+    coding_plan: bool = False  # Z.AI coding plan uses different endpoint
 
 
 class ProvidersConfig(BaseModel):
@@ -126,6 +127,8 @@ class Config(BaseSettings):
             return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
             
         if ("zhipu" in model or "glm" in model or "zai" in model) and self.providers.zhipu.api_key:
+            if self.providers.zhipu.coding_plan:
+                return "https://api.z.ai/api/coding/paas/v4"
             return self.providers.zhipu.api_base
             
         if "vllm" in model and self.providers.vllm.api_base:
