@@ -4,7 +4,6 @@ import json
 import math
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 

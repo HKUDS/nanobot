@@ -1,6 +1,7 @@
 """LiteLLM provider implementation for multi-provider support."""
 
 import logging
+import math
 import os
 from typing import Any
 
@@ -148,7 +149,12 @@ class LiteLLMProvider(LLMProvider):
         # Extract cost from LiteLLM response (uses live pricing from api.litellm.ai)
         cost_usd = 0.0
         if hasattr(response, "_hidden_params"):
-            cost_usd = response._hidden_params.get("response_cost", 0.0) or 0.0
+            raw_cost = response._hidden_params.get("response_cost", 0.0) or 0.0
+            # Validate cost is a valid non-negative finite number
+            if isinstance(raw_cost, (int, float)) and math.isfinite(raw_cost) and raw_cost >= 0:
+                cost_usd = float(raw_cost)
+            else:
+                logger.warning(f"Invalid response_cost value: {raw_cost}")
             if cost_usd == 0.0:
                 logger.debug(
                     "LiteLLM response_cost unavailable for this model; "
