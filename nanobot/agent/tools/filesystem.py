@@ -2,6 +2,8 @@
 
 from pathlib import Path
 from typing import Any
+import fnmatch
+import shutil
 
 from nanobot.agent.tools.base import Tool
 
@@ -189,3 +191,233 @@ class ListDirTool(Tool):
             return f"Error: Permission denied: {path}"
         except Exception as e:
             return f"Error listing directory: {str(e)}"
+
+class DeleteFileTool(Tool):
+    """Tool to delete a file."""
+
+    @property
+    def name(self) -> str:
+        return "delete_file"
+
+    @property
+    def description(self) -> str:
+        return "Delete a file at the given path."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "The file path to delete"
+                }
+            },
+            "required": ["path"]
+        }
+
+    async def execute(self, path: str, **kwargs: Any) -> str:
+        try:
+            file_path = Path(path).expanduser()
+            if not file_path.exists():
+                return f"Error: File not found: {path}"
+            if not file_path.is_file():
+                return f"Error: Not a file: {path}"
+
+            file_path.unlink()
+            return f"Successfully deleted file: {path}"
+        except PermissionError:
+            return f"Error: Permission denied: {path}"
+        except Exception as e:
+            return f"Error deleting file: {str(e)}"
+
+
+class MoveFileTool(Tool):
+    """Tool to move or rename a file."""
+
+    @property
+    def name(self) -> str:
+        return "move_file"
+
+    @property
+    def description(self) -> str:
+        return "Move or rename a file from source path to destination path."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": "Source file path"
+                },
+                "destination": {
+                    "type": "string",
+                    "description": "Destination file path"
+                }
+            },
+            "required": ["source", "destination"]
+        }
+
+    async def execute(self, source: str, destination: str, **kwargs: Any) -> str:
+        try:
+            src = Path(source).expanduser()
+            dst = Path(destination).expanduser()
+
+            if not src.exists():
+                return f"Error: Source file not found: {source}"
+            if not src.is_file():
+                return f"Error: Source is not a file: {source}"
+
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+
+            return f"Successfully moved file to {destination}"
+        except PermissionError:
+            return f"Error: Permission denied"
+        except Exception as e:
+            return f"Error moving file: {str(e)}"
+
+
+class CopyFileTool(Tool):
+    """Tool to copy a file."""
+
+    @property
+    def name(self) -> str:
+        return "copy_file"
+
+    @property
+    def description(self) -> str:
+        return "Copy a file from source path to destination path."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": "Source file path"
+                },
+                "destination": {
+                    "type": "string",
+                    "description": "Destination file path"
+                }
+            },
+            "required": ["source", "destination"]
+        }
+
+    async def execute(self, source: str, destination: str, **kwargs: Any) -> str:
+        try:
+            src = Path(source).expanduser()
+            dst = Path(destination).expanduser()
+
+            if not src.exists():
+                return f"Error: Source file not found: {source}"
+            if not src.is_file():
+                return f"Error: Source is not a file: {source}"
+
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+
+            return f"Successfully copied file to {destination}"
+        except PermissionError:
+            return f"Error: Permission denied"
+        except Exception as e:
+            return f"Error copying file: {str(e)}"
+
+
+class FileInfoTool(Tool):
+    """Tool to get file metadata."""
+
+    @property
+    def name(self) -> str:
+        return "file_info"
+
+    @property
+    def description(self) -> str:
+        return "Get metadata information about a file."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "File path"
+                }
+            },
+            "required": ["path"]
+        }
+
+    async def execute(self, path: str, **kwargs: Any) -> str:
+        try:
+            file_path = Path(path).expanduser()
+            if not file_path.exists():
+                return f"Error: File not found: {path}"
+
+            stat = file_path.stat()
+            return (
+                f"Path: {path}\n"
+                f"Type: {'Directory' if file_path.is_dir() else 'File'}\n"
+                f"Size: {stat.st_size} bytes\n"
+                f"Modified: {stat.st_mtime}\n"
+                f"Permissions: {oct(stat.st_mode)}"
+            )
+        except PermissionError:
+            return f"Error: Permission denied: {path}"
+        except Exception as e:
+            return f"Error retrieving file info: {str(e)}"
+
+
+class SearchFilesTool(Tool):
+    """Tool to search files by name pattern."""
+
+    @property
+    def name(self) -> str:
+        return "search_files"
+
+    @property
+    def description(self) -> str:
+        return "Search for files in a directory matching a filename pattern."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Directory to search in"
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": "Filename pattern (e.g. *.py, *.txt)"
+                }
+            },
+            "required": ["path", "pattern"]
+        }
+
+    async def execute(self, path: str, pattern: str, **kwargs: Any) -> str:
+        try:
+            base_dir = Path(path).expanduser()
+            if not base_dir.exists():
+                return f"Error: Directory not found: {path}"
+            if not base_dir.is_dir():
+                return f"Error: Not a directory: {path}"
+
+            matches = []
+            for item in base_dir.rglob("*"):
+                if item.is_file() and fnmatch.fnmatch(item.name, pattern):
+                    matches.append(str(item))
+
+            if not matches:
+                return "No matching files found."
+
+            return "\n".join(matches)
+        except PermissionError:
+            return f"Error: Permission denied: {path}"
+        except Exception as e:
+            return f"Error searching files: {str(e)}"
