@@ -1,52 +1,184 @@
-# Tools Reference
+# Available Tools
 
-Nanobot comes equipped with a set of powerful tools.
+This document describes the tools available to nanobot.
 
-## Core Tools
+## File Operations
 
-### Filesystem
-- **read_file**: Read the contents of a file.
-- **write_file**: Write content to a file (creates if missing).
-- **edit_file**: Edit a specific part of a file.
-- **list_dir**: List files in a directory.
+### read_file
+Read the contents of a file.
+```
+read_file(path: str) -> str
+```
 
-### Shell
-- **exec**: Execute shell commands in the workspace.
+### write_file
+Write content to a file (creates parent directories if needed).
+```
+write_file(path: str, content: str) -> str
+```
 
-### Web
-- **web_search**: Search the web (via Brave API).
-- **web_fetch**: Fetch and extract text from a URL.
+### edit_file
+Edit a file by replacing specific text.
+```
+edit_file(path: str, old_text: str, new_text: str) -> str
+```
 
-### Messaging
-- **message**: Send a message to a user on a specific channel (Telegram/WhatsApp).
-- **spawn**: Spawn a background subagent for complex tasks.
+### list_dir
+List contents of a directory.
+```
+list_dir(path: str) -> str
+```
+
+## Shell Execution
+
+### exec
+Execute a shell command and return output.
+```
+exec(command: str, working_dir: str = None) -> str
+```
+
+**Safety Notes:**
+- Commands have a 60-second timeout
+- Output is truncated at 10,000 characters
+- Use with caution for destructive operations
+
+## Web Access
+
+### web_search
+Search the web using DuckDuckGo.
+```
+web_search(query: str) -> str
+```
+
+Returns top 5 search results with titles, URLs, and snippets.
+
+### web_fetch
+Fetch and extract main content from a URL.
+```
+web_fetch(url: str) -> str
+```
+
+**Notes:**
+- Content is extracted using trafilatura
+- Output is truncated at 8,000 characters
+
+## Communication
+
+### message
+Send a message to the user (used internally).
+```
+message(content: str, channel: str = None, chat_id: str = None) -> str
+```
+
+### spawn
+Spawn a background subagent for complex tasks.
+```
+spawn(task: str, label: str = None) -> str
+```
+**Notes:**
+- Subagents run in the background.
+- You will be notified when they complete.
 
 ## Tool Response Offloading
 
 To manage context window size, Nanobot automatically "offloads" large tool responses to the file system.
+When this happens, you will see a `[TOOL RESPONSE OFFLOADED]` message. Use the following tools to inspect the content.
 
-When this happens, you will see a message like:
+### read_artifact
+Load the full content of an offloaded response.
 ```
-[TOOL RESPONSE OFFLOADED]
-Tool: web_fetch
-Artifact ID: web_fetch_20240101_123456
-...
---- PREVIEW ---
-<preview content>
---- END PREVIEW ---
+read_artifact(artifact_id: str) -> str
+```
+**Notes:**
+- **Loop Prevention**: Output from this tool is NEVER offloaded.
 
-Files Full response saved to: .artifacts/...
-Use read_artifact('artifact_id') to load full content.
+### tail_artifact
+Read just the end of a large file (good for logs).
+```
+tail_artifact(artifact_id: str, lines: int = 50) -> str
 ```
 
-### Artifact Tools
-Use these tools to interact with offloaded content:
+### search_artifact
+Search for specific text within a large response.
+```
+search_artifact(artifact_id: str, query: str) -> str
+```
 
-- **read_artifact(artifact_id)**: Load the full content of an offloaded response.
-- **tail_artifact(artifact_id, lines=50)**: Read just the end of a large file (good for logs).
-- **search_artifact(artifact_id, query)**: Search for specific text within a large response.
-- **list_artifacts()**: See what artifacts are available in the current session.
-- **cleanup_artifacts(retention_days=7)**: Manually trigger cleanup of old artifacts.
+### list_artifacts
+See what artifacts are available in the current session.
+```
+list_artifacts() -> str
+```
 
-> [!TIP]
-> **Loop Prevention**: Output from `read_artifact`, `search_artifact`, and `tail_artifact` is NEVER offloaded. This ensures you can always read the full content, no matter how large.
+### cleanup_artifacts
+Manually trigger cleanup of old artifacts.
+```
+cleanup_artifacts(retention_days: int = 7) -> str
+```
+
+## Scheduled Reminders (Cron)
+
+Use the `exec` tool to create scheduled reminders with `nanobot cron add`:
+
+### Set a recurring reminder
+```bash
+# Every day at 9am
+nanobot cron add --name "morning" --message "Good morning! ☀️" --cron "0 9 * * *"
+
+# Every 2 hours
+nanobot cron add --name "water" --message "Drink water! 💧" --every 7200
+```
+
+### Set a one-time reminder
+```bash
+# At a specific time (ISO format)
+nanobot cron add --name "meeting" --message "Meeting starts now!" --at "2025-01-31T15:00:00"
+```
+
+### Manage reminders
+```bash
+nanobot cron list              # List all jobs
+nanobot cron remove <job_id>   # Remove a job
+```
+
+## Heartbeat Task Management
+
+The `HEARTBEAT.md` file in the workspace is checked every 30 minutes.
+Use file operations to manage periodic tasks:
+
+### Add a heartbeat task
+```python
+# Append a new task
+edit_file(
+    path="HEARTBEAT.md",
+    old_text="## Example Tasks",
+    new_text="- [ ] New periodic task here\n\n## Example Tasks"
+)
+```
+
+### Remove a heartbeat task
+```python
+# Remove a specific task
+edit_file(
+    path="HEARTBEAT.md",
+    old_text="- [ ] Task to remove\n",
+    new_text=""
+)
+```
+
+### Rewrite all tasks
+```python
+# Replace the entire file
+write_file(
+    path="HEARTBEAT.md",
+    content="# Heartbeat Tasks\n\n- [ ] Task 1\n- [ ] Task 2\n"
+)
+```
+
+---
+
+## Adding Custom Tools
+
+To add custom tools:
+1. Create a class that extends `Tool` in `nanobot/agent/tools/`
+2. Implement `name`, `description`, `parameters`, and `execute`
+3. Register it in `AgentLoop._register_default_tools()`
