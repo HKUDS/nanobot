@@ -34,7 +34,7 @@ class MessageTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Send a message to the user. Use this when you want to communicate something."
+        return "Send a message to the user with optional media attachments. Use this when you want to communicate something."
     
     @property
     def parameters(self) -> dict[str, Any]:
@@ -44,6 +44,11 @@ class MessageTool(Tool):
                 "content": {
                     "type": "string",
                     "description": "The message content to send"
+                },
+                "media_paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of file paths to attach (images, documents)"
                 },
                 "channel": {
                     "type": "string",
@@ -60,6 +65,7 @@ class MessageTool(Tool):
     async def execute(
         self, 
         content: str, 
+        media_paths: list[str] | None = None,
         channel: str | None = None, 
         chat_id: str | None = None,
         **kwargs: Any
@@ -73,14 +79,26 @@ class MessageTool(Tool):
         if not self._send_callback:
             return "Error: Message sending not configured"
         
+        # Validate media paths
+        media_files = []
+        if media_paths:
+            for path in media_paths:
+                if len(path) > 500:
+                    return f"Error: Media path too long: {path[:50]}..."
+                if not os.path.exists(path):
+                    return f"Error: Media file not found: {path}"
+                media_files.append(path)
+        
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
-            content=content
+            content=content,
+            media=media_files
         )
         
         try:
             await self._send_callback(msg)
-            return f"Message sent to {channel}:{chat_id}"
+            media_count = len(media_files) if media_files else 0
+            return f"Message sent to {channel}:{chat_id}" + (f" with {media_count} media files" if media_count else "")
         except Exception as e:
             return f"Error sending message: {str(e)}"

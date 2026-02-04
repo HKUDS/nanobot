@@ -4,8 +4,7 @@ import asyncio
 import re
 
 from loguru import logger
-from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram import InputMediaPhoto, InputMediaDocument
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -152,33 +151,130 @@ class TelegramChannel(BaseChannel):
             self._app = None
     
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Telegram."""
+        """Send a message through Telegram with support for media attachments."""
         if not self._app:
             logger.warning("Telegram bot not running")
             return
         
         try:
-            # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
-            # Convert markdown to Telegram HTML
+            
+            # Convert markdown to Telegram HTML and truncate caption
             html_content = _markdown_to_telegram_html(msg.content)
-            await self._app.bot.send_message(
-                chat_id=chat_id,
-                text=html_content,
-                parse_mode="HTML"
-            )
+            if len(html_content) > 1024:
+                html_content = html_content[:1021] + "..."
+                logger.warning(f"Caption truncated to 1024 chars for chat {chat_id}")
+            
+            # Handle media attachments
+            if msg.media:
+                await self._send_with_media(chat_id, html_content, msg.media)
+            else:
+                # Send text-only message
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=html_content,
+                    parse_mode="HTML"
+                )
+                
         except ValueError:
             logger.error(f"Invalid chat_id: {msg.chat_id}")
         except Exception as e:
             # Fallback to plain text if HTML parsing fails
             logger.warning(f"HTML parse failed, falling back to plain text: {e}")
             try:
-                await self._app.bot.send_message(
-                    chat_id=int(msg.chat_id),
-                    text=msg.content
-                )
+                if msg.media:
+                    await self._send_with_media(chat_id, msg.content[:1024], msg.media)
+                else:
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=msg.content[:4096]  # Telegram text limit
+                    )
             except Exception as e2:
                 logger.error(f"Error sending Telegram message: {e2}")
+    
+    async def _send_with_media(self, chat_id: int, caption: str, media_paths: list[str]) -> None:
+        """Send message with media attachments."""
+        if not media_paths:
+            return
+        
+        # Categorize media files
+        image_paths = []
+        document_paths = []
+        
+        for path in media_paths:
+            if self._is_image_file(path):
+                image_paths.append(path)
+            else:
+                document_paths.append(path)
+        
+        # Send images
+        if image_paths:
+            if len(image_paths) == 1:
+                # Single photo
+                await self._send_photo(chat_id, image_paths[0], caption)
+            else:
+                # Media group for multiple images
+                await self._send_media_group(chat_id, image_paths, caption)
+        
+        # Send documents (if no images were sent, or as additional messages)
+        if document_paths:
+            for doc_path in document_paths:
+                await self._send_document(chat_id, doc_path, caption if not image_paths else "")
+    
+    def _is_image_file(self, file_path: str) -> bool:
+        """Check if file is an image based on extension."""
+        import os
+        ext = os.path.splitext(file_path)[1].lower()
+        return ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
+    
+    async def _send_photo(self, chat_id: int, photo_path: str, caption: str) -> None:
+        """Send a single photo with caption."""
+        try:
+            with open(photo_path, 'rb') as photo_file:
+                await self._app.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo_file,
+                    caption=caption,
+                    parse_mode="HTML"
+                )
+            logger.debug(f"Sent photo to {chat_id}: {photo_path}")
+        except Exception as e:
+            logger.error(f"Failed to send photo {photo_path}: {e}")
+    
+    async def _send_media_group(self, chat_id: int, image_paths: list[str], caption: str) -> None:
+        """Send multiple images as a media group."""
+        try:
+            media_group = []
+            
+            for i, img_path in enumerate(image_paths):
+                with open(img_path, 'rb') as img_file:
+                    if i == 0 and caption:
+                        # Add caption to first image
+                        media_group.append(InputMediaPhoto(img_file, caption=caption, parse_mode="HTML"))
+                    else:
+                        media_group.append(InputMediaPhoto(img_file))
+            
+            await self._app.bot.send_media_group(
+                chat_id=chat_id,
+                media=media_group
+            )
+            logger.debug(f"Sent media group to {chat_id}: {len(image_paths)} images")
+        except Exception as e:
+            logger.error(f"Failed to send media group: {e}")
+    
+    async def _send_document(self, chat_id: int, document_path: str, caption: str) -> None:
+        """Send a document with optional caption."""
+        try:
+            with open(document_path, 'rb') as doc_file:
+                await self._app.bot.send_document(
+                    chat_id=chat_id,
+                    document=doc_file,
+                    caption=caption,
+                    parse_mode="HTML" if caption else None
+                )
+            logger.debug(f"Sent document to {chat_id}: {document_path}")
+        except Exception as e:
+            logger.error(f"Failed to send document {document_path}: {e}")
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""

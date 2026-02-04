@@ -114,6 +114,20 @@ class OllamaProvider(LLMProvider):
             role = msg.get("role", "user")
             content = msg.get("content", "")
 
+            # Handle content as array (multimodal) - convert to string
+            if isinstance(content, list):
+                text_parts = []
+                for part in content:
+                    if isinstance(part, dict):
+                        if part.get("type") == "text":
+                            text_parts.append(part.get("text", ""))
+                        # Skip image parts for Ollama (doesn't support images)
+                    else:
+                        text_parts.append(str(part))
+                content = "".join(text_parts)
+            elif not isinstance(content, str):
+                content = str(content)
+
             # Handle system messages
             if role == "system":
                 ollama_messages.append({

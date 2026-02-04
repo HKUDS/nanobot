@@ -12,8 +12,11 @@ sandboxing or OS-level permission controls. Use with caution.
 import asyncio
 import os
 import re
+import shlex
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
 
 from nanobot.agent.tools.base import Tool
 
@@ -164,6 +167,17 @@ class ExecTool(Tool):
         Returns:
             Command output or error message
         """
+        # Input validation
+        command = command.strip()
+        if not command:
+            return "Error: Empty command"
+        
+        if len(command) > 2000:
+            return "Error: Command too long (max 2000 characters)"
+        
+        # Audit logging (truncated for security)
+        logger.warning(f"Shell command execution attempt: {command[:100]}{'...' if len(command) > 100 else ''}")
+        
         # Security validation: Check blocklist
         is_blocked, block_reason = self._is_command_blocked(command)
         if is_blocked:
@@ -183,8 +197,9 @@ class ExecTool(Tool):
             return f"Security Error: {dir_reason}"
         
         try:
-            process = await asyncio.create_subprocess_shell(
-                command,
+            args = shlex.split(command)
+            process = await asyncio.create_subprocess_exec(
+                *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
