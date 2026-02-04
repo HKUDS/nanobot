@@ -207,28 +207,31 @@ def gateway(
     local_provider = None
     
     if config.routing.enabled or routing_mode != RoutingMode.CLOUD_ONLY:
-        try:
-            from nanobot.agent.router import RouterAgent, RouteDecision
+        if not config.routing.local_model:
+            console.print("[yellow]Warning: Routing enabled but no local_model configured. Routing disabled.[/yellow]")
+        else:
+            try:
+                from nanobot.agent.router import RouterAgent, RouteDecision
 
-            # Create local provider
-            local_provider = LiteLLMProvider(
-                api_key="dummy",  # No key needed for local
-                api_base=config.routing.local_endpoint,
-                default_model=config.routing.local_model
-            )
+                # Create local provider
+                local_provider = LiteLLMProvider(
+                    api_key="ollama",  # Any value for local
+                    api_base=config.routing.local_endpoint,
+                    default_model=config.routing.local_model
+                )
 
-            # Create router
-            router = RouterAgent(
-                local_provider=local_provider,
-                config=config.routing,
-                mode=routing_mode
-            )
+                # Create router
+                router = RouterAgent(
+                    local_provider=local_provider,
+                    config=config.routing,
+                    mode=routing_mode
+                )
 
-            console.print(f"[green]✓[/green] Routing: {routing_mode.value} mode")
-        except Exception as e:
-            console.print(f"[yellow]Warning: Could not initialize routing: {e}[/yellow]")
-            router = None
-            local_provider = None
+                console.print(f"[green]✓[/green] Routing: {routing_mode.value} mode")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not initialize routing: {e}[/yellow]")
+                router = None
+                local_provider = None
     
     # Create components
     bus = MessageBus()
@@ -362,29 +365,32 @@ def agent(
     local_provider = None
     
     if config.routing.enabled or routing_mode != RoutingMode.CLOUD_ONLY:
-        try:
-            from nanobot.agent.router import RouterAgent, RouteDecision
+        if not config.routing.local_model:
+            console.print("[yellow]Warning: Routing enabled but no local_model configured. Routing disabled.[/yellow]")
+        else:
+            try:
+                from nanobot.agent.router import RouterAgent, RouteDecision
 
-            # Create local provider
-            local_provider = LiteLLMProvider(
-                api_key="dummy",
-                api_base=config.routing.local_endpoint,
-                default_model=config.routing.local_model
-            )
+                # Create local provider
+                local_provider = LiteLLMProvider(
+                    api_key="ollama",
+                    api_base=config.routing.local_endpoint,
+                    default_model=config.routing.local_model
+                )
 
-            # Create router
-            router = RouterAgent(
-                local_provider=local_provider,
-                config=config.routing,
-                mode=routing_mode
-            )
+                # Create router
+                router = RouterAgent(
+                    local_provider=local_provider,
+                    config=config.routing,
+                    mode=routing_mode
+                )
 
-            if routing_mode != RoutingMode.CLOUD_ONLY:
-                console.print(f"[green]✓[/green] Routing: {routing_mode.value} mode")
-        except Exception as e:
-            console.print(f"[yellow]Warning: Could not initialize routing: {e}[/yellow]")
-            router = None
-            local_provider = None
+                if routing_mode != RoutingMode.CLOUD_ONLY:
+                    console.print(f"[green]✓[/green] Routing: {routing_mode.value} mode")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not initialize routing: {e}[/yellow]")
+                router = None
+                local_provider = None
 
     agent_loop = AgentLoop(
         bus=bus,

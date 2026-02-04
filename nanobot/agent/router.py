@@ -29,6 +29,41 @@ class RouterAgent:
 
     Uses heuristics and optional small model to classify messages and route
     to appropriate model for cost and speed optimization.
+
+    LOCAL MODEL OPTIONS:
+    -------------------
+    1. Ollama (Recommended for personal use):
+       Install: curl https://ollama.ai/install.sh | sh
+       Run: ollama run llama3
+       Endpoint: http://localhost:11434/v1
+       Model: ollama/llama3
+
+    2. vLLM (Faster, but more complex):
+       Install: pip install vllm
+       Run: vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
+       Endpoint: http://localhost:8000/v1
+       Model: hosted_vllm/meta-llama/Llama-3.1-8B-Instruct
+
+    The LiteLLMProvider uses OpenAI-compatible API, so both work seamlessly.
+
+    CONFIGURATION EXAMPLE:
+    --------------------
+    ```json
+    {
+      "routing": {
+        "enabled": true,
+        "local_endpoint": "http://localhost:11434/v1",
+        "local_model": "ollama/llama3",
+        "auto_mode": true,
+        "fallback_to_cloud": true
+      }
+    }
+    ```
+
+    USAGE:
+    ------
+    nanobot gateway --routing auto
+    nanobot agent -m "hello" --routing local
     """
 
     def __init__(
@@ -98,8 +133,8 @@ class RouterAgent:
             logger.debug("Router: Forced cloud mode")
             return RouteDecision.CLOUD
 
-        # Check routing disabled
-        if not self.config.enabled:
+        # Default to cloud if no local model configured or routing disabled
+        if not self.config.enabled or not self.config.local_model:
             return RouteDecision.CLOUD
 
         # Check message length heuristic

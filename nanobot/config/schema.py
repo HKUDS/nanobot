@@ -88,8 +88,8 @@ class ToolsConfig(BaseModel):
 class RoutingConfig(BaseModel):
     """Routing configuration for local/cloud model selection."""
     enabled: bool = False  # Disabled by default
-    local_endpoint: str = "http://localhost:8000/v1"
-    local_model: str = "meta-llama/Llama-3.1-8B-Instruct"
+    local_endpoint: str = "http://localhost:11434/v1"
+    local_model: str = ""
     auto_mode: bool = True  # If true, auto route; if false, force local
     fallback_to_cloud: bool = True  # If local fails, fallback to cloud
     threshold: float = 0.6  # Confidence threshold for routing
