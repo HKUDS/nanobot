@@ -451,7 +451,7 @@ def channels_status():
 def _get_bridge_dir() -> Path:
     """Get the bridge directory, setting it up if needed."""
     import shutil
-    import subprocess
+    import subprocess  # nosec B404 - subprocess necessário para build do bridge
     
     # User's bridge location
     user_bridge = Path.home() / ".nanobot" / "bridge"
@@ -460,8 +460,9 @@ def _get_bridge_dir() -> Path:
     if (user_bridge / "dist" / "index.js").exists():
         return user_bridge
     
-    # Check for npm
-    if not shutil.which("npm"):
+    # Obter caminho completo do npm para segurança (B607)
+    npm_path = shutil.which("npm")
+    if not npm_path:
         console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
         raise typer.Exit(1)
     
@@ -488,13 +489,13 @@ def _get_bridge_dir() -> Path:
         shutil.rmtree(user_bridge)
     shutil.copytree(source, user_bridge, ignore=shutil.ignore_patterns("node_modules", "dist"))
     
-    # Install and build
+    # Install and build usando caminho completo do npm
     try:
         console.print("  Installing dependencies...")
-        subprocess.run(["npm", "install"], cwd=user_bridge, check=True, capture_output=True)
+        subprocess.run([npm_path, "install"], cwd=user_bridge, check=True, capture_output=True)  # nosec B603
         
         console.print("  Building...")
-        subprocess.run(["npm", "run", "build"], cwd=user_bridge, check=True, capture_output=True)
+        subprocess.run([npm_path, "run", "build"], cwd=user_bridge, check=True, capture_output=True)  # nosec B603
         
         console.print("[green]✓[/green] Bridge ready\n")
     except subprocess.CalledProcessError as e:
@@ -509,19 +510,24 @@ def _get_bridge_dir() -> Path:
 @channels_app.command("login")
 def channels_login():
     """Link device via QR code."""
-    import subprocess
+    import shutil
+    import subprocess  # nosec B404
     
     bridge_dir = _get_bridge_dir()
+    
+    # Obter caminho completo do npm para segurança (B607)
+    npm_path = shutil.which("npm")
+    if not npm_path:
+        console.print("[red]npm not found. Please install Node.js.[/red]")
+        raise typer.Exit(1)
     
     console.print(f"{__logo__} Starting bridge...")
     console.print("Scan the QR code to connect.\n")
     
     try:
-        subprocess.run(["npm", "start"], cwd=bridge_dir, check=True)
+        subprocess.run([npm_path, "start"], cwd=bridge_dir, check=True)  # nosec B603
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Bridge failed: {e}[/red]")
-    except FileNotFoundError:
-        console.print("[red]npm not found. Please install Node.js.[/red]")
 
 
 # ============================================================================
@@ -912,19 +918,33 @@ def ollama_pull(
     model: str = typer.Argument(..., help="Model name to pull (e.g., 'llama3.2', 'mistral')"),
 ):
     """Pull (download) an Ollama model."""
-    import subprocess
+    import re
+    import shutil
+    import subprocess  # nosec B404
+    
+    # Validação de entrada: nome do modelo deve conter apenas caracteres seguros
+    if not re.match(r'^[a-zA-Z0-9._:-]+$', model):
+        console.print("[red]Nome de modelo inválido. Use apenas letras, números, '.', '_', ':' e '-'[/red]")
+        raise typer.Exit(1)
+    
+    # Obter caminho completo do ollama para segurança (B607)
+    ollama_path = shutil.which("ollama")
+    if not ollama_path:
+        console.print("[red]ollama command not found.[/red]")
+        console.print("Install Ollama from: https://ollama.ai/download")
+        raise typer.Exit(1)
     
     console.print(f"{__logo__} Pulling Ollama model: {model}")
     console.print("This may take several minutes depending on model size...\n")
     
     try:
-        # Run ollama pull command
+        # Run ollama pull command com caminho completo e entrada validada
         result = subprocess.run(
-            ["ollama", "pull", model],
+            [ollama_path, "pull", model],
             capture_output=True,
             text=True,
             check=True
-        )
+        )  # nosec B603
         
         console.print(f"[green]✓[/green] Successfully pulled model: {model}")
         
@@ -936,9 +956,6 @@ def ollama_pull(
         if e.stderr:
             console.print(f"[dim]{e.stderr.strip()}[/dim]")
         console.print("\nMake sure Ollama is installed and running.")
-    except FileNotFoundError:
-        console.print("[red]ollama command not found.[/red]")
-        console.print("Install Ollama from: https://ollama.ai/download")
 
 
 # ============================================================================
@@ -982,6 +999,167 @@ def status():
             console.print(f"Ollama: [green]✓ enabled[/green] ({config.ollama.model})")
         else:
             console.print("Ollama: [dim]disabled[/dim]")
+
+# ============================================================================
+# Alarm Commands
+# ============================================================================
+
+alarm_app = typer.Typer(help="Manage alarms and reminders")
+app.add_typer(alarm_app, name="alarm")
+
+
+@alarm_app.command("set")
+def alarm_set(
+    message: str = typer.Argument(..., help="Alarm message"),
+    in_time: str = typer.Option(None, "--in", help="Time from now (e.g., '2m', '1h30m', '30s')"),
+    at_time: str = typer.Option(None, "--at", help="Specific time (HH:MM)"),
+    channel: str = typer.Option("telegram", "--channel", help="Notification channel: telegram, console, all"),
+):
+    """Set a new alarm."""
+    from nanobot.alarm import AlarmService, AlarmStorage, parse_time_string, AlarmChannel
+    from datetime import datetime, timedelta
+    import re
+    
+    storage = AlarmStorage()
+    service = AlarmService(storage)
+    
+    # Validate channel
+    if channel not in [c.value for c in AlarmChannel]:
+        console.print(f"[red]Invalid channel: {channel}. Use: telegram, console, all[/red]")
+        raise typer.Exit(1)
+    
+    # Parse time
+    if in_time:
+        try:
+            delay_seconds = parse_time_string(in_time)
+            trigger_at = datetime.now() + timedelta(seconds=delay_seconds)
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    elif at_time:
+        # Parse HH:MM format
+        try:
+            match = re.match(r'^(\d{1,2}):(\d{2})$', at_time)
+            if not match:
+                raise ValueError("Invalid time format. Use HH:MM")
+            hour, minute = int(match.group(1)), int(match.group(2))
+            trigger_at = datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if trigger_at < datetime.now():
+                trigger_at += timedelta(days=1)  # Next day
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    else:
+        console.print("[red]Specify time with --in or --at[/red]")
+        raise typer.Exit(1)
+    
+    # Create alarm
+    alarm = asyncio.run(service.create_alarm_at(
+        user_id="cli_user",  # Will be enhanced when integrated with user system
+        message=message,
+        trigger_at=trigger_at,
+        channel=channel,
+    ))
+    
+    time_str = trigger_at.strftime("%H:%M:%S")
+    console.print(f"[green]✓[/green] Alarm set: {message}")
+    console.print(f"   ID: {alarm.id}")
+    console.print(f"   Triggers at: {time_str}")
+    console.print(f"   Channel: {channel}")
+
+
+@alarm_app.command("list")
+def alarm_list(
+    all_status: bool = typer.Option(False, "--all", "-a", help="Show all alarms including triggered/cancelled"),
+):
+    """List active alarms."""
+    from nanobot.alarm import AlarmService, AlarmStorage, AlarmStatus
+    
+    storage = AlarmStorage()
+    service = AlarmService(storage)
+    
+    if all_status:
+        alarms = service.list_alarms()
+    else:
+        alarms = service.list_alarms(status=AlarmStatus.PENDING)
+    
+    if not alarms:
+        console.print("No alarms found.")
+        return
+    
+    table = Table(title="Alarms")
+    table.add_column("ID", style="cyan")
+    table.add_column("Message", style="green")
+    table.add_column("Time", style="yellow")
+    table.add_column("Status", style="magenta")
+    table.add_column("Channel", style="blue")
+    
+    for alarm in alarms:
+        time_str = alarm.trigger_at.strftime("%Y-%m-%d %H:%M")
+        status_icon = {
+            AlarmStatus.PENDING.value: "⏳",
+            AlarmStatus.TRIGGERED.value: "✅",
+            AlarmStatus.CANCELLED.value: "❌",
+        }.get(alarm.status.value, "?")
+        
+        table.add_row(
+            alarm.id,
+            alarm.message[:30] + "..." if len(alarm.message) > 30 else alarm.message,
+            time_str,
+            f"{status_icon} {alarm.status.value}",
+            alarm.channel,
+        )
+    
+    console.print(table)
+
+
+@alarm_app.command("cancel")
+def alarm_cancel(
+    alarm_id: str = typer.Argument(..., help="Alarm ID to cancel"),
+):
+    """Cancel an alarm."""
+    from nanobot.alarm import AlarmService, AlarmStorage
+    
+    storage = AlarmStorage()
+    service = AlarmService(storage)
+    
+    success = service.cancel_alarm(alarm_id)
+    
+    if success:
+        console.print(f"[green]✓[/green] Alarm {alarm_id} cancelled")
+    else:
+        console.print(f"[red]✗[/red] Alarm {alarm_id} not found or already triggered")
+        raise typer.Exit(1)
+
+
+@alarm_app.command("test")
+def alarm_test(
+    message: str = typer.Argument("Test alarm!", help="Test message"),
+    delay: int = typer.Option(3, "--delay", help="Seconds to wait"),
+):
+    """Test alarm system - sends notification after delay."""
+    from nanobot.alarm import AlarmService, AlarmStorage
+    
+    storage = AlarmStorage()
+    service = AlarmService(storage)
+    
+    console.print(f"Setting test alarm for {delay} seconds...")
+    
+    alarm = asyncio.run(service.create_alarm(
+        user_id="cli_user",
+        message=message,
+        delay_seconds=delay,
+        channel="console",
+    ))
+    
+    console.print(f"Alarm {alarm.id} created. Waiting...")
+    
+    # Simple wait and trigger for testing
+    import time
+    time.sleep(delay)
+    
+    asyncio.run(service.trigger_alarm(alarm))
+    console.print("[green]Test alarm triggered![/green]")
 
 
 if __name__ == "__main__":

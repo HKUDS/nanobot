@@ -17,6 +17,7 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.alarm import AlarmTool, ListAlarmsTool, CancelAlarmTool
 from nanobot.session.manager import SessionManager
 from nanobot.agent.subagent import SubagentManager
 from nanobot.usage import UsageTracker, UsageMonitor, UsageTool, UsageConfig
@@ -101,6 +102,12 @@ class AgentLoop:
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
+        
+        # Alarm tools
+        alarm_tool = AlarmTool()
+        self.tools.register(alarm_tool)
+        self.tools.register(ListAlarmsTool())
+        self.tools.register(CancelAlarmTool())
         
         # Usage tool (for self-awareness)
         usage_tool = UsageTool(self.usage_tracker, self.usage_monitor)
