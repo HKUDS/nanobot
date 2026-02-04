@@ -13,3 +13,5 @@ docs/
 *.pyz
 *.pywz
 *.pyzz
+.trae/
+openspec/
