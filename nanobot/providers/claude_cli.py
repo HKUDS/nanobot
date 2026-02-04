@@ -109,25 +109,21 @@ class ClaudeCliProvider(LLMProvider):
         """
         model = self._normalize_model(model or self.default_model)
         
-        # Build prompt from messages
+        # Build prompt from messages (include full conversation history)
         prompt = self._build_prompt_from_messages(messages)
-        
-        # Get or create session ID
-        session_id = None
-        if session_key:
-            session_id = self._session_ids.get(session_key)
-        
+
+        # NOTE: We intentionally DON'T use Claude CLI's --resume feature
+        # because we manage our own session history. Using --resume would
+        # cause duplicate context (our history + CLI's history).
+        # Instead, we always pass the full conversation as context.
+
         try:
             result = await self._run_claude_cli(
                 prompt=prompt,
                 model=model,
-                session_id=session_id,
+                session_id=None,  # Don't resume - we pass full history
                 system_prompt=self._extract_system_prompt(messages),
             )
-            
-            # Store session ID for future calls
-            if session_key and result.get("session_id"):
-                self._session_ids[session_key] = result["session_id"]
             
             return LLMResponse(
                 content=result.get("text", ""),
