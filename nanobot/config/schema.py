@@ -85,6 +85,16 @@ class ToolsConfig(BaseModel):
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
 
 
+class RoutingConfig(BaseModel):
+    """Routing configuration for local/cloud model selection."""
+    enabled: bool = False  # Disabled by default
+    local_endpoint: str = "http://localhost:8000/v1"
+    local_model: str = "meta-llama/Llama-3.1-8B-Instruct"
+    auto_mode: bool = True  # If true, auto route; if false, force local
+    fallback_to_cloud: bool = True  # If local fails, fallback to cloud
+    threshold: float = 0.6  # Confidence threshold for routing
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
@@ -92,6 +102,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    routing: RoutingConfig = Field(default_factory=RoutingConfig)
     
     @property
     def workspace_path(self) -> Path:

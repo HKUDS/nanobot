@@ -42,16 +42,20 @@ class AgentLoop:
         max_iterations: int = 20,
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
+        router: "RouterAgent | None" = None,
+        local_provider: LLMProvider | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
         self.provider = provider
+        self.local_provider = local_provider
+        self.router = router
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
-        
+
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
         self.tools = ToolRegistry()
@@ -63,7 +67,7 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
         )
-        
+
         self._running = False
         self._register_default_tools()
     
@@ -127,6 +131,46 @@ class AgentLoop:
         """Stop the agent loop."""
         self._running = False
         logger.info("Agent loop stopping")
+
+    def _select_provider(
+        self,
+        route_decision: "RouteDecision | None" = None,
+        message: str | None = None
+    ) -> tuple[LLMProvider, str]:
+        """
+        Select appropriate provider based on routing decision.
+
+        Args:
+            route_decision: Route decision if already known.
+            message: Message for classification if route_decision is None.
+
+        Returns:
+            Tuple of (provider, model_name) to use.
+        """
+        from nanobot.agent.router import RouteDecision
+
+        # No router or no local provider, use cloud provider
+        if not self.router or not self.local_provider:
+            return self.provider, self.model
+
+        # If route decision provided, use it directly
+        if route_decision:
+            if route_decision == RouteDecision.LOCAL and self.local_provider:
+                return self.local_provider, self.local_provider.get_default_model()
+            return self.provider, self.model
+
+        # Classify message
+        if message:
+            import asyncio
+
+            decision = asyncio.run(self.router.classify(message))
+
+            if decision == RouteDecision.LOCAL:
+                return self.local_provider, self.local_provider.get_default_model()
+            return self.provider, self.model
+
+        # Default to cloud
+        return self.provider, self.model
     
     async def _process_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
@@ -138,13 +182,25 @@ class AgentLoop:
         Returns:
             The response message, or None if no response needed.
         """
+        from nanobot.agent.router import RouteDecision
+
         # Handle system messages (subagent announces)
         # The chat_id contains the original "channel:chat_id" to route back to
         if msg.channel == "system":
             return await self._process_system_message(msg)
-        
+
         logger.info(f"Processing message from {msg.channel}:{msg.sender_id}")
-        
+
+        # Route the message to determine provider
+        route_decision = None
+        if self.router:
+            route_decision = await self.router.classify(msg.content)
+            logger.info(f"Routing decision: {route_decision}")
+
+        # Select provider and model
+        provider, model = self._select_provider(route_decision, msg.content)
+        logger.info(f"Using provider: {provider.get_default_model()}")
+
         # Get or create session
         session = self.sessions.get_or_create(msg.session_key)
         
@@ -171,12 +227,28 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
             
-            # Call LLM
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model
-            )
+            # Call LLM with selected provider, with fallback if needed
+            try:
+                response = await provider.chat(
+                    messages=messages,
+                    tools=self.tools.get_definitions(),
+                    model=model
+                )
+            except Exception as e:
+                # Fallback to cloud provider if local fails
+                if provider != self.provider and self.router and self.router.config.fallback_to_cloud:
+                    logger.warning(f"Local provider failed: {e}, falling back to cloud")
+                    if self.router:
+                        self.router._track_route("local_fallback")
+                    provider = self.provider
+                    model = self.model
+                    response = await provider.chat(
+                        messages=messages,
+                        tools=self.tools.get_definitions(),
+                        model=model
+                    )
+                else:
+                    raise
             
             # Handle tool calls
             if response.has_tool_calls:
