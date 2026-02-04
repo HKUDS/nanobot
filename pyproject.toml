@@ -37,6 +37,16 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "ruff>=0.1.0",
 ]
+slack = [
+    "slack-bolt>=1.18.0",
+]
+mattermost = [
+    "mattermostdriver>=7.3.0",
+]
+all = [
+    "slack-bolt>=1.18.0",
+    "mattermostdriver>=7.3.0",
+]
 
 [project.scripts]
 nanobot = "nanobot.cli.commands:app"

@@ -19,10 +19,28 @@ class TelegramConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
 
 
+class SlackConfig(BaseModel):
+    """Slack channel configuration."""
+    enabled: bool = False
+    bot_token: str = ""  # xoxb-... Bot User OAuth Token
+    app_token: str = ""  # xapp-... App-Level Token (Socket Mode)
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
+
+
+class MattermostConfig(BaseModel):
+    """Mattermost channel configuration."""
+    enabled: bool = False
+    url: str = ""  # https://mattermost.example.com
+    token: str = ""  # Personal Access Token
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    slack: SlackConfig = Field(default_factory=SlackConfig)
+    mattermost: MattermostConfig = Field(default_factory=MattermostConfig)
 
 
 class AgentDefaults(BaseModel):
