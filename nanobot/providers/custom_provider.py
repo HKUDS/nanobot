@@ -48,7 +48,6 @@ class CustomLLMProvider(LiteLLMProvider):
             api_key=config.api_key,
             api_base=config.api_url,
             default_model=config.default_model,
-            api_key_env=config.api_key_env,
         )
         self.config = config
         self.total_tokens_used = 0
@@ -101,24 +100,8 @@ class CustomLLMProvider(LiteLLMProvider):
         response.response_size_bytes = self._calculate_response_size(response)
         return response
 
-    def _normalize_model(self, model: str) -> str:
-        """Normalize model name with provider-specific prefixes."""
-        if self.is_openrouter and not model.startswith("openrouter/"):
-            model = f"openrouter/{model}"
-
-        if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
-            model.startswith("zhipu/")
-            or model.startswith("zai/")
-            or model.startswith("openrouter/")
-        ):
-            model = f"zai/{model}"
-
-        if self.is_vllm:
-            model = f"hosted_vllm/{model}"
-
-        if "gemini" in model.lower() and not model.startswith("gemini/"):
-            model = f"gemini/{model}"
-
+    def prepare_model(self, model: str) -> str:
+        """Hook for customizing model names before requests."""
         return model
 
     def _enforce_total_tokens_limit(self, response: LLMResponse) -> LLMResponse:
@@ -176,7 +159,7 @@ class CustomLLMProvider(LiteLLMProvider):
                 usage={"total_tokens": self.total_tokens_used},
             )
 
-        model = self._normalize_model(model or self.config.default_model)
+        model = self.prepare_model(model or self.config.default_model)
 
         kwargs: dict[str, Any] = {
             "model": model,
