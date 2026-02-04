@@ -23,6 +23,18 @@ class CustomLLMConfig:
     enforce_total_tokens_postcheck: bool = True
     api_validator: Callable[[dict[str, Any]], bool | None] | None = None
     default_model: str = "anthropic/claude-opus-4-5"
+    api_key_env: str | list[str] | None = None
+
+    def __post_init__(self) -> None:
+        """Validate config values early."""
+        if self.total_tokens_limit is not None and self.total_tokens_limit < 0:
+            raise ValueError("total_tokens_limit must be >= 0")
+        if self.headers is not None:
+            for key, value in self.headers.items():
+                if not key or not isinstance(key, str):
+                    raise ValueError("headers keys must be non-empty strings")
+                if not isinstance(value, str):
+                    raise ValueError("headers values must be strings")
 
 
 class CustomLLMProvider(LiteLLMProvider):
@@ -32,26 +44,15 @@ class CustomLLMProvider(LiteLLMProvider):
         self,
         config: CustomLLMConfig,
     ):
-        self._validate_config(config)
         super().__init__(
             api_key=config.api_key,
             api_base=config.api_url,
             default_model=config.default_model,
+            api_key_env=config.api_key_env,
         )
         self.config = config
         self.total_tokens_used = 0
         self.is_token_limit_blocked = False
-
-    def _validate_config(self, config: CustomLLMConfig) -> None:
-        """Validate config values early."""
-        if config.total_tokens_limit is not None and config.total_tokens_limit < 0:
-            raise ValueError("total_tokens_limit must be >= 0")
-        if config.headers is not None:
-            for key, value in config.headers.items():
-                if not key or not isinstance(key, str):
-                    raise ValueError("headers keys must be non-empty strings")
-                if not isinstance(value, str):
-                    raise ValueError("headers values must be strings")
 
     def _build_validation_context(
         self,
