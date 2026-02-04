@@ -17,6 +17,7 @@ You have access to:
 - Web access (search, fetch)
 - Messaging (message)
 - System control tools (open application, close application, system information, screenshot)
+- Spotify media controls (play, pause, next track, previous track)
 
 ## Memory
 
