@@ -21,6 +21,13 @@
 - ✅ Suporte a modelos populares (Llama, Mistral, CodeLlama, etc.)
 - ✅ Verificação automática de status e disponibilidade
 
+### NVIDIA Provider Integration
+- ✅ Provedor NVIDIA integrado ao sistema de provedores do agente
+- ✅ Suporte ao modelo moonshotai/kimi-k2.5 via API NVIDIA
+- ✅ Comunicação assíncrona com API OpenAI-compatible
+- ✅ Configuração segura via config.json com apiKey
+- ✅ Tratamento de erros e timeouts adequados
+
 ## 🚧 Em Desenvolvimento
 
 ### Melhorias Planejadas

@@ -104,7 +104,7 @@ docker-compose build
 
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Brave Search](https://brave.com/search/api/) (optional, for web search) · [NVIDIA](https://integrate.api.nvidia.com/) (for Kimi AI tool)
 > You can also change the model to `minimax/minimax-m2` for lower cost.
 
 **1. Initialize**
@@ -120,6 +120,9 @@ nanobot onboard
   "providers": {
     "openrouter": {
       "apiKey": "sk-or-v1-xxx"
+    },
+    "nvidia": {
+      "apiKey": "nvapi-xxx"
     }
   },
   "agents": {
@@ -344,6 +347,9 @@ nanobot gateway
 
 ## ⚙️ Configuration
 
+> [!NOTE]
+> **Environment Variables**: Some providers may require additional environment variables. For NVIDIA, the apiKey is configured in config.json.
+
 <details>
 <summary><b>Full config example</b></summary>
 
@@ -357,6 +363,9 @@ nanobot gateway
   "providers": {
     "openrouter": {
       "apiKey": "sk-or-v1-xxx"
+    },
+    "nvidia": {
+      "apiKey": "nvapi-xxx"
     }
   },
   "channels": {
