@@ -99,7 +99,21 @@ class Config(BaseSettings):
         return Path(self.agents.defaults.workspace).expanduser()
     
     def get_api_key(self) -> str | None:
-        """Get API key in priority order: OpenRouter > Anthropic > OpenAI > Gemini > Zhipu > Groq > vLLM."""
+        """Get API key based on the selected model or in priority order."""
+        model = self.agents.defaults.model.lower()
+        if "anthropic" in model and self.providers.anthropic.api_key:
+            return self.providers.anthropic.api_key
+        if ("openai" in model or "gpt" in model) and self.providers.openai.api_key:
+            return self.providers.openai.api_key
+        if "gemini" in model and self.providers.gemini.api_key:
+            return self.providers.gemini.api_key
+        if ("zhipu" in model or "glm" in model or "zai" in model) and self.providers.zhipu.api_key:
+            return self.providers.zhipu.api_key
+        if "groq" in model and self.providers.groq.api_key:
+            return self.providers.groq.api_key
+        if "vllm" in model and self.providers.vllm.api_key:
+            return self.providers.vllm.api_key
+            
         return (
             self.providers.openrouter.api_key or
             self.providers.anthropic.api_key or
@@ -112,13 +126,18 @@ class Config(BaseSettings):
         )
     
     def get_api_base(self) -> str | None:
-        """Get API base URL if using OpenRouter, Zhipu or vLLM."""
+        """Get API base URL based on the selected model or provider."""
+        model = self.agents.defaults.model.lower()
+        
         if self.providers.openrouter.api_key:
             return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
-        if self.providers.zhipu.api_key:
+            
+        if ("zhipu" in model or "glm" in model or "zai" in model) and self.providers.zhipu.api_key:
             return self.providers.zhipu.api_base
-        if self.providers.vllm.api_base:
+            
+        if "vllm" in model and self.providers.vllm.api_base:
             return self.providers.vllm.api_base
+            
         return None
     
     class Config:
