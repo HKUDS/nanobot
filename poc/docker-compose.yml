@@ -1,0 +1,79 @@
+services:
+  nanobot:
+    build:
+      context: ..
+      dockerfile: poc/Dockerfile.nanobot
+      args:
+        # Use current version by default; set to vulnerable version for CVE testing
+        LITELLM_VERSION: ">=1.61.15"
+    container_name: nanobot-poc
+    volumes:
+      # Mount workspace for file access testing
+      - ../:/app
+      # Mount sensitive test files
+      - ./sensitive:/sensitive:ro
+      # Shared exploit results
+      - ./results:/results
+    environment:
+      - NANOBOT_CONFIG=/app/poc/config/config.json
+      - POC_MODE=true
+    networks:
+      - poc-network
+    # Keep container running for interactive testing
+    command: ["tail", "-f", "/dev/null"]
+    
+  # Vulnerable nanobot with old litellm for CVE demonstration
+  nanobot-vulnerable:
+    build:
+      context: ..
+      dockerfile: poc/Dockerfile.nanobot
+      args:
+        # Vulnerable version for RCE/SSRF demonstration
+        LITELLM_VERSION: "==1.28.11"
+    container_name: nanobot-vulnerable-poc
+    volumes:
+      - ../:/app
+      - ./sensitive:/sensitive:ro
+      - ./results:/results
+    environment:
+      - NANOBOT_CONFIG=/app/poc/config/config.json
+      - POC_MODE=true
+    networks:
+      - poc-network
+    command: ["tail", "-f", "/dev/null"]
+    profiles:
+      - vulnerable  # Only start with --profile vulnerable
+
+  # Mock LLM server for testing without real API calls
+  mock-llm:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock-llm
+    container_name: mock-llm-poc
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./mock-responses:/responses:ro
+    networks:
+      - poc-network
+
+  # Bridge service for WhatsApp vulnerability testing
+  bridge:
+    build:
+      context: ../bridge
+      dockerfile: ../poc/Dockerfile.bridge
+      args:
+        WS_VERSION: "^8.17.1"
+    container_name: bridge-poc
+    volumes:
+      - ./results:/results
+    networks:
+      - poc-network
+    profiles:
+      - bridge
+
+networks:
+  poc-network:
+    driver: bridge
+    # Isolated network for SSRF testing
+    internal: false

