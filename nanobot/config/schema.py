@@ -73,9 +73,16 @@ class WebToolsConfig(BaseModel):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
+class ExecToolConfig(BaseModel):
+    """Shell exec tool configuration."""
+    timeout: int = 60
+    restrict_to_workspace: bool = False  # If true, block commands accessing paths outside workspace
+
+
 class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
+    exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
 
 
 class Config(BaseSettings):
