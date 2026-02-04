@@ -209,7 +209,7 @@ class AgentLoop:
                 final_content = response.content
                 break
         
-        if final_content is None:
+        if not final_content or not final_content.strip():
             final_content = "I've completed processing but have no response to give."
         
         # Save to session
@@ -301,7 +301,7 @@ class AgentLoop:
                 final_content = response.content
                 break
         
-        if final_content is None:
+        if not final_content or not final_content.strip():
             final_content = "Background task completed."
         
         # Save to session (mark as system message in history)

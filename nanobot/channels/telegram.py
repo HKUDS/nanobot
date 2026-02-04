@@ -157,6 +157,10 @@ class TelegramChannel(BaseChannel):
             logger.warning("Telegram bot not running")
             return
         
+        if not msg.content or not msg.content.strip():
+            logger.warning("Skipping empty Telegram message")
+            return
+            
         try:
             # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
