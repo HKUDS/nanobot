@@ -29,6 +29,7 @@ dependencies = [
     "rich>=13.0.0",
     "croniter>=2.0.0",
     "python-telegram-bot>=21.0",
+    "discord.py>=2.3.0",
 ]
 
 [project.optional-dependencies]
