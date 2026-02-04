@@ -55,7 +55,19 @@ class ChannelManager:
                 logger.info("WhatsApp channel enabled")
             except ImportError as e:
                 logger.warning(f"WhatsApp channel not available: {e}")
-    
+
+        # Google Chat channel
+        if self.config.channels.google_chat.enabled:
+            try:
+                from nanobot.channels.google_chat import GoogleChatChannel
+
+                self.channels["google_chat"] = GoogleChatChannel(
+                    self.config.channels.google_chat, self.bus
+                )
+                logger.info("Google Chat channel enabled")
+            except ImportError as e:
+                logger.warning(f"Google Chat channel not available: {e}")
+
     async def start_all(self) -> None:
         """Start WhatsApp channel and the outbound dispatcher."""
         if not self.channels:

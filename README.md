@@ -172,6 +172,7 @@ Talk to your nanobot through Telegram or WhatsApp — anytime, anywhere.
 |---------|-------|
 | **Telegram** | Easy (just a token) |
 | **WhatsApp** | Medium (scan QR) |
+| **Google Chat** | Medium (Tunnel + JSON key) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -237,6 +238,56 @@ nanobot channels login
 nanobot channels login
 
 # Terminal 2
+nanobot gateway
+```
+
+</details>
+
+<details>
+<summary><b>Google Chat (via HTTP Webhook)</b></summary>
+
+Uses **HTTP Webhooks** (Interactive Endpoints). You need a public HTTPS callback URL.
+
+**1. Setup Cloudflare Tunnel (Free)**
+
+Expose your local port safely to the internet.
+
+1. Install `cloudflared`: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
+2. Run tunnel:
+   ```bash
+   cloudflared tunnel --url http://localhost:18791
+   ```
+3. Copy the URL (e.g., `https://random-name.trycloudflare.com`).
+
+**2. Setup Google Cloud**
+
+1. Create a Project on [Google Cloud Console](https://console.cloud.google.com/).
+2. Enable **Google Chat API**.
+3. Create a **Service Account** and download the JSON key file.
+4. Configure **Google Chat API** (Manage -> Configuration):
+   - **Interactive Endpoint URL**: `https://your-tunnel-url/google_chat`
+   - Set **Visibility** to "Only specific people" (add your email).
+
+**3. Configure nanobot**
+
+Run the setup wizard or edit config:
+
+```json
+{
+  "channels": {
+    "google_chat": {
+      "enabled": true,
+      "port": 18791,
+      "credentials_file": "/path/to/service-account.json",
+      "allow_from": ["your@email.com"]
+    }
+  }
+}
+```
+
+**4. Run**
+
+```bash
 nanobot gateway
 ```
 

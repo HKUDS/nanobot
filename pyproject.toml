@@ -29,6 +29,8 @@ dependencies = [
     "rich>=13.0.0",
     "croniter>=2.0.0",
     "python-telegram-bot>=21.0",
+    "aiohttp>=3.9.0",
+    "google-auth>=2.0.0",
 ]
 
 [project.optional-dependencies]

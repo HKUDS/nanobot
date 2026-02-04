@@ -458,6 +458,52 @@ def channels_login():
         console.print("[red]npm not found. Please install Node.js.[/red]")
 
 
+@channels_app.command("google_chat")
+def google_chat_setup(
+    setup: bool = typer.Option(False, "--setup", "-s", help="Run setup wizard"),
+    login: bool = typer.Option(False, "--login", "-l", help="Alias for setup"),
+):
+    """Setup Google Chat integration."""
+    if not setup and not login:
+        console.print("Use --setup or --login to configure Google Chat.")
+        return
+
+    from nanobot.config.loader import load_config, save_config
+
+    console.print(f"{__logo__} Google Chat Setup\n")
+    console.print("This wizard will help you configure Google Chat.")
+    console.print("You need a Google Cloud Project and a Service Account.")
+    console.print("See guide: [cyan]README.md[/cyan] (Google Chat section)\n")
+
+    creds_path = typer.prompt("Path to Service Account JSON key")
+    creds_file = Path(creds_path).expanduser().resolve()
+
+    if not creds_file.exists():
+        console.print(f"[red]File not found: {creds_file}[/red]")
+        raise typer.Exit(1)
+
+    port = typer.prompt("Webhook port", default=18791, type=int)
+            
+    # Load existing config
+    config = load_config()
+    
+    # Update config
+    config.channels.google_chat.enabled = True
+    config.channels.google_chat.credentials_file = str(creds_file)
+    config.channels.google_chat.port = port
+
+    # Ask for allow list
+    allow_email = typer.prompt("Your email address (for allowlist)", default="")
+    if allow_email:
+        if allow_email not in config.channels.google_chat.allow_from:
+            config.channels.google_chat.allow_from.append(allow_email)
+
+    save_config(config)
+
+    console.print(f"\n[green]✓[/green] Configuration saved!")
+    console.print("\nRun [cyan]nanobot gateway[/cyan] to start the bot.")
+
+
 # ============================================================================
 # Cron Commands
 # ============================================================================
