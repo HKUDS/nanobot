@@ -37,7 +37,9 @@ class ChannelManager:
             try:
                 from nanobot.channels.telegram import TelegramChannel
                 self.channels["telegram"] = TelegramChannel(
-                    self.config.channels.telegram, self.bus
+                    self.config.channels.telegram,
+                    self.bus,
+                    groq_api_key=self.config.providers.groq.api_key,
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:

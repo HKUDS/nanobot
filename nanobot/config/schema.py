@@ -61,6 +61,7 @@ class ProvidersConfig(BaseModel):
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
+    groq: ProviderConfig = Field(default_factory=ProviderConfig)
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -84,9 +85,16 @@ class WebToolsConfig(BaseModel):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
+class ExecToolConfig(BaseModel):
+    """Shell exec tool configuration."""
+    timeout: int = 60
+    restrict_to_workspace: bool = False  # If true, block commands accessing paths outside workspace
+
+
 class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
+    exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
 
 
 class Config(BaseSettings):
@@ -103,13 +111,14 @@ class Config(BaseSettings):
         return Path(self.agents.defaults.workspace).expanduser()
     
     def get_api_key(self) -> str | None:
-        """Get API key in priority order: OpenRouter > Anthropic > OpenAI > Gemini > Zhipu > vLLM."""
+        """Get API key in priority order: OpenRouter > Anthropic > OpenAI > Gemini > Zhipu > Groq > vLLM."""
         return (
             self.providers.openrouter.api_key or
             self.providers.anthropic.api_key or
             self.providers.openai.api_key or
             self.providers.gemini.api_key or
             self.providers.zhipu.api_key or
+            self.providers.groq.api_key or
             self.providers.vllm.api_key or
             None
         )

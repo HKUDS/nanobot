@@ -40,14 +40,17 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         max_iterations: int = 20,
-        brave_api_key: str | None = None
+        brave_api_key: str | None = None,
+        exec_config: "ExecToolConfig | None" = None,
     ):
+        from nanobot.config.schema import ExecToolConfig
         self.bus = bus
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
+        self.exec_config = exec_config or ExecToolConfig()
         
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
@@ -58,6 +61,7 @@ class AgentLoop:
             bus=bus,
             model=self.model,
             brave_api_key=brave_api_key,
+            exec_config=self.exec_config,
         )
         
         self._running = False
@@ -72,7 +76,11 @@ class AgentLoop:
         self.tools.register(ListDirTool())
         
         # Shell tool
-        self.tools.register(ExecTool(working_dir=str(self.workspace)))
+        self.tools.register(ExecTool(
+            working_dir=str(self.workspace),
+            timeout=self.exec_config.timeout,
+            restrict_to_workspace=self.exec_config.restrict_to_workspace,
+        ))
         
         # Web tools
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))

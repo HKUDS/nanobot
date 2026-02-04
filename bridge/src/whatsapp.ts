@@ -160,6 +160,11 @@ export class WhatsAppClient {
       return `[Document] ${message.documentMessage.caption}`;
     }
 
+    // Voice/Audio message
+    if (message.audioMessage) {
+      return `[Voice Message]`;
+    }
+
     return null;
   }
 

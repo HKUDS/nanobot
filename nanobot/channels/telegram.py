@@ -85,9 +85,10 @@ class TelegramChannel(BaseChannel):
     
     name = "telegram"
     
-    def __init__(self, config: TelegramConfig, bus: MessageBus):
+    def __init__(self, config: TelegramConfig, bus: MessageBus, groq_api_key: str = ""):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
+        self.groq_api_key = groq_api_key
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
     
@@ -249,7 +250,20 @@ class TelegramChannel(BaseChannel):
                 await file.download_to_drive(str(file_path))
                 
                 media_paths.append(str(file_path))
-                content_parts.append(f"[{media_type}: {file_path}]")
+                
+                # Handle voice transcription
+                if media_type == "voice" or media_type == "audio":
+                    from nanobot.providers.transcription import GroqTranscriptionProvider
+                    transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
+                    transcription = await transcriber.transcribe(file_path)
+                    if transcription:
+                        logger.info(f"Transcribed {media_type}: {transcription[:50]}...")
+                        content_parts.append(f"[transcription: {transcription}]")
+                    else:
+                        content_parts.append(f"[{media_type}: {file_path}]")
+                else:
+                    content_parts.append(f"[{media_type}: {file_path}]")
+                    
                 logger.debug(f"Downloaded {media_type} to {file_path}")
             except Exception as e:
                 logger.error(f"Failed to download media: {e}")
