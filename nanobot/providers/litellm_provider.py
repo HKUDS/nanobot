@@ -32,8 +32,11 @@ class LiteLLMProvider(LLMProvider):
             (api_base and "openrouter" in api_base)
         )
         
-        # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        # Track if using Kimi (detect by api_key prefix or if api_base contains kimi)
+        self.is_kimi = bool((api_key and api_key.startswith("sk-kimi-")) or (api_base and "kimi" in api_base))
+        
+        # Track if using custom endpoint (vLLM, etc.) - but not if it's Kimi
+        self.is_vllm = bool(api_base) and not self.is_openrouter and not self.is_kimi
         
         # Configure LiteLLM based on provider
         if api_key:
@@ -53,8 +56,14 @@ class LiteLLMProvider(LLMProvider):
                 os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
+            elif self.is_kimi or "kimi" in default_model.lower():
+                os.environ.setdefault("KIMI_API_KEY", api_key)
         
-        if api_base:
+        if self.is_kimi:
+            # Set default Kimi Code API base
+            litellm.api_base = api_base or "https://api.kimi.com/coding/"
+            self.api_base = api_base or "https://api.kimi.com/coding/"
+        elif api_base:
             litellm.api_base = api_base
         
         # Disable LiteLLM logging noise
