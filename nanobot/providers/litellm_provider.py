@@ -209,6 +209,11 @@ class LiteLLMProvider(LLMProvider):
                     name=tc.function.name,
                     arguments=args,
                 ))
+        elif getattr(message, "content", None):
+            # Fallback: parse tool calls embedded in text (Together-style)
+            parsed_calls = self._parse_tool_calls_from_content(message.content)
+            if parsed_calls:
+                tool_calls.extend(parsed_calls)
         
         usage = {}
         if hasattr(response, "usage") and response.usage:
@@ -219,11 +224,109 @@ class LiteLLMProvider(LLMProvider):
             }
         
         return LLMResponse(
-            content=message.content,
+            content=None if tool_calls else message.content,
             tool_calls=tool_calls,
             finish_reason=choice.finish_reason or "stop",
             usage=usage,
         )
+
+    def _parse_tool_calls_from_content(self, content: str) -> list[ToolCallRequest]:
+        """Parse tool calls from raw content when provider doesn't return tool_calls."""
+        import json
+        import re
+
+        pattern = re.compile(
+            r"<\\|tool_call_begin\\|>\\s*([^\\s]+)\\s*<\\|tool_call_argument_begin\\|>\\s*(\\{.*?\\})\\s*<\\|tool_call_end\\|>",
+            re.DOTALL,
+        )
+
+        name_map = {
+            "execute_command": "exec",
+            "list_dir": "list_dir",
+            "read_file": "read_file",
+            "write_file": "write_file",
+            "edit_file": "edit_file",
+            "web_search": "web_search",
+            "web_fetch": "web_fetch",
+        }
+
+        tool_calls: list[ToolCallRequest] = []
+        for idx, match in enumerate(pattern.findall(content), start=1):
+            raw_name, raw_args = match
+            # Drop indexes like functions.execute_command:2
+            name_part = raw_name.split(":", 1)[0]
+            if name_part.startswith("functions."):
+                name_part = name_part[len("functions."):]
+            name = name_map.get(name_part, name_part)
+
+            try:
+                args = json.loads(raw_args)
+            except json.JSONDecodeError:
+                args = {"raw": raw_args}
+
+            tool_calls.append(ToolCallRequest(
+                id=f"synthetic_{idx}",
+                name=name,
+                arguments=args,
+            ))
+
+        # Also support simple JSON tool format: {"tool": "...", "args": {...}}
+        for obj in self._extract_json_objects(content):
+            if not isinstance(obj, dict):
+                continue
+            if "tool" not in obj or "args" not in obj:
+                continue
+            raw_name = str(obj.get("tool"))
+            name = raw_name
+            if raw_name.startswith("functions."):
+                name = raw_name[len("functions."):]
+            name = name_map.get(name, name)
+            args = obj.get("args") if isinstance(obj.get("args"), dict) else {"raw": obj.get("args")}
+            tool_calls.append(ToolCallRequest(
+                id=f"synthetic_json_{len(tool_calls) + 1}",
+                name=name,
+                arguments=args,
+            ))
+
+        return tool_calls
+
+    def _extract_json_objects(self, text: str) -> list[Any]:
+        """Extract top-level JSON objects from text (best-effort)."""
+        import json
+
+        objs: list[Any] = []
+        in_string = False
+        escape = False
+        depth = 0
+        start = None
+        for i, ch in enumerate(text):
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            else:
+                if ch == '"':
+                    in_string = True
+                    continue
+                if ch == "{":
+                    if depth == 0:
+                        start = i
+                    depth += 1
+                elif ch == "}":
+                    if depth > 0:
+                        depth -= 1
+                        if depth == 0 and start is not None:
+                            snippet = text[start : i + 1]
+                            try:
+                                objs.append(json.loads(snippet))
+                            except json.JSONDecodeError:
+                                pass
+                            start = None
+        return objs
     
     def get_default_model(self) -> str:
         """Get the default model."""
