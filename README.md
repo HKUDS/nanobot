@@ -248,8 +248,9 @@ Config file: `~/.nanobot/config.json`
 
 ### Providers
 
+
 > [!NOTE]
-> Groq provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
+> Voice transcription is configurable! Set `transcription.provider` to `"groq"` (default) or `"gemini"`. You can also set `transcription.fallback` to automatically try another provider if the primary fails.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -257,7 +258,8 @@ Config file: `~/.nanobot/config.json`
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
-| `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
+| `gemini` | LLM + **Voice transcription** | [aistudio.google.com](https://aistudio.google.com) |
+
 
 
 <details>
@@ -276,7 +278,14 @@ Config file: `~/.nanobot/config.json`
     },
     "groq": {
       "apiKey": "gsk_xxx"
+    },
+    "gemini": {
+      "apiKey": "your-gemini-api-key"
     }
+  },
+  "transcription": {
+    "provider": "gemini",
+    "fallback": "groq"
   },
   "channels": {
     "telegram": {
