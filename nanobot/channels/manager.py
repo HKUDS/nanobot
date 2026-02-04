@@ -9,24 +9,26 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
+from nanobot.session import SessionManager
 
 
 class ChannelManager:
     """
     Manages chat channels and coordinates message routing.
-    
+
     Responsibilities:
     - Initialize enabled channels (Telegram, WhatsApp, etc.)
     - Start/stop channels
     - Route outbound messages
     """
-    
-    def __init__(self, config: Config, bus: MessageBus):
+
+    def __init__(self, config: Config, bus: MessageBus, sessions: SessionManager | None = None):
         self.config = config
         self.bus = bus
+        self.sessions = sessions or SessionManager(config.workspace_path)
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
-        
+
         self._init_channels()
     
     def _init_channels(self) -> None:
@@ -40,17 +42,20 @@ class ChannelManager:
                     self.config.channels.telegram,
                     self.bus,
                     groq_api_key=self.config.providers.groq.api_key,
+                    sessions=self.sessions,
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:
                 logger.warning(f"Telegram channel not available: {e}")
-        
+
         # WhatsApp channel
         if self.config.channels.whatsapp.enabled:
             try:
                 from nanobot.channels.whatsapp import WhatsAppChannel
                 self.channels["whatsapp"] = WhatsAppChannel(
-                    self.config.channels.whatsapp, self.bus
+                    self.config.channels.whatsapp,
+                    self.bus,
+                    sessions=self.sessions,
                 )
                 logger.info("WhatsApp channel enabled")
             except ImportError as e:

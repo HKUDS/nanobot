@@ -2,15 +2,19 @@
 
 import asyncio
 import re
+from typing import TYPE_CHECKING
 
 from loguru import logger
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
+
+if TYPE_CHECKING:
+    from nanobot.session import SessionManager
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -85,8 +89,14 @@ class TelegramChannel(BaseChannel):
     
     name = "telegram"
     
-    def __init__(self, config: TelegramConfig, bus: MessageBus, groq_api_key: str = ""):
-        super().__init__(config, bus)
+    def __init__(
+        self,
+        config: TelegramConfig,
+        bus: MessageBus,
+        groq_api_key: str = "",
+        sessions: "SessionManager | None" = None,
+    ):
+        super().__init__(config, bus, sessions=sessions)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
         self._app: Application | None = None
@@ -116,9 +126,9 @@ class TelegramChannel(BaseChannel):
             )
         )
         
-        # Add /start command handler
-        from telegram.ext import CommandHandler
+        # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
+        self._app.add_handler(CommandHandler("reset", self._on_reset))
         
         logger.info("Starting Telegram bot (polling mode)...")
         
@@ -129,6 +139,12 @@ class TelegramChannel(BaseChannel):
         # Get bot info
         bot_info = await self._app.bot.get_me()
         logger.info(f"Telegram bot @{bot_info.username} connected")
+
+        # Set bot commands menu
+        await self._app.bot.set_my_commands([
+            ("start", "Start the bot"),
+            ("reset", "Reset the session"),
+        ])
         
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
@@ -184,12 +200,39 @@ class TelegramChannel(BaseChannel):
         """Handle /start command."""
         if not update.message or not update.effective_user:
             return
-        
+
         user = update.effective_user
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
             "Send me a message and I'll respond!"
         )
+
+    async def _on_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /reset command - archive and clear session history."""
+        if not update.message or not update.effective_user:
+            return
+
+        user = update.effective_user
+        sender_id = str(user.id)
+
+        # Check permission
+        if not self.is_allowed(sender_id):
+            return
+
+        chat_id = update.message.chat_id
+        session_key = f"telegram:{chat_id}"
+
+        if self.sessions:
+            archived = self.sessions.archive(session_key)
+            if archived:
+                await update.message.reply_text(
+                    f"✓ Session archived and reset.\n"
+                    f"Previous history saved to: {archived.name}"
+                )
+            else:
+                await update.message.reply_text("✓ Session reset. (No previous history)")
+        else:
+            await update.message.reply_text("Session management not available.")
     
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""

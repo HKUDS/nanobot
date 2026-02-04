@@ -40,7 +40,8 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         max_iterations: int = 20,
-        brave_api_key: str | None = None
+        brave_api_key: str | None = None,
+        sessions: SessionManager | None = None
     ):
         self.bus = bus
         self.provider = provider
@@ -48,9 +49,9 @@ class AgentLoop:
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
-        
+
         self.context = ContextBuilder(workspace)
-        self.sessions = SessionManager(workspace)
+        self.sessions = sessions or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
             provider=provider,
