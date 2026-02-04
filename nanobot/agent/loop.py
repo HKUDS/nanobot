@@ -17,6 +17,12 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.system import (
+    OpenApplicationTool,
+    CloseApplicationTool,
+    SystemInfoTool,
+    ScreenshotTool
+)
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
 
@@ -74,6 +80,10 @@ class AgentLoop:
         self.tools.register(WriteFileTool())
         self.tools.register(EditFileTool())
         self.tools.register(ListDirTool())
+        self.tools.register(OpenApplicationTool())
+        self.tools.register(CloseApplicationTool())
+        self.tools.register(SystemInfoTool())
+        self.tools.register(ScreenshotTool())
         
         # Shell tool
         self.tools.register(ExecTool(
