@@ -86,10 +86,9 @@ class TelegramChannel(BaseChannel):
     
     name = "telegram"
     
-    def __init__(self, config: TelegramConfig, bus: MessageBus, groq_api_key: str = ""):
+    def __init__(self, config: TelegramConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
-        self.groq_api_key = groq_api_key
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         # Media group buffering: collect album parts before processing
