@@ -166,12 +166,13 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram or WhatsApp — anytime, anywhere.
+Talk to your nanobot through Telegram, WhatsApp, or Discord — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
 | **Telegram** | Easy (just a token) |
 | **WhatsApp** | Medium (scan QR) |
+| **Discord** | Easy (just a token) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -242,6 +243,68 @@ nanobot gateway
 
 </details>
 
+<details>
+<summary><b>Discord</b></summary>
+
+**1. Create a Discord Application and Bot**
+
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications) and log in
+2. Click **"New Application"** (top-right button)
+3. Enter a name (e.g., "nanobot") and click **Create**
+4. In the left sidebar, click **"Bot"**
+5. Click **"Reset Token"** (or "Add Bot" if you haven't created one yet)
+6. **Copy the token** — this is your bot token (you won't be able to see it again!)
+   - The token looks like: `XXX11Xx1x11X11x111Xxx.XxXxX.XXXXXXxXxXxXXXXXxXxXXXXXXX`
+   - ⚠️ Keep this secret and never share it publicly
+7. Under **Privileged Gateway Intents**, enable:
+   - ✅ **Message Content Intent** (required to read message content)
+   - ✅ **Server Members Intent** (optional, for user info)
+8. Click **"Save Changes"** at the bottom
+
+**2. Invite bot to your server**
+
+1. In the Developer Portal, go to **OAuth2** → **URL Generator**
+2. Under **Scopes**, select: `bot`
+3. Under **Bot Permissions**, select:
+   - ✅ Send Messages
+   - ✅ Read Messages/View Channels
+   - ✅ Read Message History
+4. Copy the generated URL from the bottom
+5. Open the URL in your browser and select your server to invite the bot
+
+**3. Configure**
+
+Edit `~/.nanobot/config.json`:
+
+```json
+{
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "token": "YOUR_BOT_TOKEN_HERE",
+      "allow_from": ["YOUR_USER_ID_HERE"]
+    }
+  }
+}
+```
+
+> **Get your Discord User ID:**
+> 1. Enable Developer Mode: Discord → User Settings → Advanced → toggle Developer Mode
+> 2. Right-click your name in any server
+> 3. Select "Copy User ID"
+>
+> **Tip:** Leave `allow_from` empty (`[]`) to allow all users while testing.
+
+**4. Run**
+
+```bash
+nanobot gateway
+```
+
+Your bot is now ready! Send it a message in any server it's invited to, or DM it directly.
+
+</details>
+
 ## ⚙️ Configuration
 
 Config file: `~/.nanobot/config.json`
@@ -307,7 +370,7 @@ Config file: `~/.nanobot/config.json`
 | `nanobot onboard` | Initialize config & workspace |
 | `nanobot agent -m "..."` | Chat with the agent |
 | `nanobot agent` | Interactive chat mode |
-| `nanobot gateway` | Start the gateway |
+| `nanobot gateway` | Start the gateway (connects to Telegram/WhatsApp/Discord) |
 | `nanobot status` | Show status |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
@@ -346,7 +409,7 @@ docker run -v ~/.nanobot:/root/.nanobot --rm nanobot onboard
 # Edit config on host to add API keys
 vim ~/.nanobot/config.json
 
-# Run gateway (connects to Telegram/WhatsApp)
+# Run gateway (connects to Telegram/WhatsApp/Discord)
 docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
 
 # Or run a single command
