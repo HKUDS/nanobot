@@ -258,6 +258,9 @@ def gateway(
         hindsight_url=hindsight_url,
         soul_config=soul_config,
         mem0_config=mem0_config,
+        elevenlabs_api_key=config.providers.elevenlabs.api_key or None,
+        elevenlabs_voice_id=config.providers.elevenlabs.voice_id or None,
+        gemini_api_key=config.providers.gemini_image.api_key or None,
     )
     
     # Create cron service
@@ -369,6 +372,9 @@ def agent(
         hindsight_url=hindsight_url,
         soul_config=soul_config,
         mem0_config=mem0_config,
+        elevenlabs_api_key=config.providers.elevenlabs.api_key or None,
+        elevenlabs_voice_id=config.providers.elevenlabs.voice_id or None,
+        gemini_api_key=config.providers.gemini_image.api_key or None,
     )
     
     if message:

@@ -9,6 +9,8 @@ import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  downloadMediaMessage,
+  proto,
 } from '@whiskeysockets/baileys';
 
 import { Boom } from '@hapi/boom';
@@ -17,12 +19,20 @@ import pino from 'pino';
 
 const VERSION = '0.1.0';
 
+export interface MediaInfo {
+  type: 'image' | 'audio' | 'video' | 'document';
+  mimetype: string;
+  data: string;  // base64-encoded
+  filename?: string;
+}
+
 export interface InboundMessage {
   id: string;
   sender: string;
   content: string;
   timestamp: number;
   isGroup: boolean;
+  media?: MediaInfo;
 }
 
 export interface WhatsAppClientOptions {
@@ -115,7 +125,7 @@ export class WhatsAppClient {
         // Skip status updates
         if (msg.key.remoteJid === 'status@broadcast') continue;
 
-        const content = this.extractMessageContent(msg);
+        const { content, media } = await this.extractMessageContent(msg);
         if (!content) continue;
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
@@ -126,46 +136,99 @@ export class WhatsAppClient {
           content,
           timestamp: msg.messageTimestamp as number,
           isGroup,
+          media,
         });
       }
     });
   }
 
-  private extractMessageContent(msg: any): string | null {
+  private async extractMessageContent(msg: any): Promise<{ content: string | null; media?: MediaInfo }> {
     const message = msg.message;
-    if (!message) return null;
+    if (!message) return { content: null };
 
     // Text message
     if (message.conversation) {
-      return message.conversation;
+      return { content: message.conversation };
     }
 
     // Extended text (reply, link preview)
     if (message.extendedTextMessage?.text) {
-      return message.extendedTextMessage.text;
+      return { content: message.extendedTextMessage.text };
     }
 
-    // Image with caption
-    if (message.imageMessage?.caption) {
-      return `[Image] ${message.imageMessage.caption}`;
+    // Image message
+    if (message.imageMessage) {
+      const caption = message.imageMessage.caption || '';
+      const media = await this.downloadMedia(msg, 'image', message.imageMessage.mimetype);
+      return {
+        content: caption ? `[Image] ${caption}` : '[Image]',
+        media
+      };
     }
 
-    // Video with caption
-    if (message.videoMessage?.caption) {
-      return `[Video] ${message.videoMessage.caption}`;
+    // Video message
+    if (message.videoMessage) {
+      const caption = message.videoMessage.caption || '';
+      const media = await this.downloadMedia(msg, 'video', message.videoMessage.mimetype);
+      return {
+        content: caption ? `[Video] ${caption}` : '[Video]',
+        media
+      };
     }
 
-    // Document with caption
-    if (message.documentMessage?.caption) {
-      return `[Document] ${message.documentMessage.caption}`;
+    // Document message
+    if (message.documentMessage) {
+      const caption = message.documentMessage.caption || '';
+      const filename = message.documentMessage.fileName;
+      const media = await this.downloadMedia(msg, 'document', message.documentMessage.mimetype, filename);
+      return {
+        content: caption ? `[Document: ${filename}] ${caption}` : `[Document: ${filename}]`,
+        media
+      };
     }
 
     // Voice/Audio message
     if (message.audioMessage) {
-      return `[Voice Message]`;
+      const media = await this.downloadMedia(msg, 'audio', message.audioMessage.mimetype || 'audio/ogg');
+      return {
+        content: '[Voice Message]',
+        media
+      };
     }
 
-    return null;
+    return { content: null };
+  }
+
+  private async downloadMedia(
+    msg: any,
+    type: 'image' | 'audio' | 'video' | 'document',
+    mimetype: string,
+    filename?: string
+  ): Promise<MediaInfo | undefined> {
+    try {
+      const buffer = await downloadMediaMessage(
+        msg,
+        'buffer',
+        {},
+        {
+          logger: pino({ level: 'silent' }),
+          reuploadRequest: this.sock.updateMediaMessage,
+        }
+      );
+
+      const data = (buffer as Buffer).toString('base64');
+      console.log(`📥 Downloaded ${type} (${Math.round(data.length / 1024)}KB base64)`);
+
+      return {
+        type,
+        mimetype,
+        data,
+        filename,
+      };
+    } catch (error) {
+      console.error(`Failed to download ${type}:`, error);
+      return undefined;
+    }
   }
 
   async sendMessage(to: string, text: string): Promise<void> {
@@ -174,6 +237,56 @@ export class WhatsAppClient {
     }
 
     await this.sock.sendMessage(to, { text });
+  }
+
+  async sendMedia(
+    to: string,
+    mediaData: string,
+    mimetype: string,
+    type: 'image' | 'audio' | 'video' | 'document',
+    caption?: string,
+    filename?: string,
+    ptt?: boolean  // Push-to-talk (voice note)
+  ): Promise<void> {
+    if (!this.sock) {
+      throw new Error('Not connected');
+    }
+
+    const buffer = Buffer.from(mediaData, 'base64');
+
+    switch (type) {
+      case 'image':
+        await this.sock.sendMessage(to, {
+          image: buffer,
+          mimetype,
+          caption,
+        });
+        break;
+      case 'audio':
+        await this.sock.sendMessage(to, {
+          audio: buffer,
+          mimetype: mimetype || 'audio/ogg; codecs=opus',
+          ptt: ptt ?? true,  // Send as voice note by default
+        });
+        break;
+      case 'video':
+        await this.sock.sendMessage(to, {
+          video: buffer,
+          mimetype,
+          caption,
+        });
+        break;
+      case 'document':
+        await this.sock.sendMessage(to, {
+          document: buffer,
+          mimetype,
+          fileName: filename || 'document',
+          caption,
+        });
+        break;
+    }
+
+    console.log(`📤 Sent ${type} to ${to}`);
   }
 
   async disconnect(): Promise<void> {

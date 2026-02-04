@@ -109,6 +109,25 @@ class ClaudeCliConfig(BaseModel):
     timeout_seconds: int = 300
 
 
+class ElevenLabsConfig(BaseModel):
+    """ElevenLabs TTS configuration."""
+    api_key: str = ""
+    voice_id: str = "pMsXgVXv3BLzUgSXRplE"  # Default voice (Serena)
+    model_id: str = "eleven_multilingual_v2"
+    stability: float = 0.5
+    similarity_boost: float = Field(default=0.75, alias="similarityBoost")
+    style: float = 0.0
+    speed: float = 1.0
+
+    model_config = {"populate_by_name": True}
+
+
+class GeminiImageConfig(BaseModel):
+    """Gemini image generation configuration."""
+    api_key: str = ""
+    model: str = "imagen-3.0-generate-002"
+
+
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -119,6 +138,10 @@ class ProvidersConfig(BaseModel):
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     claude_cli: ClaudeCliConfig = Field(default_factory=ClaudeCliConfig)
+    elevenlabs: ElevenLabsConfig = Field(default_factory=ElevenLabsConfig)
+    gemini_image: GeminiImageConfig = Field(default_factory=GeminiImageConfig, alias="geminiImage")
+
+    model_config = {"populate_by_name": True}
 
 
 class GatewayConfig(BaseModel):

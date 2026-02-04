@@ -17,6 +17,8 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.audio import AudioGeneratorTool
+from nanobot.agent.tools.image import ImageGeneratorTool, ImageEditorTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.compaction import ContextCompactor, estimate_messages_tokens
 from nanobot.session.manager import SessionManager
@@ -52,6 +54,9 @@ class AgentLoop:
         hindsight_url: str | None = None,
         soul_config: "SoulConfig | None" = None,
         mem0_config: "Mem0Config | None" = None,
+        elevenlabs_api_key: str | None = None,
+        elevenlabs_voice_id: str | None = None,
+        gemini_api_key: str | None = None,
     ):
         self.bus = bus
         self.provider = provider
@@ -61,6 +66,9 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.max_context_tokens = max_context_tokens
         self.enable_compaction = enable_compaction
+        self.elevenlabs_api_key = elevenlabs_api_key
+        self.elevenlabs_voice_id = elevenlabs_voice_id
+        self.gemini_api_key = gemini_api_key
         
         # Soul loader for personality/memory
         self._soul_loader: SoulLoader | None = None
@@ -137,10 +145,35 @@ class AgentLoop:
         # Message tool
         message_tool = MessageTool(send_callback=self.bus.publish_outbound)
         self.tools.register(message_tool)
-        
+
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
+
+        # Audio generation tool (ElevenLabs TTS)
+        if self.elevenlabs_api_key:
+            audio_tool = AudioGeneratorTool(
+                api_key=self.elevenlabs_api_key,
+                voice_id=self.elevenlabs_voice_id or "",
+                send_callback=self.bus.publish_outbound,
+            )
+            self.tools.register(audio_tool)
+            logger.info("Audio generation tool registered (ElevenLabs)")
+
+        # Image generation tools (Gemini)
+        if self.gemini_api_key:
+            image_gen_tool = ImageGeneratorTool(
+                api_key=self.gemini_api_key,
+                send_callback=self.bus.publish_outbound,
+            )
+            self.tools.register(image_gen_tool)
+
+            image_edit_tool = ImageEditorTool(
+                api_key=self.gemini_api_key,
+                send_callback=self.bus.publish_outbound,
+            )
+            self.tools.register(image_edit_tool)
+            logger.info("Image generation tools registered (Gemini)")
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -200,10 +233,23 @@ class AgentLoop:
         message_tool = self.tools.get("message")
         if isinstance(message_tool, MessageTool):
             message_tool.set_context(msg.channel, msg.chat_id)
-        
+
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(msg.channel, msg.chat_id)
+
+        # Update media tool contexts
+        audio_tool = self.tools.get("generate_audio")
+        if isinstance(audio_tool, AudioGeneratorTool):
+            audio_tool.set_context(msg.channel, msg.chat_id)
+
+        image_gen_tool = self.tools.get("generate_image")
+        if isinstance(image_gen_tool, ImageGeneratorTool):
+            image_gen_tool.set_context(msg.channel, msg.chat_id)
+
+        image_edit_tool = self.tools.get("edit_image")
+        if isinstance(image_edit_tool, ImageEditorTool):
+            image_edit_tool.set_context(msg.channel, msg.chat_id)
         
         # Load soul content if enabled
         if self._soul_loader:
