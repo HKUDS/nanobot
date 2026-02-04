@@ -45,6 +45,12 @@ class ProviderConfig(BaseModel):
     api_base: str | None = None
 
 
+class VertexAIConfig(BaseModel):
+    """Vertex AI provider configuration."""
+    vertex_project: str = ""
+    vertex_location: str = "global"
+
+
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -54,6 +60,7 @@ class ProvidersConfig(BaseModel):
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    vertex_ai: VertexAIConfig = Field(default_factory=VertexAIConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -120,6 +127,16 @@ class Config(BaseSettings):
         if self.providers.vllm.api_base:
             return self.providers.vllm.api_base
         return None
+    
+    def get_provider_kwargs(self) -> dict[str, str]:
+        """Get provider-specific configuration parameters."""
+        kwargs = {}
+        # Only pass Vertex params when project is explicitly set
+        if self.providers.vertex_ai.vertex_project:
+            kwargs["vertex_project"] = self.providers.vertex_ai.vertex_project
+            if self.providers.vertex_ai.vertex_location:
+                kwargs["vertex_location"] = self.providers.vertex_ai.vertex_location
+        return kwargs
     
     class Config:
         env_prefix = "NANOBOT_"

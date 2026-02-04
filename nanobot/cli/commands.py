@@ -182,9 +182,8 @@ def gateway(
     api_key = config.get_api_key()
     api_base = config.get_api_base()
     model = config.agents.defaults.model
-    is_bedrock = model.startswith("bedrock/")
 
-    if not api_key and not is_bedrock:
+    if not api_key and not model.startswith(("bedrock/", "vertex_ai/")):
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
         raise typer.Exit(1)
@@ -192,7 +191,8 @@ def gateway(
     provider = LiteLLMProvider(
         api_key=api_key,
         api_base=api_base,
-        default_model=config.agents.defaults.model
+        default_model=config.agents.defaults.model,
+        **config.get_provider_kwargs(),
     )
     
     # Create agent
@@ -293,9 +293,8 @@ def agent(
     api_key = config.get_api_key()
     api_base = config.get_api_base()
     model = config.agents.defaults.model
-    is_bedrock = model.startswith("bedrock/")
 
-    if not api_key and not is_bedrock:
+    if not api_key and not model.startswith(("bedrock/", "vertex_ai/")):
         console.print("[red]Error: No API key configured.[/red]")
         raise typer.Exit(1)
 
@@ -303,7 +302,8 @@ def agent(
     provider = LiteLLMProvider(
         api_key=api_key,
         api_base=api_base,
-        default_model=config.agents.defaults.model
+        default_model=config.agents.defaults.model,
+        **config.get_provider_kwargs()
     )
     
     agent_loop = AgentLoop(

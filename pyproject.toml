@@ -37,6 +37,9 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "ruff>=0.1.0",
 ]
+vertex = [
+    "google-cloud-aiplatform>=1.135.0",
+]
 
 [project.scripts]
 nanobot = "nanobot.cli.commands:app"

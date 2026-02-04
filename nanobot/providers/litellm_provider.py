@@ -21,10 +21,19 @@ class LiteLLMProvider(LLMProvider):
         self, 
         api_key: str | None = None, 
         api_base: str | None = None,
-        default_model: str = "anthropic/claude-opus-4-5"
+        default_model: str = "anthropic/claude-opus-4-5",
+        **kwargs,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
+        
+        # Vertex AI configuration (only when explicitly provided)
+        if project := kwargs.get("vertex_project"):
+            os.environ["VERTEXAI_PROJECT"] = project
+            if location := kwargs.get("vertex_location"):
+                os.environ["VERTEXAI_LOCATION"] = location
+            else:
+                os.environ.setdefault("VERTEXAI_LOCATION", "global")
         
         # Detect OpenRouter by api_key prefix or explicit api_base
         self.is_openrouter = (
@@ -102,7 +111,10 @@ class LiteLLMProvider(LLMProvider):
             model = f"hosted_vllm/{model}"
         
         # For Gemini, ensure gemini/ prefix if not already present
-        if "gemini" in model.lower() and not model.startswith("gemini/"):
+        if ("gemini" in model.lower()) and not (
+            model.startswith("gemini/") or 
+            model.startswith("vertex_ai/")
+        ): 
             model = f"gemini/{model}"
         
         kwargs: dict[str, Any] = {

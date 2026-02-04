@@ -81,6 +81,19 @@ uv tool install nanobot-ai
 pip install nanobot-ai
 ```
 
+**Vertex AI support** (optional, adds google-cloud-aiplatform)
+
+```bash
+# PyPI
+pip install "nanobot-ai[vertex]"
+
+# From source
+pip install -e .[vertex]
+
+# Or with uv
+uv tool install "nanobot-ai[vertex]"
+```
+
 ## 🚀 Quick Start
 
 > [!TIP]
@@ -258,6 +271,7 @@ Config file: `~/.nanobot/config.json`
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
+| `vertex_ai` | LLM (Vertex AI) | [cloud.google.com/vertex-ai](https://cloud.google.com/vertex-ai) |
 
 
 <details>
@@ -276,6 +290,10 @@ Config file: `~/.nanobot/config.json`
     },
     "groq": {
       "apiKey": "gsk_xxx"
+    },
+    "vertex_ai": {
+      "vertex_project": "id",
+      "vertex_location": "global"
     }
   },
   "channels": {
