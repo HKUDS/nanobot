@@ -97,16 +97,14 @@ poc/
 ├── docker-compose.yml      # Container orchestration
 ├── Dockerfile.nanobot      # Python app container
 ├── Dockerfile.bridge       # Node.js bridge container
-├── Dockerfile.mock-llm     # Mock LLM server
-├── mock_llm_server.py      # Simulates LLM responses triggering tools
 ├── run_poc.sh              # Test harness script
 ├── config/
-│   └── config.json         # Test configuration
+│   └── config.json         # Test configuration (not used by exploit scripts)
 ├── exploits/
-│   ├── shell_injection.py  # Shell bypass tests
-│   ├── path_traversal.py   # File access tests
-│   └── litellm_rce.py      # LiteLLM RCE vulnerability tests
-├── sensitive/              # Test sensitive files
+│   ├── shell_injection.py  # Shell bypass tests - uses real ExecTool
+│   ├── path_traversal.py   # File access tests - uses real ReadFileTool/WriteFileTool
+│   └── litellm_rce.py      # LiteLLM RCE tests - scans real litellm source code
+├── sensitive/              # Test files to demonstrate path traversal
 └── results/                # Test output
 ```
 
@@ -159,28 +157,6 @@ tool = ExecTool()
 print(asyncio.run(tool.execute(command='cat /etc/passwd')))
 "
 ```
-
-## Mock LLM Server
-
-The mock LLM server simulates OpenAI API responses that trigger vulnerable tool calls:
-
-```bash
-# Start the mock server
-docker compose up mock-llm
-
-# Set exploit mode
-curl -X POST http://localhost:8080/set_exploit/path_traversal_read
-
-# List available exploits
-curl http://localhost:8080/exploits
-```
-
-Available exploit modes:
-- `shell_injection` - Returns exec tool call with command injection
-- `path_traversal_read` - Returns read_file for /etc/passwd
-- `path_traversal_write` - Returns write_file to /tmp
-- `sensitive_file_read` - Returns read_file for API keys
-- `resource_exhaustion` - Returns command generating large output
 
 ## Expected Results
 

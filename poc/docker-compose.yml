@@ -44,19 +44,6 @@ services:
     profiles:
       - vulnerable  # Only start with --profile vulnerable
 
-  # Mock LLM server for testing without real API calls
-  mock-llm:
-    build:
-      context: .
-      dockerfile: Dockerfile.mock-llm
-    container_name: mock-llm-poc
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./mock-responses:/responses:ro
-    networks:
-      - poc-network
-
   # Bridge service for WhatsApp vulnerability testing
   bridge:
     build:

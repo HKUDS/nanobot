@@ -1,18 +1,18 @@
 {
   "provider": {
     "model": "gpt-4",
-    "api_base": "http://mock-llm:8080/v1",
-    "api_key": "sk-poc-test-key-not-real"
+    "api_base": "https://api.openai.com/v1",
+    "api_key": "NOT_USED_IN_POC_TESTS"
   },
   "channels": {
     "telegram": {
       "enabled": false,
-      "token": "FAKE_TELEGRAM_TOKEN_FOR_POC",
+      "token": "NOT_USED_IN_POC_TESTS",
       "allow_from": ["123456789"]
     },
     "whatsapp": {
       "enabled": false,
-      "bridge_url": "ws://bridge:3000"
+      "bridge_url": "ws://localhost:3000"
     }
   },
   "workspace": "/app/workspace",
