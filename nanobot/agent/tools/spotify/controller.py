@@ -9,14 +9,19 @@ def _os() -> str:
 def _macos(cmd: str):
     script = f'''
     tell application "Spotify"
+        if it is not running then
+            activate
+            delay 0.5
+        end if
+        activate
         {cmd}
     end tell
     '''
     subprocess.run(
         ["osascript", "-e", script],
         check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
 
 
