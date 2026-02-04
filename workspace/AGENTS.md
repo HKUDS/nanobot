@@ -16,6 +16,7 @@ You have access to:
 - Shell commands (exec)
 - Web access (search, fetch)
 - Messaging (message)
+- System control tools (open application, close application, system information, screenshot)
 
 ## Memory
 
