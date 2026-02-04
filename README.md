@@ -108,8 +108,12 @@ nanobot onboard
       "model": "anthropic/claude-opus-4-5"
     }
   },
-  "webSearch": {
-    "apiKey": "BSA-xxx"
+  "tools": {
+    "web": {
+      "search": {
+        "apiKey": "BSA-xxx"
+      }
+    }
   }
 }
 ```

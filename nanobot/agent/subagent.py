@@ -39,7 +39,9 @@ class SubagentManager:
         model: str | None = None,
         brave_api_key: str | None = None,
         offload_config: OffloadConfig | None = None,
+        exec_config: "ExecToolConfig | None" = None,
     ):
+        from nanobot.config.schema import ExecToolConfig
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
@@ -47,6 +49,7 @@ class SubagentManager:
         self.brave_api_key = brave_api_key
         self.offload_config = offload_config
         self.offloader = ToolResponseOffloader(workspace, config=offload_config) if offload_config else None
+        self.exec_config = exec_config or ExecToolConfig()
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
     
     async def spawn(
@@ -104,7 +107,11 @@ class SubagentManager:
             tools.register(ReadFileTool())
             tools.register(WriteFileTool())
             tools.register(ListDirTool())
-            tools.register(ExecTool(working_dir=str(self.workspace)))
+            tools.register(ExecTool(
+                working_dir=str(self.workspace),
+                timeout=self.exec_config.timeout,
+                restrict_to_workspace=self.exec_config.restrict_to_workspace,
+            ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
             
