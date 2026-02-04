@@ -50,7 +50,9 @@ class ChannelManager:
             try:
                 from nanobot.channels.whatsapp import WhatsAppChannel
                 self.channels["whatsapp"] = WhatsAppChannel(
-                    self.config.channels.whatsapp, self.bus
+                    self.config.channels.whatsapp,
+                    self.bus,
+                    groq_api_key=self.config.providers.groq.api_key,
                 )
                 logger.info("WhatsApp channel enabled")
             except ImportError as e:

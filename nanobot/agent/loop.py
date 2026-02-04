@@ -3,7 +3,7 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from loguru import logger
 
@@ -17,8 +17,16 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.audio import AudioGeneratorTool
+from nanobot.agent.tools.image import ImageGeneratorTool, ImageEditorTool
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.compaction import ContextCompactor, estimate_messages_tokens
 from nanobot.session.manager import SessionManager
+from nanobot.agent.soul import SoulLoader
+from nanobot.agent.mem0_memory import Mem0MemoryStore, Mem0Config
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import SoulConfig
 
 
 class AgentLoop:
@@ -40,7 +48,15 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         max_iterations: int = 20,
-        brave_api_key: str | None = None
+        brave_api_key: str | None = None,
+        max_context_tokens: int = 128000,
+        enable_compaction: bool = True,
+        hindsight_url: str | None = None,
+        soul_config: "SoulConfig | None" = None,
+        mem0_config: "Mem0Config | None" = None,
+        elevenlabs_api_key: str | None = None,
+        elevenlabs_voice_id: str | None = None,
+        gemini_api_key: str | None = None,
     ):
         self.bus = bus
         self.provider = provider
@@ -48,6 +64,28 @@ class AgentLoop:
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
+        self.max_context_tokens = max_context_tokens
+        self.enable_compaction = enable_compaction
+        self.elevenlabs_api_key = elevenlabs_api_key
+        self.elevenlabs_voice_id = elevenlabs_voice_id
+        self.gemini_api_key = gemini_api_key
+        
+        # Soul loader for personality/memory
+        self._soul_loader: SoulLoader | None = None
+        if soul_config and soul_config.enabled:
+            self._soul_loader = SoulLoader(soul_config)
+            logger.info(f"Soul loader enabled: {soul_config.path}")
+        
+        # mem0 semantic memory
+        self._mem0: Mem0MemoryStore | None = None
+        if mem0_config and mem0_config.enabled:
+            self._mem0 = Mem0MemoryStore(
+                config=mem0_config,
+                workspace=workspace,
+                user_id="default",
+            )
+            if self._mem0.available:
+                logger.info("mem0 semantic memory enabled")
         
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
@@ -60,8 +98,34 @@ class AgentLoop:
             brave_api_key=brave_api_key,
         )
         
+        # Context compactor for long conversations
+        self._compactors: dict[str, ContextCompactor] = {}
+        
+        # Hindsight memory (optional)
+        self._memory = None
+        if hindsight_url:
+            try:
+                from nanobot.agent.hindsight_memory import HindsightMemoryStore
+                self._memory = HindsightMemoryStore(
+                    workspace=workspace,
+                    base_url=hindsight_url,
+                )
+                logger.info(f"Hindsight memory enabled: {hindsight_url}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Hindsight: {e}")
+        
         self._running = False
         self._register_default_tools()
+    
+    def _get_compactor(self, session_key: str) -> ContextCompactor:
+        """Get or create a context compactor for a session."""
+        if session_key not in self._compactors:
+            self._compactors[session_key] = ContextCompactor(
+                provider=self.provider,
+                max_context_tokens=self.max_context_tokens,
+                model=self.model,
+            )
+        return self._compactors[session_key]
     
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -81,10 +145,35 @@ class AgentLoop:
         # Message tool
         message_tool = MessageTool(send_callback=self.bus.publish_outbound)
         self.tools.register(message_tool)
-        
+
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
+
+        # Audio generation tool (ElevenLabs TTS)
+        if self.elevenlabs_api_key:
+            audio_tool = AudioGeneratorTool(
+                api_key=self.elevenlabs_api_key,
+                voice_id=self.elevenlabs_voice_id or "",
+                send_callback=self.bus.publish_outbound,
+            )
+            self.tools.register(audio_tool)
+            logger.info("Audio generation tool registered (ElevenLabs)")
+
+        # Image generation tools (Gemini)
+        if self.gemini_api_key:
+            image_gen_tool = ImageGeneratorTool(
+                api_key=self.gemini_api_key,
+                send_callback=self.bus.publish_outbound,
+            )
+            self.tools.register(image_gen_tool)
+
+            image_edit_tool = ImageEditorTool(
+                api_key=self.gemini_api_key,
+                send_callback=self.bus.publish_outbound,
+            )
+            self.tools.register(image_edit_tool)
+            logger.info("Image generation tools registered (Gemini)")
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -144,10 +233,32 @@ class AgentLoop:
         message_tool = self.tools.get("message")
         if isinstance(message_tool, MessageTool):
             message_tool.set_context(msg.channel, msg.chat_id)
-        
+
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(msg.channel, msg.chat_id)
+
+        # Update media tool contexts
+        audio_tool = self.tools.get("generate_audio")
+        if isinstance(audio_tool, AudioGeneratorTool):
+            audio_tool.set_context(msg.channel, msg.chat_id)
+
+        image_gen_tool = self.tools.get("generate_image")
+        if isinstance(image_gen_tool, ImageGeneratorTool):
+            image_gen_tool.set_context(msg.channel, msg.chat_id)
+
+        image_edit_tool = self.tools.get("edit_image")
+        if isinstance(image_edit_tool, ImageEditorTool):
+            image_edit_tool.set_context(msg.channel, msg.chat_id)
+        
+        # Load soul content if enabled
+        if self._soul_loader:
+            soul_content = self._soul_loader.load(
+                channel=msg.channel,
+                model=self.model,
+                session_key=msg.session_key,
+            )
+            self.context.set_soul_content(soul_content)
         
         # Build initial messages (use get_history for LLM-formatted messages)
         messages = self.context.build_messages(
@@ -155,6 +266,42 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
         )
+        
+        # Apply compaction if enabled
+        if self.enable_compaction:
+            compactor = self._get_compactor(msg.session_key)
+            
+            # Check if we need to compact
+            current_tokens = estimate_messages_tokens(messages)
+            budget = int(self.max_context_tokens * 0.7)  # Leave room for response
+            
+            if current_tokens > budget:
+                logger.info(f"Compacting context: {current_tokens} tokens > {budget} budget")
+                messages = await compactor.maybe_compact(messages)
+                
+                # Inject summary into system prompt if available
+                summary_prompt = compactor.get_summary_prompt()
+                if summary_prompt and messages and messages[0].get("role") == "system":
+                    messages[0]["content"] += summary_prompt
+        
+        # Recall relevant memories from Hindsight (if available)
+        if self._memory:
+            try:
+                memory_context = await self._memory.recall_for_context(msg.content)
+                if memory_context and messages and messages[0].get("role") == "system":
+                    messages[0]["content"] += f"\n\n{memory_context}"
+            except Exception as e:
+                logger.debug(f"Memory recall failed: {e}")
+        
+        # Recall relevant memories from mem0 (if available)
+        if self._mem0 and self._mem0.available:
+            try:
+                mem0_context = await self._mem0.recall_for_context(msg.content, user_id=msg.sender_id)
+                if mem0_context and messages and messages[0].get("role") == "system":
+                    messages[0]["content"] += f"\n\n{mem0_context}"
+                    logger.debug(f"mem0 recalled memories for context")
+            except Exception as e:
+                logger.debug(f"mem0 recall failed: {e}")
         
         # Agent loop
         iteration = 0
@@ -208,6 +355,19 @@ class AgentLoop:
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
+        
+        # Store important memories (async, don't wait)
+        if self._memory:
+            asyncio.create_task(self._memory.process_message({"role": "user", "content": msg.content}))
+            asyncio.create_task(self._memory.process_message({"role": "assistant", "content": final_content}))
+        
+        # Store memories in mem0 (async, don't wait)
+        if self._mem0 and self._mem0.available:
+            conversation = [
+                {"role": "user", "content": msg.content},
+                {"role": "assistant", "content": final_content}
+            ]
+            asyncio.create_task(self._mem0.add_from_conversation(conversation, user_id=msg.sender_id))
         
         return OutboundMessage(
             channel=msg.channel,

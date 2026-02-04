@@ -12,4 +12,5 @@ docs/
 *.pyw
 *.pyz
 *.pywz
-*.pyzz
+*.pyzzbridge/node_modules/
+config.yaml

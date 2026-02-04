@@ -152,6 +152,49 @@ This file stores important information that should persist across sessions.
 # ============================================================================
 
 
+def _create_provider(config):
+    """Create the appropriate LLM provider based on config."""
+    from nanobot.providers.litellm_provider import LiteLLMProvider
+    from nanobot.providers.claude_cli import ClaudeCliProvider
+
+    # Check for Claude CLI credentials (Claude Max/Pro subscription)
+    # NOTE: OAuth tokens cannot be used directly with Anthropic API.
+    # The Claude CLI is the correct intermediary - it handles OAuth internally.
+    claude_creds_path = Path.home() / ".claude" / ".credentials.json"
+    has_claude_creds = claude_creds_path.exists()
+
+    # Priority 1: Use Claude CLI if credentials exist (subscription mode)
+    # This works with Claude Max/Pro subscription via OAuth
+    if has_claude_creds:
+        import shutil
+        if shutil.which("claude"):
+            cli_config = config.get_claude_cli_config()
+            console.print(f"[green]Using Claude CLI provider (subscription mode)[/green]")
+            return ClaudeCliProvider(
+                default_model=cli_config.default_model,
+                command=cli_config.command,
+                timeout_seconds=cli_config.timeout_seconds,
+                working_dir=str(config.workspace_path),
+            )
+        else:
+            console.print(f"[yellow]Claude credentials found but 'claude' CLI not in PATH[/yellow]")
+
+    # Priority 2: Fall back to LiteLLM provider (API key mode)
+    api_key = config.get_api_key()
+    api_base = config.get_api_base()
+    model = config.agents.defaults.model
+    is_bedrock = model.startswith("bedrock/")
+
+    if not api_key and not is_bedrock:
+        return None  # Caller should handle this
+
+    return LiteLLMProvider(
+        api_key=api_key,
+        api_base=api_base,
+        default_model=config.agents.defaults.model
+    )
+
+
 @app.command()
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
@@ -160,7 +203,6 @@ def gateway(
     """Start the nanobot gateway."""
     from nanobot.config.loader import load_config, get_data_dir
     from nanobot.bus.queue import MessageBus
-    from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.agent.loop import AgentLoop
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
@@ -178,31 +220,47 @@ def gateway(
     # Create components
     bus = MessageBus()
     
-    # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock)
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
-    model = config.agents.defaults.model
-    is_bedrock = model.startswith("bedrock/")
-
-    if not api_key and not is_bedrock:
-        console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
+    # Create provider
+    provider = _create_provider(config)
+    
+    if provider is None:
+        console.print("[red]Error: No API key configured and Claude CLI not enabled.[/red]")
+        console.print("Options:")
+        console.print("  1. Set API key in ~/.nanobot/config.json under providers.openrouter.apiKey")
+        console.print("  2. Enable Claude CLI: set providers.claude_cli.enabled = true")
         raise typer.Exit(1)
     
-    provider = LiteLLMProvider(
-        api_key=api_key,
-        api_base=api_base,
-        default_model=config.agents.defaults.model
-    )
-    
     # Create agent
+    hindsight_url = None
+    if config.agents.defaults.hindsight.enabled:
+        hindsight_url = config.agents.defaults.hindsight.url
+        console.print(f"[green]✓[/green] Hindsight memory: {hindsight_url}")
+    
+    # Soul config
+    soul_config = config.agents.defaults.soul if config.agents.defaults.soul.enabled else None
+    if soul_config:
+        console.print(f"[green]✓[/green] Soul loaded from: {soul_config.path}")
+    
+    # mem0 config
+    mem0_config = config.agents.defaults.mem0 if config.agents.defaults.mem0.enabled else None
+    if mem0_config:
+        console.print(f"[green]✓[/green] mem0 semantic memory enabled")
+    
     agent = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        brave_api_key=config.tools.web.search.api_key or None
+        brave_api_key=config.tools.web.search.api_key or None,
+        max_context_tokens=config.agents.defaults.compaction.max_context_tokens,
+        enable_compaction=config.agents.defaults.compaction.enabled,
+        hindsight_url=hindsight_url,
+        soul_config=soul_config,
+        mem0_config=mem0_config,
+        elevenlabs_api_key=config.providers.elevenlabs.api_key or None,
+        elevenlabs_voice_id=config.providers.elevenlabs.voice_id or None,
+        gemini_api_key=config.providers.gemini_image.api_key or None,
     )
     
     # Create cron service
@@ -284,32 +342,39 @@ def agent(
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config
     from nanobot.bus.queue import MessageBus
-    from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.agent.loop import AgentLoop
     
     config = load_config()
     
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
-    model = config.agents.defaults.model
-    is_bedrock = model.startswith("bedrock/")
-
-    if not api_key and not is_bedrock:
-        console.print("[red]Error: No API key configured.[/red]")
+    # Create provider (supports Claude CLI or API)
+    provider = _create_provider(config)
+    
+    if provider is None:
+        console.print("[red]Error: No API key configured and Claude CLI not enabled.[/red]")
         raise typer.Exit(1)
 
     bus = MessageBus()
-    provider = LiteLLMProvider(
-        api_key=api_key,
-        api_base=api_base,
-        default_model=config.agents.defaults.model
-    )
+    
+    hindsight_url = None
+    if config.agents.defaults.hindsight.enabled:
+        hindsight_url = config.agents.defaults.hindsight.url
+    
+    soul_config = config.agents.defaults.soul if config.agents.defaults.soul.enabled else None
+    mem0_config = config.agents.defaults.mem0 if config.agents.defaults.mem0.enabled else None
     
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        brave_api_key=config.tools.web.search.api_key or None
+        brave_api_key=config.tools.web.search.api_key or None,
+        max_context_tokens=config.agents.defaults.compaction.max_context_tokens,
+        enable_compaction=config.agents.defaults.compaction.enabled,
+        hindsight_url=hindsight_url,
+        soul_config=soul_config,
+        mem0_config=mem0_config,
+        elevenlabs_api_key=config.providers.elevenlabs.api_key or None,
+        elevenlabs_voice_id=config.providers.elevenlabs.voice_id or None,
+        gemini_api_key=config.providers.gemini_image.api_key or None,
     )
     
     if message:
@@ -337,6 +402,199 @@ def agent(
                     break
         
         asyncio.run(run_interactive())
+
+
+# ============================================================================
+# Compact Command
+# ============================================================================
+
+
+@app.command()
+def compact(
+    session_id: str = typer.Option(None, "--session", "-s", help="Session ID to compact (e.g. 'whatsapp:5512992247834' or 'cli:default')"),
+    all_sessions: bool = typer.Option(False, "--all", "-a", help="Compact ALL sessions"),
+    show_summary: bool = typer.Option(True, "--summary/--no-summary", help="Show the generated summary"),
+    list_sessions: bool = typer.Option(False, "--list", "-l", help="List available sessions"),
+):
+    """Force context compaction on a session or all sessions.
+
+    Examples:
+        nanobot compact -s whatsapp:5512992247834
+        nanobot compact -s cli:default
+        nanobot compact --all
+        nanobot compact --list
+    """
+    from nanobot.config.loader import load_config
+    from nanobot.session.manager import SessionManager, normalize_session_id
+    from nanobot.agent.compaction import (
+        ContextCompactor,
+        estimate_messages_tokens,
+    )
+
+    config = load_config()
+    sessions = SessionManager(config.workspace_path)
+
+    # List sessions mode
+    if list_sessions:
+        all_sessions = sessions.list_sessions()
+        if not all_sessions:
+            console.print("[yellow]No sessions found.[/yellow]")
+            raise typer.Exit(0)
+
+        console.print("\n[bold]Available sessions:[/bold]")
+        for s in all_sessions:
+            key = s.get("key", s.get("path", "unknown"))
+            updated = s.get("updated_at", "?")[:19] if s.get("updated_at") else "?"
+            console.print(f"  - [cyan]{key}[/cyan] (updated: {updated})")
+        raise typer.Exit(0)
+
+    # Compact all sessions mode
+    if all_sessions:
+        all_sess = sessions.list_sessions()
+        if not all_sess:
+            console.print("[yellow]No sessions found.[/yellow]")
+            raise typer.Exit(0)
+
+        console.print(f"\n[bold]Compacting {len(all_sess)} sessions...[/bold]\n")
+        
+        # Create provider once for all compactions
+        provider = _create_provider(config)
+        if provider is None:
+            console.print("[red]Error: No LLM provider configured.[/red]")
+            raise typer.Exit(1)
+
+        compactor = ContextCompactor(
+            provider=provider,
+            max_context_tokens=config.agents.defaults.compaction.max_context_tokens,
+            model=config.agents.defaults.model,
+        )
+
+        total_before = 0
+        total_after = 0
+        compacted_count = 0
+
+        for s in all_sess:
+            key = s.get("key", "unknown")
+            session = sessions._load(key)
+            if session is None:
+                console.print(f"  [yellow]⚠[/yellow] {key}: could not load")
+                continue
+
+            history = session.get_history()
+            if not history:
+                console.print(f"  [dim]○[/dim] {key}: empty, skipping")
+                continue
+
+            tokens_before = estimate_messages_tokens(history)
+            total_before += tokens_before
+            
+            console.print(f"  [dim]⟳[/dim] {key}: {len(history)} msgs, {tokens_before:,} tokens...")
+
+            async def do_compact_one():
+                compacted = await compactor.compact(history)
+                return compacted, compactor.get_summary_prompt()
+
+            compacted, summary = asyncio.run(do_compact_one())
+            tokens_after = estimate_messages_tokens(compacted)
+            total_after += tokens_after
+
+            # Save compacted state
+            if summary:
+                session.messages = []
+                session.add_message(
+                    role="system",
+                    content=f"[Prior conversation summary]\n{summary}"
+                )
+                sessions.save(session)
+                compacted_count += 1
+                console.print(f"  [green]✓[/green] {key}: {tokens_before:,} → summary")
+
+        reduction = ((total_before - total_after) / total_before * 100) if total_before > 0 else 0
+        console.print(f"\n[green]✓[/green] Compacted {compacted_count}/{len(all_sess)} sessions")
+        console.print(f"[bold]Total reduction:[/bold] {total_before:,} → {total_after:,} tokens ({reduction:.1f}%)")
+        raise typer.Exit(0)
+
+    # Require session ID if not listing or compacting all
+    if session_id is None:
+        console.print("[red]Error: --session/-s or --all is required.[/red]")
+        console.print("\nUsage examples:")
+        console.print("  nanobot compact -s whatsapp:5512992247834")
+        console.print("  nanobot compact -s cli:default")
+        console.print("  nanobot compact --all")
+        console.print("  nanobot compact --list")
+        raise typer.Exit(1)
+
+    # Normalize session ID (accepts whatsapp:number, whatsapp_number, etc.)
+    normalized_id = normalize_session_id(session_id)
+
+    # Load session
+    session = sessions._load(normalized_id)
+
+    if session is None:
+        console.print(f"[red]Session not found: {session_id}[/red]")
+        console.print(f"[dim](tried: {normalized_id})[/dim]")
+        console.print("\nAvailable sessions:")
+        for s in sessions.list_sessions():
+            key = s.get("key", s.get("path", "unknown"))
+            console.print(f"  - {key}")
+        raise typer.Exit(1)
+    
+    history = session.get_history()
+    if not history:
+        console.print(f"[yellow]Session {session_id} has no history to compact.[/yellow]")
+        raise typer.Exit(0)
+    
+    # Estimate current tokens
+    current_tokens = estimate_messages_tokens(history)
+    console.print(f"\n[bold]Session:[/bold] {session_id}")
+    console.print(f"[bold]Messages:[/bold] {len(history)}")
+    console.print(f"[bold]Estimated tokens:[/bold] {current_tokens:,}")
+    
+    # Create provider for summarization
+    provider = _create_provider(config)
+    if provider is None:
+        console.print("[red]Error: No LLM provider configured.[/red]")
+        raise typer.Exit(1)
+    
+    # Create compactor and run
+    compactor = ContextCompactor(
+        provider=provider,
+        max_context_tokens=config.agents.defaults.compaction.max_context_tokens,
+        model=config.agents.defaults.model,
+    )
+    
+    console.print("\n[dim]Compacting...[/dim]")
+
+    async def do_compact():
+        # Force compaction - summarizes all messages
+        compacted = await compactor.compact(history)
+        return compacted, compactor.get_summary_prompt()
+
+    compacted, summary = asyncio.run(do_compact())
+
+    new_tokens = estimate_messages_tokens(compacted)
+    reduction = ((current_tokens - new_tokens) / current_tokens * 100) if current_tokens > 0 else 0
+
+    # Save the compacted state back to session
+    if summary:
+        # Clear old messages and add summary as system context
+        session.messages = []
+        session.add_message(
+            role="system",
+            content=f"[Prior conversation summary]\n{summary}"
+        )
+        sessions.save(session)
+        console.print(f"[green]✓[/green] Session updated with compacted context")
+
+    console.print(f"\n[green]✓[/green] Compaction complete!")
+    console.print(f"[bold]Original messages:[/bold] {len(history)}")
+    console.print(f"[bold]Original tokens:[/bold] {current_tokens:,}")
+    console.print(f"[bold]New tokens:[/bold] {new_tokens:,} (+ summary)")
+    console.print(f"[bold]Reduction:[/bold] {reduction:.1f}%")
+
+    if show_summary and summary:
+        console.print(f"\n[bold]Generated Summary:[/bold]")
+        console.print(f"[dim]{summary[:2000]}{'...' if len(summary) > 2000 else ''}[/dim]")
 
 
 # ============================================================================
@@ -614,6 +872,14 @@ def cron_run(
 
 
 # ============================================================================
+# Auth Commands
+# ============================================================================
+
+from nanobot.commands import auth as auth_commands
+app.add_typer(auth_commands.app, name="auth")
+
+
+# ============================================================================
 # Status Commands
 # ============================================================================
 
@@ -648,6 +914,27 @@ def status():
         console.print(f"Gemini API: {'[green]✓[/green]' if has_gemini else '[dim]not set[/dim]'}")
         vllm_status = f"[green]✓ {config.providers.vllm.api_base}[/green]" if has_vllm else "[dim]not set[/dim]"
         console.print(f"vLLM/Local: {vllm_status}")
+        
+        # Claude CLI status
+        claude_cli = config.providers.claude_cli
+        if claude_cli.enabled:
+            console.print(f"Claude CLI: [green]✓ enabled[/green] (model: {claude_cli.default_model})")
+        else:
+            console.print(f"Claude CLI: [dim]disabled[/dim]")
+        
+        # Compaction status
+        compaction = config.agents.defaults.compaction
+        if compaction.enabled:
+            console.print(f"Compaction: [green]✓ enabled[/green] (max {compaction.max_context_tokens:,} tokens)")
+        else:
+            console.print(f"Compaction: [dim]disabled[/dim]")
+        
+        # Hindsight status
+        hindsight = config.agents.defaults.hindsight
+        if hindsight.enabled:
+            console.print(f"Hindsight: [green]✓ enabled[/green] ({hindsight.url})")
+        else:
+            console.print(f"Hindsight: [dim]disabled[/dim]")
 
 
 if __name__ == "__main__":

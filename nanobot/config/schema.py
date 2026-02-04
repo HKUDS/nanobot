@@ -5,11 +5,19 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 
+class PrefixRule(BaseModel):
+    """Prefix rule for filtering messages."""
+    phone: str  # Phone number (partial match, e.g., "992247834")
+    prefix: str  # Required prefix (e.g., "nano")
+    strip: bool = True  # Remove prefix before processing
+
+
 class WhatsAppConfig(BaseModel):
     """WhatsApp channel configuration."""
     enabled: bool = False
     bridge_url: str = "ws://localhost:3001"
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
+    prefix_rules: list[PrefixRule] = Field(default_factory=list)  # Require prefix from specific numbers
 
 
 class TelegramConfig(BaseModel):
@@ -25,6 +33,50 @@ class ChannelsConfig(BaseModel):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
 
 
+class CompactionConfig(BaseModel):
+    """Context compaction configuration."""
+    enabled: bool = True
+    max_context_tokens: int = 128000  # Model's context window
+
+
+class HindsightConfig(BaseModel):
+    """Hindsight memory configuration."""
+    enabled: bool = False
+    url: str = "http://localhost:8888"
+    bank_id: str | None = None  # Defaults to workspace name
+
+
+class SoulConfig(BaseModel):
+    """Soul/personality configuration - loads .md files as system context."""
+    enabled: bool = True
+    path: str = "~/.nanobot/soul"  # Directory containing soul files
+    files: list[str] = Field(default_factory=lambda: [
+        "SOUL.md",      # Core personality & rules
+        "IDENTITY.md",  # Who the agent is
+        "USER.md",      # About the user
+        "MEMORY.md",    # Long-term curated memory
+        "AGENTS.md",    # Behavior rules
+        "TOOLS.md",     # Tool usage notes
+    ])
+    inject_datetime: bool = True  # Add current date/time to context
+    inject_runtime: bool = True   # Add runtime info (model, channel, etc)
+
+
+class Mem0Config(BaseModel):
+    """mem0 semantic memory configuration."""
+    enabled: bool = False
+    storage_path: str | None = Field(default=None, alias="storagePath")  # Path for vector DB
+    llm_provider: str = Field(default="groq", alias="llmProvider")  # groq, anthropic, openai
+    llm_model: str = Field(default="llama-3.3-70b-versatile", alias="llmModel")
+    embedder_provider: str = Field(default="openai", alias="embedderProvider")  # openai, huggingface
+    embedder_model: str = Field(default="text-embedding-3-small", alias="embedderModel")
+    auto_add: bool = Field(default=False, alias="autoAdd")  # Only add on explicit commands
+    auto_recall: bool = Field(default=True, alias="autoRecall")  # Auto-recall before each turn
+    recall_limit: int = Field(default=5, alias="recallLimit")  # Max memories to recall
+
+    model_config = {"populate_by_name": True}
+
+
 class AgentDefaults(BaseModel):
     """Default agent configuration."""
     workspace: str = "~/.nanobot/workspace"
@@ -32,6 +84,10 @@ class AgentDefaults(BaseModel):
     max_tokens: int = 8192
     temperature: float = 0.7
     max_tool_iterations: int = 20
+    compaction: CompactionConfig = Field(default_factory=CompactionConfig)
+    hindsight: HindsightConfig = Field(default_factory=HindsightConfig)
+    soul: SoulConfig = Field(default_factory=SoulConfig)
+    mem0: Mem0Config = Field(default_factory=Mem0Config)
 
 
 class AgentsConfig(BaseModel):
@@ -45,6 +101,33 @@ class ProviderConfig(BaseModel):
     api_base: str | None = None
 
 
+class ClaudeCliConfig(BaseModel):
+    """Claude CLI provider configuration (uses Claude Code subscription)."""
+    enabled: bool = False
+    command: str = "claude"  # Path to claude CLI
+    default_model: str = "opus"  # opus, sonnet, haiku
+    timeout_seconds: int = 300
+
+
+class ElevenLabsConfig(BaseModel):
+    """ElevenLabs TTS configuration."""
+    api_key: str = ""
+    voice_id: str = "pMsXgVXv3BLzUgSXRplE"  # Default voice (Serena)
+    model_id: str = "eleven_multilingual_v2"
+    stability: float = 0.5
+    similarity_boost: float = Field(default=0.75, alias="similarityBoost")
+    style: float = 0.0
+    speed: float = 1.0
+
+    model_config = {"populate_by_name": True}
+
+
+class GeminiImageConfig(BaseModel):
+    """Gemini image generation configuration."""
+    api_key: str = ""
+    model: str = "imagen-3.0-generate-002"
+
+
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -54,6 +137,11 @@ class ProvidersConfig(BaseModel):
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    claude_cli: ClaudeCliConfig = Field(default_factory=ClaudeCliConfig)
+    elevenlabs: ElevenLabsConfig = Field(default_factory=ElevenLabsConfig)
+    gemini_image: GeminiImageConfig = Field(default_factory=GeminiImageConfig, alias="geminiImage")
+
+    model_config = {"populate_by_name": True}
 
 
 class GatewayConfig(BaseModel):
@@ -113,6 +201,14 @@ class Config(BaseSettings):
         if self.providers.vllm.api_base:
             return self.providers.vllm.api_base
         return None
+    
+    def use_claude_cli(self) -> bool:
+        """Check if Claude CLI provider should be used."""
+        return self.providers.claude_cli.enabled
+    
+    def get_claude_cli_config(self) -> ClaudeCliConfig:
+        """Get Claude CLI configuration."""
+        return self.providers.claude_cli
     
     class Config:
         env_prefix = "NANOBOT_"

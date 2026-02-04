@@ -1,6 +1,7 @@
 """Session management for conversation history."""
 
 import json
+import re
 from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -9,6 +10,39 @@ from typing import Any
 from loguru import logger
 
 from nanobot.utils.helpers import ensure_dir, safe_filename
+
+
+def normalize_session_id(session_id: str) -> str:
+    """
+    Normalize a session ID to the canonical format.
+
+    Accepts various formats and normalizes to the internal format:
+    - "whatsapp:5512992247834" -> "whatsapp_5512992247834@s.whatsapp.net"
+    - "whatsapp_5512992247834" -> "whatsapp_5512992247834@s.whatsapp.net"
+    - "whatsapp_5512992247834@s.whatsapp.net" -> unchanged
+    - "telegram:123456" -> "telegram_123456"
+    - "cli:default" -> "cli_default"
+
+    Args:
+        session_id: Session ID in any supported format.
+
+    Returns:
+        Normalized session ID.
+    """
+    # Replace : with _ for consistency
+    normalized = session_id.replace(":", "_")
+
+    # Handle WhatsApp - add @s.whatsapp.net suffix if missing
+    if normalized.startswith("whatsapp_"):
+        # Check if it's just a number without the suffix
+        if "@" not in normalized:
+            # Extract the number part
+            number = normalized[9:]  # Remove "whatsapp_" prefix
+            # Clean up - remove any non-numeric characters except @
+            if number.isdigit():
+                normalized = f"whatsapp_{number}@s.whatsapp.net"
+
+    return normalized
 
 
 @dataclass
