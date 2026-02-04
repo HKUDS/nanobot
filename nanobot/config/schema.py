@@ -130,6 +130,7 @@ class Config(BaseSettings):
             self.providers.gemini.api_key or
             self.providers.zhipu.api_key or
             self.providers.groq.api_key or
+            self.providers.nvidia.api_key or
             self.providers.vllm.api_key or
             None
         )

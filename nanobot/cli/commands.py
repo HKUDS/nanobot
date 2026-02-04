@@ -339,10 +339,26 @@ def agent(
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
 
-    if not api_key and not is_bedrock:
+    # Check if NVIDIA provider should be used
+    is_nvidia = model.startswith("moonshotai/") or config.providers.nvidia.api_key
+
+    if not api_key and not is_bedrock and not is_nvidia:
         console.print("[red]Error: No API key configured.[/red]")
         raise typer.Exit(1)
 
+    if is_nvidia and config.providers.nvidia.api_key:
+        from nanobot.providers.nvidia_provider import NvidiaProvider
+        provider = NvidiaProvider(
+            api_key=config.providers.nvidia.api_key,
+            default_model=config.agents.defaults.model
+        )
+    else:
+        provider = LiteLLMProvider(
+            api_key=api_key,
+            api_base=api_base,
+            default_model=config.agents.defaults.model
+        )
+    
     bus = MessageBus()
     
     agent_loop = AgentLoop(
