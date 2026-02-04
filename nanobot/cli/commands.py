@@ -220,6 +220,22 @@ def gateway(
     
     # Create provider (supports Ollama, OpenRouter, Anthropic, OpenAI)
     provider = _create_provider(config)
+    # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock)
+    api_key = config.get_api_key()
+    api_base = config.get_api_base()
+    model = config.agents.defaults.model
+    is_bedrock = model.startswith("bedrock/")
+
+    if not api_key and not is_bedrock:
+        console.print("[red]Error: No API key configured.[/red]")
+        console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
+        raise typer.Exit(1)
+    
+    provider = LiteLLMProvider(
+        api_key=api_key,
+        api_base=api_base,
+        default_model=config.agents.defaults.model
+    )
     
     # Create agent
     agent = AgentLoop(
@@ -318,6 +334,15 @@ def agent(
     # Create provider (supports Ollama, OpenRouter, Anthropic, OpenAI)
     provider = _create_provider(config)
     
+    api_key = config.get_api_key()
+    api_base = config.get_api_base()
+    model = config.agents.defaults.model
+    is_bedrock = model.startswith("bedrock/")
+
+    if not api_key and not is_bedrock:
+        console.print("[red]Error: No API key configured.[/red]")
+        raise typer.Exit(1)
+
     bus = MessageBus()
     
     agent_loop = AgentLoop(
@@ -367,15 +392,17 @@ app.add_typer(channels_app, name="channels")
 def channels_status():
     """Show channel status."""
     from nanobot.config.loader import load_config
-    
+
     config = load_config()
-    
+
     table = Table(title="Channel Status")
     table.add_column("Channel", style="cyan")
     table.add_column("Enabled", style="green")
     table.add_column("Configuration", style="yellow")
     
     # WhatsApp channel
+
+    # WhatsApp
     wa = config.channels.whatsapp
     table.add_row(
         "WhatsApp",
@@ -392,6 +419,16 @@ def channels_status():
         token_display
     )
     
+
+    # Telegram
+    tg = config.channels.telegram
+    tg_config = f"token: {tg.token[:10]}..." if tg.token else "[dim]not configured[/dim]"
+    table.add_row(
+        "Telegram",
+        "✓" if tg.enabled else "✗",
+        tg_config
+    )
+
     console.print(table)
 
 
@@ -897,18 +934,17 @@ def ollama_pull(
 def status():
     """Show nanobot status."""
     from nanobot.config.loader import load_config, get_config_path
-    from nanobot.utils.helpers import get_workspace_path
-    
+
     config_path = get_config_path()
-    workspace = get_workspace_path()
-    
+    config = load_config()
+    workspace = config.workspace_path
+
     console.print(f"{__logo__} nanobot Status\n")
-    
+
     console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
     console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
-    
+
     if config_path.exists():
-        config = load_config()
         console.print(f"Model: {config.agents.defaults.model}")
         
         # Check API keys
