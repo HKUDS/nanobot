@@ -32,14 +32,23 @@ class LiteLLMProvider(LLMProvider):
             (api_base and "openrouter" in api_base)
         )
         
-        # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        # Detect MiniMax by api_base containing "minimax"
+        self.is_minimax = (
+            (api_base and "minimax" in api_base.lower()) or
+            ("minimax" in default_model.lower())
+        )
+        
+        # Track if using custom endpoint (vLLM, etc.) - exclude MiniMax
+        self.is_vllm = bool(api_base) and not self.is_openrouter and not self.is_minimax
         
         # Configure LiteLLM based on provider
         if api_key:
             if self.is_openrouter:
                 # OpenRouter mode - set key
                 os.environ["OPENROUTER_API_KEY"] = api_key
+            elif self.is_minimax:
+                # MiniMax mode - set key for Authorization header
+                os.environ["MINIMAX_API_KEY"] = api_key
             elif self.is_vllm:
                 # vLLM/custom endpoint - uses OpenAI-compatible API
                 os.environ["OPENAI_API_KEY"] = api_key
@@ -53,9 +62,15 @@ class LiteLLMProvider(LLMProvider):
                 os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
+            elif "minimax" in default_model.lower():
+                os.environ.setdefault("MINIMAX_API_KEY", api_key)
         
         if api_base:
             litellm.api_base = api_base
+        
+        # Configure MiniMax authentication header
+        if self.is_minimax:
+            litellm.custom_provider_auth_header = {"minimax": "Authorization"}
         
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
@@ -83,18 +98,22 @@ class LiteLLMProvider(LLMProvider):
         """
         model = model or self.default_model
         
+        # For MiniMax, ensure minimax/ prefix if not already present
+        if "minimax" in model.lower() and not model.startswith("minimax/"):
+            model = f"minimax/{model}"
+        
         # For OpenRouter, prefix model name if not already prefixed
         if self.is_openrouter and not model.startswith("openrouter/"):
             model = f"openrouter/{model}"
         
         # For Zhipu/Z.ai, ensure prefix is present
-        # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
+        # Handle cases like "glm-4.7-flash" -> "zhipu/glm-4.7-flash"
         if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
             model.startswith("zhipu/") or 
             model.startswith("zai/") or 
             model.startswith("openrouter/")
         ):
-            model = f"zai/{model}"
+            model = f"zhipu/{model}"
         
         # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
         # Convert openai/ prefix to hosted_vllm/ if user specified it
@@ -115,6 +134,10 @@ class LiteLLMProvider(LLMProvider):
         # Pass api_base directly for custom endpoints (vLLM, etc.)
         if self.api_base:
             kwargs["api_base"] = self.api_base
+        
+        # Pass api_key directly for MiniMax to ensure correct authentication
+        if self.is_minimax and self.api_key:
+            kwargs["api_key"] = self.api_key
         
         if tools:
             kwargs["tools"] = tools
