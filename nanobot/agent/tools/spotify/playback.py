@@ -11,7 +11,10 @@ class SpotifyPlayTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Play or resume Spotify using system media controls."
+        return (
+            "Play or resume Spotify using system media controls."
+            "Use when the user says play music, play song, or resume Spotify."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -33,7 +36,10 @@ class SpotifyPauseTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Pause Spotify playback."
+        return (
+            "Pause Spotify playback."
+            "Use when the user says pause or stop music, song, or Spotify."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -55,7 +61,10 @@ class SpotifyNextTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Skip to next Spotify track."
+        return (
+            "Skip to next Spotify track."
+            "Use when the user says next song, next track or skip song or track."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -77,7 +86,10 @@ class SpotifyPreviousTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Go to previous Spotify track."
+        return (
+            "Go to previous Spotify track."
+            "Use when the user says previous song, go back, or play previous song/track."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
