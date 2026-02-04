@@ -1,4 +1,0 @@
-# TEST DATA - Demonstrates path traversal can read sensitive files
-# If this content appears in POC output, the vulnerability is confirmed
-SENSITIVE_DATA_MARKER=PATH_TRAVERSAL_VULNERABILITY_CONFIRMED
-TEST_SECRET=this_file_should_not_be_readable_from_workspace
