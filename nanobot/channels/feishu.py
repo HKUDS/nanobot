@@ -148,11 +148,15 @@ class FeishuChannel(BaseChannel):
                 return
             asyncio.run_coroutine_threadsafe(self._process_message_event(payload), self._loop)
 
+        def on_ignore(_: Any) -> None:
+            return
+
         token = self.config.verification_token or ""
         encrypt_key = self.config.encrypt_key or ""
         event_handler = (
             lark.EventDispatcherHandler.builder(encrypt_key, token, lark.LogLevel.INFO)
             .register_p2_im_message_receive_v1(on_message)
+            .register_p2_im_message_message_read_v1(on_ignore)
             .build()
         )
 
