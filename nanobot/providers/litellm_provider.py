@@ -49,8 +49,12 @@ class LiteLLMProvider(LLMProvider):
                 os.environ.setdefault("OPENAI_API_KEY", api_key)
             elif "gemini" in default_model.lower():
                 os.environ.setdefault("GEMINI_API_KEY", api_key)
-            elif "zhipu" in default_model or "glm" in default_model or "zai" in default_model:
+            elif "zhipu" in default_model or "glm" in default_model:
                 os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
+            elif "zai-coding" in default_model or ("zai" in default_model and "coding" in default_model):
+                os.environ.setdefault("ZAI_API_KEY", api_key)
+            elif "zai" in default_model:
+                os.environ.setdefault("ZAI_API_KEY", api_key)
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
         
@@ -89,16 +93,18 @@ class LiteLLMProvider(LLMProvider):
         
         # For Zhipu/Z.ai, ensure prefix is present
         # Handle cases like "glm-4.7-flash" -> "zhipu/glm-4.7-flash"
+        # But skip this for zai and zai-coding models since they have their own prefixes
         if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
             model.startswith("zhipu/") or 
             model.startswith("zai/") or 
             model.startswith("openrouter/")
-        ):
+        ) and "zai-" not in model and "zai/" not in model:
             model = f"zhipu/{model}"
         
         # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
         # Convert openai/ prefix to hosted_vllm/ if user specified it
-        if self.is_vllm:
+        # But skip this for Zai since it has its own endpoint
+        if self.is_vllm and not ("zai/" in model or "zai-coding/" in model):
             model = f"hosted_vllm/{model}"
         
         # For Gemini, ensure gemini/ prefix if not already present
