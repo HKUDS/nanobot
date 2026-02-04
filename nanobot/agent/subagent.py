@@ -12,7 +12,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, ListDirTool
+from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, ListDirTool, MoveFileTool, DeleteFileTool, CopyFileTool, SearchFilesTool, FileInfoTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.system import (
@@ -104,11 +104,12 @@ class SubagentManager:
             tools.register(ReadFileTool())
             tools.register(WriteFileTool())
             tools.register(ListDirTool())
-            tools.register(ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.exec_config.restrict_to_workspace,
-            ))
+            self.tools.register(DeleteFileTool())
+            self.tools.register(CopyFileTool())
+            self.tools.register(MoveFileTool())
+            self.tools.register(FileInfoTool())
+            self.tools.register(SearchFilesTool())
+            tools.register(ExecTool(working_dir=str(self.workspace)))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
             self.tools.register(OpenApplicationTool())

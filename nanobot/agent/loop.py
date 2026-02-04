@@ -12,7 +12,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
+from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool, DeleteFileTool, MoveFileTool, CopyFileTool, FileInfoTool, SearchFilesTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
@@ -84,6 +84,11 @@ class AgentLoop:
         self.tools.register(CloseApplicationTool())
         self.tools.register(SystemInfoTool())
         self.tools.register(ScreenshotTool())
+        self.tools.register(DeleteFileTool())
+        self.tools.register(CopyFileTool())
+        self.tools.register(MoveFileTool())
+        self.tools.register(FileInfoTool())
+        self.tools.register(SearchFilesTool())
         
         # Shell tool
         self.tools.register(ExecTool(

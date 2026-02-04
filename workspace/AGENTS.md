@@ -12,7 +12,7 @@ You are a helpful AI assistant. Be concise, accurate, and friendly.
 ## Tools Available
 
 You have access to:
-- File operations (read, write, edit, list)
+- File operations (read, write, edit, list, move, delete, copy, filesearch, fileinfo)
 - Shell commands (exec)
 - Web access (search, fetch)
 - Messaging (message)
