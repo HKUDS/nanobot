@@ -166,12 +166,13 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram or WhatsApp — anytime, anywhere.
+Talk to your nanobot through Telegram, WhatsApp, or Discord — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
 | **Telegram** | Easy (just a token) |
 | **WhatsApp** | Medium (scan QR) |
+| **Discord** | Easy (just a token) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -242,6 +243,45 @@ nanobot gateway
 
 </details>
 
+<details>
+<summary><b>Discord</b></summary>
+
+**1. Create a bot**
+- Go to [Discord Developer Portal](https://discord.com/developers/applications)
+- Create a new application → Bot → Create a bot
+- Copy the token
+- Enable "Message Content Intent" under Privileged Gateway Intents
+
+**2. Invite bot to your server**
+- Go to OAuth2 → URL Generator
+- Select scopes: `bot`
+- Bot permissions: `Send Messages`, `Read Messages/View Channels`, `Read Message History`
+- Use the generated URL to invite the bot to your server
+
+**3. Configure**
+
+```json
+{
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "token": "YOUR_BOT_TOKEN",
+      "allowFrom": ["YOUR_USER_ID"]
+    }
+  }
+}
+```
+
+> Get your user ID by enabling Developer Mode in Discord → User Settings → Advanced, then right-click your name and Copy User ID.
+
+**4. Run**
+
+```bash
+nanobot gateway
+```
+
+</details>
+
 ## ⚙️ Configuration
 
 Config file: `~/.nanobot/config.json`
@@ -307,7 +347,7 @@ Config file: `~/.nanobot/config.json`
 | `nanobot onboard` | Initialize config & workspace |
 | `nanobot agent -m "..."` | Chat with the agent |
 | `nanobot agent` | Interactive chat mode |
-| `nanobot gateway` | Start the gateway |
+| `nanobot gateway` | Start the gateway (connects to Telegram/WhatsApp/Discord) |
 | `nanobot status` | Show status |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
@@ -346,7 +386,7 @@ docker run -v ~/.nanobot:/root/.nanobot --rm nanobot onboard
 # Edit config on host to add API keys
 vim ~/.nanobot/config.json
 
-# Run gateway (connects to Telegram/WhatsApp)
+# Run gateway (connects to Telegram/WhatsApp/Discord)
 docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
 
 # Or run a single command

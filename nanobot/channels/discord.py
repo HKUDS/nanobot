@@ -151,14 +151,20 @@ class DiscordChannel(BaseChannel):
 
             # Try to get channel or user
             try:
-                # Try as a channel first (for server channels or DM channels)
+                # Try cache first (faster)
                 channel = self._client.get_channel(target_id)
 
                 if channel is None:
-                    # If not found, try to get user and create DM
-                    user = self._client.get_user(target_id)
-                    if user:
-                        channel = await user.create_dm()
+                    # Not in cache, try fetching from API
+                    try:
+                        channel = await self._client.fetch_channel(target_id)
+                    except discord.NotFound:
+                        # Not a channel, try as a user
+                        user = self._client.get_user(target_id)
+                        if user is None:
+                            user = await self._client.fetch_user(target_id)
+                        if user:
+                            channel = await user.create_dm()
 
                 if channel:
                     # Discord has a 2000 character limit for messages
