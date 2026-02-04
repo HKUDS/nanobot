@@ -54,6 +54,8 @@ class ProvidersConfig(BaseModel):
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    ollama: ProviderConfig = Field(default_factory=ProviderConfig)
+    ollama_cloud: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -108,6 +110,7 @@ class Config(BaseSettings):
             self.providers.zhipu.api_key or
             self.providers.groq.api_key or
             self.providers.vllm.api_key or
+            self.providers.ollama_cloud.api_key or
             None
         )
     
@@ -117,6 +120,10 @@ class Config(BaseSettings):
             return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
         if self.providers.zhipu.api_key:
             return self.providers.zhipu.api_base
+        if self.providers.ollama_cloud.api_key:
+            return self.providers.ollama_cloud.api_base or "https://ollama.com"
+        if self.providers.ollama.api_base:
+            return self.providers.ollama.api_base or "http://localhost:11434"
         if self.providers.vllm.api_base:
             return self.providers.vllm.api_base
         return None

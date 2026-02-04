@@ -32,8 +32,13 @@ class LiteLLMProvider(LLMProvider):
             (api_base and "openrouter" in api_base)
         )
         
+        # Detect Ollama Cloud
+        self.is_ollama_cloud = (
+            (api_base and "ollama.com" in api_base)
+        )
+        
         # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        self.is_vllm = bool(api_base) and not (self.is_openrouter or self.is_ollama_cloud)
         
         # Configure LiteLLM based on provider
         if api_key:
@@ -53,6 +58,8 @@ class LiteLLMProvider(LLMProvider):
                 os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
+            elif self.is_ollama_cloud:
+                os.environ.setdefault("OLLAMA_API_KEY", api_key)
         
         if api_base:
             litellm.api_base = api_base
@@ -104,6 +111,13 @@ class LiteLLMProvider(LLMProvider):
         # For Gemini, ensure gemini/ prefix if not already present
         if "gemini" in model.lower() and not model.startswith("gemini/"):
             model = f"gemini/{model}"
+            
+        # For Ollama (local or cloud)
+        if ("ollama" in model.lower() or self.is_ollama_cloud) and not (
+            model.startswith("ollama/") or 
+            model.startswith("openrouter/")
+        ):
+            model = f"ollama/{model}"
         
         kwargs: dict[str, Any] = {
             "model": model,
@@ -119,6 +133,12 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+            
+        # Inject auth header for Ollama Cloud if not handled by environment variable
+        if self.is_ollama_cloud and self.api_key:
+            if "extra_headers" not in kwargs:
+                kwargs["extra_headers"] = {}
+            kwargs["extra_headers"]["Authorization"] = f"Bearer {self.api_key}"
         
         try:
             response = await acompletion(**kwargs)
