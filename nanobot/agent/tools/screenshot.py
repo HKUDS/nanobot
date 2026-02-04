@@ -61,7 +61,22 @@ class ScreenshotTool(Tool):
         **kwargs: Any
     ) -> str:
         """Capture screenshot and return base64 or save to file."""
-        # Input validation
+        # Validate inputs
+        validation_error = self._validate_inputs(output_path, region, delay)
+        if validation_error:
+            return validation_error
+
+        # Handle delay
+        await self._handle_delay(delay)
+
+        # Setup output path
+        actual_output_path, use_temp = self._setup_output_path(output_path)
+
+        # Capture and process screenshot
+        return await self._capture_and_process_screenshot(actual_output_path, use_temp, region)
+
+    def _validate_inputs(self, output_path: str | None, region: dict[str, int] | None, delay: float) -> str | None:
+        """Validate input parameters."""
         if output_path and len(output_path) > 500:
             return "Error: Output path too long"
 
@@ -74,16 +89,23 @@ class ScreenshotTool(Tool):
             if any(region[k] < 0 for k in region):
                 return "Error: Region coordinates must be non-negative"
 
-        # Delay if requested
+        return None
+
+    async def _handle_delay(self, delay: float) -> None:
+        """Handle delay before screenshot capture."""
         if delay > 0:
             await asyncio.sleep(delay)
 
-        # Create temp file if no output path
+    def _setup_output_path(self, output_path: str | None) -> tuple[str, bool]:
+        """Setup output path, creating temp file if needed."""
         use_temp = output_path is None
         if use_temp:
             temp_fd, output_path = tempfile.mkstemp(suffix=".png")
             os.close(temp_fd)
+        return output_path, use_temp
 
+    async def _capture_and_process_screenshot(self, output_path: str, use_temp: bool, region: dict[str, int] | None) -> str:
+        """Capture screenshot and process the result."""
         try:
             # Capture screenshot
             success, error = await self._capture_screenshot(output_path, region)

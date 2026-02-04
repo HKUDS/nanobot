@@ -291,88 +291,124 @@ class TelegramChannel(BaseChannel):
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:
             return
-        
+
         message = update.message
         user = update.effective_user
         chat_id = message.chat_id
-        
-        # Use stable numeric ID, but keep username for allowlist compatibility
+
+        # Build sender ID
+        sender_id = self._build_sender_id(user)
+
+        # Store chat_id for replies
+        self._chat_ids[sender_id] = chat_id
+
+        # Extract content and media
+        content, media_paths = await self._process_message_content(message)
+
+        # Forward to message bus
+        await self._forward_message(sender_id, str(chat_id), content, media_paths, message, user)
+
+    def _build_sender_id(self, user) -> str:
+        """Build sender ID with username for compatibility."""
         sender_id = str(user.id)
         if user.username:
             sender_id = f"{sender_id}|{user.username}"
-        
-        # Store chat_id for replies
-        self._chat_ids[sender_id] = chat_id
-        
-        # Build content from text and/or media
+        return sender_id
+
+    async def _process_message_content(self, message) -> tuple[str, list[str]]:
+        """Extract text content and process media from message."""
         content_parts = []
         media_paths = []
-        
-        # Text content
+
+        # Extract text content
+        self._extract_text_content(message, content_parts)
+
+        # Process media if present
+        await self._handle_media_processing(message, content_parts, media_paths)
+
+        content = "\n".join(content_parts) if content_parts else "[empty message]"
+        return content, media_paths
+
+    def _extract_text_content(self, message, content_parts: list[str]) -> None:
+        """Extract text and caption content from message."""
         if message.text:
             content_parts.append(message.text)
         if message.caption:
             content_parts.append(message.caption)
-        
-        # Handle media files
-        media_file = None
-        media_type = None
-        
-        if message.photo:
-            media_file = message.photo[-1]  # Largest photo
-            media_type = "image"
-        elif message.voice:
-            media_file = message.voice
-            media_type = "voice"
-        elif message.audio:
-            media_file = message.audio
-            media_type = "audio"
-        elif message.document:
-            media_file = message.document
-            media_type = "file"
-        
-        # Download media if present
+
+    async def _handle_media_processing(self, message, content_parts: list[str], media_paths: list[str]) -> None:
+        """Detect, download and process media files."""
+        media_file, media_type = self._detect_media_type(message)
+
         if media_file and self._app:
-            try:
-                file = await self._app.bot.get_file(media_file.file_id)
-                ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
-                
-                # Save to workspace/media/
-                from pathlib import Path
-                media_dir = Path.home() / ".nanobot" / "media"
-                media_dir.mkdir(parents=True, exist_ok=True)
-                
-                file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
-                await file.download_to_drive(str(file_path))
-                
-                media_paths.append(str(file_path))
-                
-                # Handle voice transcription
-                if media_type == "voice" or media_type == "audio":
-                    from nanobot.providers.transcription import GroqTranscriptionProvider
-                    transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
-                    transcription = await transcriber.transcribe(file_path)
-                    if transcription:
-                        logger.info(f"Transcribed {media_type}: {transcription[:50]}...")
-                        content_parts.append(f"[transcription: {transcription}]")
-                    else:
-                        content_parts.append(f"[{media_type}: {file_path}]")
-                else:
-                    content_parts.append(f"[{media_type}: {file_path}]")
-                    
-                logger.debug(f"Downloaded {media_type} to {file_path}")
-            except Exception as e:
-                logger.error(f"Failed to download media: {e}")
-                content_parts.append(f"[{media_type}: download failed]")
-        
-        content = "\n".join(content_parts) if content_parts else "[empty message]"
-        
+            await self._download_and_process_media(media_file, media_type, content_parts, media_paths)
+
+    def _detect_media_type(self, message) -> tuple[Any, str | None]:
+        """Detect the type of media in the message."""
+        if message.photo:
+            return message.photo[-1], "image"  # Largest photo
+        elif message.voice:
+            return message.voice, "voice"
+        elif message.audio:
+            return message.audio, "audio"
+        elif message.document:
+            return message.document, "file"
+        return None, None
+
+    async def _download_and_process_media(self, media_file, media_type: str, content_parts: list[str], media_paths: list[str]) -> None:
+        """Download media file and process it (transcription for audio/voice)."""
+        try:
+            file = await self._app.bot.get_file(media_file.file_id)
+            ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
+
+            # Create media directory
+            from pathlib import Path
+            media_dir = Path.home() / ".nanobot" / "media"
+            media_dir.mkdir(parents=True, exist_ok=True)
+
+            file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
+            await file.download_to_drive(str(file_path))
+
+            media_paths.append(str(file_path))
+
+            # Process audio transcription or add media reference
+            await self._process_media_content(media_type, str(file_path), content_parts)
+
+            logger.debug(f"Downloaded {media_type} to {file_path}")
+
+        except Exception as e:
+            logger.error(f"Failed to download media: {e}")
+            content_parts.append(f"[{media_type}: download failed]")
+
+    async def _process_media_content(self, media_type: str, file_path: str, content_parts: list[str]) -> None:
+        """Process media content, including transcription for audio."""
+        if media_type in ("voice", "audio"):
+            transcription = await self._transcribe_audio(file_path)
+            if transcription:
+                logger.info(f"Transcribed {media_type}: {transcription[:50]}...")
+                content_parts.append(f"[transcription: {transcription}]")
+            else:
+                content_parts.append(f"[{media_type}: {file_path}]")
+        else:
+            content_parts.append(f"[{media_type}: {file_path}]")
+
+    async def _transcribe_audio(self, file_path: str) -> str | None:
+        """Transcribe audio file using Groq provider."""
+        try:
+            from nanobot.providers.transcription import GroqTranscriptionProvider
+            transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
+            return await transcriber.transcribe(file_path)
+        except Exception as e:
+            logger.error(f"Transcription failed: {e}")
+            return None
+
+    async def _forward_message(self, sender_id: str, chat_id: str, content: str, media_paths: list[str], message, user) -> None:
+        """Forward processed message to the message bus."""
         logger.debug(f"Telegram message from {sender_id}: {content[:50]}...")
-        
-        # Forward to the message bus
+
         await self._handle_message(
             sender_id=sender_id,
-            chat_id=str(chat_id),
+            chat_id=chat_id,
             content=content,
             media=media_paths,
             metadata={
@@ -383,7 +419,7 @@ class TelegramChannel(BaseChannel):
                 "is_group": message.chat.type != "private"
             }
         )
-    
+
     def _get_extension(self, media_type: str, mime_type: str | None) -> str:
         """Get file extension based on media type."""
         if mime_type:

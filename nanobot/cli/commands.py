@@ -703,33 +703,37 @@ def usage(
     """Show token usage statistics and budget information."""
     from nanobot.usage import UsageTracker, UsageMonitor, UsageConfig
     from nanobot.config.loader import load_config
-    
+
     config = load_config()
     usage_config = config.usage
     tracker = UsageTracker()
     monitor = UsageMonitor(tracker, usage_config)
-    
+
+    # Handle special modes
     if budget:
-        # Show budget status only
-        status = monitor.get_budget_status()
-        console.print(f"[bold]Monthly Budget Status[/bold]\n")
-        console.print(f"Budget: [green]${status.monthly_budget_usd:.2f}[/green]")
-        console.print(f"Current Spend: [yellow]${status.current_spend_usd:.2f}[/yellow]")
-        console.print(f"Remaining: [cyan]${status.remaining_budget_usd:.2f}[/cyan]")
-        console.print(f"Utilization: [magenta]{status.utilization_percentage:.1f}%[/magenta]")
+        self._display_budget_status(monitor)
         return
-    
+
     if alerts:
-        # Show alerts only
-        alerts_list = monitor.get_budget_alerts()
-        if not alerts_list:
-            console.print("[green]✓ No budget alerts at this time[/green]")
-        else:
-            console.print("[bold red]Budget Alerts:[/bold red]")
-            for alert in alerts_list:
-                console.print(f"  ⚠️  {alert}")
+        self._display_alerts(monitor)
         return
-    
+
+    # Validate period and get summary
+    days, period_name = self._validate_period_and_get_days(period)
+    summary = tracker.get_usage_summary(
+        days=days,
+        model_filter=model,
+        channel_filter=channel
+    )
+
+    # Display usage information
+    self._display_usage_summary(summary, period_name, model, channel)
+    self._display_model_breakdown(summary)
+    self._display_channel_breakdown(summary)
+    self._display_budget_and_alerts(monitor)
+
+
+def _validate_period_and_get_days(self, period):
     # Determine days based on period
     if period == "today":
         days = 1
@@ -743,16 +747,12 @@ def usage(
     else:
         console.print(f"[red]Error: Invalid period '{period}'. Use: today, week, month[/red]")
         raise typer.Exit(1)
-    
-    # Get usage summary
-    summary = tracker.get_usage_summary(
-        days=days,
-        model_filter=model,
-        channel_filter=channel
-    )
-    
+    return days, period_name
+
+
+def _display_usage_summary(self, summary, period_name, model, channel):
     console.print(f"[bold]Usage Summary ({period_name})[/bold]\n")
-    
+
     if model or channel:
         filters = []
         if model:
@@ -760,39 +760,66 @@ def usage(
         if channel:
             filters.append(f"channel: {channel}")
         console.print(f"[dim]Filtered by: {', '.join(filters)}[/dim]\n")
-    
+
     console.print(f"Total Tokens: [green]{summary['total_tokens']:,}[/green]")
     console.print(f"Total Cost: [yellow]${summary['total_cost_usd']:.4f}[/yellow]")
     console.print(f"API Calls: [cyan]{summary['record_count']}[/cyan]\n")
-    
+
+
+def _display_model_breakdown(self, summary):
     # Model breakdown
     if summary['model_breakdown']:
         table = Table(title="Model Usage")
         table.add_column("Model", style="cyan")
         table.add_column("Tokens", style="green", justify="right")
         table.add_column("Percentage", style="yellow", justify="right")
-        
+
         for model_name, tokens in sorted(summary['model_breakdown'].items(), key=lambda x: x[1], reverse=True):
             percentage = (tokens / summary['total_tokens'] * 100) if summary['total_tokens'] > 0 else 0
             table.add_row(model_name, f"{tokens:,}", f"{percentage:.1f}%")
-        
+
         console.print(table)
         console.print()
-    
+
+
+def _display_channel_breakdown(self, summary):
     # Channel breakdown
     if summary['channel_breakdown']:
         table = Table(title="Channel Usage")
         table.add_column("Channel", style="cyan")
         table.add_column("Tokens", style="green", justify="right")
         table.add_column("Percentage", style="yellow", justify="right")
-        
+
         for channel_name, tokens in sorted(summary['channel_breakdown'].items(), key=lambda x: x[1], reverse=True):
             percentage = (tokens / summary['total_tokens'] * 100) if summary['total_tokens'] > 0 else 0
             table.add_row(channel_name, f"{tokens:,}", f"{percentage:.1f}%")
-        
+
         console.print(table)
         console.print()
-    
+
+
+def _display_budget_status(self, monitor):
+    # Show budget status only
+    status = monitor.get_budget_status()
+    console.print(f"[bold]Monthly Budget Status[/bold]\n")
+    console.print(f"Budget: [green]${status.monthly_budget_usd:.2f}[/green]")
+    console.print(f"Current Spend: [yellow]${status.current_spend_usd:.2f}[/yellow]")
+    console.print(f"Remaining: [cyan]${status.remaining_budget_usd:.2f}[/cyan]")
+    console.print(f"Utilization: [magenta]{status.utilization_percentage:.1f}%[/magenta]")
+
+
+def _display_alerts(self, monitor):
+    # Show alerts only
+    alerts_list = monitor.get_budget_alerts()
+    if not alerts_list:
+        console.print("[green] No budget alerts at this time[/green]")
+    else:
+        console.print("[bold red]Budget Alerts:[/bold red]")
+        for alert in alerts_list:
+            console.print(f"  {alert}")
+
+
+def _display_budget_and_alerts(self, monitor):
     # Budget status
     status = monitor.get_budget_status()
     console.print(f"[bold]Budget Status[/bold]")
@@ -800,17 +827,12 @@ def usage(
     console.print(f"Current Spend: [yellow]${status.current_spend_usd:.2f}[/yellow]")
     console.print(f"Remaining: [cyan]${status.remaining_budget_usd:.2f}[/cyan]")
     console.print(f"Utilization: [magenta]{status.utilization_percentage:.1f}%[/magenta]")
-    
+
     # Show alerts if any
     if status.alerts:
         console.print("\n[bold red]Alerts:[/bold red]")
         for alert in status.alerts:
-            console.print(f"  ⚠️  {alert}")
-
-
-# ============================================================================
-# Ollama Commands
-# ============================================================================
+            console.print(f"  {alert}")
 
 
 ollama_app = typer.Typer(help="Manage Ollama local models")

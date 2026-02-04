@@ -158,44 +158,77 @@ class ExecTool(Tool):
     
     async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
         """Execute shell command with security validations.
-        
+
         Args:
             command: Shell command to execute
             working_dir: Optional working directory override
             **kwargs: Additional arguments (ignored)
-        
+
         Returns:
             Command output or error message
         """
-        # Input validation
+        # Validate command input
+        validation_error = self._validate_command_input(command)
+        if validation_error:
+            return validation_error
+
+        # Perform security checks
+        security_error = self._perform_security_checks(command)
+        if security_error:
+            return security_error
+
+        # Determine working directory
+        cwd = self._determine_working_directory(working_dir)
+
+        # Check directory fence
+        dir_error = self._check_directory_fence(cwd)
+        if dir_error:
+            return dir_error
+
+        # Execute command and process output
+        return await self._execute_and_process_command(command, cwd)
+
+    def _validate_command_input(self, command: str) -> str | None:
+        """Validate basic command input."""
         command = command.strip()
         if not command:
             return "Error: Empty command"
-        
+
         if len(command) > 2000:
             return "Error: Command too long (max 2000 characters)"
-        
+
+        return None
+
+    def _perform_security_checks(self, command: str) -> str | None:
+        """Perform security validations (blocklist and allowlist)."""
         # Audit logging (truncated for security)
         logger.warning(f"Shell command execution attempt: {command[:100]}{'...' if len(command) > 100 else ''}")
-        
-        # Security validation: Check blocklist
+
+        # Check blocklist
         is_blocked, block_reason = self._is_command_blocked(command)
         if is_blocked:
             return f"Security Error: {block_reason}"
-        
-        # Security validation: Check allowlist
+
+        # Check allowlist
         is_allowed, allow_reason = self._is_command_allowed(command)
         if not is_allowed:
             return f"Security Error: {allow_reason}"
-        
-        # Determine working directory
-        cwd = working_dir or self.working_dir or os.getcwd()
-        
-        # Security validation: Check directory fence
+
+        return None
+
+    def _determine_working_directory(self, working_dir: str | None) -> str:
+        """Determine the working directory for command execution."""
+        return working_dir or self.working_dir or os.getcwd()
+
+    def _check_directory_fence(self, cwd: str) -> str | None:
+        """Check if working directory is within allowed fence."""
         is_dir_allowed, dir_reason = self._is_directory_allowed(cwd)
         if not is_dir_allowed:
             return f"Security Error: {dir_reason}"
-        
+        return None
+
+    async def _execute_and_process_command(self, command: str, cwd: str) -> str:
+        """Execute the command and process its output."""
         try:
             args = shlex.split(command)
             process = await asyncio.create_subprocess_exec(
@@ -204,7 +237,7 @@ class ExecTool(Tool):
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
             )
-            
+
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
@@ -213,28 +246,32 @@ class ExecTool(Tool):
             except asyncio.TimeoutError:
                 process.kill()
                 return f"Error: Command timed out after {self.timeout} seconds"
-            
-            output_parts = []
-            
-            if stdout:
-                output_parts.append(stdout.decode("utf-8", errors="replace"))
-            
-            if stderr:
-                stderr_text = stderr.decode("utf-8", errors="replace")
-                if stderr_text.strip():
-                    output_parts.append(f"STDERR:\n{stderr_text}")
-            
-            if process.returncode != 0:
-                output_parts.append(f"\nExit code: {process.returncode}")
-            
-            result = "\n".join(output_parts) if output_parts else "(no output)"
-            
-            # Truncate very long output
-            max_len = 10000
-            if len(result) > max_len:
-                result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
-            
-            return result
-            
+
+            return self._process_command_output(stdout, stderr, process.returncode)
+
         except Exception as e:
             return f"Error executing command: {str(e)}"
+
+    def _process_command_output(self, stdout: bytes | None, stderr: bytes | None, returncode: int) -> str:
+        """Process and format command output."""
+        output_parts = []
+
+        if stdout:
+            output_parts.append(stdout.decode("utf-8", errors="replace"))
+
+        if stderr:
+            stderr_text = stderr.decode("utf-8", errors="replace")
+            if stderr_text.strip():
+                output_parts.append(f"STDERR:\n{stderr_text}")
+
+        if returncode != 0:
+            output_parts.append(f"\nExit code: {returncode}")
+
+        result = "\n".join(output_parts) if output_parts else "(no output)"
+
+        # Truncate very long output
+        max_len = 10000
+        if len(result) > max_len:
+            result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
+
+        return result
