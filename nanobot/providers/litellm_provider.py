@@ -88,23 +88,32 @@ class LiteLLMProvider(LLMProvider):
             model = f"openrouter/{model}"
         
         # For Zhipu/Z.ai, ensure prefix is present
-        # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
+        # Handle cases like "glm-4.7-flash" -> "zhipu/glm-4.7-flash"
         if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
             model.startswith("zhipu/") or 
             model.startswith("zai/") or 
             model.startswith("openrouter/")
         ):
-            model = f"zai/{model}"
+            model = f"zhipu/{model}"
         
-        # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
-        # Convert openai/ prefix to hosted_vllm/ if user specified it
-        if self.is_vllm:
-            model = f"hosted_vllm/{model}"
+        # For custom OpenAI-compatible endpoints, keep the model name as-is.
+        # Some providers reject the hosted_vllm/ prefix even if the API is compatible.
         
         # For Gemini, ensure gemini/ prefix if not already present
         if "gemini" in model.lower() and not model.startswith("gemini/"):
             model = f"gemini/{model}"
+
         
+        # Use direct OpenAI-compatible call for custom endpoints.
+        if self.is_vllm and self.api_base:
+            return await self._chat_openai_compatible(
+                messages=messages,
+                tools=tools,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
@@ -129,6 +138,113 @@ class LiteLLMProvider(LLMProvider):
                 content=f"Error calling LLM: {str(e)}",
                 finish_reason="error",
             )
+
+    async def _chat_openai_compatible(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        model: str,
+        max_tokens: int,
+        temperature: float,
+    ) -> LLMResponse:
+        """Call an OpenAI-compatible chat/completions endpoint directly."""
+        import httpx
+
+        base = (self.api_base or "").rstrip("/")
+        url = base if base.endswith("/chat/completions") else f"{base}/chat/completions"
+
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+
+        headers: dict[str, str] = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+        except Exception as e:
+            return LLMResponse(
+                content=f"Error calling LLM: {str(e)}",
+                finish_reason="error",
+            )
+
+        if resp.status_code >= 400:
+            return LLMResponse(
+                content=f"Error calling LLM: HTTP {resp.status_code} - {resp.text}",
+                finish_reason="error",
+            )
+
+        try:
+            data = resp.json()
+        except Exception:
+            return LLMResponse(
+                content=f"Error calling LLM: Invalid JSON response - {resp.text}",
+                finish_reason="error",
+            )
+
+        return self._parse_openai_response(data)
+
+    def _parse_openai_response(self, data: dict[str, Any]) -> LLMResponse:
+        """Parse OpenAI-compatible response into our standard format."""
+        choices = data.get("choices") or []
+        if not choices:
+            return LLMResponse(
+                content="Error calling LLM: Empty response",
+                finish_reason="error",
+            )
+
+        choice = choices[0]
+        message = choice.get("message") or {}
+        content = message.get("content")
+
+        tool_calls = []
+        for tc in message.get("tool_calls") or []:
+            func = tc.get("function") or {}
+            args = func.get("arguments")
+            if isinstance(args, str):
+                import json
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {"raw": args}
+            tool_calls.append(ToolCallRequest(
+                id=tc.get("id") or "",
+                name=func.get("name") or "",
+                arguments=args or {},
+            ))
+
+        # Handle legacy function_call
+        if not tool_calls and message.get("function_call"):
+            func = message.get("function_call") or {}
+            args = func.get("arguments")
+            if isinstance(args, str):
+                import json
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {"raw": args}
+            tool_calls.append(ToolCallRequest(
+                id="function_call",
+                name=func.get("name") or "",
+                arguments=args or {},
+            ))
+
+        usage = data.get("usage") or {}
+
+        return LLMResponse(
+            content=content,
+            tool_calls=tool_calls,
+            finish_reason=choice.get("finish_reason") or "stop",
+            usage=usage,
+        )
     
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
