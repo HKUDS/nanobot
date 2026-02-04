@@ -25,6 +25,18 @@ class ChannelsConfig(BaseModel):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
 
 
+class OffloadConfig(BaseModel):
+    """Tool response offloading configuration."""
+    enabled: bool = True
+    threshold_tokens: int = 500
+    threshold_bytes: int = 2000
+    max_preview_tokens: int = 150
+    max_preview_lines: int = 10
+    storage_dir: str = ".artifacts"
+    retention_days: int = 7
+    include_metadata: bool = True
+
+
 class AgentDefaults(BaseModel):
     """Default agent configuration."""
     workspace: str = "~/.nanobot/workspace"
@@ -82,6 +94,7 @@ class ExecToolConfig(BaseModel):
 class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
+    offload: OffloadConfig = Field(default_factory=OffloadConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
 
 

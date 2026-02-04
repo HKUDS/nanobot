@@ -259,6 +259,16 @@ Config file: `~/.nanobot/config.json`
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 
+### Context Management (Tool Offloading)
+
+nanobot automatically prevents context bloat by offloading large tool responses to disk.
+
+| Config | Env Var | Default | Description |
+|--------|---------|---------|-------------|
+| `enabled` | `NANOBOT_TOOLS__OFFLOAD__ENABLED` | `true` | Enable/disable offloading |
+| `threshold_tokens` | `NANOBOT_TOOLS__OFFLOAD__THRESHOLD_TOKENS` | `500` | Max tokens before offloading |
+| `retention_days` | `NANOBOT_TOOLS__OFFLOAD__RETENTION_DAYS` | `7` | Days to keep offloaded files |
+
 
 <details>
 <summary><b>Full config example</b></summary>
@@ -292,6 +302,11 @@ Config file: `~/.nanobot/config.json`
     "web": {
       "search": {
         "apiKey": "BSA..."
+      },
+      "offload": {
+        "enabled": true,
+        "thresholdTokens": 1000,
+        "retentionDays": 30
       }
     }
   }

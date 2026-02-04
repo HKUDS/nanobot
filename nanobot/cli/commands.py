@@ -115,6 +115,21 @@ Information about the user goes here.
 - Timezone: (your timezone)
 - Language: (your preferred language)
 """,
+        "TOOLS.md": """# Tools Reference
+
+## Core Tools
+- **read_file/write_file/edit_file/list_dir**: Filesystem operations
+- **exec**: Shell command execution
+- **web_search/web_fetch**: Internet access
+- **message**: Telegram/WhatsApp messaging
+- **spawn**: Background subagents
+
+## Tool Response Offloading
+To manage context size, large tool responses are offloaded to disk.
+When you see `[TOOL RESPONSE OFFLOADED]`, a preview is shown.
+Use **read_artifact(id)** to view the full content if the preview is insufficient.
+Reading an artifact is safe - it will never be offloaded again.
+""",
     }
     
     for filename, content in templates.items():
@@ -203,6 +218,7 @@ def gateway(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         brave_api_key=config.tools.web.search.api_key or None,
+        offload_config=config.tools.offload
         exec_config=config.tools.exec,
     )
     
@@ -225,6 +241,9 @@ def gateway(
     
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path, on_job=on_cron_job)
+    
+    # Ensure automated cleanup job exists and is up to date
+    _ensure_cleanup_job(cron, config.tools.offload)
     
     # Create heartbeat service
     async def on_heartbeat(prompt: str) -> str:
@@ -311,14 +330,28 @@ def agent(
         provider=provider,
         workspace=config.workspace_path,
         brave_api_key=config.tools.web.search.api_key or None,
+        offload_config=config.tools.offload
         exec_config=config.tools.exec,
     )
     
     if message:
         # Single message mode
         async def run_once():
-            response = await agent_loop.process_direct(message, session_id)
-            console.print(f"\n{__logo__} {response}")
+            # Start background task to print intermediate messages
+            async def printer():
+                while True:
+                    if not bus.outbound.empty():
+                        msg = await bus.outbound.get()
+                        console.print(f"\n{__logo__} {msg.content}")
+                    await asyncio.sleep(0.1)
+            
+            printer_task = asyncio.create_task(printer())
+            
+            try:
+                response = await agent_loop.process_direct(message, session_id)
+                console.print(f"\n{__logo__} {response}")
+            finally:
+                printer_task.cancel()
         
         asyncio.run(run_once())
     else:
@@ -332,8 +365,24 @@ def agent(
                     if not user_input.strip():
                         continue
                     
-                    response = await agent_loop.process_direct(user_input, session_id)
-                    console.print(f"\n{__logo__} {response}\n")
+                    # Consume any previous messages
+                    while not bus.outbound.empty():
+                        _ = bus.outbound.get_nowait()
+                        
+                    # Start printer
+                    async def printer():
+                        while True:
+                            if not bus.outbound.empty():
+                                msg = await bus.outbound.get()
+                                console.print(f"\n{__logo__} {msg.content}\n")
+                            await asyncio.sleep(0.1)
+                    printer_task = asyncio.create_task(printer())
+                    
+                    try:
+                        response = await agent_loop.process_direct(user_input, session_id)
+                        console.print(f"\n{__logo__} {response}\n")
+                    finally:
+                        printer_task.cancel()
                 except KeyboardInterrupt:
                     console.print("\nGoodbye!")
                     break
@@ -650,6 +699,44 @@ def status():
         console.print(f"Gemini API: {'[green]✓[/green]' if has_gemini else '[dim]not set[/dim]'}")
         vllm_status = f"[green]✓ {config.providers.vllm.api_base}[/green]" if has_vllm else "[dim]not set[/dim]"
         console.print(f"vLLM/Local: {vllm_status}")
+
+
+
+def _ensure_cleanup_job(cron_service: "CronService", offload_config: "OffloadConfig"):
+    """
+    Ensure the artifact cleanup job exists and uses current configuration.
+    If 'artifact_cleanup' exists, it is removed and recreated to ensure
+    settings (like retention days in the prompt) are up to date.
+    """
+    from nanobot.cron.types import CronSchedule
+    
+    if not offload_config.enabled:
+        return
+
+    JOB_NAME = "artifact_cleanup"
+    
+    # Check for existing job
+    existing_jobs = cron_service.list_jobs(include_disabled=True)
+    for job in existing_jobs:
+        if job.name == JOB_NAME:
+            cron_service.remove_job(job.id)
+            break
+            
+    # Create new job
+    # Run daily (86400 seconds)
+    # Be explicit about retention days in the prompt so the agent sees it
+    days = offload_config.retention_days
+    message = (
+        f"SYSTEM MAINTENANCE: Please run the 'cleanup_artifacts' tool to delete "
+        f"tool response files older than {days} days."
+    )
+    
+    cron_service.add_job(
+        name=JOB_NAME,
+        schedule=CronSchedule(kind="every", every_ms=86400 * 1000), # Daily
+        message=message,
+        deliver=False
+    )
 
 
 if __name__ == "__main__":
