@@ -3,8 +3,9 @@
 import re
 
 from nanobot.agent.retrieval.bm25 import BM25Retriever
+from nanobot.agent.retrieval.tfidf import TFIDFRetriever
 
-__all__ = ["BM25Retriever", "tokenize"]
+__all__ = ["BM25Retriever", "TFIDFRetriever", "tokenize"]
 
 
 def tokenize(text: str) -> list[str]:
