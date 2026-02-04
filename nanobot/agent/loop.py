@@ -23,6 +23,12 @@ from nanobot.agent.tools.filesystem import (
     FileInfoTool,
     SearchFilesTool
 )
+from nanobot.agent.tools.spotify.playback import (
+    SpotifyPlayTool,
+    SpotifyPauseTool,
+    SpotifyNextTool,
+    SpotifyPreviousTool,
+)
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
@@ -90,10 +96,6 @@ class AgentLoop:
         self.tools.register(WriteFileTool())
         self.tools.register(EditFileTool())
         self.tools.register(ListDirTool())
-        self.tools.register(OpenApplicationTool())
-        self.tools.register(CloseApplicationTool())
-        self.tools.register(SystemInfoTool())
-        self.tools.register(ScreenshotTool())
         self.tools.register(DeleteFileTool())
         self.tools.register(CopyFileTool())
         self.tools.register(MoveFileTool())
@@ -118,6 +120,19 @@ class AgentLoop:
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
+
+        # System control tool
+        self.tools.register(OpenApplicationTool())
+        self.tools.register(CloseApplicationTool())
+        self.tools.register(SystemInfoTool())
+        self.tools.register(ScreenshotTool())
+
+        # Spotify tool
+        self.tools.register(SpotifyNextTool())
+        self.tools.register(SpotifyPauseTool())
+        self.tools.register(SpotifyPlayTool())
+        self.tools.register(SpotifyPreviousTool())
+        
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
