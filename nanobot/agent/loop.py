@@ -151,6 +151,8 @@ class AgentLoop:
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
+        if hasattr(self, 'context') and self.context:
+            self.context.close()
         logger.info("Agent loop stopping")
     
     async def _process_message(self, msg: InboundMessage) -> OutboundMessage | None:

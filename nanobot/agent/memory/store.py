@@ -38,11 +38,13 @@ class MemoryItem:
 class EmbeddingService:
     """Embedding service with LRU cache. Rate limiting handled by litellm."""
 
+    EMBEDDING_DIMENSIONS = {"text-embedding-3-small": 1536, "text-embedding-3-large": 3072}
+
     def __init__(self, model: str = "text-embedding-3-small"):
         self.model = model
-        self._dimension: int | None = None
+        self._dimension: int | None = self.EMBEDDING_DIMENSIONS.get(model)
 
-    @lru_cache(maxsize=1000)
+    @lru_cache(maxsize=200)
     def _embed_cached(self, text: str) -> tuple[float, ...]:
         """Cached embedding call. Returns tuple for hashability."""
         import litellm
@@ -96,6 +98,17 @@ class VectorMemoryStore:
             self._conn.close()
             self._conn = None
 
+    def __del__(self):
+        try:
+            if hasattr(self, '_conn') and self._conn:
+                self._conn.close()
+        except Exception:
+            pass
+
+    def _ensure_open(self) -> None:
+        if self._conn is None:
+            raise RuntimeError("VectorMemoryStore is closed")
+
     def __enter__(self):
         return self
 
@@ -127,6 +140,7 @@ class VectorMemoryStore:
         self._conn.commit()
 
     def add(self, content: str, metadata: dict[str, Any] | None = None, namespace: str | None = None) -> MemoryItem:
+        self._ensure_open()
         if not isinstance(content, str):
             raise TypeError("content must be a string")
         content = content.strip()
@@ -163,6 +177,7 @@ class VectorMemoryStore:
         )
 
     def update(self, memory_id: str, content: str, metadata: dict[str, Any] | None = None, namespace: str | None = None) -> MemoryItem | None:
+        self._ensure_open()
         if not isinstance(content, str):
             raise TypeError("content must be a string")
         content = content.strip()
@@ -203,12 +218,14 @@ class VectorMemoryStore:
         )
 
     def delete(self, memory_id: str, namespace: str | None = None) -> bool:
+        self._ensure_open()
         namespace = self._validate_namespace(namespace or self.namespace)
         cursor = self._conn.execute("DELETE FROM memories WHERE id = ? AND namespace = ?", (memory_id, namespace))
         self._conn.commit()
         return cursor.rowcount > 0
 
     def get(self, memory_id: str, namespace: str | None = None) -> MemoryItem | None:
+        self._ensure_open()
         namespace = self._validate_namespace(namespace or self.namespace)
         cursor = self._conn.execute("SELECT * FROM memories WHERE id = ? AND namespace = ?", (memory_id, namespace))
         row = cursor.fetchone()
@@ -219,11 +236,15 @@ class VectorMemoryStore:
         embedding = None
         if data.get("embedding"):
             embedding = np.frombuffer(data["embedding"], dtype=np.float32).tolist() if HAS_NUMPY else json.loads(data["embedding"].decode("utf-8"))
+        try:
+            metadata = json.loads(data.get("metadata", "{}"))
+        except json.JSONDecodeError:
+            metadata = {}
         return MemoryItem(
             id=data["id"],
             content=data["content"],
             embedding=embedding,
-            metadata=json.loads(data.get("metadata", "{}")),
+            metadata=metadata,
             created_at=datetime.fromisoformat(data["created_at"]),
             updated_at=datetime.fromisoformat(data["updated_at"]),
             access_count=data.get("access_count", 0),
@@ -232,6 +253,7 @@ class VectorMemoryStore:
         )
 
     def search(self, query: str, top_k: int = 5, threshold: float = 0.5, namespace: str | None = None, priority_weight: float = 0.3) -> list[tuple[MemoryItem, float]]:
+        self._ensure_open()
         namespace = self._validate_namespace(namespace or self.namespace)
         query_embedding = self.embedding_service.embed(query)
         cursor = self._conn.execute(
@@ -277,7 +299,7 @@ class VectorMemoryStore:
         return 0.0 if norm_a == 0 or norm_b == 0 else float(dot / (norm_a * norm_b))
 
     def _prune_if_needed(self, namespace: str | None = None) -> None:
-        namespace = namespace or self.namespace
+        namespace = self._validate_namespace(namespace or self.namespace)
         cursor = self._conn.execute("SELECT COUNT(*) FROM memories WHERE namespace = ?", (namespace,))
         count = cursor.fetchone()[0]
         if count > self.max_memories:
@@ -293,6 +315,7 @@ class VectorMemoryStore:
             logger.info(f"Pruned {len(ids_to_delete)} old memories from namespace '{namespace}'")
 
     def count(self, namespace: str | None = None) -> int:
+        self._ensure_open()
         namespace = self._validate_namespace(namespace or self.namespace)
         cursor = self._conn.execute("SELECT COUNT(*) FROM memories WHERE namespace = ?", (namespace,))
         return cursor.fetchone()[0]

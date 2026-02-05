@@ -129,7 +129,9 @@ class MemoryExtractor:
 
     def _sanitize_for_prompt(self, text: str) -> str:
         """Sanitize user content before embedding in prompts."""
-        text = text.replace("```", "'''").replace("<", "&lt;").replace(">", "&gt;")
+        text = text.replace("```", "'''")
+        text = text.replace("</", "&lt;/")  # Escape all closing tags
+        text = text.replace("<", "&lt;").replace(">", "&gt;")
         return text[:2000] + "..." if len(text) > 2000 else text
 
     def _format_conversation(self, messages: list[dict[str, Any]]) -> str:
@@ -174,8 +176,10 @@ class MemoryExtractor:
             for item in raw_data[:self.max_facts]:
                 try:
                     validated = ExtractedFactSchema(**item) if isinstance(item, dict) else ExtractedFactSchema(fact=str(item))
+                    # Sanitize LLM-returned fact content
+                    sanitized_fact = validated.fact.replace("<", "&lt;").replace(">", "&gt;")
                     extracted.append(ExtractedFact(
-                        content=validated.fact,
+                        content=sanitized_fact,
                         importance=importance_map.get(validated.importance, 0.5),
                         source="llm"
                     ))

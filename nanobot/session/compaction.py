@@ -10,7 +10,11 @@ from nanobot.agent.memory.extractor import extract_facts_from_messages
 
 @dataclass
 class CompactionConfig:
-    """Configuration for session compaction."""
+    """Configuration for session compaction.
+
+    Note: Compaction only reduces message count when len(messages) > threshold.
+    At exactly threshold, all messages are preserved in the 3-layer structure.
+    """
     threshold: int = 50
     recent_turns_keep: int = 8
     summary_max_turns: int = 15
@@ -20,11 +24,18 @@ class CompactionConfig:
 class SessionCompactor:
     """Compacts session history using layered summarization."""
 
+    MIN_QUESTION_LENGTH = 20
+    MIN_CONTENT_LENGTH = 50
+    MIN_SENTENCE_LENGTH = 30
+    MAX_EXTRACT_LENGTH = 150
+
     def __init__(self, config: CompactionConfig | None = None):
         self.config = config or CompactionConfig()
 
     def compact(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Compact message history to reduce size."""
+        if not isinstance(messages, list):
+            raise TypeError(f"messages must be a list, got {type(messages)}")
         if len(messages) < self.config.threshold:
             logger.debug(f"Skipping compaction: {len(messages)} < {self.config.threshold}")
             return messages
@@ -74,7 +85,9 @@ class SessionCompactor:
     def _summarize(self, messages: list[dict[str, Any]]) -> str:
         """Summarize middle-section messages using heuristics."""
         user_questions = []
+        seen_questions = set()
         assistant_conclusions = []
+        seen_conclusions = set()
 
         for msg in messages:
             content = msg.get("content", "")
@@ -86,14 +99,20 @@ class SessionCompactor:
             if role == "user":
                 for line in content.split("\n"):
                     line = line.strip()
-                    if line.endswith("?") and len(line) > 20:
-                        user_questions.append(line[:150])
+                    if line.endswith("?") and len(line) > self.MIN_QUESTION_LENGTH:
+                        extracted = line[:self.MAX_EXTRACT_LENGTH]
+                        if extracted not in seen_questions:
+                            user_questions.append(extracted)
+                            seen_questions.add(extracted)
 
-            if role == "assistant" and len(content) > 50:
+            if role == "assistant" and len(content) > self.MIN_CONTENT_LENGTH:
                 for sentence in content.split(".")[:3]:
                     sentence = sentence.strip()
-                    if len(sentence) > 30:
-                        assistant_conclusions.append(sentence[:150])
+                    if len(sentence) > self.MIN_SENTENCE_LENGTH:
+                        extracted = sentence[:self.MAX_EXTRACT_LENGTH]
+                        if extracted not in seen_conclusions:
+                            assistant_conclusions.append(extracted)
+                            seen_conclusions.add(extracted)
                         break
 
         parts = []
