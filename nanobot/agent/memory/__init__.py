@@ -10,8 +10,8 @@ from nanobot.agent.memory_store import (
 )
 
 # Import vector-based memory components
-from nanobot.agent.memory.store import VectorMemoryStore, EmbeddingService, MemoryItem, RateLimiter
-from nanobot.agent.memory.extractor import MemoryExtractor, ExtractedFact
+from nanobot.agent.memory.store import VectorMemoryStore, EmbeddingService, MemoryItem
+from nanobot.agent.memory.extractor import MemoryExtractor, ExtractedFact, extract_facts_from_messages, FACT_KEYWORDS
 from nanobot.agent.memory.consolidator import (
     MemoryConsolidator,
     ConsolidationResult,
@@ -29,10 +29,11 @@ __all__ = [
     "VectorMemoryStore",
     "EmbeddingService",
     "MemoryItem",
-    "RateLimiter",
     # Extractor
     "MemoryExtractor",
     "ExtractedFact",
+    "extract_facts_from_messages",
+    "FACT_KEYWORDS",
     # Consolidator
     "MemoryConsolidator",
     "ConsolidationResult",
