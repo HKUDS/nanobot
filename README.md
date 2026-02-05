@@ -254,6 +254,7 @@ Config file: `~/.nanobot/config.json`
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
+| `deepseek` | LLM (DeepSeek official API) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
@@ -273,6 +274,9 @@ Config file: `~/.nanobot/config.json`
   "providers": {
     "openrouter": {
       "apiKey": "sk-or-v1-xxx"
+    },
+    "deepseek": {
+      "apiKey": "sk-xxx"
     },
     "groq": {
       "apiKey": "gsk_xxx"

@@ -25,7 +25,7 @@ class LiteLLMProvider(LLMProvider):
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
-        
+
         # Detect OpenRouter by api_key prefix or explicit api_base
         self.is_openrouter = (
             (api_key and api_key.startswith("sk-or-")) or
@@ -51,6 +51,8 @@ class LiteLLMProvider(LLMProvider):
                 os.environ.setdefault("GEMINI_API_KEY", api_key)
             elif "zhipu" in default_model or "glm" in default_model or "zai" in default_model:
                 os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
+            elif "deepseek" in default_model.lower():
+                os.environ.setdefault("DEEPSEEK_API_KEY", api_key)
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
         
@@ -104,6 +106,10 @@ class LiteLLMProvider(LLMProvider):
         # For Gemini, ensure gemini/ prefix if not already present
         if "gemini" in model.lower() and not model.startswith("gemini/"):
             model = f"gemini/{model}"
+        
+        # For DeepSeek, ensure deepseek/ prefix if not already present
+        if "deepseek" in model and not model.startswith("deepseek/"):
+            model = f"deepseek/{model}"
         
         kwargs: dict[str, Any] = {
             "model": model,

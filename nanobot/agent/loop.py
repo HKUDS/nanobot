@@ -257,7 +257,7 @@ class AgentLoop:
         
         # Build messages with the announce content
         messages = self.context.build_messages(
-            history=session.get_history(),
+            # history=session.get_history(),
             current_message=msg.content
         )
         
