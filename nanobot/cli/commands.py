@@ -53,8 +53,60 @@ def onboard():
         if not typer.confirm("Overwrite?"):
             raise typer.Exit()
     
-    # Create default config
+    # Interactive model selection
+    console.print("\n[bold]Select your preferred LLM provider:[/bold]")
+    providers = ["OpenRouter", "Anthropic", "OpenAI", "Zhipu AI (Z.AI)", "Gemini", "Groq"]
+    for i, p in enumerate(providers, 1):
+        console.print(f"  {i}. {p}")
+    
+    choice = typer.prompt("Enter choice", default="1")
+    
     config = Config()
+    selected_provider = providers[int(choice) - 1] if choice.isdigit() and 1 <= int(choice) <= len(providers) else "OpenRouter"
+    
+    if selected_provider == "Zhipu AI (Z.AI)":
+        # Ask about coding plan
+        console.print("\n[dim]Z.AI offers two API plans:[/dim]")
+        console.print("  1. [cyan]Coding Plan[/cyan] - Optimized for code generation")
+        console.print("  2. [dim]General Plan[/dim] - General LLM access")
+        plan_choice = typer.prompt("Select your plan (1 or 2)", default="1")
+        is_coding = plan_choice == "1"
+        
+        console.print("\n[bold]Select Zhipu AI model:[/bold]")
+        if is_coding:
+            models = ["glm-4.7", "glm-4.7-flash"]
+        else:
+            models = ["glm-4.7", "glm-4.7-flash", "glm-4.5-air", "glm-4.0"]
+        for i, m in enumerate(models, 1):
+            console.print(f"  {i}. {m}")
+        model_choice = typer.prompt("Enter choice", default="1")
+        selected_model = models[int(model_choice) - 1] if model_choice.isdigit() and 1 <= int(model_choice) <= len(models) else "glm-4.7"
+        config.agents.defaults.model = f"zai/{selected_model}"
+        
+        api_key = typer.prompt("Enter your Zhipu AI API Key", hide_input=True)
+        config.providers.zhipu.api_key = api_key
+        config.providers.zhipu.coding_plan = is_coding
+    elif selected_provider == "Anthropic":
+        config.agents.defaults.model = "anthropic/claude-3-5-sonnet-20240620"
+        api_key = typer.prompt("Enter your Anthropic API Key", hide_input=True)
+        config.providers.anthropic.api_key = api_key
+    elif selected_provider == "OpenAI":
+        config.agents.defaults.model = "openai/gpt-4o"
+        api_key = typer.prompt("Enter your OpenAI API Key", hide_input=True)
+        config.providers.openai.api_key = api_key
+    elif selected_provider == "Gemini":
+        config.agents.defaults.model = "gemini/gemini-1.5-pro"
+        api_key = typer.prompt("Enter your Gemini API Key", hide_input=True)
+        config.providers.gemini.api_key = api_key
+    elif selected_provider == "Groq":
+        config.agents.defaults.model = "groq/llama-3.1-70b-versatile"
+        api_key = typer.prompt("Enter your Groq API Key", hide_input=True)
+        config.providers.groq.api_key = api_key
+    else: # OpenRouter
+        config.agents.defaults.model = "openrouter/anthropic/claude-3.5-sonnet"
+        api_key = typer.prompt("Enter your OpenRouter API Key", hide_input=True)
+        config.providers.openrouter.api_key = api_key
+
     save_config(config)
     console.print(f"[green]✓[/green] Created config at {config_path}")
     
@@ -67,8 +119,10 @@ def onboard():
     
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
-    console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
-    console.print("     Get one at: https://openrouter.ai/keys")
+    if not any([config.providers.openrouter.api_key, config.providers.anthropic.api_key, 
+                config.providers.openai.api_key, config.providers.zhipu.api_key,
+                config.providers.gemini.api_key, config.providers.groq.api_key]):
+        console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
     console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
 

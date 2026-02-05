@@ -96,6 +96,10 @@ class LiteLLMProvider(LLMProvider):
         ):
             model = f"zai/{model}"
         
+        # Also convert 'zhipu/' to 'zai/' if present
+        if model.startswith("zhipu/"):
+            model = model.replace("zhipu/", "zai/", 1)
+        
         # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
         # Convert openai/ prefix to hosted_vllm/ if user specified it
         if self.is_vllm:
