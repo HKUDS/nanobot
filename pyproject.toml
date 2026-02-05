@@ -29,6 +29,8 @@ dependencies = [
     "rich>=13.0.0",
     "croniter>=2.0.0",
     "python-telegram-bot>=21.0",
+    "deepdub>=0.1.20",
+    "audiosample[av]>=2.2.9",
 ]
 
 [project.optional-dependencies]
