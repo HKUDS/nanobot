@@ -77,6 +77,7 @@ class CompactionConfig(BaseModel):
     enabled: bool = True
     threshold: float = 0.8  # Compact at 80% capacity
     model: str | None = None  # None = use main model
+    provider: str | None = None  # Named provider from providers section
     keep_recent: int = Field(default=10, alias="keepRecent")
 
 
@@ -85,7 +86,10 @@ class MemoryConfig(BaseModel):
 
     enabled: bool = True
     embedding_model: str = Field(default="openai/text-embedding-3-small", alias="embeddingModel")
+    embedding_provider: str | None = Field(default=None, alias="embeddingProvider")
     extraction_model: str | None = Field(default=None, alias="extractionModel")
+    extraction_provider: str | None = Field(default=None, alias="extractionProvider")
+    consolidation_provider: str | None = Field(default=None, alias="consolidationProvider")
     index_conversations: bool = Field(default=True, alias="indexConversations")
     extract_facts: bool = Field(default=True, alias="extractFacts")
     auto_recall: bool = Field(default=True, alias="autoRecall")
@@ -105,6 +109,7 @@ class AgentDefaults(BaseModel):
 
     workspace: str = "~/.nanobot/workspace"
     model: str = "anthropic/claude-opus-4-5"
+    provider: str | None = None  # Named provider from providers section
     max_tokens: int = 8192
     temperature: float = 0.7
     max_tool_iterations: int = 20
@@ -233,6 +238,25 @@ class Config(BaseSettings):
         if self.providers.vllm.api_base:
             return self.providers.vllm.api_base
         return None
+
+    def resolve_provider(self, name: str | None = None) -> tuple[str | None, str | None]:
+        """Resolve (api_key, api_base) for a named provider or the default.
+
+        Args:
+            name: Provider name from the providers section (e.g. "openrouter", "zhipu").
+                  If None, falls back to priority-based resolution.
+
+        Returns:
+            Tuple of (api_key, api_base).
+        """
+        if name:
+            provider = getattr(self.providers, name, None)
+            if provider and provider.api_key:
+                api_base = provider.api_base
+                if name == "openrouter" and not api_base:
+                    api_base = "https://openrouter.ai/api/v1"
+                return provider.api_key, api_base
+        return self.get_api_key(), self.get_api_base()
 
     class Config:
         env_prefix = "NANOBOT_"

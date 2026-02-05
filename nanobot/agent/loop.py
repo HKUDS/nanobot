@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
     from nanobot.mcp import MCPManager
     from nanobot.memory.vectors import VectorStore
+    from nanobot.providers.resolver import ProviderResolver
     from nanobot.session.manager import Session
 
 
@@ -81,7 +82,7 @@ class AgentLoop:
         context_config: "ContextConfig | None" = None,
         compaction_config: "CompactionConfig | None" = None,
         memory_config: "MemoryConfig | None" = None,
-        api_key: str | None = None,
+        provider_resolver: "ProviderResolver | None" = None,
     ):
         from nanobot.config.schema import (
             CompactionConfig,
@@ -104,7 +105,7 @@ class AgentLoop:
         self.context_config = context_config or ContextConfig()
         self.compaction_config = compaction_config or CompactionConfig()
         self.memory_config = memory_config or MemoryConfig()
-        self.api_key = api_key
+        self.provider_resolver = provider_resolver
 
         # Vector store for semantic memory (initialized in run())
         self.vector_store: "VectorStore | None" = None
@@ -132,6 +133,9 @@ class AgentLoop:
 
         # MCP manager (initialized in run())
         self.mcp_manager: "MCPManager | None" = None
+
+        # Cache for subsystem-specific LLM providers
+        self._provider_cache: dict[str, LLMProvider] = {}
 
         self._running = False
         self._register_default_tools()
@@ -185,6 +189,45 @@ class AgentLoop:
 
         self.tools.register(InstallMCPServerTool(workspace=self.workspace))
 
+    def _resolve_subsystem_provider(self, provider_name: str | None) -> LLMProvider:
+        """Resolve an LLM provider for a subsystem (compaction, extraction, etc.).
+
+        If ``provider_name`` is set and differs from the main provider, creates
+        and caches a separate LiteLLMProvider with the appropriate credentials.
+        Otherwise returns the main provider.
+
+        Args:
+            provider_name: Named provider from config, or None for main.
+
+        Returns:
+            An LLMProvider instance.
+        """
+        if not provider_name or not self.provider_resolver:
+            return self.provider
+
+        api_key, api_base = self.provider_resolver.resolve(provider_name)
+
+        # If resolution yielded the same credentials as main, reuse it
+        if api_key == self.provider.api_key and api_base == self.provider.api_base:
+            return self.provider
+
+        # Check cache
+        cache_key = f"{provider_name}:{api_key}:{api_base}"
+        if cache_key in self._provider_cache:
+            return self._provider_cache[cache_key]
+
+        # Create new provider
+        from nanobot.providers.litellm_provider import LiteLLMProvider
+
+        new_provider = LiteLLMProvider(
+            api_key=api_key,
+            api_base=api_base,
+            default_model=self.model,
+        )
+        self._provider_cache[cache_key] = new_provider
+        logger.debug(f"Created subsystem provider for '{provider_name}'")
+        return new_provider
+
     def _truncate_tool_result(self, result: str) -> str:
         """Truncate tool result to fit within budget."""
         from nanobot.utils.tokens import count_tokens, truncate_to_token_limit
@@ -231,9 +274,12 @@ class AgentLoop:
         if not await should_compact(messages, max_tokens, threshold):
             return messages
 
+        # Resolve compaction provider (may differ from main)
+        compaction_provider = self._resolve_subsystem_provider(self.compaction_config.provider)
+
         # Create compactor
         compactor = MessageCompactor(
-            provider=self.provider,
+            provider=compaction_provider,
             model=self.compaction_config.model or self.model,
             keep_recent=self.compaction_config.keep_recent,
         )
@@ -690,8 +736,13 @@ class AgentLoop:
                 self.memory_config.extraction_model or self.compaction_config.model or self.model
             )
 
+            # Resolve extraction provider: extraction -> compaction -> main
+            extraction_provider = self._resolve_subsystem_provider(
+                self.memory_config.extraction_provider or self.compaction_config.provider
+            )
+
             extractor = FactExtractor(
-                provider=self.provider,
+                provider=extraction_provider,
                 model=extraction_model,
             )
 
@@ -724,6 +775,11 @@ class AgentLoop:
                 self.memory_config.extraction_model or self.compaction_config.model or self.model
             )
 
+            # Resolve extraction provider: extraction -> compaction -> main
+            extraction_provider = self._resolve_subsystem_provider(
+                self.memory_config.extraction_provider or self.compaction_config.provider
+            )
+
             prompt = (
                 "Extract named entities and their relationships "
                 "from this conversation.\n\n"
@@ -739,7 +795,7 @@ class AgentLoop:
                 "If none, output [].\nJSON:"
             )
 
-            response = await self.provider.chat(
+            response = await extraction_provider.chat(
                 messages=[{"role": "user", "content": prompt}],
                 model=extraction_model,
                 max_tokens=512,
@@ -786,10 +842,20 @@ class AgentLoop:
             from nanobot.llm.embeddings import EmbeddingService
             from nanobot.memory.vectors import VectorStore
 
+            # Resolve embedding provider credentials
+            embed_key, embed_base = None, None
+            if self.provider_resolver:
+                embed_key, embed_base = self.provider_resolver.resolve(
+                    self.memory_config.embedding_provider
+                )
+            else:
+                embed_key = self.provider.api_key
+
             # Create embedding service
             embedding_service = EmbeddingService(
                 model=self.memory_config.embedding_model,
-                api_key=self.api_key,
+                api_key=embed_key,
+                api_base=embed_base,
             )
 
             # Create vector store

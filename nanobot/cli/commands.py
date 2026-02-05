@@ -177,9 +177,11 @@ def gateway(
     # Create components
     bus = MessageBus()
 
-    # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock)
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
+    # Resolve main provider credentials
+    from nanobot.providers.resolver import ProviderResolver
+
+    resolver = ProviderResolver(config.providers, config.agents.defaults.provider)
+    api_key, api_base = resolver.resolve()
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
 
@@ -214,7 +216,7 @@ def gateway(
         context_config=config.agents.defaults.context,
         compaction_config=config.agents.defaults.compaction,
         memory_config=config.agents.defaults.memory,
-        api_key=api_key,
+        provider_resolver=resolver,
     )
 
     # Set the cron callback using agent's process_direct
@@ -295,8 +297,10 @@ def agent(
 
     config = load_config()
 
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
+    from nanobot.providers.resolver import ProviderResolver
+
+    resolver = ProviderResolver(config.providers, config.agents.defaults.provider)
+    api_key, api_base = resolver.resolve()
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
 
@@ -318,7 +322,7 @@ def agent(
         context_config=config.agents.defaults.context,
         compaction_config=config.agents.defaults.compaction,
         memory_config=config.agents.defaults.memory,
-        api_key=api_key,
+        provider_resolver=resolver,
     )
 
     if message:
@@ -635,6 +639,7 @@ def _get_memory_components() -> (
     from nanobot.config.loader import load_config
     from nanobot.llm.embeddings import EmbeddingService
     from nanobot.memory.vectors import VectorStore
+    from nanobot.providers.resolver import ProviderResolver
 
     config = load_config()
     mem = config.agents.defaults.memory
@@ -643,10 +648,13 @@ def _get_memory_components() -> (
         console.print("[red]Memory is disabled in config.[/red]")
         raise typer.Exit(1)
 
-    api_key = config.get_api_key()
+    resolver = ProviderResolver(config.providers, config.agents.defaults.provider)
+    embed_key, embed_base = resolver.resolve(mem.embedding_provider)
+
     embedding_service = EmbeddingService(
         model=mem.embedding_model,
-        api_key=api_key,
+        api_key=embed_key,
+        api_base=embed_base,
     )
     vector_store = VectorStore(
         db_path=mem.db_path,
@@ -863,12 +871,16 @@ def memory_prune(
     from nanobot.config.loader import load_config
     from nanobot.memory.consolidation import MemoryConsolidator
     from nanobot.providers.litellm_provider import LiteLLMProvider
+    from nanobot.providers.resolver import ProviderResolver
 
     config = load_config()
     vector_store, _ = _get_memory_components()
 
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
+    # Consolidation follows compaction provider
+    mem = config.agents.defaults.memory
+    comp = config.agents.defaults.compaction
+    resolver = ProviderResolver(config.providers, config.agents.defaults.provider)
+    api_key, api_base = resolver.resolve(mem.consolidation_provider or comp.provider)
     provider = LiteLLMProvider(
         api_key=api_key,
         api_base=api_base,
@@ -907,12 +919,16 @@ def memory_consolidate(
     from nanobot.config.loader import load_config
     from nanobot.memory.consolidation import MemoryConsolidator
     from nanobot.providers.litellm_provider import LiteLLMProvider
+    from nanobot.providers.resolver import ProviderResolver
 
     config = load_config()
     vector_store, _ = _get_memory_components()
 
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
+    # Consolidation follows compaction provider
+    mem = config.agents.defaults.memory
+    comp = config.agents.defaults.compaction
+    resolver = ProviderResolver(config.providers, config.agents.defaults.provider)
+    api_key, api_base = resolver.resolve(mem.consolidation_provider or comp.provider)
     provider = LiteLLMProvider(
         api_key=api_key,
         api_base=api_base,
