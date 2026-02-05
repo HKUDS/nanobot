@@ -57,6 +57,14 @@ class ProviderConfig(BaseModel):
     api_base: str | None = None
 
 
+class DeepDubConfig(BaseModel):
+    """DeepDub TTS provider configuration."""
+    api_key: str = ""
+    voice_prompt_id: str = "59da0f21-63de-4aef-9ade-e5cabfe639ab"  # Default voice
+    model: str = "dd-etts-3.0"
+    locale: str = "en-US"
+
+
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -67,6 +75,7 @@ class ProvidersConfig(BaseModel):
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    deepdub: DeepDubConfig = Field(default_factory=DeepDubConfig)
 
 
 class GatewayConfig(BaseModel):
