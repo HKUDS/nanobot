@@ -166,12 +166,13 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram or WhatsApp — anytime, anywhere.
+Talk to your nanobot through Telegram, WhatsApp, or Feishu — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
 | **Telegram** | Easy (just a token) |
 | **WhatsApp** | Medium (scan QR) |
+| **Feishu** | Medium (create app) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -237,6 +238,45 @@ nanobot channels login
 nanobot channels login
 
 # Terminal 2
+nanobot gateway
+```
+
+</details>
+
+<details>
+<summary><b>Feishu (飞书)</b></summary>
+
+Requires **lark-oapi** SDK: `pip install lark-oapi`
+
+Uses WebSocket long connection - **no public IP or webhook required**.
+
+**1. Create an app**
+- Go to [Feishu Open Platform](https://open.feishu.cn)
+- Create a new app → Enable "Bot" capability
+- Get App ID and App Secret
+- In "Event Subscription", enable "Use long connection to receive events"
+- Add permission: `im:message` and `im:message:send_as_bot`
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "appId": "cli_xxx",
+      "appSecret": "xxx",
+      "allowFrom": ["ou_xxx"]
+    }
+  }
+}
+```
+
+> Get user open_id from Feishu Open Platform API or bot message events.
+
+**3. Run**
+
+```bash
 nanobot gateway
 ```
 
