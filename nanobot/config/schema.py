@@ -57,6 +57,19 @@ class ProviderConfig(BaseModel):
     api_base: str | None = None
 
 
+class OllamaConfig(BaseModel):
+    """Ollama provider configuration with local/cloud mode support."""
+    enabled: bool = False
+    mode: str = "local"  # "local" or "cloud"
+    # Local mode settings
+    base_url: str = "http://localhost:11434"
+    # Cloud mode settings  
+    api_key: str = ""
+    # Common settings
+    default_model: str = "qwen3:4b"
+    timeout: int = 120
+
+
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -66,6 +79,7 @@ class ProvidersConfig(BaseModel):
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    ollama: OllamaConfig = Field(default_factory=OllamaConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -80,15 +94,31 @@ class WebSearchConfig(BaseModel):
     max_results: int = 5
 
 
+class OllamaWebSearchConfig(BaseModel):
+    """Ollama web search tool configuration."""
+    enabled: bool = False
+    api_key: str = ""  # Ollama API key for web search
+    base_url: str = "https://ollama.com"  # Ollama endpoint (cloud or local)
+    max_results: int = 5
+
+
 class WebToolsConfig(BaseModel):
     """Web tools configuration."""
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    ollama_search: OllamaWebSearchConfig = Field(default_factory=OllamaWebSearchConfig)
 
 
 class ExecToolConfig(BaseModel):
     """Shell exec tool configuration."""
     timeout: int = 60
     restrict_to_workspace: bool = False  # If true, block commands accessing paths outside workspace
+
+
+class UsageAlertConfig(BaseModel):
+    """Token usage alert configuration."""
+    enabled: bool = False
+    daily_limit: int = 1000000  # Daily token limit
+    session_limit: int = 100000  # Per-session token limit
 
 
 class ToolsConfig(BaseModel):
@@ -104,6 +134,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    usage_alert: UsageAlertConfig = Field(default_factory=UsageAlertConfig)
     
     @property
     def workspace_path(self) -> Path:

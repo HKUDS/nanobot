@@ -86,6 +86,7 @@ pip install nanobot-ai
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
 > Get API keys: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
+> Ollama users: See [Ollama setup](#-ollama-local--cloud-models) below
 > You can also change the model to `minimax/minimax-m2` for lower cost.
 
 **1. Initialize**
@@ -163,6 +164,75 @@ nanobot agent -m "Hello from my local LLM!"
 
 > [!TIP]
 > The `apiKey` can be any non-empty string for local servers that don't require authentication.
+
+## 🦙 Ollama (Local & Cloud Models)
+
+Run nanobot with Ollama for easy local model management or use Ollama cloud models.
+
+**1. Install Ollama** ([ollama.com](https://ollama.com))
+
+```bash
+# Pull a model
+ollama pull qwen3:4b
+```
+
+**2. Configure** (`~/.nanobot/config.json`)
+
+**Local Mode:**
+```json
+{
+  "providers": {
+    "ollama": {
+      "enabled": true,
+      "mode": "local",
+      "baseUrl": "http://localhost:11434"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "qwen3:4b"
+    }
+  }
+}
+```
+
+**Cloud Mode:**
+```json
+{
+  "providers": {
+    "ollama": {
+      "enabled": true,
+      "mode": "cloud",
+      "apiKey": "YOUR_OLLAMA_CLOUD_API_KEY"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "qwen3:4b"
+    }
+  },
+  "tools": {
+    "web": {
+      "ollamaSearch": {
+        "enabled": true,
+        "apiKey": "YOUR_OLLAMA_CLOUD_API_KEY"
+      }
+    }
+  }
+}
+```
+
+**3. Chat**
+
+```bash
+nanobot agent -m "Hello from Ollama!"
+```
+
+> [!TIP]
+> - **Local mode**: `mode: "local"`, no API key needed, uses local Ollama server
+> - **Cloud mode**: `mode: "cloud"`, requires API key from [ollama.com](https://ollama.com)
+> - **Web Search**: Ollama web search (cloud only) works alongside Brave Search
+> - **Easy setup**: Run `nanobot config setup-provider` for interactive configuration
 
 ## 💬 Chat Apps
 
@@ -308,6 +378,7 @@ Config file: `~/.nanobot/config.json`
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
+| `ollama` | LLM (local & cloud models) | [ollama.com](https://ollama.com) |
 
 
 <details>
@@ -326,6 +397,11 @@ Config file: `~/.nanobot/config.json`
     },
     "groq": {
       "apiKey": "gsk_xxx"
+    },
+    "ollama": {
+      "enabled": true,
+      "mode": "local",
+      "baseUrl": "http://localhost:11434"
     }
   },
   "channels": {
@@ -350,8 +426,17 @@ Config file: `~/.nanobot/config.json`
     "web": {
       "search": {
         "apiKey": "BSA..."
+      },
+      "ollamaSearch": {
+        "enabled": false,
+        "apiKey": ""
       }
     }
+  },
+  "usageAlert": {
+    "enabled": false,
+    "dailyLimit": 1000000,
+    "sessionLimit": 100000
   }
 }
 ```
@@ -363,12 +448,20 @@ Config file: `~/.nanobot/config.json`
 | Command | Description |
 |---------|-------------|
 | `nanobot onboard` | Initialize config & workspace |
+| `nanobot config show` | Display current configuration |
+| `nanobot config setup-provider` | Setup LLM provider (interactive) |
+| `nanobot config setup-alerts` | Configure usage alerts |
+| `nanobot config setup-web-search` | Configure web search tools |
 | `nanobot agent -m "..."` | Chat with the agent |
 | `nanobot agent` | Interactive chat mode |
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
+| `nanobot usage` | View token usage statistics |
+| `nanobot usage --session <id>` | View usage for specific session |
+| `nanobot usage --today/--week` | View recent usage |
+| `nanobot usage --export stats.json` | Export usage data |
 
 <details>
 <summary><b>Scheduled Tasks (Cron)</b></summary>

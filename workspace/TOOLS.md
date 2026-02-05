@@ -52,6 +52,19 @@ web_search(query: str, count: int = 5) -> str
 
 Returns search results with titles, URLs, and snippets. Requires `tools.web.search.apiKey` in config.
 
+### ollama_web_search
+Search the web using Ollama Cloud's web search feature.
+```
+ollama_web_search(query: str, count: int = 5) -> str
+```
+
+**Requirements:**
+- Ollama Cloud mode enabled (`providers.ollama.mode = "cloud"`)
+- Valid Ollama Cloud API key
+- Web search enabled in config (`tools.web.ollamaSearch.enabled = true`)
+
+**Note:** Only available with Ollama Cloud, not local Ollama installations.
+
 ### web_fetch
 Fetch and extract main content from a URL.
 ```

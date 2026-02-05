@@ -1,5 +1,6 @@
 """Web tools: web_search and web_fetch."""
 
+import asyncio
 import html
 import json
 import os
@@ -8,6 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from loguru import logger
 
 from nanobot.agent.tools.base import Tool
 
@@ -161,3 +163,82 @@ class WebFetchTool(Tool):
         text = re.sub(r'</(p|div|section|article)>', '\n\n', text, flags=re.I)
         text = re.sub(r'<(br|hr)\s*/?>', '\n', text, flags=re.I)
         return _normalize(_strip_tags(text))
+
+
+class OllamaWebSearchTool(Tool):
+    """Search the web using Ollama's web search API."""
+    
+    name = "ollama_web_search"
+    description = "Search the web using Ollama. Returns titles, URLs, and content snippets."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query"},
+            "max_results": {"type": "integer", "description": "Maximum results (1-10)", "minimum": 1, "maximum": 10}
+        },
+        "required": ["query"]
+    }
+    
+    def __init__(self, api_key: str | None = None, base_url: str | None = None, max_results: int = 5):
+        self.api_key = api_key or os.environ.get("OLLAMA_API_KEY", "")
+        self.base_url = base_url or "https://ollama.com"  # Default to cloud
+        self.max_results = max_results
+        self._available = False
+        
+        # Try to import ollama
+        try:
+            import ollama
+            self.ollama = ollama
+            
+            # Create client with appropriate configuration
+            if self.api_key:
+                self.client = ollama.Client(
+                    host=self.base_url,
+                    headers={'Authorization': f'Bearer {self.api_key}'}
+                )
+            else:
+                self.client = ollama.Client(host=self.base_url)
+            
+            self._available = True
+        except ImportError:
+            logger.warning("ollama package not installed. ollama_web_search tool unavailable.")
+            self.ollama = None
+            self.client = None
+    
+    async def execute(self, query: str, max_results: int | None = None, **kwargs: Any) -> str:
+        if not self._available:
+            return "Error: ollama package not installed. Install with: pip install ollama"
+        
+        if not self.api_key:
+            return "Error: OLLAMA_API_KEY not configured for web search"
+        
+        try:
+            n = min(max(max_results or self.max_results, 1), 10)
+            
+            # Use ollama client's web_search method
+            results_data = await asyncio.to_thread(
+                self.client.web_search,
+                query=query
+            )
+            
+            # Parse results
+            results = results_data.get("results", [])
+            if not results:
+                return f"No results found for: {query}"
+            
+            # Format output to match WebSearchTool format
+            lines = [f"Results for: {query}\n"]
+            for i, item in enumerate(results[:n], 1):
+                title = item.get("title", "")
+                url = item.get("url", "")
+                content = item.get("content", "")
+                
+                lines.append(f"{i}. {title}")
+                lines.append(f"   {url}")
+                if content:
+                    lines.append(f"   {content}")
+            
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error(f"Ollama web search error: {e}")
+            return f"Error performing web search: {e}"

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +15,12 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
+from nanobot.agent.tools.web import WebSearchTool, WebFetchTool, OllamaWebSearchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
+from nanobot.usage.tracker import UsageTracker
 
 
 class AgentLoop:
@@ -41,20 +43,27 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 20,
         brave_api_key: str | None = None,
+        ollama_web_search_key: str | None = None,
+        ollama_web_search_base_url: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
+        usage_alert_config: "UsageAlertConfig | None" = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, UsageAlertConfig
         self.bus = bus
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
+        self.ollama_web_search_key = ollama_web_search_key
+        self.ollama_web_search_base_url = ollama_web_search_base_url or "https://ollama.com"
         self.exec_config = exec_config or ExecToolConfig()
+        self.usage_alert_config = usage_alert_config or UsageAlertConfig()
         
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
         self.tools = ToolRegistry()
+        self.usage_tracker = UsageTracker()
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -66,6 +75,47 @@ class AgentLoop:
         
         self._running = False
         self._register_default_tools()
+    
+    def _check_usage_alerts(self, session_key: str) -> str | None:
+        """
+        Check if usage limits have been exceeded and return warning message.
+        
+        Args:
+            session_key: Session identifier to check.
+        
+        Returns:
+            Warning message if limits exceeded, None otherwise.
+        """
+        if not self.usage_alert_config.enabled:
+            return None
+        
+        warnings = []
+        
+        # Check session limit
+        if self.usage_alert_config.session_limit > 0:
+            session_usage = self.usage_tracker.get_session(session_key)
+            if session_usage:
+                total = session_usage.get("total_tokens", 0)
+                if total > self.usage_alert_config.session_limit:
+                    warnings.append(
+                        f"⚠️  Session token limit exceeded: {total:,} / {self.usage_alert_config.session_limit:,} tokens"
+                    )
+        
+        # Check daily limit
+        if self.usage_alert_config.daily_limit > 0:
+            daily_usage = self.usage_tracker.get_daily()
+            if daily_usage:
+                total = daily_usage.get("total_tokens", 0)
+                if total > self.usage_alert_config.daily_limit:
+                    warnings.append(
+                        f"⚠️  Daily token limit exceeded: {total:,} / {self.usage_alert_config.daily_limit:,} tokens"
+                    )
+        
+        if warnings:
+            logger.warning(f"Usage alert triggered for {session_key}: {'; '.join(warnings)}")
+            return "\n".join(warnings)
+        
+        return None
     
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -83,7 +133,15 @@ class AgentLoop:
         ))
         
         # Web tools
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key))
+        if self.brave_api_key:
+            self.tools.register(WebSearchTool(api_key=self.brave_api_key))
+        
+        if self.ollama_web_search_key:
+            self.tools.register(OllamaWebSearchTool(
+                api_key=self.ollama_web_search_key,
+                base_url=self.ollama_web_search_base_url
+            ))
+        
         self.tools.register(WebFetchTool())
         
         # Message tool
@@ -145,6 +203,9 @@ class AgentLoop:
         
         logger.info(f"Processing message from {msg.channel}:{msg.sender_id}")
         
+        # Track tool usage for this session
+        tool_calls_counter = Counter()
+        
         # Get or create session
         session = self.sessions.get_or_create(msg.session_key)
         
@@ -178,6 +239,16 @@ class AgentLoop:
                 model=self.model
             )
             
+            # Track token usage
+            if response.usage:
+                self.usage_tracker.track(
+                    session_key=msg.session_key,
+                    model=self.model,
+                    prompt_tokens=response.usage.get("prompt_tokens", 0),
+                    completion_tokens=response.usage.get("completion_tokens", 0),
+                    total_tokens=response.usage.get("total_tokens", 0),
+                )
+            
             # Handle tool calls
             if response.has_tool_calls:
                 # Add assistant message with tool calls
@@ -204,6 +275,8 @@ class AgentLoop:
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+                    # Track tool usage
+                    tool_calls_counter[tool_call.name] += 1
             else:
                 # No tool calls, we're done
                 final_content = response.content
@@ -211,6 +284,19 @@ class AgentLoop:
         
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
+        
+        # Check usage alerts and append warning if needed
+        usage_warning = self._check_usage_alerts(msg.session_key)
+        if usage_warning:
+            final_content = f"{final_content}\n\n{usage_warning}"
+        
+        # Log tool usage summary
+        if tool_calls_counter:
+            tool_summary = ", ".join(
+                f"{name} ({count}x)" if count > 1 else name
+                for name, count in tool_calls_counter.most_common()
+            )
+            logger.info(f"Tools used: {tool_summary}")
         
         # Save to session
         session.add_message("user", msg.content)
@@ -273,6 +359,16 @@ class AgentLoop:
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
+            
+            # Track token usage for system messages
+            if response.usage:
+                self.usage_tracker.track(
+                    session_key=session_key,
+                    model=self.model,
+                    prompt_tokens=response.usage.get("prompt_tokens", 0),
+                    completion_tokens=response.usage.get("completion_tokens", 0),
+                    total_tokens=response.usage.get("total_tokens", 0),
+                )
             
             if response.has_tool_calls:
                 tool_call_dicts = [
