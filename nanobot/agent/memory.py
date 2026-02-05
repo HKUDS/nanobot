@@ -1,9 +1,11 @@
 """Memory system for persistent agent memory."""
 
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import List, Optional
 
 from nanobot.utils.helpers import ensure_dir, today_date
+from nanobot.agent.retrieval import MemoryRetriever, split_markdown_into_chunks
 
 
 class MemoryStore:
@@ -63,8 +65,6 @@ class MemoryStore:
         Returns:
             Combined memory content.
         """
-        from datetime import timedelta
-        
         memories = []
         today = datetime.now().date()
         
@@ -79,7 +79,7 @@ class MemoryStore:
         
         return "\n\n---\n\n".join(memories)
     
-    def list_memory_files(self) -> list[Path]:
+    def list_memory_files(self) -> List[Path]:
         """List all memory files sorted by date (newest first)."""
         if not self.memory_dir.exists():
             return []
@@ -87,23 +87,58 @@ class MemoryStore:
         files = list(self.memory_dir.glob("????-??-??.md"))
         return sorted(files, reverse=True)
     
-    def get_memory_context(self) -> str:
+    def get_memory_context(self, query: Optional[str] = None, top_k: int = 5) -> str:
         """
         Get memory context for the agent.
         
-        Returns:
-            Formatted memory context including long-term and recent memories.
-        """
-        parts = []
+        If a query is provided, it uses BM25 retrieval to find relevant chunks.
+        Otherwise, it returns the standard context (long-term + today).
         
-        # Long-term memory
+        Args:
+            query: Optional query string for retrieval.
+            top_k: Number of relevant chunks to retrieve.
+            
+        Returns:
+            Formatted memory context.
+        """
+        if not query:
+            parts = []
+            long_term = self.read_long_term()
+            if long_term:
+                parts.append("## Long-term Memory\n" + long_term)
+            today = self.read_today()
+            if today:
+                parts.append("## Today's Notes\n" + today)
+            return "\n\n".join(parts) if parts else ""
+
+        # Retrieval mode
+        all_content = []
+        
+        # Add long-term memory
         long_term = self.read_long_term()
         if long_term:
-            parts.append("## Long-term Memory\n" + long_term)
+            all_content.append(long_term)
+            
+        # Add recent memories (last 30 days for retrieval)
+        recent = self.get_recent_memories(days=30)
+        if recent:
+            all_content.append(recent)
+            
+        if not all_content:
+            return ""
+            
+        full_text = "\n\n".join(all_content)
+        chunks = split_markdown_into_chunks(full_text)
         
-        # Today's notes
-        today = self.read_today()
-        if today:
-            parts.append("## Today's Notes\n" + today)
+        if not chunks:
+            return ""
+            
+        retriever = MemoryRetriever(chunks)
+        results = retriever.retrieve(query, top_k=top_k)
         
-        return "\n\n".join(parts) if parts else ""
+        if not results:
+            # Fallback to standard context if no matches
+            return self.get_memory_context(query=None)
+            
+        relevant_chunks = [chunk for chunk, score in results]
+        return "## Relevant Memories\n\n" + "\n\n---\n\n".join(relevant_chunks)
