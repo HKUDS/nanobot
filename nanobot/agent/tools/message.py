@@ -58,12 +58,16 @@ class MessageTool(Tool):
         }
     
     async def execute(
-        self, 
-        content: str, 
-        channel: str | None = None, 
+        self,
+        content: str,
+        channel: str | None = None,
         chat_id: str | None = None,
         **kwargs: Any
     ) -> str:
+        # Validate content before sending
+        if not content or not content.strip():
+            return "Error: Cannot send empty message"
+
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
         

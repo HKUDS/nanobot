@@ -77,7 +77,12 @@ class WhatsAppChannel(BaseChannel):
         if not self._ws or not self._connected:
             logger.warning("WhatsApp bridge not connected")
             return
-        
+
+        # Guard against empty messages (fixes "Message text is empty" error)
+        if not msg.content or not msg.content.strip():
+            logger.debug(f"Skipping empty message to chat_id={msg.chat_id}")
+            return
+
         try:
             payload = {
                 "type": "send",

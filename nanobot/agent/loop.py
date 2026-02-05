@@ -13,6 +13,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
+from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
@@ -69,11 +70,23 @@ class AgentLoop:
     
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        # File tools
-        self.tools.register(ReadFileTool())
-        self.tools.register(WriteFileTool())
-        self.tools.register(EditFileTool())
-        self.tools.register(ListDirTool())
+        # File tools (with workspace security validation)
+        self.tools.register(ReadFileTool(
+            workspace=self.workspace,
+            restrict_to_workspace=True,
+        ))
+        self.tools.register(WriteFileTool(
+            workspace=self.workspace,
+            restrict_to_workspace=True,
+        ))
+        self.tools.register(EditFileTool(
+            workspace=self.workspace,
+            restrict_to_workspace=True,
+        ))
+        self.tools.register(ListDirTool(
+            workspace=self.workspace,
+            restrict_to_workspace=True,
+        ))
         
         # Shell tool
         self.tools.register(ExecTool(
@@ -85,6 +98,16 @@ class AgentLoop:
         # Web tools
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
+
+        # Search tools
+        self.tools.register(GlobTool(
+            workspace=self.workspace,
+            restrict_to_workspace=self.exec_config.restrict_to_workspace,
+        ))
+        self.tools.register(GrepTool(
+            workspace=self.workspace,
+            restrict_to_workspace=self.exec_config.restrict_to_workspace,
+        ))
         
         # Message tool
         message_tool = MessageTool(send_callback=self.bus.publish_outbound)
@@ -211,18 +234,22 @@ class AgentLoop:
         
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
-        
+
+        # Fallback for empty/whitespace-only responses (fixes "Message text is empty" error)
+        if not final_content.strip():
+            final_content = "Done."
+
         # Save to session
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
-        
+
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content
         )
-    
+
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
         Process a system message (e.g., subagent announce).
@@ -303,18 +330,22 @@ class AgentLoop:
         
         if final_content is None:
             final_content = "Background task completed."
-        
+
+        # Fallback for empty/whitespace-only responses (fixes "Message text is empty" error)
+        if not final_content.strip():
+            final_content = "Done."
+
         # Save to session (mark as system message in history)
         session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
         session.add_message("assistant", final_content)
         self.sessions.save(session)
-        
+
         return OutboundMessage(
             channel=origin_channel,
             chat_id=origin_chat_id,
             content=final_content
         )
-    
+
     async def process_direct(self, content: str, session_key: str = "cli:direct") -> str:
         """
         Process a message directly (for CLI usage).

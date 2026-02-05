@@ -12,7 +12,8 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, ListDirTool
+from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
+from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 
@@ -95,10 +96,24 @@ class SubagentManager:
         
         try:
             # Build subagent tools (no message tool, no spawn tool)
+            # All filesystem tools enforce workspace security validation
             tools = ToolRegistry()
-            tools.register(ReadFileTool())
-            tools.register(WriteFileTool())
-            tools.register(ListDirTool())
+            tools.register(ReadFileTool(
+                workspace=self.workspace,
+                restrict_to_workspace=True,
+            ))
+            tools.register(WriteFileTool(
+                workspace=self.workspace,
+                restrict_to_workspace=True,
+            ))
+            tools.register(EditFileTool(
+                workspace=self.workspace,
+                restrict_to_workspace=True,
+            ))
+            tools.register(ListDirTool(
+                workspace=self.workspace,
+                restrict_to_workspace=True,
+            ))
             tools.register(ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
@@ -106,6 +121,14 @@ class SubagentManager:
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
+            tools.register(GlobTool(
+                workspace=self.workspace,
+                restrict_to_workspace=self.exec_config.restrict_to_workspace,
+            ))
+            tools.register(GrepTool(
+                workspace=self.workspace,
+                restrict_to_workspace=self.exec_config.restrict_to_workspace,
+            ))
             
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)

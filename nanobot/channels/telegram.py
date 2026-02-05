@@ -107,11 +107,12 @@ class TelegramChannel(BaseChannel):
             .build()
         )
         
-        # Add message handler for text, photos, voice, documents
+        # Add message handler for text, photos, voice, documents, stickers, contacts, locations
         self._app.add_handler(
             MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL) 
-                & ~filters.COMMAND, 
+                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO |
+                 filters.Document.ALL | filters.Sticker.ALL | filters.CONTACT | filters.LOCATION)
+                & ~filters.COMMAND,
                 self._on_message
             )
         )
@@ -156,7 +157,12 @@ class TelegramChannel(BaseChannel):
         if not self._app:
             logger.warning("Telegram bot not running")
             return
-        
+
+        # Guard against empty messages (fixes "Message text is empty" error)
+        if not msg.content or not msg.content.strip():
+            logger.debug(f"Skipping empty message to chat_id={msg.chat_id}")
+            return
+
         try:
             # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
@@ -240,17 +246,17 @@ class TelegramChannel(BaseChannel):
             try:
                 file = await self._app.bot.get_file(media_file.file_id)
                 ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
-                
+
                 # Save to workspace/media/
                 from pathlib import Path
                 media_dir = Path.home() / ".nanobot" / "media"
                 media_dir.mkdir(parents=True, exist_ok=True)
-                
+
                 file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
                 await file.download_to_drive(str(file_path))
-                
+
                 media_paths.append(str(file_path))
-                
+
                 # Handle voice transcription
                 if media_type == "voice" or media_type == "audio":
                     from nanobot.providers.transcription import GroqTranscriptionProvider
@@ -263,13 +269,41 @@ class TelegramChannel(BaseChannel):
                         content_parts.append(f"[{media_type}: {file_path}]")
                 else:
                     content_parts.append(f"[{media_type}: {file_path}]")
-                    
+
                 logger.debug(f"Downloaded {media_type} to {file_path}")
             except Exception as e:
                 logger.error(f"Failed to download media: {e}")
                 content_parts.append(f"[{media_type}: download failed]")
-        
-        content = "\n".join(content_parts) if content_parts else "[empty message]"
+
+        # Handle additional message types (stickers, contacts, locations)
+        if message.sticker:
+            emoji = message.sticker.emoji or "unknown"
+            content_parts.append(f"[Sticker: {emoji}]")
+
+        if message.contact:
+            parts = []
+            if message.contact.first_name:
+                parts.append(message.contact.first_name)
+            if message.contact.last_name:
+                parts.append(message.contact.last_name)
+            if message.contact.phone_number:
+                parts.append(message.contact.phone_number)
+            if parts:
+                content_parts.append(f"[Contact: {' '.join(parts)}]")
+            else:
+                content_parts.append("[Contact: unknown]")
+
+        if message.location:
+            lat = message.location.latitude
+            lon = message.location.longitude
+            content_parts.append(f"[Location: {lat}, {lon}]")
+
+        # Skip messages with no extractable content
+        if not content_parts:
+            logger.debug(f"Ignoring message with no extractable content from {sender_id}")
+            return
+
+        content = "\n".join(content_parts)
         
         logger.debug(f"Telegram message from {sender_id}: {content[:50]}...")
         
