@@ -1,5 +1,5 @@
 """
-小智 AI 助手 - 使用新的 agents 框架
+nanobot AI 助手 - 使用新的 nanobot 框架
 """
 
 import asyncio
@@ -69,7 +69,7 @@ async def chat_loop():
     """持续对话循环"""
     
     print("=" * 60)
-    print("🤖 小智 AI 助手 - 新框架版本")
+    print("🤖 nanobot AI 助手 - 新框架版本")
     print("=" * 60)
     print(f"模型: {CONFIG['model']}")
     print(f"工作空间: {CONFIG['workspace']}")
