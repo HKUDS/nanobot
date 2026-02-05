@@ -106,6 +106,7 @@ Always be helpful, accurate, and concise. When using tools, explain what you're 
 When remembering something, write to {workspace_path}/memory/MEMORY.md"""
 
     def _get_runtime_environment_summary(self) -> str:
+        """Get runtime environment information."""
         system = platform.system()
         system_map = {"Darwin": "MacOS", "Windows": "Windows", "Linux": "Linux"}
         system_label = system_map.get(system, system)
