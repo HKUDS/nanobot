@@ -109,10 +109,6 @@ class LiteLLMProvider(LLMProvider):
         if "gemini" in model.lower() and not model.startswith("gemini/"):
             model = f"gemini/{model}"
         
-        # Force set env vars for the provider based on model
-        if "deepseek" in model:
-            os.environ["DEEPSEEK_API_KEY"] = self.api_key
-        
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
