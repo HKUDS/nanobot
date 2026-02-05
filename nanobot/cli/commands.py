@@ -387,6 +387,11 @@ def gateway(
         cfg.channels.whatsapp.enabled = whatsapp_enabled
 
         save_config(cfg)
+        if _is_true(os.getenv("NANOBOT_RESTART_ON_SAVE", "0")):
+            console.print("[yellow]Restarting nanobot to apply settings...[/yellow]")
+            # Exit the process to let Railway (or another supervisor) restart the service.
+            import os as _os
+            _os._exit(0)
 
     def start_web_server(host: str, web_port: int) -> ThreadingHTTPServer | None:
         class WebHandler(BaseHTTPRequestHandler):
