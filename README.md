@@ -18,12 +18,8 @@
 
 ## 📢 News
 
-- **2025-02-03** 🔒 Security audit completed! See [SECURITY_AUDIT.md](./SECURITY_AUDIT.md) and [SECURITY.md](./SECURITY.md) for details.
-- **2025-02-01** 🎉 nanobot launched! Welcome to try 🐈 nanobot!
-
-> [!IMPORTANT]
-> **Security Notice**: If you're using nanobot in production, please review [SECURITY.md](./SECURITY.md) for security best practices.
-> Key actions: Configure `allowFrom` lists, secure your API keys, and keep dependencies updated.
+- **2026-02-04** 🚀 v0.1.3 released with multi-provider & Docker support! Check [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post4) for details.
+- **2026-02-01** 🎉 nanobot launched! Welcome to try 🐈 nanobot!
 
 ## Key Features of nanobot:
 
