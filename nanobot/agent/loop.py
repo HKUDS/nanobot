@@ -41,6 +41,7 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 20,
         brave_api_key: str | None = None,
+        ollama_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig
@@ -50,6 +51,7 @@ class AgentLoop:
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
+        self.ollama_api_key = ollama_api_key
         self.exec_config = exec_config or ExecToolConfig()
         
         self.context = ContextBuilder(workspace)
@@ -61,6 +63,7 @@ class AgentLoop:
             bus=bus,
             model=self.model,
             brave_api_key=brave_api_key,
+            ollama_api_key=ollama_api_key,
             exec_config=self.exec_config,
         )
         
@@ -85,6 +88,11 @@ class AgentLoop:
         # Web tools
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
+        
+        # Ollama Web tools
+        from nanobot.agent.tools.web import OllamaWebSearchTool, OllamaWebFetchTool
+        self.tools.register(OllamaWebSearchTool(api_key=self.ollama_api_key))
+        self.tools.register(OllamaWebFetchTool(api_key=self.ollama_api_key))
         
         # Message tool
         message_tool = MessageTool(send_callback=self.bus.publish_outbound)

@@ -220,6 +220,30 @@ Create an [API key](https://ollama.com/settings/keys) on your Ollama account.
 nanobot agent -m "Explain the theory of relativity using a 120B model."
 ```
 
+### 🌐 Web Search & Fetch
+Ollama Cloud also provides world-class web search and page fetching APIs.
+
+**Configure** (`~/.nanobot/config.json`)
+```json
+{
+  "tools": {
+    "web": {
+      "ollama": {
+        "apiKey": "your_api_key"
+      }
+    }
+  }
+}
+```
+
+> [!NOTE]
+> By default, nanobot uses your `ollama_cloud.apiKey` for web search if configured.
+
+**Try it out**
+```bash
+nanobot agent -m "Search for the latest news about Ollama"
+```
+
 ## 💬 Chat Apps
 
 Talk to your nanobot through Telegram or WhatsApp — anytime, anywhere.

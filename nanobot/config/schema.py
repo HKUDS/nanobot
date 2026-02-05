@@ -73,6 +73,7 @@ class WebSearchConfig(BaseModel):
 class WebToolsConfig(BaseModel):
     """Web tools configuration."""
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    ollama: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
 class ExecToolConfig(BaseModel):

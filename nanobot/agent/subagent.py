@@ -33,6 +33,7 @@ class SubagentManager:
         bus: MessageBus,
         model: str | None = None,
         brave_api_key: str | None = None,
+        ollama_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig
@@ -41,6 +42,7 @@ class SubagentManager:
         self.bus = bus
         self.model = model or provider.get_default_model()
         self.brave_api_key = brave_api_key
+        self.ollama_api_key = ollama_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
     
@@ -106,6 +108,11 @@ class SubagentManager:
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
+            
+            # Ollama Web tools
+            from nanobot.agent.tools.web import OllamaWebSearchTool, OllamaWebFetchTool
+            tools.register(OllamaWebSearchTool(api_key=self.ollama_api_key))
+            tools.register(OllamaWebFetchTool(api_key=self.ollama_api_key))
             
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)
