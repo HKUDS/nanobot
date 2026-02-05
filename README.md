@@ -30,7 +30,7 @@
 
 ⚡️ **Lightning Fast**: Minimal footprint means faster startup, lower resource usage, and quicker iterations.
 
-💎 **Easy-to-Use**: One-click to depoly and you're ready to go.
+💎 **Easy-to-Use**: One-click to deploy and you're ready to go.
 
 ## 🏗️ Architecture
 
