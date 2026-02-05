@@ -14,7 +14,7 @@ class InboundMessage:
     chat_id: str  # Chat/channel identifier
     content: str  # Message text
     timestamp: datetime = field(default_factory=datetime.now)
-    media: list[str] = field(default_factory=list)  # Media URLs
+    media: list[dict[str, str]] = field(default_factory=list)  # [{"type": ..., "url": ...}]
     metadata: dict[str, Any] = field(default_factory=dict)  # Channel-specific data
     
     @property
