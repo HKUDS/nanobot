@@ -19,10 +19,21 @@ class TelegramConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
 
 
+class FeishuConfig(BaseModel):
+    """Feishu/Lark channel configuration."""
+    enabled: bool = False
+    app_id: str = ""  # App ID from Feishu developer console
+    app_secret: str = ""  # App Secret from Feishu developer console
+    verification_token: str = ""  # Verification Token for event callback
+    encrypt_key: str = ""  # Encrypt Key for event encryption (optional)
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    feishu: FeishuConfig = Field(default_factory=FeishuConfig)
 
 
 class AgentDefaults(BaseModel):
@@ -45,6 +56,14 @@ class ProviderConfig(BaseModel):
     api_base: str | None = None
 
 
+class VertexAIConfig(BaseModel):
+    """Vertex AI provider configuration."""
+    api_key: str = ""  # Optional, can use service account credentials instead
+    project_id: str = ""  # GCP project ID
+    location: str = "global"  # Default region (global for multi-region)
+    credentials_path: str = ""  # Path to service account JSON file (optional)
+
+
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -54,6 +73,7 @@ class ProvidersConfig(BaseModel):
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    vertex_ai: VertexAIConfig = Field(default_factory=VertexAIConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -99,7 +119,7 @@ class Config(BaseSettings):
         return Path(self.agents.defaults.workspace).expanduser()
     
     def get_api_key(self) -> str | None:
-        """Get API key in priority order: OpenRouter > Anthropic > OpenAI > Gemini > Zhipu > Groq > vLLM."""
+        """Get API key in priority order: OpenRouter > Anthropic > OpenAI > Gemini > Zhipu > Groq > vLLM > Vertex AI."""
         return (
             self.providers.openrouter.api_key or
             self.providers.anthropic.api_key or
@@ -108,6 +128,7 @@ class Config(BaseSettings):
             self.providers.zhipu.api_key or
             self.providers.groq.api_key or
             self.providers.vllm.api_key or
+            self.providers.vertex_ai.api_key or
             None
         )
     

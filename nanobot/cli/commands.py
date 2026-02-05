@@ -178,13 +178,14 @@ def gateway(
     # Create components
     bus = MessageBus()
     
-    # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock)
+    # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock, Vertex AI)
     api_key = config.get_api_key()
     api_base = config.get_api_base()
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
+    is_vertex_ai = model.startswith("vertex_ai/")
 
-    if not api_key and not is_bedrock:
+    if not api_key and not is_bedrock and not is_vertex_ai:
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
         raise typer.Exit(1)
@@ -240,18 +241,18 @@ def gateway(
     
     # Create channel manager
     channels = ChannelManager(config, bus)
-    
+
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
-    
+
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
-    
+
     console.print(f"[green]✓[/green] Heartbeat: every 30m")
-    
+
     async def run():
         try:
             await cron.start()
@@ -266,7 +267,7 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
-    
+
     asyncio.run(run())
 
 
@@ -294,8 +295,9 @@ def agent(
     api_base = config.get_api_base()
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
+    is_vertex_ai = model.startswith("vertex_ai/")
 
-    if not api_key and not is_bedrock:
+    if not api_key and not is_bedrock and not is_vertex_ai:
         console.print("[red]Error: No API key configured.[/red]")
         raise typer.Exit(1)
 

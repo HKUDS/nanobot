@@ -18,22 +18,25 @@ class LiteLLMProvider(LLMProvider):
     """
     
     def __init__(
-        self, 
-        api_key: str | None = None, 
+        self,
+        api_key: str | None = None,
         api_base: str | None = None,
         default_model: str = "anthropic/claude-opus-4-5"
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
-        
+
         # Detect OpenRouter by api_key prefix or explicit api_base
         self.is_openrouter = (
             (api_key and api_key.startswith("sk-or-")) or
             (api_base and "openrouter" in api_base)
         )
-        
+
         # Track if using custom endpoint (vLLM, etc.)
         self.is_vllm = bool(api_base) and not self.is_openrouter
+
+        # Track if using Vertex AI
+        self.is_vertex_ai = "vertex_ai" in default_model or default_model.startswith("vertex_ai/")
         
         # Configure LiteLLM based on provider
         if api_key:
@@ -53,10 +56,30 @@ class LiteLLMProvider(LLMProvider):
                 os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
-        
+            elif self.is_vertex_ai:
+                # For Vertex AI, api_key can be empty if using service account
+                if api_key:
+                    os.environ.setdefault("GOOGLE_API_KEY", api_key)
+
+        # Configure Vertex AI specific settings
+        if self.is_vertex_ai:
+            # Import config to get Vertex AI settings
+            from nanobot.config.loader import load_config
+            config = load_config()
+
+            if config.providers.vertex_ai.project_id:
+                os.environ["VERTEXAI_PROJECT"] = config.providers.vertex_ai.project_id
+
+            if config.providers.vertex_ai.location:
+                os.environ["VERTEXAI_LOCATION"] = config.providers.vertex_ai.location
+
+            if config.providers.vertex_ai.credentials_path:
+                credentials_path = os.path.expanduser(config.providers.vertex_ai.credentials_path)
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+
         if api_base:
             litellm.api_base = api_base
-        
+
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
     
@@ -102,26 +125,42 @@ class LiteLLMProvider(LLMProvider):
             model = f"hosted_vllm/{model}"
         
         # For Gemini, ensure gemini/ prefix if not already present
-        if "gemini" in model.lower() and not model.startswith("gemini/"):
+        if "gemini" in model.lower() and not model.startswith("gemini/") and not model.startswith("vertex_ai/"):
             model = f"gemini/{model}"
-        
+
+        # For Vertex AI, ensure vertex_ai/ prefix
+        # Supports models like: gemini-3-flash-preview, claude-sonnet-4-5@20250929
+        if self.is_vertex_ai and not model.startswith("vertex_ai/"):
+            # Extract model name without any existing prefix
+            model_name = model.split("/")[-1] if "/" in model else model
+            model = f"vertex_ai/{model_name}"
+
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        
+
         # Pass api_base directly for custom endpoints (vLLM, etc.)
         if self.api_base:
             kwargs["api_base"] = self.api_base
-        
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
-        
+
         try:
+            # Debug: log the actual model being used
+            from loguru import logger
+            logger.debug(f"LiteLLM calling model: {model}")
+
             response = await acompletion(**kwargs)
+
+            # Debug: log the model from response
+            if hasattr(response, 'model'):
+                logger.debug(f"LiteLLM response model: {response.model}")
+
             return self._parse_response(response)
         except Exception as e:
             # Return error as content for graceful handling
