@@ -88,13 +88,13 @@ class LiteLLMProvider(LLMProvider):
             model = f"openrouter/{model}"
         
         # For Zhipu/Z.ai, ensure prefix is present
-        # Handle cases like "glm-4.7-flash" -> "zhipu/glm-4.7-flash"
+        # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
         if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
             model.startswith("zhipu/") or 
             model.startswith("zai/") or 
             model.startswith("openrouter/")
         ):
-            model = f"zhipu/{model}"
+            model = f"zai/{model}"
         
         # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
         # Convert openai/ prefix to hosted_vllm/ if user specified it
