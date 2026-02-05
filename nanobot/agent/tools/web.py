@@ -144,7 +144,10 @@ class WebFetchTool(Tool):
             truncated = len(text) > max_chars
             if truncated:
                 text = text[:max_chars]
-            
+
+            # Sanitize external content for prompt injection defense
+            text = sanitize_external_content(text, source=url)
+
             return json.dumps({"url": url, "finalUrl": str(r.url), "status": r.status_code,
                               "extractor": extractor, "truncated": truncated, "length": len(text), "text": text})
         except Exception as e:

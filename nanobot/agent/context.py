@@ -118,6 +118,8 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         current_message: str,
         skill_names: list[str] | None = None,
         media: list[str] | None = None,
+        channel: str | None = None,
+        chat_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Build the complete message list for an LLM call.
@@ -127,6 +129,8 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
             current_message: The new user message.
             skill_names: Optional skills to include.
             media: Optional list of local file paths for images/media.
+            channel: Current channel (telegram, feishu, etc.).
+            chat_id: Current chat/user ID.
 
         Returns:
             List of messages including system prompt.
@@ -135,6 +139,8 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
 
         # System prompt
         system_prompt = self.build_system_prompt(skill_names)
+        if channel and chat_id:
+            system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
         messages.append({"role": "system", "content": system_prompt})
 
         # History
