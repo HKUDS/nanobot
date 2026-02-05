@@ -13,3 +13,7 @@ docs/
 *.pyz
 *.pywz
 *.pyzz
+# Local development
+.omc/
+.venv/
+venv/
