@@ -32,14 +32,26 @@ class LiteLLMProvider(LLMProvider):
             (api_base and "openrouter" in api_base)
         )
         
+        # Detect Qwen by model name or api_base
+        self.is_qwen = (
+            "qwen" in default_model.lower() or
+            (api_base and "dashscope" in api_base)
+        )
+        
         # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        # vLLM is only true if api_base is set and it's not OpenRouter or Qwen
+        self.is_vllm = bool(api_base) and not self.is_openrouter and not self.is_qwen
         
         # Configure LiteLLM based on provider
         if api_key:
             if self.is_openrouter:
                 # OpenRouter mode - set key
                 os.environ["OPENROUTER_API_KEY"] = api_key
+            elif self.is_qwen:
+                # Qwen/DashScope mode - uses OpenAI-compatible API
+                # Set both for compatibility with different LiteLLM versions
+                os.environ["OPENAI_API_KEY"] = api_key
+                os.environ.setdefault("DASHSCOPE_API_KEY", api_key)
             elif self.is_vllm:
                 # vLLM/custom endpoint - uses OpenAI-compatible API
                 os.environ["OPENAI_API_KEY"] = api_key
@@ -104,6 +116,10 @@ class LiteLLMProvider(LLMProvider):
         # For Gemini, ensure gemini/ prefix if not already present
         if "gemini" in model.lower() and not model.startswith("gemini/"):
             model = f"gemini/{model}"
+        
+        # For Qwen/DashScope, use openai-compatible format
+        # DashScope uses OpenAI-compatible API, so we don't add prefix
+        # The model name should be used directly (e.g., "qwen-plus", "qwen-turbo")
         
         kwargs: dict[str, Any] = {
             "model": model,
