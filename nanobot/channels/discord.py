@@ -146,7 +146,7 @@ class DiscordChannel(BaseChannel):
             logger.warning("Discord bot not running")
             return
 
-        # Get original message for reply before marking complete
+        # Get original message for reply (don't mark complete yet - do that after sending)
         # Note: original_msg_id may be string after JSON serialization through message bus
         raw_msg_id = msg.metadata.get("original_message_id")
         original_msg_id: int | None = int(raw_msg_id) if raw_msg_id else None
@@ -158,7 +158,6 @@ class DiscordChannel(BaseChannel):
         if original_msg_id and original_msg_id in self._processing_messages:
             _, original_message = self._processing_messages[original_msg_id]
             logger.debug(f"Found original message for reply: {original_message.id}")
-            await self._mark_complete(original_msg_id)
         else:
             logger.debug("No original message found for reply")
 
@@ -184,6 +183,10 @@ class DiscordChannel(BaseChannel):
             # Send as reply to original message (if we have it)
             content = msg.content
             await self._send_message(channel, content, reply_to=original_message)
+
+            # Mark complete AFTER message is sent (updates reaction and stops typing)
+            if original_msg_id:
+                await self._mark_complete(original_msg_id)
 
         except discord.Forbidden:
             logger.error(f"Permission denied sending to channel {channel_id}")
@@ -478,11 +481,11 @@ class DiscordChannel(BaseChannel):
         _, message = self._processing_messages.pop(message_id)
 
         try:
-            # Remove processing reaction
+            # Add complete reaction first (before removing processing, to avoid visual jump)
+            await message.add_reaction(self.config.emoji_complete)
+            # Then remove processing reaction
             if self._client and self._client.user:
                 await message.remove_reaction(self.config.emoji_processing, self._client.user)
-            # Add complete reaction
-            await message.add_reaction(self.config.emoji_complete)
         except discord.Forbidden:
             logger.debug("Cannot modify reactions - missing permissions")
         except discord.NotFound:
@@ -501,11 +504,11 @@ class DiscordChannel(BaseChannel):
         _, message = self._processing_messages.pop(message_id)
 
         try:
-            # Remove processing reaction
+            # Add error reaction first (before removing processing, to avoid visual jump)
+            await message.add_reaction(self.config.emoji_error)
+            # Then remove processing reaction
             if self._client and self._client.user:
                 await message.remove_reaction(self.config.emoji_processing, self._client.user)
-            # Add error reaction
-            await message.add_reaction(self.config.emoji_error)
         except discord.Forbidden:
             logger.debug("Cannot modify reactions - missing permissions")
         except discord.NotFound:
