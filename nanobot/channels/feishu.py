@@ -1,8 +1,9 @@
-"""Feishu/Lark channel implementation using official lark-oapi SDK with long connection."""
+"""Feishu/Lark channel implementation using lark-oapi SDK with WebSocket long connection."""
 
 import asyncio
 import json
 import threading
+from collections import OrderedDict
 from typing import Any
 
 from loguru import logger
@@ -12,124 +13,149 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import FeishuConfig
 
+try:
+    import lark_oapi as lark
+    from lark_oapi.api.im.v1 import (
+        CreateMessageRequest,
+        CreateMessageRequestBody,
+        CreateMessageReactionRequest,
+        CreateMessageReactionRequestBody,
+        Emoji,
+        P2ImMessageReceiveV1,
+    )
+    FEISHU_AVAILABLE = True
+except ImportError:
+    FEISHU_AVAILABLE = False
+    lark = None
+    Emoji = None
+
+# Message type display mapping
+MSG_TYPE_MAP = {
+    "image": "[image]",
+    "audio": "[audio]",
+    "file": "[file]",
+    "sticker": "[sticker]",
+}
+
 
 class FeishuChannel(BaseChannel):
     """
-    Feishu/Lark channel using long connection (WebSocket).
-
-    Uses official lark-oapi SDK to receive events through WebSocket,
-    eliminating the need for public URL or webhook configuration.
+    Feishu/Lark channel using WebSocket long connection.
+    
+    Uses WebSocket to receive events - no public IP or webhook required.
+    
+    Requires:
+    - App ID and App Secret from Feishu Open Platform
+    - Bot capability enabled
+    - Event subscription enabled (im.message.receive_v1)
     """
-
+    
     name = "feishu"
-
+    
     def __init__(self, config: FeishuConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: FeishuConfig = config
-        self._client = None
-        self._ws_client = None
-        self._event_loop = None
-        self._ws_thread = None
-
+        self._client: Any = None
+        self._ws_client: Any = None
+        self._ws_thread: threading.Thread | None = None
+        self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
+        self._loop: asyncio.AbstractEventLoop | None = None
+    
     async def start(self) -> None:
-        """Start the Feishu channel with long connection."""
-        if not self.config.app_id or not self.config.app_secret:
-            logger.error("Feishu app_id or app_secret not configured")
+        """Start the Feishu bot with WebSocket long connection."""
+        if not FEISHU_AVAILABLE:
+            logger.error("Feishu SDK not installed. Run: pip install lark-oapi")
             return
-
-        try:
-            # Import Feishu SDK
-            import lark_oapi as lark
-            from lark_oapi.ws import Client as WSClient
-
-            self._running = True
-            self._event_loop = asyncio.get_event_loop()
-
-            # Create Feishu client (for sending messages)
-            self._client = lark.Client.builder() \
-                .app_id(self.config.app_id) \
-                .app_secret(self.config.app_secret) \
-                .log_level(lark.LogLevel.INFO) \
-                .build()
-
-            logger.info(f"Feishu client initialized (app_id: {self.config.app_id})")
-
-            # Create event handler
-            event_handler = lark.EventDispatcherHandler.builder(
-                self.config.verification_token or "",
-                self.config.encrypt_key or ""
-            ).register_p2_im_message_receive_v1(
-                self._handle_message_event
-            ).build()
-
-            # Create WebSocket client
-            self._ws_client = WSClient(
-                app_id=self.config.app_id,
-                app_secret=self.config.app_secret,
-                event_handler=event_handler,
-                log_level=lark.LogLevel.INFO,
-                auto_reconnect=True
-            )
-
-            logger.info("Starting Feishu long connection...")
-
-            # Start WebSocket in a separate thread
-            # (SDK requires its own event loop, can't run in current loop)
-            self._ws_thread = threading.Thread(
-                target=self._run_ws_in_thread,
-                daemon=True
-            )
-            self._ws_thread.start()
-
-            logger.info("Feishu WebSocket thread started")
-
-            # Keep the channel alive
-            while self._running:
-                await asyncio.sleep(1)
-
-        except ImportError as e:
-            logger.error(f"Failed to import lark-oapi SDK: {e}")
-            logger.info("Install with: pip install lark-oapi")
-        except Exception as e:
-            logger.error(f"Error starting Feishu channel: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-
-    def _run_ws_in_thread(self) -> None:
-        """
-        Run WebSocket client in a separate thread with its own event loop.
-
-        This is necessary because the lark-oapi SDK's ws.client module
-        captures the event loop at import time (module-level code).
-        We need to monkey-patch the module's loop variable before calling start().
-        """
-        # Create a new event loop for this thread
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-
-        try:
-            # CRITICAL: The SDK's ws.client module captures the event loop
-            # at import time in a module-level variable. We must replace it
-            # with our new loop before calling start().
-            import lark_oapi.ws.client as ws_client_module
-            ws_client_module.loop = new_loop
-
-            logger.info("WebSocket thread starting with patched event loop...")
-            # SDK's start() method is blocking and handles its own event loop
-            self._ws_client.start()
-        except Exception as e:
-            logger.error(f"WebSocket thread error: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-        finally:
-            # Clean up the event loop when done
-            new_loop.close()
-
+        
+        if not self.config.app_id or not self.config.app_secret:
+            logger.error("Feishu app_id and app_secret not configured")
+            return
+        
+        self._running = True
+        self._loop = asyncio.get_running_loop()
+        
+        # Create Lark client for sending messages
+        self._client = lark.Client.builder() \
+            .app_id(self.config.app_id) \
+            .app_secret(self.config.app_secret) \
+            .log_level(lark.LogLevel.INFO) \
+            .build()
+        
+        # Create event handler (only register message receive, ignore other events)
+        event_handler = lark.EventDispatcherHandler.builder(
+            self.config.encrypt_key or "",
+            self.config.verification_token or "",
+        ).register_p2_im_message_receive_v1(
+            self._on_message_sync
+        ).build()
+        
+        # Create WebSocket client for long connection
+        self._ws_client = lark.ws.Client(
+            self.config.app_id,
+            self.config.app_secret,
+            event_handler=event_handler,
+            log_level=lark.LogLevel.INFO
+        )
+        
+        # Start WebSocket client in a separate thread
+        def run_ws():
+            try:
+                self._ws_client.start()
+            except Exception as e:
+                logger.error(f"Feishu WebSocket error: {e}")
+        
+        self._ws_thread = threading.Thread(target=run_ws, daemon=True)
+        self._ws_thread.start()
+        
+        logger.info("Feishu bot started with WebSocket long connection")
+        logger.info("No public IP required - using WebSocket to receive events")
+        
+        # Keep running until stopped
+        while self._running:
+            await asyncio.sleep(1)
+    
     async def stop(self) -> None:
-        """Stop the Feishu channel."""
+        """Stop the Feishu bot."""
         self._running = False
-        logger.info("Feishu channel stopped")
+        if self._ws_client:
+            try:
+                self._ws_client.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping WebSocket client: {e}")
+        logger.info("Feishu bot stopped")
+    
+    def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
+        """Sync helper for adding reaction (runs in thread pool)."""
+        try:
+            request = CreateMessageReactionRequest.builder() \
+                .message_id(message_id) \
+                .request_body(
+                    CreateMessageReactionRequestBody.builder()
+                    .reaction_type(Emoji.builder().emoji_type(emoji_type).build())
+                    .build()
+                ).build()
+            
+            response = self._client.im.v1.message_reaction.create(request)
+            
+            if not response.success():
+                logger.warning(f"Failed to add reaction: code={response.code}, msg={response.msg}")
+            else:
+                logger.debug(f"Added {emoji_type} reaction to message {message_id}")
+        except Exception as e:
+            logger.warning(f"Error adding reaction: {e}")
 
+    async def _add_reaction(self, message_id: str, emoji_type: str = "THUMBSUP") -> None:
+        """
+        Add a reaction emoji to a message (non-blocking).
+        
+        Common emoji types: THUMBSUP, OK, EYES, DONE, OnIt, HEART
+        """
+        if not self._client or not Emoji:
+            return
+        
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
+    
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu."""
         if not self._client:

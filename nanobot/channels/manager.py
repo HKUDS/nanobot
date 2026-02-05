@@ -55,7 +55,7 @@ class ChannelManager:
                 logger.info("WhatsApp channel enabled")
             except ImportError as e:
                 logger.warning(f"WhatsApp channel not available: {e}")
-
+        
         # Feishu channel
         if self.config.channels.feishu.enabled:
             try:
