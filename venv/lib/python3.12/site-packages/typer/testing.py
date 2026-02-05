@@ -1,0 +1,30 @@
+from collections.abc import Mapping, Sequence
+from typing import IO, Any, Optional, Union
+
+from click.testing import CliRunner as ClickCliRunner  # noqa
+from click.testing import Result
+from typer.main import Typer
+from typer.main import get_command as _get_command
+
+
+class CliRunner(ClickCliRunner):
+    def invoke(  # type: ignore
+        self,
+        app: Typer,
+        args: Optional[Union[str, Sequence[str]]] = None,
+        input: Optional[Union[bytes, str, IO[Any]]] = None,
+        env: Optional[Mapping[str, Optional[str]]] = None,
+        catch_exceptions: bool = True,
+        color: bool = False,
+        **extra: Any,
+    ) -> Result:
+        use_cli = _get_command(app)
+        return super().invoke(
+            use_cli,
+            args=args,
+            input=input,
+            env=env,
+            catch_exceptions=catch_exceptions,
+            color=color,
+            **extra,
+        )

@@ -12,29 +12,29 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 class LiteLLMProvider(LLMProvider):
     """
     LLM provider using LiteLLM for multi-provider support.
-    
-    Supports OpenRouter, Anthropic, OpenAI, Gemini, and many other providers through
-    a unified interface.
+
+    Supports OpenRouter, Anthropic, OpenAI, Gemini, Cerebras, and many other providers
+    through a unified interface.
     """
     
     def __init__(
-        self, 
-        api_key: str | None = None, 
+        self,
+        api_key: str | None = None,
         api_base: str | None = None,
         default_model: str = "anthropic/claude-opus-4-5"
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
-        
+
         # Detect OpenRouter by api_key prefix or explicit api_base
         self.is_openrouter = (
             (api_key and api_key.startswith("sk-or-")) or
             (api_base and "openrouter" in api_base)
         )
-        
+
         # Track if using custom endpoint (vLLM, etc.)
         self.is_vllm = bool(api_base) and not self.is_openrouter
-        
+
         # Configure LiteLLM based on provider
         if api_key:
             if self.is_openrouter:
@@ -53,10 +53,12 @@ class LiteLLMProvider(LLMProvider):
                 os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
-        
+            elif "cerebras" in default_model:
+                os.environ.setdefault("CEREBRAS_API_KEY", api_key)
+
         if api_base:
             litellm.api_base = api_base
-        
+
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
     
@@ -104,7 +106,13 @@ class LiteLLMProvider(LLMProvider):
         # For Gemini, ensure gemini/ prefix if not already present
         if "gemini" in model.lower() and not model.startswith("gemini/"):
             model = f"gemini/{model}"
-        
+
+        # For Cerebras, ensure cerebras/ prefix if not already present
+        if "cerebras" in model.lower() and not model.startswith("cerebras/"):
+            # Extract model name after cerebras/ if present
+            model_name = model.split("/")[-1]
+            model = f"cerebras/{model_name}"
+
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,

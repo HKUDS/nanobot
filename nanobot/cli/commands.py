@@ -166,18 +166,18 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
-    
+
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
-    
+
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    
+
     config = load_config()
-    
+
     # Create components
     bus = MessageBus()
-    
+
     # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock)
     api_key = config.get_api_key()
     api_base = config.get_api_base()
@@ -188,7 +188,7 @@ def gateway(
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
         raise typer.Exit(1)
-    
+
     provider = LiteLLMProvider(
         api_key=api_key,
         api_base=api_base,
@@ -287,9 +287,9 @@ def agent(
     from nanobot.bus.queue import MessageBus
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.agent.loop import AgentLoop
-    
+
     config = load_config()
-    
+
     api_key = config.get_api_key()
     api_base = config.get_api_base()
     model = config.agents.defaults.model

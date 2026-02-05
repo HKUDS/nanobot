@@ -1,0 +1,100 @@
+Metadata-Version: 2.1
+Name: readability-lxml
+Version: 0.8.4.1
+Summary: fast html to text parser (article readability tool) with python 3 support
+Home-page: http://github.com/buriy/python-readability
+Author: Yuri Baburov
+Author-email: burchik@gmail.com
+License: Apache License 2.0
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Text Processing :: Indexing
+Classifier: Topic :: Utilities
+Classifier: Topic :: Internet
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: Implementation :: PyPy
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: chardet
+Requires-Dist: lxml[html_clean]
+Requires-Dist: cssselect
+Requires-Dist: lxml-html-clean; python_version < "3.11"
+Provides-Extra: speed
+Requires-Dist: cchardet; extra == "speed"
+
+[![PyPI version](https://img.shields.io/pypi/v/readability-lxml.svg)](https://pypi.python.org/pypi/readability-lxml)
+
+# python-readability
+
+Given an HTML document, extract and clean up the main body text and title.
+
+This is a Python port of a Ruby port of [arc90's Readability project](https://web.archive.org/web/20130519040221/http://www.readability.com/).
+
+## Installation
+
+It's easy using `pip`, just run:
+
+```bash
+$ pip install readability-lxml
+```
+
+As an alternative, you may also use conda to install, just run:
+
+```bash
+$ conda install -c conda-forge readability-lxml
+```
+
+## Usage
+
+```python
+>>> import requests
+>>> from readability import Document
+
+>>> response = requests.get('http://example.com')
+>>> doc = Document(response.content)
+>>> doc.title()
+'Example Domain'
+
+>>> doc.summary()
+"""<html><body><div><body id="readabilityBody">\n<div>\n    <h1>Example Domain</h1>\n
+<p>This domain is established to be used for illustrative examples in documents. You may
+use this\n    domain in examples without prior coordination or asking for permission.</p>
+\n    <p><a href="http://www.iana.org/domains/example">More information...</a></p>\n</div>
+\n</body>\n</div></body></html>"""
+```
+
+## Change Log
+- 0.8.4 Better CJK support, thanks @cdhigh
+- 0.8.3.1 Support for python 3.8 - 3.13
+- 0.8.3 We can now save all images via keep_all_images=True (default is to save 1 main image), thanks @botlabsDev
+- 0.8.2 Added article author(s) (thanks @mattblaha)
+- 0.8.1 Fixed processing of non-ascii HTMLs via regexps.
+- 0.8 Replaced XHTML output with HTML5 output in summary() call.
+- 0.7.1 Support for Python 3.7 . Fixed a slowdown when processing documents with lots of spaces.
+- 0.7 Improved HTML5 tags handling. Fixed stripping unwanted HTML nodes (only first matching node was removed before).
+- 0.6 Finally a release which supports Python versions 2.6, 2.7, 3.3 - 3.6
+- 0.5 Preparing a release to support Python versions 2.6, 2.7, 3.3 and 3.4
+- 0.4 Added Videos loading and allowed more images per paragraph
+- 0.3 Added Document.encoding, positive\_keywords and negative\_keywords
+
+## Licensing
+
+This code is under [the Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0) license.
+
+## Thanks to
+
+- Latest [readability.js](https://github.com/MHordecki/readability-redux/blob/master/readability/readability.js)
+- Ruby port by starrhorne and iterationlabs
+- [Python port](https://github.com/gfxmonk/python-readability) by gfxmonk
+- [Decruft effort](https://web.archive.org/web/20110214150709/https://www.minvolai.com/blog/decruft-arc90s-readability-in-python/) to move to lxml
+- "BR to P" fix from readability.js which improves quality for smaller texts
+- Github users contributions.

@@ -54,6 +54,7 @@ class ProvidersConfig(BaseModel):
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    cerebras: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -99,7 +100,7 @@ class Config(BaseSettings):
         return Path(self.agents.defaults.workspace).expanduser()
     
     def get_api_key(self) -> str | None:
-        """Get API key in priority order: OpenRouter > Anthropic > OpenAI > Gemini > Zhipu > Groq > vLLM."""
+        """Get API key in priority order: OpenRouter > Anthropic > OpenAI > Gemini > Zhipu > Groq > Cerebras > vLLM."""
         return (
             self.providers.openrouter.api_key or
             self.providers.anthropic.api_key or
@@ -107,16 +108,19 @@ class Config(BaseSettings):
             self.providers.gemini.api_key or
             self.providers.zhipu.api_key or
             self.providers.groq.api_key or
+            self.providers.cerebras.api_key or
             self.providers.vllm.api_key or
             None
         )
     
     def get_api_base(self) -> str | None:
-        """Get API base URL if using OpenRouter, Zhipu or vLLM."""
+        """Get API base URL if using OpenRouter, Zhipu, Cerebras or vLLM."""
         if self.providers.openrouter.api_key:
             return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
         if self.providers.zhipu.api_key:
             return self.providers.zhipu.api_base
+        if self.providers.cerebras.api_key:
+            return self.providers.cerebras.api_base or "https://api.cerebras.ai/v1"
         if self.providers.vllm.api_base:
             return self.providers.vllm.api_base
         return None
