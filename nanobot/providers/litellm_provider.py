@@ -50,6 +50,7 @@ class LiteLLMProvider(LLMProvider):
             elif "gemini" in default_model.lower():
                 os.environ.setdefault("GEMINI_API_KEY", api_key)
             elif "zhipu" in default_model or "glm" in default_model or "zai" in default_model:
+                os.environ.setdefault("ZAI_API_KEY", api_key)
                 os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
@@ -92,7 +93,8 @@ class LiteLLMProvider(LLMProvider):
         if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
             model.startswith("zhipu/") or 
             model.startswith("zai/") or 
-            model.startswith("openrouter/")
+            model.startswith("openrouter/") or
+            model.startswith("hosted_vllm/")
         ):
             model = f"zai/{model}"
         
