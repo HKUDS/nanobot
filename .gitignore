@@ -13,3 +13,5 @@ docs/
 *.pyz
 *.pywz
 *.pyzz
+.venv/
+__pycache__/
