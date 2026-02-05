@@ -248,20 +248,18 @@ nanobot gateway
 
 Uses **WebSocket** long connection — no public IP required.
 
-Requires **lark-oapi** SDK:
-
 ```bash
-pip install lark-oapi
+pip install nanobot-ai[feishu]
 ```
 
 **1. Create a Feishu bot**
 - Visit [Feishu Open Platform](https://open.feishu.cn/app)
-- Create a new app (Custom App)
-- Enable bot capability
-- Add event subscription: `im.message.receive_v1`
-- Get credentials:
-  - **App ID** and **App Secret** from "Credentials & Basic Info"
-  - **Verification Token** and **Encrypt Key** from "Event Subscriptions"
+- Create a new app → Enable **Bot** capability
+- **Permissions**: Add `im:message` (send messages)
+- **Events**: Add `im.message.receive_v1` (receive messages)
+  - Select **Long Connection** mode (requires running nanobot first to establish connection)
+- Get **App ID** and **App Secret** from "Credentials & Basic Info"
+- Publish the app
 
 **2. Configure**
 
@@ -272,15 +270,16 @@ pip install lark-oapi
       "enabled": true,
       "appId": "cli_xxx",
       "appSecret": "xxx",
-      "verificationToken": "xxx",
-      "encryptKey": "xxx",
-      "allowFrom": ["ou_xxx"]
+      "encryptKey": "",
+      "verificationToken": "",
+      "allowFrom": []
     }
   }
 }
 ```
 
-> Get your Open ID by sending a message to the bot, or from Feishu admin console.
+> `encryptKey` and `verificationToken` are optional for Long Connection mode.
+> `allowFrom`: Leave empty to allow all users, or add `["ou_xxx"]` to restrict access.
 
 **3. Run**
 
@@ -342,9 +341,9 @@ Config file: `~/.nanobot/config.json`
       "enabled": false,
       "appId": "cli_xxx",
       "appSecret": "xxx",
-      "verificationToken": "xxx",
-      "encryptKey": "xxx",
-      "allowFrom": ["ou_xxx"]
+      "encryptKey": "",
+      "verificationToken": "",
+      "allowFrom": []
     }
   },
   "tools": {
