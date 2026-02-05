@@ -178,13 +178,11 @@ def gateway(
     # Create components
     bus = MessageBus()
     
-    # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock)
+    # Create provider (supports OpenRouter, Anthropic, OpenAI)
     api_key = config.get_api_key()
     api_base = config.get_api_base()
-    model = config.agents.defaults.model
-    is_bedrock = model.startswith("bedrock/")
-
-    if not api_key and not is_bedrock:
+    
+    if not api_key:
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
         raise typer.Exit(1)
@@ -203,9 +201,12 @@ def gateway(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         brave_api_key=config.tools.web.search.api_key or None,
-        exec_config=config.tools.exec,
+        extraction_model=config.memory.extraction_model,
+        embedding_model=config.memory.embedding_model,
+        max_memories=config.memory.max_memories,
+        extraction_interval=config.memory.extraction_interval,
     )
-    
+
     # Create cron service
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
@@ -292,13 +293,11 @@ def agent(
     
     api_key = config.get_api_key()
     api_base = config.get_api_base()
-    model = config.agents.defaults.model
-    is_bedrock = model.startswith("bedrock/")
-
-    if not api_key and not is_bedrock:
+    
+    if not api_key:
         console.print("[red]Error: No API key configured.[/red]")
         raise typer.Exit(1)
-
+    
     bus = MessageBus()
     provider = LiteLLMProvider(
         api_key=api_key,
@@ -311,9 +310,12 @@ def agent(
         provider=provider,
         workspace=config.workspace_path,
         brave_api_key=config.tools.web.search.api_key or None,
-        exec_config=config.tools.exec,
+        extraction_model=config.memory.extraction_model,
+        embedding_model=config.memory.embedding_model,
+        max_memories=config.memory.max_memories,
+        extraction_interval=config.memory.extraction_interval,
     )
-    
+
     if message:
         # Single message mode
         async def run_once():
@@ -354,31 +356,21 @@ app.add_typer(channels_app, name="channels")
 def channels_status():
     """Show channel status."""
     from nanobot.config.loader import load_config
-
+    
     config = load_config()
-
+    
     table = Table(title="Channel Status")
     table.add_column("Channel", style="cyan")
     table.add_column("Enabled", style="green")
-    table.add_column("Configuration", style="yellow")
-
-    # WhatsApp
+    table.add_column("Bridge URL", style="yellow")
+    
     wa = config.channels.whatsapp
     table.add_row(
         "WhatsApp",
         "✓" if wa.enabled else "✗",
         wa.bridge_url
     )
-
-    # Telegram
-    tg = config.channels.telegram
-    tg_config = f"token: {tg.token[:10]}..." if tg.token else "[dim]not configured[/dim]"
-    table.add_row(
-        "Telegram",
-        "✓" if tg.enabled else "✗",
-        tg_config
-    )
-
+    
     console.print(table)
 
 
@@ -400,7 +392,7 @@ def _get_bridge_dir() -> Path:
         raise typer.Exit(1)
     
     # Find source bridge: first check package data, then source dir
-    pkg_bridge = Path(__file__).parent.parent / "bridge"  # nanobot/bridge (installed)
+    pkg_bridge = Path(__file__).parent / "bridge"  # nanobot/bridge (installed)
     src_bridge = Path(__file__).parent.parent.parent / "bridge"  # repo root/bridge (dev)
     
     source = None
@@ -522,7 +514,6 @@ def cron_add(
     at: str = typer.Option(None, "--at", help="Run once at time (ISO format)"),
     deliver: bool = typer.Option(False, "--deliver", "-d", help="Deliver response to channel"),
     to: str = typer.Option(None, "--to", help="Recipient for delivery"),
-    channel: str = typer.Option(None, "--channel", help="Channel for delivery (e.g. 'telegram', 'whatsapp')"),
 ):
     """Add a scheduled job."""
     from nanobot.config.loader import get_data_dir
@@ -551,7 +542,6 @@ def cron_add(
         message=message,
         deliver=deliver,
         to=to,
-        channel=channel,
     )
     
     console.print(f"[green]✓[/green] Added job '{job.name}' ({job.id})")
@@ -624,17 +614,18 @@ def cron_run(
 def status():
     """Show nanobot status."""
     from nanobot.config.loader import load_config, get_config_path
-
+    from nanobot.utils.helpers import get_workspace_path
+    
     config_path = get_config_path()
-    config = load_config()
-    workspace = config.workspace_path
-
+    workspace = get_workspace_path()
+    
     console.print(f"{__logo__} nanobot Status\n")
-
+    
     console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
     console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
-
+    
     if config_path.exists():
+        config = load_config()
         console.print(f"Model: {config.agents.defaults.model}")
         
         # Check API keys
