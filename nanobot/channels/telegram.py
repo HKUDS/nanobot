@@ -152,7 +152,7 @@ class TelegramChannel(BaseChannel):
             self._app = None
     
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Telegram."""
+        """Send a message through Telegram with optional media."""
         if not self._app:
             logger.warning("Telegram bot not running")
             return
@@ -160,18 +160,23 @@ class TelegramChannel(BaseChannel):
         try:
             # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
-            # Convert markdown to Telegram HTML
-            html_content = _markdown_to_telegram_html(msg.content)
-            await self._app.bot.send_message(
-                chat_id=chat_id,
-                text=html_content,
-                parse_mode="HTML"
-            )
+            
+            # If media files are provided, send them
+            if msg.media:
+                await self._send_with_media(chat_id, msg.content, msg.media)
+            else:
+                # Text-only message
+                html_content = _markdown_to_telegram_html(msg.content)
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=html_content,
+                    parse_mode="HTML"
+                )
         except ValueError:
             logger.error(f"Invalid chat_id: {msg.chat_id}")
         except Exception as e:
             # Fallback to plain text if HTML parsing fails
-            logger.warning(f"HTML parse failed, falling back to plain text: {e}")
+            logger.warning(f"Send failed, falling back to plain text: {e}")
             try:
                 await self._app.bot.send_message(
                     chat_id=int(msg.chat_id),
@@ -179,6 +184,63 @@ class TelegramChannel(BaseChannel):
                 )
             except Exception as e2:
                 logger.error(f"Error sending Telegram message: {e2}")
+    
+    async def _send_with_media(self, chat_id: int, content: str, media_paths: list[str]) -> None:
+        """Send media files (images, documents) to Telegram."""
+        import mimetypes
+        from pathlib import Path
+        
+        caption = content if content else None
+        
+        for media_path in media_paths:
+            path = Path(media_path)
+            if not path.exists():
+                logger.warning(f"Media file not found: {media_path}")
+                continue
+            
+            # Detect MIME type
+            mime, _ = mimetypes.guess_type(str(path))
+            
+            try:
+                with open(path, 'rb') as f:
+                    if mime and mime.startswith('image/'):
+                        # Send as photo
+                        await self._app.bot.send_photo(
+                            chat_id=chat_id,
+                            photo=f,
+                            caption=caption
+                        )
+                        logger.debug(f"Sent image: {path.name}")
+                    elif mime and mime.startswith('video/'):
+                        # Send as video
+                        await self._app.bot.send_video(
+                            chat_id=chat_id,
+                            video=f,
+                            caption=caption
+                        )
+                        logger.debug(f"Sent video: {path.name}")
+                    elif mime and mime.startswith('audio/'):
+                        # Send as audio
+                        await self._app.bot.send_audio(
+                            chat_id=chat_id,
+                            audio=f,
+                            caption=caption
+                        )
+                        logger.debug(f"Sent audio: {path.name}")
+                    else:
+                        # Send as document (fallback for all other files)
+                        await self._app.bot.send_document(
+                            chat_id=chat_id,
+                            document=f,
+                            caption=caption
+                        )
+                        logger.debug(f"Sent document: {path.name}")
+                    
+                    # Only use caption for first file
+                    caption = None
+                    
+            except Exception as e:
+                logger.error(f"Failed to send media {path.name}: {e}")
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
