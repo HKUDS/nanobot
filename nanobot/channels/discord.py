@@ -342,6 +342,15 @@ class DiscordChannel(BaseChannel):
         embed.set_footer(text="Nanobot")
         return embed
 
+    async def _send_message(self, channel: discord.TextChannel, content: str) -> None:
+        """Send a message, splitting if it exceeds Discord's 2000 char limit."""
+        if len(content) <= self.MESSAGE_MAX_LENGTH:
+            await channel.send(content)
+        else:
+            chunks = self._split_content(content, self.MESSAGE_MAX_LENGTH)
+            for chunk in chunks:
+                await channel.send(chunk)
+
     async def _send_long_message(self, channel: discord.TextChannel, content: str) -> None:
         """Send a long message by splitting into multiple parts."""
         # Try to split at paragraph or sentence boundaries
