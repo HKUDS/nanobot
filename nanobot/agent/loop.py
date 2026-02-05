@@ -11,6 +11,9 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.memory.extractor import MemoryExtractor
+from nanobot.agent.memory.consolidator import MemoryConsolidator
+from nanobot.session.compaction import SessionCompactor, CompactionConfig
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
@@ -41,18 +44,31 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 20,
         brave_api_key: str | None = None,
-        exec_config: "ExecToolConfig | None" = None,
+        extraction_model: str = "gpt-4o-mini",
+        embedding_model: str = "text-embedding-3-small",
+        max_memories: int = 1000,
+        extraction_interval: int = 10,
     ):
-        from nanobot.config.schema import ExecToolConfig
         self.bus = bus
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
-        self.exec_config = exec_config or ExecToolConfig()
-        
-        self.context = ContextBuilder(workspace)
+
+        self.context = ContextBuilder(workspace, embedding_model=embedding_model, max_memories=max_memories)
+        self._extraction_interval = extraction_interval
+
+        # Memory extraction and consolidation
+        self._extractor = MemoryExtractor(model=extraction_model)
+        self._consolidator = (
+            MemoryConsolidator(
+                store=self.context.vector_memory,
+                model=extraction_model,
+            )
+            if self.context.vector_memory else None
+        )
+        self._compactor = SessionCompactor(config=CompactionConfig())
         self.sessions = SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -61,7 +77,6 @@ class AgentLoop:
             bus=bus,
             model=self.model,
             brave_api_key=brave_api_key,
-            exec_config=self.exec_config,
         )
         
         self._running = False
@@ -76,11 +91,7 @@ class AgentLoop:
         self.tools.register(ListDirTool())
         
         # Shell tool
-        self.tools.register(ExecTool(
-            working_dir=str(self.workspace),
-            timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.exec_config.restrict_to_workspace,
-        ))
+        self.tools.register(ExecTool(working_dir=str(self.workspace)))
         
         # Web tools
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
@@ -93,7 +104,21 @@ class AgentLoop:
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
-    
+
+    async def _extract_and_consolidate(self, messages: list[dict], namespace: str = "default") -> None:
+        """Extract facts from conversation and consolidate into vector memory."""
+        if not self._consolidator:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            extracted = await loop.run_in_executor(None, self._extractor.extract, messages)
+            if extracted:
+                # Pass ExtractedFact objects directly (preserves importance)
+                await loop.run_in_executor(None, self._consolidator.consolidate, extracted, namespace)
+                logger.debug(f"Extracted and consolidated {len(extracted)} facts")
+        except Exception as e:
+            logger.warning(f"Memory extraction/consolidation failed: {e}")
+
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
         self._running = True
@@ -126,6 +151,8 @@ class AgentLoop:
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
+        if hasattr(self, 'context') and self.context:
+            self.context.close()
         logger.info("Agent loop stopping")
     
     async def _process_message(self, msg: InboundMessage) -> OutboundMessage | None:
@@ -152,32 +179,38 @@ class AgentLoop:
         message_tool = self.tools.get("message")
         if isinstance(message_tool, MessageTool):
             message_tool.set_context(msg.channel, msg.chat_id)
-        
+
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(msg.channel, msg.chat_id)
-        
+
+        # Get history with optional compaction for long conversations
+        history = session.get_history()
+        if len(history) > self._compactor.config.threshold:
+            history = self._compactor.compact(history)
+
         # Build initial messages (use get_history for LLM-formatted messages)
         messages = self.context.build_messages(
-            history=session.get_history(),
+            history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
+            namespace=msg.session_key,
         )
-        
+
         # Agent loop
         iteration = 0
         final_content = None
-        
+
         while iteration < self.max_iterations:
             iteration += 1
-            
+
             # Call LLM
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
-            
+
             # Handle tool calls
             if response.has_tool_calls:
                 # Add assistant message with tool calls
@@ -195,7 +228,7 @@ class AgentLoop:
                 messages = self.context.add_assistant_message(
                     messages, response.content, tool_call_dicts
                 )
-                
+
                 # Execute tools
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments)
@@ -208,15 +241,23 @@ class AgentLoop:
                 # No tool calls, we're done
                 final_content = response.content
                 break
-        
+
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
-        
+
         # Save to session
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
-        
+
+        # N-turn synchronous extraction
+        user_count = sum(1 for m in session.messages if m["role"] == "user")
+        if user_count > 0 and user_count % self._extraction_interval == 0:
+            await self._extract_and_consolidate(
+                session.get_history()[-20:],
+                namespace=msg.session_key,
+            )
+
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
@@ -254,26 +295,32 @@ class AgentLoop:
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(origin_channel, origin_chat_id)
-        
+
+        # Get history with optional compaction for long conversations
+        history = session.get_history()
+        if len(history) > self._compactor.config.threshold:
+            history = self._compactor.compact(history)
+
         # Build messages with the announce content
         messages = self.context.build_messages(
-            history=session.get_history(),
-            current_message=msg.content
+            history=history,
+            current_message=msg.content,
+            namespace=session_key,
         )
-        
+
         # Agent loop (limited for announce handling)
         iteration = 0
         final_content = None
-        
+
         while iteration < self.max_iterations:
             iteration += 1
-            
+
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
-            
+
             if response.has_tool_calls:
                 tool_call_dicts = [
                     {
@@ -289,7 +336,7 @@ class AgentLoop:
                 messages = self.context.add_assistant_message(
                     messages, response.content, tool_call_dicts
                 )
-                
+
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments)
                     logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
@@ -300,15 +347,23 @@ class AgentLoop:
             else:
                 final_content = response.content
                 break
-        
+
         if final_content is None:
             final_content = "Background task completed."
-        
+
         # Save to session (mark as system message in history)
         session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
         session.add_message("assistant", final_content)
         self.sessions.save(session)
-        
+
+        # N-turn synchronous extraction
+        user_count = sum(1 for m in session.messages if m["role"] == "user")
+        if user_count > 0 and user_count % self._extraction_interval == 0:
+            await self._extract_and_consolidate(
+                session.get_history()[-20:],
+                namespace=session_key,
+            )
+
         return OutboundMessage(
             channel=origin_channel,
             chat_id=origin_chat_id,
