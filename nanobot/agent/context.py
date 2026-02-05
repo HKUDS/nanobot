@@ -44,10 +44,10 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
         
-        # Memory context
-        memory = self.memory.get_memory_context()
-        if memory:
-            parts.append(f"# Memory\n\n{memory}")
+        # Static long-term memory (MEMORY.md)
+        long_term_memory = self.memory.read_long_term()
+        if long_term_memory:
+            parts.append(f"# Memory\n\n{long_term_memory}")
         
         # Skills - progressive loading
         # 1. Always-loaded skills: include full content
@@ -118,6 +118,7 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         current_message: str,
         skill_names: list[str] | None = None,
         media: list[str] | None = None,
+        retrieved_context: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Build the complete message list for an LLM call.
@@ -127,18 +128,27 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
             current_message: The new user message.
             skill_names: Optional skills to include.
             media: Optional list of local file paths for images/media.
+            retrieved_context: Optional retrieved memory context (ephemeral).
 
         Returns:
             List of messages including system prompt.
         """
         messages = []
 
-        # System prompt
-        system_prompt = self.build_system_prompt(skill_names)
+        # System prompt (includes static MEMORY.md)
+        system_prompt = self.build_system_prompt(skill_names=skill_names)
         messages.append({"role": "system", "content": system_prompt})
 
-        # History
+        # History (clean, without memory artifacts)
         messages.extend(history)
+
+        # Ephemeral retrieved context (synthetic assistant turn)
+        # Only injected for current turn, not stored in history
+        if retrieved_context:
+            messages.append({
+                "role": "assistant",
+                "content": f"[Retrieved Context]\n{retrieved_context}"
+            })
 
         # Current message (with optional image attachments)
         user_content = self._build_user_content(current_message, media)

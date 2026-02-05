@@ -1,9 +1,10 @@
 """Memory system for persistent agent memory."""
 
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Any, Protocol, runtime_checkable
 
-from nanobot.utils.helpers import ensure_dir, today_date
+from nanobot.utils.helpers import ensure_dir, today_date, timestamp
 
 
 class MemoryStore:
@@ -63,8 +64,6 @@ class MemoryStore:
         Returns:
             Combined memory content.
         """
-        from datetime import timedelta
-        
         memories = []
         today = datetime.now().date()
         
@@ -107,3 +106,71 @@ class MemoryStore:
             parts.append("## Today's Notes\n" + today)
         
         return "\n\n".join(parts) if parts else ""
+
+
+# =============================================================================
+# Memory Middleware Protocol
+# =============================================================================
+
+
+@runtime_checkable
+class MemoryMiddleware(Protocol):
+    """
+    Protocol for memory middleware implementations.
+    
+    Implement this protocol to create custom memory backends (vector stores,
+    databases, RAG systems, etc.).
+    """
+    
+    async def initialize(self) -> None:
+        """
+        Initialize resources needed by the middleware.
+        
+        Called once when the agent loop starts. Use this to establish
+        database connections, load vector stores, warm caches, etc.
+        """
+        ...
+    
+    async def retrieve(
+        self,
+        user_input: str,
+        history: list[dict[str, Any]] | None,
+        metadata: dict[str, Any],
+    ) -> str:
+        """
+        Retrieve relevant memory context for the current query.
+        
+        Args:
+            user_input: The user's message.
+            history: Recent conversation history (may be None).
+            metadata: Message metadata (session_key, channel, chat_id, etc.).
+        
+        Returns:
+            Memory context string to inject into the system prompt.
+        """
+        ...
+    
+    async def write(
+        self,
+        user_input: str,
+        llm_output: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        """
+        Write conversation data to memory.
+        
+        Args:
+            user_input: The user's original message.
+            llm_output: The agent's final response.
+            metadata: Message metadata.
+        """
+        ...
+    
+    async def cleanup(self) -> None:
+        """
+        Clean up resources on shutdown.
+        
+        Called when the agent loop stops. Use this to close connections,
+        flush buffers, save state, etc.
+        """
+        ...
