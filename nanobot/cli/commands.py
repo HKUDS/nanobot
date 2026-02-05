@@ -156,6 +156,7 @@ This file stores important information that should persist across sessions.
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    routing_mode: str = typer.Option("auto", "--routing", "-r", help="Routing mode: auto, local, cloud"),
 ):
     """Start the nanobot gateway."""
     from nanobot.config.loader import load_config, get_data_dir
@@ -175,10 +176,16 @@ def gateway(
     
     config = load_config()
     
-    # Create components
-    bus = MessageBus()
+    # Validate routing mode
+    from nanobot.agent.router import RoutingMode
+    routing_mode_map = {
+        "auto": RoutingMode.AUTO,
+        "local": RoutingMode.LOCAL_ONLY,
+        "cloud": RoutingMode.CLOUD_ONLY,
+    }
+    routing_mode = routing_mode_map.get(routing_mode.lower(), RoutingMode.AUTO)
     
-    # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock)
+    # Create main provider (cloud)
     api_key = config.get_api_key()
     api_base = config.get_api_base()
     model = config.agents.defaults.model
@@ -195,6 +202,40 @@ def gateway(
         default_model=config.agents.defaults.model
     )
     
+    # Create local provider and router if routing enabled
+    router = None
+    local_provider = None
+    
+    if config.routing.enabled or routing_mode != RoutingMode.CLOUD_ONLY:
+        if not config.routing.local_model:
+            console.print("[yellow]Warning: Routing enabled but no local_model configured. Routing disabled.[/yellow]")
+        else:
+            try:
+                from nanobot.agent.router import RouterAgent, RouteDecision
+
+                # Create local provider
+                local_provider = LiteLLMProvider(
+                    api_key="ollama",  # Any value for local
+                    api_base=config.routing.local_endpoint,
+                    default_model=config.routing.local_model
+                )
+
+                # Create router
+                router = RouterAgent(
+                    local_provider=local_provider,
+                    config=config.routing,
+                    mode=routing_mode
+                )
+
+                console.print(f"[green]✓[/green] Routing: {routing_mode.value} mode")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not initialize routing: {e}[/yellow]")
+                router = None
+                local_provider = None
+    
+    # Create components
+    bus = MessageBus()
+    
     # Create agent
     agent = AgentLoop(
         bus=bus,
@@ -204,6 +245,8 @@ def gateway(
         max_iterations=config.agents.defaults.max_tool_iterations,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
+        router=router,
+        local_provider=local_provider,
     )
     
     # Create cron service
@@ -281,6 +324,7 @@ def gateway(
 def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:default", "--session", "-s", help="Session ID"),
+    routing_mode: str = typer.Option("auto", "--routing", "-r", help="Routing mode: auto, local, cloud"),
 ):
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config
@@ -290,6 +334,16 @@ def agent(
     
     config = load_config()
     
+    # Validate routing mode
+    from nanobot.agent.router import RoutingMode
+    routing_mode_map = {
+        "auto": RoutingMode.AUTO,
+        "local": RoutingMode.LOCAL_ONLY,
+        "cloud": RoutingMode.CLOUD_ONLY,
+    }
+    routing_mode = routing_mode_map.get(routing_mode.lower(), RoutingMode.AUTO)
+    
+    # Create main provider (cloud)
     api_key = config.get_api_key()
     api_base = config.get_api_base()
     model = config.agents.defaults.model
@@ -306,12 +360,46 @@ def agent(
         default_model=config.agents.defaults.model
     )
     
+    # Create local provider and router if routing enabled
+    router = None
+    local_provider = None
+    
+    if config.routing.enabled or routing_mode != RoutingMode.CLOUD_ONLY:
+        if not config.routing.local_model:
+            console.print("[yellow]Warning: Routing enabled but no local_model configured. Routing disabled.[/yellow]")
+        else:
+            try:
+                from nanobot.agent.router import RouterAgent, RouteDecision
+
+                # Create local provider
+                local_provider = LiteLLMProvider(
+                    api_key="ollama",
+                    api_base=config.routing.local_endpoint,
+                    default_model=config.routing.local_model
+                )
+
+                # Create router
+                router = RouterAgent(
+                    local_provider=local_provider,
+                    config=config.routing,
+                    mode=routing_mode
+                )
+
+                if routing_mode != RoutingMode.CLOUD_ONLY:
+                    console.print(f"[green]✓[/green] Routing: {routing_mode.value} mode")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not initialize routing: {e}[/yellow]")
+                router = None
+                local_provider = None
+
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
+        router=router,
+        local_provider=local_provider,
     )
     
     if message:
