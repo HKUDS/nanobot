@@ -30,7 +30,7 @@ class ContextBuilder:
         self.vector_memory: VectorMemoryStore | None = None
         if use_vector_memory and VECTOR_MEMORY_AVAILABLE:
             try:
-                vector_db_path = Path("memory/vectors.db")
+                vector_db_path = workspace / "memory" / "vectors.db"
                 embedding_service = EmbeddingService(model=embedding_model)
                 self.vector_memory = VectorMemoryStore(
                     db_path=vector_db_path,
@@ -211,6 +211,7 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         """Clean up resources."""
         if self.vector_memory:
             self.vector_memory.close()
+            self.vector_memory = None  # Prevent double-close
 
     def __del__(self):
         self.close()

@@ -1,6 +1,7 @@
 """Memory consolidator for managing memory updates with Mem0-style operations."""
 
 import json
+import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal
@@ -60,6 +61,12 @@ class MemoryConsolidator:
         text = text.replace('"', '\\"').replace('\n', ' ')
         return text[:500] if len(text) > 500 else text
 
+    def _sanitize_storage_content(self, text: str) -> str:
+        """Sanitize content before storing."""
+        if not text:
+            return text
+        return text.replace("<", "&lt;").replace(">", "&gt;")
+
     def consolidate(self, facts: list[ExtractedFact], namespace: str = "default") -> list[ConsolidationResult]:
         """Consolidate extracted facts into the memory store."""
         results = []
@@ -68,7 +75,14 @@ class MemoryConsolidator:
                 continue
             result, valid_ids = self._consolidate_single(fact.content.strip(), namespace)
             results.append(result)
-            importance = max(0.0, min(1.0, float(fact.importance))) if isinstance(fact.importance, (int, float)) else 0.5
+
+            # Validate and normalize importance
+            if isinstance(fact.importance, (int, float)):
+                imp = float(fact.importance)
+                importance = max(0.0, min(1.0, imp)) if not (math.isnan(imp) or math.isinf(imp)) else 0.5
+            else:
+                importance = 0.5
+
             self._execute_operation(result, namespace, importance, valid_ids)
         return results
 
@@ -188,20 +202,24 @@ Response:"""
                     result.memory_id = None
 
             if result.operation == Operation.ADD:
-                item = self.store.add(result.new_content, metadata={"importance": importance}, namespace=namespace)
+                content = self._sanitize_storage_content(result.new_content) if result.new_content else ""
+                item = self.store.add(content, metadata={"importance": importance}, namespace=namespace)
                 result.memory_id = item.id
-                logger.debug(f"Added: {result.new_content[:50]}...")
+                logger.debug(f"Added: {content[:50]}...")
 
             elif result.operation == Operation.UPDATE:
                 if not result.memory_id:
                     logger.error("Cannot UPDATE without memory_id")
                     return
 
-                updated = self.store.update(result.memory_id, result.new_content, namespace=namespace)
+                content = self._sanitize_storage_content(result.new_content) if result.new_content else ""
+                updated = self.store.update(result.memory_id, content, namespace=namespace)
                 if not updated:
-                    logger.warning(f"Memory {result.memory_id} not found for UPDATE")
+                    logger.info(f"Memory {result.memory_id} not found, creating new memory instead")
+                    item = self.store.add(content, metadata={"importance": importance}, namespace=namespace)
+                    result.memory_id = item.id
                 else:
-                    logger.debug(f"Updated {result.memory_id}: {result.new_content[:50]}...")
+                    logger.debug(f"Updated {result.memory_id}: {content[:50]}...")
 
             elif result.operation == Operation.DELETE:
                 if not result.memory_id:
@@ -216,8 +234,9 @@ Response:"""
 
                 # Add replacement if different
                 if result.new_content and result.new_content != result.old_content:
-                    self.store.add(result.new_content, metadata={"importance": importance}, namespace=namespace)
-                    logger.debug(f"Added replacement: {result.new_content[:50]}...")
+                    content = self._sanitize_storage_content(result.new_content)
+                    self.store.add(content, metadata={"importance": importance}, namespace=namespace)
+                    logger.debug(f"Added replacement: {content[:50]}...")
 
             elif result.operation == Operation.NOOP:
                 logger.debug(f"Skipped duplicate: {result.new_content[:50] if result.new_content else 'N/A'}...")
