@@ -1,5 +1,6 @@
 """Configuration schema using Pydantic."""
 
+from enum import StrEnum
 from pathlib import Path
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
@@ -44,7 +45,6 @@ class ProviderConfig(BaseModel):
     api_key: str = ""
     api_base: str | None = None
 
-
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -54,6 +54,7 @@ class ProvidersConfig(BaseModel):
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    custom: dict[str, ProviderConfig] = Field(default_factory=dict) # generic provider configuration
 
 
 class GatewayConfig(BaseModel):
@@ -98,28 +99,38 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
     
-    def get_api_key(self) -> str | None:
-        """Get API key in priority order: OpenRouter > Anthropic > OpenAI > Gemini > Zhipu > Groq > vLLM."""
-        return (
-            self.providers.openrouter.api_key or
-            self.providers.anthropic.api_key or
-            self.providers.openai.api_key or
-            self.providers.gemini.api_key or
-            self.providers.zhipu.api_key or
-            self.providers.groq.api_key or
-            self.providers.vllm.api_key or
-            None
-        )
-    
-    def get_api_base(self) -> str | None:
-        """Get API base URL if using OpenRouter, Zhipu or vLLM."""
+    def get_provider_config(self) -> tuple[str | None, str | None, str | None]:
+        """Get provider configuration (api_key, api_base, provider_type)."""
+        # Check custom providers first
+        for provider_name, config in self.providers.custom.items():
+            # Handle both ProviderConfig objects and dicts
+            if isinstance(config, dict):
+                api_key = config.get("api_key", "")
+                api_base = config.get("api_base")
+            else:
+                api_key = config.api_key
+                api_base = config.api_base
+
+            if api_key:
+                return api_key, api_base, provider_name
+
+        # Fall back to standard providers
         if self.providers.openrouter.api_key:
-            return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
+            return self.providers.openrouter.api_key, self.providers.openrouter.api_base or "https://openrouter.ai/api/v1", "openrouter"
+        if self.providers.anthropic.api_key:
+            return self.providers.anthropic.api_key, None, "anthropic"
+        if self.providers.openai.api_key:
+            return self.providers.openai.api_key, None, "openai"
+        if self.providers.gemini.api_key:
+            return self.providers.gemini.api_key, None, "gemini"
         if self.providers.zhipu.api_key:
-            return self.providers.zhipu.api_base
-        if self.providers.vllm.api_base:
-            return self.providers.vllm.api_base
-        return None
+            return self.providers.zhipu.api_key, self.providers.zhipu.api_base, "zhipu"
+        if self.providers.groq.api_key:
+            return self.providers.groq.api_key, None, "groq"
+        if self.providers.vllm.api_key or self.providers.vllm.api_base:
+            return self.providers.vllm.api_key, self.providers.vllm.api_base, "vllm"
+
+        return None, None, None
     
     class Config:
         env_prefix = "NANOBOT_"

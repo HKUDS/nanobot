@@ -18,28 +18,33 @@ class LiteLLMProvider(LLMProvider):
     """
     
     def __init__(
-        self, 
-        api_key: str | None = None, 
+        self,
+        api_key: str | None = None,
         api_base: str | None = None,
-        default_model: str = "anthropic/claude-opus-4-5"
+        default_model: str = "anthropic/claude-opus-4-5",
+        provider_type: str | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
-        
+        self.provider_type = provider_type or "unknown"
+
         # Detect OpenRouter by api_key prefix or explicit api_base
-        self.is_openrouter = (
-            (api_key and api_key.startswith("sk-or-")) or
-            (api_base and "openrouter" in api_base)
-        )
-        
+        self.is_openrouter = provider_type == "openrouter"
+
         # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        self.is_vllm = provider_type == "vllm"
+
+        # Track if using custom provider
+        self.is_custom = provider_type and provider_type not in ["anthropic", "openai", "openrouter", "groq", "zhipu", "vllm", "gemini"]
         
         # Configure LiteLLM based on provider
         if api_key:
             if self.is_openrouter:
                 # OpenRouter mode - set key
                 os.environ["OPENROUTER_API_KEY"] = api_key
+            elif self.is_custom:
+                # Custom providers - use OpenAI-compatible API
+                os.environ["OPENAI_API_KEY"] = api_key
             elif self.is_vllm:
                 # vLLM/custom endpoint - uses OpenAI-compatible API
                 os.environ["OPENAI_API_KEY"] = api_key
@@ -86,24 +91,25 @@ class LiteLLMProvider(LLMProvider):
         # For OpenRouter, prefix model name if not already prefixed
         if self.is_openrouter and not model.startswith("openrouter/"):
             model = f"openrouter/{model}"
-        
         # For Zhipu/Z.ai, ensure prefix is present
         # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
         if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
-            model.startswith("zhipu/") or 
-            model.startswith("zai/") or 
+            model.startswith("zhipu/") or
+            model.startswith("zai/") or
             model.startswith("openrouter/")
         ):
             model = f"zai/{model}"
-        
         # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
         # Convert openai/ prefix to hosted_vllm/ if user specified it
         if self.is_vllm:
             model = f"hosted_vllm/{model}"
-        
         # For Gemini, ensure gemini/ prefix if not already present
         if "gemini" in model.lower() and not model.startswith("gemini/"):
             model = f"gemini/{model}"
+
+        # For custom providers, use openai/ prefix
+        if self.is_custom and not model.startswith("openai/"):
+            model = f"openai/{model}"
         
         kwargs: dict[str, Any] = {
             "model": model,

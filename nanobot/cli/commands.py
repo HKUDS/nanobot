@@ -178,21 +178,21 @@ def gateway(
     # Create components
     bus = MessageBus()
     
-    # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock)
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
+    # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock, and custom providers)
+    api_key, api_base, provider_type = config.get_provider_config()
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
 
     if not api_key and not is_bedrock:
         console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
+        console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey or providers.custom.<name>.apiKey")
         raise typer.Exit(1)
-    
+
     provider = LiteLLMProvider(
         api_key=api_key,
         api_base=api_base,
-        default_model=config.agents.defaults.model
+        default_model=config.agents.defaults.model,
+        provider_type=provider_type,
     )
     
     # Create agent
@@ -290,8 +290,7 @@ def agent(
     
     config = load_config()
     
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
+    api_key, api_base, provider_type = config.get_provider_config()
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
 
@@ -303,7 +302,8 @@ def agent(
     provider = LiteLLMProvider(
         api_key=api_key,
         api_base=api_base,
-        default_model=config.agents.defaults.model
+        default_model=config.agents.defaults.model,
+        provider_type=provider_type,
     )
     
     agent_loop = AgentLoop(
@@ -636,21 +636,38 @@ def status():
 
     if config_path.exists():
         console.print(f"Model: {config.agents.defaults.model}")
-        
+
         # Check API keys
         has_openrouter = bool(config.providers.openrouter.api_key)
         has_anthropic = bool(config.providers.anthropic.api_key)
         has_openai = bool(config.providers.openai.api_key)
         has_gemini = bool(config.providers.gemini.api_key)
         has_vllm = bool(config.providers.vllm.api_base)
-        
-        console.print(f"OpenRouter API: {'[green]✓[/green]' if has_openrouter else '[dim]not set[/dim]'}")
-        console.print(f"Anthropic API: {'[green]✓[/green]' if has_anthropic else '[dim]not set[/dim]'}")
-        console.print(f"OpenAI API: {'[green]✓[/green]' if has_openai else '[dim]not set[/dim]'}")
-        console.print(f"Gemini API: {'[green]✓[/green]' if has_gemini else '[dim]not set[/dim]'}")
+
+        # Show custom providers
+        if config.providers.custom:
+            console.print("\nCustom Providers:")
+            for name, provider_config in config.providers.custom.items():
+                # Handle both ProviderConfig objects and dicts
+                if isinstance(provider_config, dict):
+                    api_key = provider_config.get("api_key", "")
+                    api_base = provider_config.get("api_base")
+                else:
+                    api_key = provider_config.api_key
+                    api_base = provider_config.api_base
+
+                if api_key:
+                    base_info = f" ({api_base})" if api_base else ""
+                    console.print(f"  {name}: [green]✓[/green]{base_info}")
+
+        # Show standard providers
+        console.print(f"\nStandard Providers:")
+        console.print(f"OpenRouter API: {'[green]✓[/green]' if has_openrouter else '[dim]not set[/dim]'})")
+        console.print(f"Anthropic API: {'[green]✓[/green]' if has_anthropic else '[dim]not set[/dim]'})")
+        console.print(f"OpenAI API: {'[green]✓[/green]' if has_openai else '[dim]not set[/dim]'})")
+        console.print(f"Gemini API: {'[green]✓[/green]' if has_gemini else '[dim]not set[/dim]'})")
         vllm_status = f"[green]✓ {config.providers.vllm.api_base}[/green]" if has_vllm else "[dim]not set[/dim]"
         console.print(f"vLLM/Local: {vllm_status}")
-
 
 if __name__ == "__main__":
     app()
