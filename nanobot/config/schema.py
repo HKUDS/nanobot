@@ -40,8 +40,8 @@ class ChannelsConfig(BaseModel):
 class AgentDefaults(BaseModel):
     """Default agent configuration."""
     workspace: str = "~/.nanobot/workspace"
-    model: str = "anthropic/claude-opus-4-5"
-    max_tokens: int = 8192
+    model: str = "nvidia/nemotron-3-nano-30b-a3b"
+    max_tokens: int = 16384
     temperature: float = 0.7
     max_tool_iterations: int = 20
 
@@ -67,6 +67,7 @@ class ProvidersConfig(BaseModel):
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    nvidia: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -122,6 +123,7 @@ class Config(BaseSettings):
             self.providers.zhipu.api_key or
             self.providers.groq.api_key or
             self.providers.vllm.api_key or
+            self.providers.nvidia.api_key or
             None
         )
     
@@ -133,6 +135,8 @@ class Config(BaseSettings):
             return self.providers.zhipu.api_base
         if self.providers.vllm.api_base:
             return self.providers.vllm.api_base
+        if self.providers.nvidia.api_key:
+            return self.providers.nvidia.api_base or "https://integrate.api.nvidia.com/v1"
         return None
     
     class Config:

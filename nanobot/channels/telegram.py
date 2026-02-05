@@ -5,6 +5,7 @@ import re
 
 from loguru import logger
 from telegram import Update
+from telegram.error import Conflict
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
 from nanobot.bus.events import OutboundMessage
@@ -131,10 +132,66 @@ class TelegramChannel(BaseChannel):
         logger.info(f"Telegram bot @{bot_info.username} connected")
         
         # Start polling (this runs until stopped)
-        await self._app.updater.start_polling(
-            allowed_updates=["message"],
-            drop_pending_updates=True  # Ignore old messages on startup
-        )
+        try:
+            await self._app.updater.start_polling(
+                allowed_updates=["message"],
+                drop_pending_updates=True  # Ignore old messages on startup
+            )
+        except Conflict as e:
+            logger.error(
+                "Telegram polling conflict detected: another getUpdates client is running. "
+                "Ensure only one bot instance is running (stop other processes or containers)."
+            )
+            logger.debug(f"Telegram Conflict detail: {e}")
+
+            # Attempt to fetch webhook info for diagnostics (do not modify state)
+            try:
+                import httpx
+                token = self.config.token
+                if token:
+                    webhook_url = f"https://api.telegram.org/bot{token}/getWebhookInfo"
+                    async with httpx.AsyncClient(timeout=10.0) as c:
+                        resp = await c.get(webhook_url)
+                    if resp.status_code == 200:
+                        logger.info(f"Telegram getWebhookInfo: {resp.text}")
+                else:
+                    logger.debug("No telegram token available for webhook diagnostics")
+            except Exception as de:
+                logger.debug(f"Failed to fetch webhook info: {de}")
+
+            # Try a few retries with backoff in case of transient termination by another client
+            retry_waits = [1, 2, 4]
+            for wait in retry_waits:
+                if not self._running:
+                    break
+                logger.info(f"Retrying polling in {wait}s...")
+                await asyncio.sleep(wait)
+                try:
+                    await self._app.updater.start_polling(allowed_updates=["message"], drop_pending_updates=True)
+                    logger.info("Polling started after retry")
+                    break
+                except Conflict:
+                    logger.warning("Polling still in conflict; will retry or exit")
+                    continue
+
+            # If still running but polling not started, stop and cleanup
+            if self._app:
+                logger.info("Stopping Telegram app due to persistent conflict")
+                self._running = False
+                try:
+                    await self._app.stop()
+                    await self._app.shutdown()
+                except Exception:
+                    pass
+                self._app = None
+
+            # Provide user actionable suggestion in logs
+            logger.error(
+                "Persistent Conflict: Another polling client likely running. "
+                "Run `pgrep -af python | grep -i telegram` or check Docker/Services and stop the other instance. "
+                "If you use webhooks, run getWebhookInfo to inspect webhook settings."
+            )
+            return
         
         # Keep running until stopped
         while self._running:

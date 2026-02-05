@@ -311,6 +311,8 @@ Config file: `~/.nanobot/config.json`
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 
+| `nvidia` | LLM (NVIDIA Integrate) | (see provider dashboard) |
+
 
 <details>
 <summary><b>Full config example</b></summary>
@@ -359,6 +361,33 @@ Config file: `~/.nanobot/config.json`
 ```
 
 </details>
+
+## 🔌 NVIDIA 集成与验证
+
+如果要使用 NVIDIA 大模型（通过 NVIDIA Integrate），请在 `~/.nanobot/config.json` 中配置 `providers.nvidia`，并把 agent 默认模型设为以 `nvidia/` 开头的模型 ID。示例：
+
+```json
+{
+  "agents": { "defaults": { "model": "nvidia/your-model-id" } },
+  "providers": {
+    "nvidia": {
+      "apiKey": "nvapi-<YOUR_NV_API_KEY>",
+      "apiBase": "https://integrate.api.nvidia.com/v1"
+    }
+  }
+}
+```
+
+仓库中提供了一个验证脚本来快速检查连通性与基础功能（ping/identify/math）：
+
+```bash
+python3 scripts/validate_nvidia.py
+```
+
+验证结果示例已保存在 `scripts/nvidia_validation.log`。
+
+注意：若使用私有推理服务，需要确保 `apiBase` 对应的路由兼容 OpenAI-style 请求，或在前端提供一个兼容层。
+
 
 ## CLI Reference
 

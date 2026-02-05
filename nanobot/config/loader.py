@@ -61,6 +61,31 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         json.dump(data, f, indent=2)
 
 
+def validate_nvidia_config(config: Config) -> tuple[bool, str | None]:
+    """
+    Validate NVIDIA provider settings and return (is_valid, message).
+
+    - If no NVIDIA API key is set, returns (False, error_message).
+    - If API key is present but doesn't look like an nvapi key, returns (True, warning_message).
+    - If api_base is missing, returns (True, info_message) since we default to integrate base.
+    """
+    nv = config.providers.nvidia
+    if not nv.api_key:
+        return False, ("NVIDIA API key missing: set providers.nvidia.apiKey in ~/.nanobot/config.json. "
+                       "Example: \"nvapi-<YOUR_KEY>\".")
+
+    # Key present; check format
+    if not nv.api_key.startswith("nvapi-"):
+        return True, ("Warning: NVIDIA API key does not start with 'nvapi-'. "
+                      "Ensure you provided the correct Integrate key.")
+
+    # api_base optional (we default to integrate API base), but inform user if missing
+    if not nv.api_base:
+        return True, ("Info: providers.nvidia.apiBase not set; defaulting to https://integrate.api.nvidia.com/v1.")
+
+    return True, None
+
+
 def convert_keys(data: Any) -> Any:
     """Convert camelCase keys to snake_case for Pydantic."""
     if isinstance(data, dict):

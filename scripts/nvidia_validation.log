@@ -1,0 +1,35 @@
+[
+  {
+    "label": "ping",
+    "content": "\npong",
+    "finish_reason": "stop",
+    "usage": {
+      "prompt_tokens": 24,
+      "completion_tokens": 36,
+      "total_tokens": 60
+    },
+    "elapsed_s": 0.961
+  },
+  {
+    "label": "identify",
+    "content": "\nI am the latest GPT‑4 model.",
+    "finish_reason": "stop",
+    "usage": {
+      "prompt_tokens": 33,
+      "completion_tokens": 162,
+      "total_tokens": 195
+    },
+    "elapsed_s": 1.223
+  },
+  {
+    "label": "math_check",
+    "content": "\n80235",
+    "finish_reason": "stop",
+    "usage": {
+      "prompt_tokens": 37,
+      "completion_tokens": 111,
+      "total_tokens": 148
+    },
+    "elapsed_s": 0.665
+  }
+]
