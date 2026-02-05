@@ -28,7 +28,9 @@
 
 ⚡️ **Lightning Fast**: Minimal footprint means faster startup, lower resource usage, and quicker iterations.
 
-💎 **Easy-to-Use**: One-click to depoly and you're ready to go.
+💎 **Easy-to-Use**: One-click to deploy and you're ready to go.
+
+🔍 **Web Search & Fetch**: Integrated support for Ollama Web Search & Fetch APIs to augment models with real-time information.
 
 ## 🏗️ Architecture
 
@@ -339,7 +341,7 @@ Config file: `~/.nanobot/config.json`
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `ollama` | LLM (Local Ollama) | [ollama.com](https://ollama.com) |
-| `ollama_cloud` | LLM (Ollama Cloud) | [ollama.com/cloud](https://ollama.com/cloud) |
+| `ollama_cloud` | LLM + **Web Search & Fetch** | [ollama.com/cloud](https://ollama.com/cloud) |
 
 
 <details>
@@ -374,6 +376,9 @@ Config file: `~/.nanobot/config.json`
     "web": {
       "search": {
         "apiKey": "BSA..."
+      },
+      "ollama": {
+        "apiKey": "ollama_key"
       }
     }
   }
