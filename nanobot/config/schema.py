@@ -17,12 +17,24 @@ class TelegramConfig(BaseModel):
     enabled: bool = False
     token: str = ""  # Bot token from @BotFather
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
+    proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
+
+
+class FeishuConfig(BaseModel):
+    """Feishu/Lark channel configuration using WebSocket long connection."""
+    enabled: bool = False
+    app_id: str = ""  # App ID from Feishu Open Platform
+    app_secret: str = ""  # App Secret from Feishu Open Platform
+    encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
+    verification_token: str = ""  # Verification Token for event subscription (optional)
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
 
 
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    feishu: FeishuConfig = Field(default_factory=FeishuConfig)
 
 
 class AgentDefaults(BaseModel):
@@ -74,9 +86,16 @@ class WebToolsConfig(BaseModel):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
+class ExecToolConfig(BaseModel):
+    """Shell exec tool configuration."""
+    timeout: int = 60
+    restrict_to_workspace: bool = False  # If true, block commands accessing paths outside workspace
+
+
 class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
+    exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
 
 
 class Config(BaseSettings):

@@ -8,6 +8,7 @@
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
     <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/Feishu-Group-E9DBFC?style=flat&logo=feishu&logoColor=white" alt="Feishu"></a>
     <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/WeChat-Group-C5EAB4?style=flat&logo=wechat&logoColor=white" alt="WeChat"></a>
+    <a href="https://discord.gg/MnCvHqpUGB"><img src="https://img.shields.io/badge/Discord-Community-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
   </p>
 </div>
 
@@ -107,8 +108,12 @@ nanobot onboard
       "model": "anthropic/claude-opus-4-5"
     }
   },
-  "webSearch": {
-    "apiKey": "BSA-xxx"
+  "tools": {
+    "web": {
+      "search": {
+        "apiKey": "BSA-xxx"
+      }
+    }
   }
 }
 ```
@@ -161,12 +166,13 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram or WhatsApp — anytime, anywhere.
+Talk to your nanobot through Telegram, WhatsApp, or Feishu — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
 | **Telegram** | Easy (just a token) |
 | **WhatsApp** | Medium (scan QR) |
+| **Feishu** | Medium (app credentials) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -237,6 +243,55 @@ nanobot gateway
 
 </details>
 
+<details>
+<summary><b>Feishu (飞书)</b></summary>
+
+Uses **WebSocket** long connection — no public IP required.
+
+```bash
+pip install nanobot-ai[feishu]
+```
+
+**1. Create a Feishu bot**
+- Visit [Feishu Open Platform](https://open.feishu.cn/app)
+- Create a new app → Enable **Bot** capability
+- **Permissions**: Add `im:message` (send messages)
+- **Events**: Add `im.message.receive_v1` (receive messages)
+  - Select **Long Connection** mode (requires running nanobot first to establish connection)
+- Get **App ID** and **App Secret** from "Credentials & Basic Info"
+- Publish the app
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "appId": "cli_xxx",
+      "appSecret": "xxx",
+      "encryptKey": "",
+      "verificationToken": "",
+      "allowFrom": []
+    }
+  }
+}
+```
+
+> `encryptKey` and `verificationToken` are optional for Long Connection mode.
+> `allowFrom`: Leave empty to allow all users, or add `["ou_xxx"]` to restrict access.
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+> [!TIP]
+> Feishu uses WebSocket to receive messages — no webhook or public IP needed!
+
+</details>
+
 ## ⚙️ Configuration
 
 Config file: `~/.nanobot/config.json`
@@ -281,6 +336,14 @@ Config file: `~/.nanobot/config.json`
     },
     "whatsapp": {
       "enabled": false
+    },
+    "feishu": {
+      "enabled": false,
+      "appId": "cli_xxx",
+      "appSecret": "xxx",
+      "encryptKey": "",
+      "verificationToken": "",
+      "allowFrom": []
     }
   },
   "tools": {
@@ -387,10 +450,9 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 ### Contributors
 
 <a href="https://github.com/HKUDS/nanobot/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=HKUDS/nanobot" />
+  <img src="https://contrib.rocks/image?repo=HKUDS/nanobot&max=100&columns=12" />
 </a>
 
----
 
 ## ⭐ Star History
 
@@ -409,7 +471,6 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
   <img src="https://visitor-badge.laobi.icu/badge?page_id=HKUDS.nanobot&style=for-the-badge&color=00d4ff" alt="Views">
 </p>
 
----
 
 <p align="center">
   <sub>nanobot is for educational, research, and technical exchange purposes only</sub>

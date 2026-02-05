@@ -89,7 +89,6 @@ class LiteLLMProvider(LLMProvider):
         
         # For Zhipu/Z.ai, ensure prefix is present
         # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
-        # LiteLLM uses 'zai/' for Zhipu AI models
         if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
             model.startswith("zhipu/") or 
             model.startswith("zai/") or 
