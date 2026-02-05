@@ -450,7 +450,7 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 ### Contributors
 
 <a href="https://github.com/HKUDS/nanobot/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=HKUDS/nanobot" />
+  <img src="https://contrib.rocks/image?repo=HKUDS/nanobot&max=100&columns=12" />
 </a>
 
 
