@@ -1,9 +1,22 @@
-"""Agent loop: the core processing engine."""
+"""Agent loop: the core processing engine.
+
+The Stanford Generative Agents memory system flow:
+
+1. Receive message
+2. [New] Store observation + evaluate importance
+3. [New] Retrieve relevant memories (3D retrieval)
+4. Build context (includes retrieved memories)
+5. Call LLM
+6. Execute tools
+7. [New] Check if reflection is triggered
+8. [New] Store assistant response
+9. Response
+"""
 
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Optional
 
 from loguru import logger
 
@@ -11,6 +24,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.memory_manager import MemoryManager
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
@@ -25,12 +39,16 @@ class AgentLoop:
     """
     The agent loop is the core processing engine.
     
-    It:
+    The Stanford Generative Agents memory system flow:
     1. Receives messages from the bus
-    2. Builds context with history, memory, skills
-    3. Calls the LLM
-    4. Executes tool calls
-    5. Sends responses back
+    2. [NEW] Stores observation + evaluates importance
+    3. [NEW] Retrieves relevant memories (3D retrieval)
+    4. Builds context with history, memory, skills
+    5. Calls the LLM
+    6. Executes tool calls
+    7. [NEW] Checks reflection trigger
+    8. [NEW] Stores assistant response
+    9. Sends responses back
     """
     
     def __init__(
@@ -42,6 +60,11 @@ class AgentLoop:
         max_iterations: int = 20,
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
+        # memory system configuration
+        memory_enabled: bool = True,
+        embedding_config: Optional[Dict[str, Any]] = None,
+        reflection_threshold: int = 150,
+        reflection_enabled: bool = True,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -51,6 +74,12 @@ class AgentLoop:
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
+        
+        # memory system configuration
+        self.memory_enabled = memory_enabled
+        self.embedding_config = embedding_config
+        self.reflection_threshold = reflection_threshold
+        self.reflection_enabled = reflection_enabled
         
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
@@ -64,8 +93,35 @@ class AgentLoop:
             exec_config=self.exec_config,
         )
         
+        # memory manager cache (one per session)
+        self._memory_managers: Dict[str, MemoryManager] = {}
+        
         self._running = False
         self._register_default_tools()
+    
+    def _get_memory_manager(self, session_key: str) -> Optional[MemoryManager]:
+        """
+        Get or create the memory manager for the session
+        
+        Args:
+            session_key: session identifier
+        
+        Returns:
+            MemoryManager instance, return None if memory system is disabled
+        """
+        if not self.memory_enabled:
+            return None
+        
+        if session_key not in self._memory_managers:
+            self._memory_managers[session_key] = MemoryManager(
+                role_id=session_key.replace(":", "_"),
+                workspace=self.workspace,
+                embedding_config=self.embedding_config,
+                reflection_threshold=self.reflection_threshold,
+                reflection_enabled=self.reflection_enabled,
+            )
+        
+        return self._memory_managers[session_key]
     
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -132,6 +188,17 @@ class AgentLoop:
         """
         Process a single inbound message.
         
+        Implement Stanford GA memory enhancement flow:
+        1. Receive message 
+        2. [New] Store observation + evaluate importance
+        3. [New] Retrieve relevant memories (3D retrieval)
+        4. Build context (includes retrieved memories)
+        5. Call LLM 
+        6. Execute tools 
+        7. [New] Check if reflection is triggered
+        8. [New] Store assistant response
+        9. Response
+        
         Args:
             msg: The inbound message to process.
         
@@ -148,6 +215,9 @@ class AgentLoop:
         # Get or create session
         session = self.sessions.get_or_create(msg.session_key)
         
+        # Get memory manager
+        memory_manager = self._get_memory_manager(msg.session_key)
+        
         # Update tool contexts
         message_tool = self.tools.get("message")
         if isinstance(message_tool, MessageTool):
@@ -157,14 +227,42 @@ class AgentLoop:
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(msg.channel, msg.chat_id)
         
-        # Build initial messages (use get_history for LLM-formatted messages)
+        # ========== Step 2: Store user message to memory + evaluate importance ==========
+        memory_context = ""
+        if memory_manager:
+            try:
+                await memory_manager.add_observation(
+                    content=msg.content,
+                    role="user",
+                    metadata={
+                        "channel": msg.channel,
+                        "sender_id": msg.sender_id,
+                    }
+                )
+                logger.debug(f"Added user message to memory: {msg.content[:50]}...")
+            except Exception as e:
+                logger.warning(f"Failed to add user message to memory: {e}")
+            
+            # ========== Step 3: Retrieve relevant memories (3D retrieval) ==========
+            try:
+                relevant_memories = await memory_manager.retrieve_relevant_memories(
+                    query=msg.content,
+                    k=5,
+                )
+                memory_context = memory_manager.format_memories_for_context(relevant_memories)
+                logger.debug(f"Retrieved {len(relevant_memories)} relevant memories")
+            except Exception as e:
+                logger.warning(f"Failed to retrieve memories: {e}")
+        
+        # ========== Step 4: Build context (includes retrieved memories) ==========
         messages = self.context.build_messages(
             history=session.get_history(),
             current_message=msg.content,
             media=msg.media if msg.media else None,
+            memory_context=memory_context,  # New: memory context
         )
         
-        # Agent loop
+        # ========== Step 5-6: Call LLM + execute tools ==========
         iteration = 0
         final_content = None
         
@@ -177,7 +275,7 @@ class AgentLoop:
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
-            
+            logger.bind(tag="agents").info(f"Response: {response}")
             # Handle tool calls
             if response.has_tool_calls:
                 # Add assistant message with tool calls
@@ -212,11 +310,37 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
         
-        # Save to session
+        # ========== Step 7: Check if reflection is triggered ==========
+        if memory_manager:
+            try:
+                reflection_nodes = await memory_manager.check_and_reflect(
+                    llm=self.provider,
+                    agent_name="assistant",
+                )
+                if reflection_nodes:
+                    logger.info(f"Reflection generated {len(reflection_nodes)} insights")
+            except Exception as e:
+                logger.warning(f"Reflection failed: {e}")
+            
+            # ========== Step 8: Store assistant response to memory ==========
+            try:
+                await memory_manager.add_observation(
+                    content=final_content,
+                    role="assistant",
+                    metadata={
+                        "channel": msg.channel,
+                    }
+                )
+                logger.debug(f"Added assistant response to memory: {final_content[:50]}...")
+            except Exception as e:
+                logger.warning(f"Failed to add assistant response to memory: {e}")
+        
+        # Save to session (keep the existing session mechanism)
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
         
+        # ========== Step 9: Response ==========
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,

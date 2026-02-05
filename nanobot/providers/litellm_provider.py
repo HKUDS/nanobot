@@ -35,11 +35,20 @@ class LiteLLMProvider(LLMProvider):
         # Track if using custom endpoint (vLLM, etc.)
         self.is_vllm = bool(api_base) and not self.is_openrouter
         
+        # Detect Qwen/DashScope
+        self.is_qwen = (
+            "qwen" in default_model.lower() or
+            (api_base and "dashscope" in api_base)
+        )
+        
         # Configure LiteLLM based on provider
         if api_key:
             if self.is_openrouter:
                 # OpenRouter mode - set key
                 os.environ["OPENROUTER_API_KEY"] = api_key
+            elif self.is_qwen:
+                # Qwen/DashScope - uses OpenAI-compatible API
+                os.environ["OPENAI_API_KEY"] = api_key
             elif self.is_vllm:
                 # vLLM/custom endpoint - uses OpenAI-compatible API
                 os.environ["OPENAI_API_KEY"] = api_key
@@ -98,9 +107,13 @@ class LiteLLMProvider(LLMProvider):
         ):
             model = f"zai/{model}"
         
+        # For Qwen/DashScope, use openai/ prefix with custom base
+        if self.is_qwen and not model.startswith("openai/"):
+            model = f"openai/{model}"
+        
         # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
         # Convert openai/ prefix to hosted_vllm/ if user specified it
-        if self.is_vllm:
+        elif self.is_vllm:
             model = f"hosted_vllm/{model}"
         
         # For Gemini, ensure gemini/ prefix if not already present
