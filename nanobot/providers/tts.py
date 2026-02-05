@@ -73,7 +73,7 @@ class DeepDubTTSProvider:
         self._base_delay = 1.0  # seconds
         self._max_delay = 30.0  # seconds
     
-    async def _ensure_connected(self) -> Any:
+    async def _ensure_connected(self) -> DeepdubClient:
         """
         Ensure we have an active WebSocket connection.
         
@@ -176,26 +176,13 @@ class DeepDubTTSProvider:
         for attempt in range(max_attempts):
             try:
                 conn = await self._ensure_connected()
-                
-                # Use the async streaming TTS - collect all chunks
-                audio_chunks: list[bytes] = []
-                
-                async for chunk in conn.async_tts(
-                    text=text,
-                    voicePromptId=voice_id,
-                    model=use_model,
-                    locale=use_locale,
-                    format=output_format.value,
-                    sampleRate=sample_rate,
-                    realtime=True,
-                ):
-                    if chunk:
-                        audio_chunks.append(chunk)
-                
-                if not audio_chunks:
-                    raise RuntimeError("No audio data received from DeepDub")
-                
-                result = b"".join(audio_chunks)
+
+                logger.debug(f"calling async_tts with text: {text}, voice_id: {voice_id}, model: {use_model}, locale: {use_locale}, output_format: {output_format.value}, sample_rate: {sample_rate}")
+
+                response = conn.tts(text=text, voice_prompt_id=voice_id, model="dd-etts-2.5", locale=use_locale, format=output_format.value, sample_rate=sample_rate, realtime=True, verbose=True)
+
+                result = response
+
                 logger.debug(f"TTS completed: {len(text)} chars -> {len(result)} bytes")
                 return result
                 

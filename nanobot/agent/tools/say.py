@@ -2,9 +2,10 @@
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool
+from nanobot.bus.events import OutboundMessage
 from nanobot.providers.tts import DeepDubTTSProvider, OutputFormat, SUPPORTED_SAMPLE_RATES
 
 
@@ -13,6 +14,7 @@ class SayTool(Tool):
     Tool to convert text to speech using DeepDub TTS.
     
     Uses a persistent WebSocket connection for efficient repeated calls.
+    Can send audio directly to a channel via send_callback.
     """
     
     def __init__(
@@ -22,6 +24,7 @@ class SayTool(Tool):
         model: str = "dd-etts-3.0",
         locale: str = "en-US",
         output_dir: str | None = None,
+        send_callback: Callable[[OutboundMessage], Awaitable[None]] | None = None,
     ):
         """
         Initialize the say tool.
@@ -32,6 +35,7 @@ class SayTool(Tool):
             model: TTS model (default: dd-etts-3.0).
             locale: Default locale (default: en-US).
             output_dir: Directory to save audio files. Defaults to workspace/audio.
+            send_callback: Async callback to send OutboundMessage (for direct audio sending).
         """
         self._api_key = api_key
         self._voice_prompt_id = voice_prompt_id
@@ -39,6 +43,22 @@ class SayTool(Tool):
         self._locale = locale
         self._output_dir = output_dir
         self._provider: DeepDubTTSProvider | None = None
+        self._send_callback = send_callback
+        
+        # Context for sending audio
+        self._channel: str | None = None
+        self._chat_id: str | None = None
+    
+    def set_context(self, channel: str, chat_id: str) -> None:
+        """
+        Set the current channel and chat context for audio sending.
+        
+        Args:
+            channel: The channel name (e.g., 'telegram').
+            chat_id: The chat ID to send audio to.
+        """
+        self._channel = channel
+        self._chat_id = chat_id
     
     def _get_provider(self) -> DeepDubTTSProvider:
         """Get or create the TTS provider (lazy initialization)."""
@@ -123,6 +143,10 @@ class SayTool(Tool):
                     "type": "integer",
                     "description": f"Sample rate in Hz. Options: {SUPPORTED_SAMPLE_RATES}. Default: 48000 (8000 for mulaw)",
                     "enum": SUPPORTED_SAMPLE_RATES
+                },
+                "send_to_channel": {
+                    "type": "boolean",
+                    "description": "If true, send the audio directly to the current chat channel. Default: true"
                 }
             },
             "required": ["text"]
@@ -135,6 +159,7 @@ class SayTool(Tool):
         voice_prompt_id: str | None = None,
         locale: str | None = None,
         sample_rate: int | None = None,
+        send_to_channel: bool = True,
         **kwargs: Any
     ) -> str:
         """
@@ -146,6 +171,7 @@ class SayTool(Tool):
             voice_prompt_id: Voice prompt ID (overrides default).
             locale: Locale for speech (overrides default).
             sample_rate: Sample rate in Hz. Default: 48000 (8000 for mulaw).
+            send_to_channel: If True, send audio directly to the channel. Default: True.
         
         Returns:
             Path to the saved audio file or error message.
@@ -197,17 +223,40 @@ class SayTool(Tool):
                 actual_sample_rate = 8000 if output_format == OutputFormat.MULAW else 48000
             
             # Generate speech - returns bytes directly
-            audio_bytes = await provider.say(
-                text=text,
-                voice_prompt_id=voice_id,
-                locale=locale or self._locale,
-                output_format=output_format,
-                sample_rate=sample_rate,
-            )
+            import asyncio
+            try:
+                audio_bytes = await asyncio.wait_for(
+                    provider.say(
+                        text=text,
+                        voice_prompt_id=voice_id,
+                        locale=locale or self._locale,
+                        output_format=output_format,
+                        sample_rate=sample_rate,
+                    ),
+                    timeout=8.0
+                )
+            except asyncio.TimeoutError:
+                return "Error: TTS request timed out after 8 seconds."
             
             # Save audio bytes to file
             with open(output_path, "wb") as f:
                 f.write(audio_bytes)
+            
+            # Send audio to channel if requested
+            if send_to_channel and self._send_callback and self._channel and self._chat_id:
+                await self._send_callback(OutboundMessage(
+                    channel=self._channel,
+                    chat_id=self._chat_id,
+                    content="",  # No text content, just audio
+                    media=[str(output_path)]
+                ))
+                return (
+                    f"Audio generated and sent to channel.\n"
+                    f"File: {output_path}\n"
+                    f"Format: {output_format.value}\n"
+                    f"Sample rate: {actual_sample_rate}Hz\n"
+                    f"Size: {len(audio_bytes)} bytes"
+                )
             
             # Return success with file info
             return (

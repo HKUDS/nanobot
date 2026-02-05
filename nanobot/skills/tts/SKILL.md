@@ -2,7 +2,7 @@
 name: tts
 description: Convert text to speech using DeepDub's emotional TTS API.
 homepage: https://deepdub.ai
-metadata: {"nanobot":{"emoji":"🔊","requires":{"env":["DEEPDUB_API_KEY"]}}}
+metadata: {"nanobot":{"emoji":"🔊"}}
 ---
 
 # Text-to-Speech (TTS)
@@ -94,15 +94,19 @@ say(text="Chapter 2: The Journey", filename="chapter2.mp3")
 
 ## Configuration
 
-Requires `DEEPDUB_API_KEY` environment variable or configuration in nanobot settings:
+Requires an api key configuration in nanobot settings:
 
-```yaml
-providers:
-  deepdub:
-    api_key: "your-api-key"
-    voice_prompt_id: "59da0f21-63de-4aef-9ade-e5cabfe639ab"
-    model: "dd-etts-3.0"
-    locale: "en-US"
+```json
+{
+  "providers": {
+    "deepdub": {
+      "api_key": "your-api-key",
+      "voice_prompt_id": "59da0f21-63de-4aef-9ade-e5cabfe639ab",
+      "model": "dd-etts-3.0",
+      "locale": "en-US"
+    }
+  }
+}
 ```
 
 Get your API key at: https://app.deepdub.ai/signup

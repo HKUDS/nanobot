@@ -16,6 +16,7 @@ from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFile
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
+from nanobot.agent.tools.say import SayTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.subagent import SubagentManager
@@ -44,9 +45,11 @@ class AgentLoop:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
+        providers: "ProvidersConfig | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
+        from nanobot.config.schema import ProvidersConfig
         self.bus = bus
         self.provider = provider
         self.workspace = workspace
@@ -55,7 +58,8 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
-        
+        self.providers = providers
+
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
         self.tools = ToolRegistry()
@@ -97,7 +101,23 @@ class AgentLoop:
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
-        
+
+        if (
+            self.providers is not None and
+            self.providers.deepdub is not None and
+            self.providers.deepdub.api_key is not None
+        ):
+            logger.info("Registering Say tool with DeepDub")
+            # Say tool with send callback for direct audio sending
+            say_tool = SayTool(
+                api_key=self.providers.deepdub.api_key,
+                voice_prompt_id=self.providers.deepdub.voice_prompt_id,
+                model=self.providers.deepdub.model,
+                locale=self.providers.deepdub.locale,
+                send_callback=self.bus.publish_outbound,
+            )
+            self.tools.register(say_tool)
+
         # Cron tool (for scheduling)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
@@ -168,6 +188,10 @@ class AgentLoop:
         cron_tool = self.tools.get("cron")
         if isinstance(cron_tool, CronTool):
             cron_tool.set_context(msg.channel, msg.chat_id)
+        
+        say_tool = self.tools.get("say")
+        if isinstance(say_tool, SayTool):
+            say_tool.set_context(msg.channel, msg.chat_id)
         
         # Build initial messages (use get_history for LLM-formatted messages)
         messages = self.context.build_messages(
@@ -272,6 +296,10 @@ class AgentLoop:
         cron_tool = self.tools.get("cron")
         if isinstance(cron_tool, CronTool):
             cron_tool.set_context(origin_channel, origin_chat_id)
+        
+        say_tool = self.tools.get("say")
+        if isinstance(say_tool, SayTool):
+            say_tool.set_context(origin_channel, origin_chat_id)
         
         # Build messages with the announce content
         messages = self.context.build_messages(
