@@ -11,6 +11,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.memory import MemoryMiddleware
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
@@ -42,6 +43,7 @@ class AgentLoop:
         max_iterations: int = 20,
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
+        memory: MemoryMiddleware | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -65,7 +67,11 @@ class AgentLoop:
         )
         
         self._running = False
+        self._memory_initialized = False
         self._register_default_tools()
+
+        # Optional memory middleware (None = no dynamic memory)
+        self.memory: MemoryMiddleware | None = memory
     
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -97,6 +103,16 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
         self._running = True
+        
+        # Initialize memory middleware (if provided)
+        if self.memory and not self._memory_initialized:
+            try:
+                await self.memory.initialize()
+                self._memory_initialized = True
+                logger.info("Memory middleware initialized")
+            except Exception as e:
+                logger.warning(f"Memory initialization failed: {e}")
+        
         logger.info("Agent loop started")
         
         while self._running:
@@ -123,10 +139,19 @@ class AgentLoop:
             except asyncio.TimeoutError:
                 continue
     
-    def stop(self) -> None:
-        """Stop the agent loop."""
+    async def stop(self) -> None:
+        """Stop the agent loop and cleanup resources."""
         self._running = False
-        logger.info("Agent loop stopping")
+        
+        # Cleanup memory middleware (if provided)
+        if self.memory and self._memory_initialized:
+            try:
+                await self.memory.cleanup()
+                logger.info("Memory middleware cleaned up")
+            except Exception as e:
+                logger.warning(f"Memory cleanup failed: {e}")
+        
+        logger.info("Agent loop stopped")
     
     async def _process_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
@@ -147,6 +172,26 @@ class AgentLoop:
         
         # Get or create session
         session = self.sessions.get_or_create(msg.session_key)
+
+        metadata = {
+            "session_key": msg.session_key,
+            "channel": msg.channel,
+            "chat_id": msg.chat_id,
+            "sender_id": msg.sender_id,
+            "timestamp": msg.timestamp.isoformat(),
+        }
+
+        retrieved_memory = ""
+        if self.memory:
+            try:
+                recent_history = session.get_history(max_messages=12)
+                retrieved_memory = await self.memory.retrieve(
+                    msg.content,
+                    recent_history,
+                    metadata,
+                )
+            except Exception as e:
+                logger.warning(f"Memory retrieve failed: {e}")
         
         # Update tool contexts
         message_tool = self.tools.get("message")
@@ -162,6 +207,7 @@ class AgentLoop:
             history=session.get_history(),
             current_message=msg.content,
             media=msg.media if msg.media else None,
+            retrieved_context=retrieved_memory if retrieved_memory else None,
         )
         
         # Agent loop
@@ -211,6 +257,12 @@ class AgentLoop:
         
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
+
+        if self.memory:
+            try:
+                await self.memory.write(msg.content, final_content, metadata)
+            except Exception as e:
+                logger.warning(f"Memory write failed: {e}")
         
         # Save to session
         session.add_message("user", msg.content)
