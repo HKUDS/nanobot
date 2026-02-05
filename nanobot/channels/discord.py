@@ -147,11 +147,20 @@ class DiscordChannel(BaseChannel):
             return
 
         # Get original message for reply before marking complete
-        original_msg_id = msg.metadata.get("original_message_id")
+        # Note: original_msg_id may be string after JSON serialization through message bus
+        raw_msg_id = msg.metadata.get("original_message_id")
+        original_msg_id: int | None = int(raw_msg_id) if raw_msg_id else None
         original_message: "DiscordMessage | None" = None
+
+        logger.debug(f"send() called - raw_msg_id={raw_msg_id}, original_msg_id={original_msg_id}")
+        logger.debug(f"_processing_messages keys: {list(self._processing_messages.keys())}")
+
         if original_msg_id and original_msg_id in self._processing_messages:
             _, original_message = self._processing_messages[original_msg_id]
+            logger.debug(f"Found original message for reply: {original_message.id}")
             await self._mark_complete(original_msg_id)
+        else:
+            logger.debug("No original message found for reply")
 
         # Determine target channel
         channel_id = msg.chat_id

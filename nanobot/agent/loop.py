@@ -156,12 +156,13 @@ class AgentLoop:
                         await self.bus.publish_outbound(response)
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
-                    # Send error response
+                    # Send error response (include metadata for reaction/typing cleanup)
                     await self.bus.publish_outbound(
                         OutboundMessage(
                             channel=msg.channel,
                             chat_id=msg.chat_id,
                             content=f"Sorry, I encountered an error: {str(e)}",
+                            metadata=msg.metadata,
                         )
                     )
             except asyncio.TimeoutError:
@@ -282,7 +283,9 @@ class AgentLoop:
         session.add_message("assistant", final_content)
         self.sessions.save(session)
 
-        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=final_content)
+        return OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id, content=final_content, metadata=msg.metadata
+        )
 
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
