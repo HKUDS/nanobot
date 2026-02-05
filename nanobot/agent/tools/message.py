@@ -1,6 +1,6 @@
 """Message tool for sending messages to users."""
 
-from typing import Any, Callable, Awaitable
+from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool
 from nanobot.bus.events import OutboundMessage

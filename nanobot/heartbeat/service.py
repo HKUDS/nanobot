@@ -118,7 +118,7 @@ class HeartbeatService:
                 if HEARTBEAT_OK_TOKEN.replace("_", "") in response.upper().replace("_", ""):
                     logger.info("Heartbeat: OK (no action needed)")
                 else:
-                    logger.info(f"Heartbeat: completed task")
+                    logger.info("Heartbeat: completed task")
 
             except Exception as e:
                 logger.error(f"Heartbeat execution failed: {e}")

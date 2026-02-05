@@ -113,12 +113,12 @@ class WebFetchTool(Tool):
     def __init__(self, max_chars: int = 50000):
         self.max_chars = max_chars
 
-    async def execute(
-        self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any
-    ) -> str:
+    async def execute(self, url: str, **kwargs: Any) -> str:
         from readability import Document
 
-        max_chars = maxChars or self.max_chars
+        # Handle both camelCase (from JSON schema) and snake_case parameter names
+        extract_mode = kwargs.get("extractMode", kwargs.get("extract_mode", "markdown"))
+        max_chars = kwargs.get("maxChars", kwargs.get("max_chars")) or self.max_chars
 
         # Validate URL before fetching
         is_valid, error_msg = _validate_url(url)
@@ -142,7 +142,7 @@ class WebFetchTool(Tool):
                 doc = Document(r.text)
                 content = (
                     self._to_markdown(doc.summary())
-                    if extractMode == "markdown"
+                    if extract_mode == "markdown"
                     else _strip_tags(doc.summary())
                 )
                 text = f"# {doc.title()}\n\n{content}" if doc.title() else content

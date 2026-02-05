@@ -1,6 +1,6 @@
 """Spawn tool for creating background subagents."""
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool
 

@@ -150,13 +150,43 @@ Skills with available="false" need dependencies installed first - you can try in
         return "\n\n---\n\n".join(parts)
 
     def _get_identity(self) -> str:
-        """Get the core identity section."""
+        """Get the core identity section, loading from IDENTITY.md if available."""
         from datetime import datetime
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         workspace_path = str(self.workspace.expanduser().resolve())
 
-        return f"""# nanobot 🐈
+        # Try to load identity from IDENTITY.md
+        identity_file = self.workspace / "IDENTITY.md"
+        if identity_file.exists():
+            try:
+                identity_content = identity_file.read_text(encoding="utf-8")
+                return self._build_identity_with_context(identity_content, now, workspace_path)
+            except Exception as e:
+                logger.warning(f"Failed to load IDENTITY.md, using defaults: {e}")
+
+        # Fallback to hardcoded defaults if IDENTITY.md doesn't exist
+        return self._get_default_identity(now, workspace_path)
+
+    def _build_identity_with_context(self, identity_content: str, now: str, workspace_path: str) -> str:
+        """Build identity from IDENTITY.md content with dynamic context appended."""
+        return f"""{identity_content}
+
+## Current Context
+
+**Time**: {now}
+**Workspace**: {workspace_path}
+- Memory files: {workspace_path}/memory/MEMORY.md
+- Daily notes: {workspace_path}/memory/YYYY-MM-DD.md
+- Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
+
+{self._get_capabilities_section(workspace_path)}
+
+{self._get_tool_usage_section(workspace_path)}"""
+
+    def _get_default_identity(self, now: str, workspace_path: str) -> str:
+        """Get the hardcoded default identity (fallback when IDENTITY.md doesn't exist)."""
+        return f"""# nanobot
 
 You are nanobot, a helpful AI assistant. You have access to tools that allow you to:
 - Read, write, and edit files
@@ -175,7 +205,16 @@ Your workspace is at: {workspace_path}
 - Daily notes: {workspace_path}/memory/YYYY-MM-DD.md
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
-## Proactive Capabilities
+{self._get_capabilities_section(workspace_path)}
+
+{self._get_tool_usage_section(workspace_path)}
+
+Always be helpful, accurate, and concise. When using tools, explain what you're doing.
+When remembering something, write to {workspace_path}/memory/MEMORY.md"""
+
+    def _get_capabilities_section(self, workspace_path: str) -> str:
+        """Get the proactive capabilities section."""
+        return f"""## Proactive Capabilities
 
 ### Scheduled Jobs (cron tool)
 You can schedule tasks using the `cron` tool:
@@ -200,9 +239,11 @@ The file `{workspace_path}/HEARTBEAT.md` is checked every ~30 minutes.
 
 IMPORTANT: When responding to direct questions or conversations, reply directly with your text response.
 Only use the 'message' tool when you need to send a message to a specific chat channel (like WhatsApp).
-For normal conversation, just respond with text - do not call the message tool.
+For normal conversation, just respond with text - do not call the message tool."""
 
-## Tool Usage Knowledge
+    def _get_tool_usage_section(self, workspace_path: str) -> str:
+        """Get the tool usage knowledge section."""
+        return f"""## Tool Usage Knowledge
 
 You maintain a knowledge file at {workspace_path}/TOOLS.md that tracks:
 - When to use each tool
@@ -219,10 +260,7 @@ MCP tools extend your capabilities by connecting to external servers. You can:
 - After installation, nanobot restarts to load the new server
 - MCP tool names are prefixed with the server name (e.g., `github_create_issue`)
 
-When you install a new MCP server, document its tools in TOOLS.md.
-
-Always be helpful, accurate, and concise. When using tools, explain what you're doing.
-When remembering something, write to {workspace_path}/memory/MEMORY.md"""
+When you install a new MCP server, document its tools in TOOLS.md."""
 
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
