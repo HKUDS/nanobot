@@ -32,8 +32,18 @@ class LiteLLMProvider(LLMProvider):
             (api_base and "openrouter" in api_base)
         )
         
+        # Check if using Anthropic with custom endpoint
+        self.is_anthropic_custom = (
+            "anthropic" in default_model and api_base is not None
+        )
+        
         # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        # Exclude OpenRouter and Anthropic custom endpoints
+        self.is_vllm = (
+            bool(api_base) and 
+            not self.is_openrouter and 
+            not self.is_anthropic_custom
+        )
         
         # Configure LiteLLM based on provider
         if api_key:
@@ -47,6 +57,9 @@ class LiteLLMProvider(LLMProvider):
                 os.environ.setdefault("DEEPSEEK_API_KEY", api_key)
             elif "anthropic" in default_model:
                 os.environ.setdefault("ANTHROPIC_API_KEY", api_key)
+                # Set Anthropic custom base URL if provided
+                if api_base:
+                    os.environ.setdefault("ANTHROPIC_BASE_URL", api_base)
             elif "openai" in default_model or "gpt" in default_model:
                 os.environ.setdefault("OPENAI_API_KEY", api_key)
             elif "gemini" in default_model.lower():
@@ -56,7 +69,8 @@ class LiteLLMProvider(LLMProvider):
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
         
-        if api_base:
+        # Only set litellm.api_base for vLLM/custom endpoints, not for standard providers
+        if api_base and self.is_vllm:
             litellm.api_base = api_base
         
         # Disable LiteLLM logging noise
