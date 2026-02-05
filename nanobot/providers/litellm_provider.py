@@ -21,7 +21,8 @@ class LiteLLMProvider(LLMProvider):
         self, 
         api_key: str | None = None, 
         api_base: str | None = None,
-        default_model: str = "anthropic/claude-opus-4-5"
+        default_model: str = "anthropic/claude-opus-4-5",
+        use_vllm: bool = False,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
@@ -32,8 +33,11 @@ class LiteLLMProvider(LLMProvider):
             (api_base and "openrouter" in api_base)
         )
         
-        # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        # Track if using vLLM/custom endpoint
+        self.is_vllm = use_vllm
+        if not self.is_vllm and api_base and not self.is_openrouter:
+            if default_model.startswith("vllm/") or default_model.startswith("hosted_vllm/"):
+                self.is_vllm = True
         
         # Configure LiteLLM based on provider
         if api_key:
@@ -99,7 +103,12 @@ class LiteLLMProvider(LLMProvider):
         # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
         # Convert openai/ prefix to hosted_vllm/ if user specified it
         if self.is_vllm:
-            model = f"hosted_vllm/{model}"
+            if model.startswith("hosted_vllm/"):
+                pass
+            elif model.startswith("vllm/"):
+                model = f"hosted_vllm/{model[len('vllm/'):]}"
+            else:
+                model = f"hosted_vllm/{model}"
         
         # For Gemini, ensure gemini/ prefix if not already present
         if "gemini" in model.lower() and not model.startswith("gemini/"):

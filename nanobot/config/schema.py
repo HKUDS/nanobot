@@ -112,25 +112,52 @@ class Config(BaseSettings):
     
     def get_api_key(self) -> str | None:
         """Get API key in priority order: OpenRouter > Anthropic > OpenAI > Gemini > Zhipu > Groq > vLLM."""
-        return (
-            self.providers.openrouter.api_key or
-            self.providers.anthropic.api_key or
-            self.providers.openai.api_key or
-            self.providers.gemini.api_key or
-            self.providers.zhipu.api_key or
-            self.providers.groq.api_key or
-            self.providers.vllm.api_key or
-            None
-        )
+        provider = self.get_provider()
+        if provider == "openrouter":
+            return self.providers.openrouter.api_key
+        if provider == "anthropic":
+            return self.providers.anthropic.api_key
+        if provider == "openai":
+            return self.providers.openai.api_key
+        if provider == "gemini":
+            return self.providers.gemini.api_key
+        if provider == "zhipu":
+            return self.providers.zhipu.api_key
+        if provider == "groq":
+            return self.providers.groq.api_key
+        if provider == "vllm":
+            return self.providers.vllm.api_key or None
+        return None
     
     def get_api_base(self) -> str | None:
-        """Get API base URL if using OpenRouter, Zhipu or vLLM."""
-        if self.providers.openrouter.api_key:
+        """Get API base URL in priority order (OpenRouter > OpenAI > Zhipu > vLLM)."""
+        provider = self.get_provider()
+        if provider == "openrouter":
             return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
-        if self.providers.zhipu.api_key:
+        if provider == "openai":
+            return self.providers.openai.api_base
+        if provider == "zhipu":
             return self.providers.zhipu.api_base
-        if self.providers.vllm.api_base:
+        if provider == "vllm":
             return self.providers.vllm.api_base
+        return None
+    
+    def get_provider(self) -> str | None:
+        """Get active provider based on configured credentials (same priority as get_api_key)."""
+        if self.providers.openrouter.api_key:
+            return "openrouter"
+        if self.providers.anthropic.api_key:
+            return "anthropic"
+        if self.providers.openai.api_key:
+            return "openai"
+        if self.providers.gemini.api_key:
+            return "gemini"
+        if self.providers.zhipu.api_key:
+            return "zhipu"
+        if self.providers.groq.api_key:
+            return "groq"
+        if self.providers.vllm.api_base:
+            return "vllm"
         return None
     
     class Config:

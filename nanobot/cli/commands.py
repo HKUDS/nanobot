@@ -182,6 +182,7 @@ def gateway(
     api_key = config.get_api_key()
     api_base = config.get_api_base()
     model = config.agents.defaults.model
+    provider_name = config.get_provider()
     is_bedrock = model.startswith("bedrock/")
 
     if not api_key and not is_bedrock:
@@ -192,7 +193,8 @@ def gateway(
     provider = LiteLLMProvider(
         api_key=api_key,
         api_base=api_base,
-        default_model=config.agents.defaults.model
+        default_model=config.agents.defaults.model,
+        use_vllm=provider_name == "vllm",
     )
     
     # Create agent
@@ -293,6 +295,7 @@ def agent(
     api_key = config.get_api_key()
     api_base = config.get_api_base()
     model = config.agents.defaults.model
+    provider_name = config.get_provider()
     is_bedrock = model.startswith("bedrock/")
 
     if not api_key and not is_bedrock:
@@ -303,7 +306,8 @@ def agent(
     provider = LiteLLMProvider(
         api_key=api_key,
         api_base=api_base,
-        default_model=config.agents.defaults.model
+        default_model=config.agents.defaults.model,
+        use_vllm=provider_name == "vllm",
     )
     
     agent_loop = AgentLoop(
