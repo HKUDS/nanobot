@@ -203,6 +203,7 @@ def gateway(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         brave_api_key=config.tools.web.search.api_key or None,
+        groq_api_key=config.providers.groq.api_key or None,
         exec_config=config.tools.exec,
     )
     

@@ -18,6 +18,7 @@ from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.subagent import SubagentManager
+from nanobot.media import MediaProcessor
 from nanobot.session.manager import SessionManager
 
 
@@ -41,6 +42,7 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 20,
         brave_api_key: str | None = None,
+        groq_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig
@@ -51,6 +53,7 @@ class AgentLoop:
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
+        self.media_processor = MediaProcessor(groq_api_key=groq_api_key)
         
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
@@ -157,11 +160,18 @@ class AgentLoop:
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(msg.channel, msg.chat_id)
         
+        # Preprocess media (transcription, etc.)
+        processed = await self.media_processor.process(msg.media)
+        content = msg.content
+        if processed.text_parts:
+            parts = ([content] if content else []) + processed.text_parts
+            content = "\n".join(parts)
+
         # Build initial messages (use get_history for LLM-formatted messages)
         messages = self.context.build_messages(
             history=session.get_history(),
-            current_message=msg.content,
-            media=msg.media if msg.media else None,
+            current_message=content,
+            media=processed.media if processed.media else None,
         )
         
         # Agent loop
