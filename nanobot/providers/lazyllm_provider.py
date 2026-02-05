@@ -5,6 +5,7 @@ import copy
 import json
 import os
 import uuid
+import warnings
 from typing import Any
 
 from lazyllm import OnlineModule
@@ -22,6 +23,20 @@ class LazyLLMProvider(LLMProvider):
     """
 
     SUPPORTED_TYPES = {"LLM", "VLM"}
+    # Best-effort source list from LazyLLM online suppliers (non-exhaustive across versions).
+    KNOWN_SOURCES = (
+        "aiping",
+        "deepseek",
+        "doubao",
+        "glm",
+        "kimi",
+        "minimax",
+        "openai",
+        "ppio",
+        "qwen",
+        "sensenova",
+        "siliconflow",
+    )
 
     def __init__(
         self,
@@ -34,6 +49,12 @@ class LazyLLMProvider(LLMProvider):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.source = source
+        if self.source and self.source not in self.KNOWN_SOURCES:
+            warnings.warn(
+                f"Unknown lazyllm source '{self.source}'. "
+                f"Known sources: {', '.join(self.KNOWN_SOURCES)}",
+                stacklevel=2,
+            )
         self.model_type = self._normalize_type(type)
         self.client = self._create_client(
             model=self.default_model,
@@ -217,3 +238,8 @@ class LazyLLMProvider(LLMProvider):
     def get_default_model(self) -> str:
         """Get the default model."""
         return self.default_model
+
+    @classmethod
+    def get_known_sources(cls) -> tuple[str, ...]:
+        """Get built-in known lazyllm sources (best-effort list)."""
+        return cls.KNOWN_SOURCES

@@ -88,6 +88,7 @@ pip install nanobot-ai
 > Get API keys: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
 > You can also change the model to `minimax/minimax-m2` for lower cost.
 > You can also switch provider to LazyLLM by setting `providers.provider` to `lazyllm`, then configuring `providers.lazyllm` to access more model vendors.
+> Common LazyLLM `modelSource` values include: `qwen`, `deepseek`, `siliconflow`, `doubao`, `openai`, `glm`, `kimi`, `minimax`.
 
 **1. Initialize**
 
@@ -120,6 +121,7 @@ nanobot onboard
 ```
 
 If you want LazyLLM instead, set `providers.provider` to `lazyllm` and fill `providers.lazyllm.modelSource` / `modelId` / `apiKey`.
+`modelSource` can be one of the common providers listed above.
 
 
 **3. Chat**
