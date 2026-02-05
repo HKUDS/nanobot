@@ -75,6 +75,30 @@ def onboard():
 
 
 
+def get_provider(config):
+    """Get the appropriate provider based on configuration."""
+    api_key = config.get_api_key()
+    api_base = config.get_api_base()
+    model = config.agents.defaults.model
+
+    # Use HTTP provider if explicitly configured
+    if config.providers.http.api_base or config.providers.http.api_key:
+        from nanobot.providers import OpenAIHTTPProvider
+        return OpenAIHTTPProvider(
+            api_key=config.providers.http.api_key or api_key,
+            api_base=config.providers.http.api_base or api_base,
+            default_model=model
+        )
+
+    # Otherwise use LiteLLM
+    from nanobot.providers import LiteLLMProvider
+    return LiteLLMProvider(
+        api_key=api_key,
+        api_base=api_base,
+        default_model=model
+    )
+
+
 def _create_workspace_templates(workspace: Path):
     """Create default workspace template files."""
     templates = {
@@ -160,7 +184,6 @@ def gateway(
     """Start the nanobot gateway."""
     from nanobot.config.loader import load_config, get_data_dir
     from nanobot.bus.queue import MessageBus
-    from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.agent.loop import AgentLoop
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
@@ -178,22 +201,16 @@ def gateway(
     # Create components
     bus = MessageBus()
     
-    # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock)
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
+    # Create provider (auto-detects HTTP or LiteLLM based on config)
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
 
-    if not api_key and not is_bedrock:
+    if not config.get_api_key() and not is_bedrock:
         console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
+        console.print("Set one in ~/.nanobot/config.json under providers")
         raise typer.Exit(1)
-    
-    provider = LiteLLMProvider(
-        api_key=api_key,
-        api_base=api_base,
-        default_model=config.agents.defaults.model
-    )
+
+    provider = get_provider(config)
     
     # Create agent
     agent = AgentLoop(
@@ -285,26 +302,19 @@ def agent(
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config
     from nanobot.bus.queue import MessageBus
-    from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.agent.loop import AgentLoop
-    
+
     config = load_config()
-    
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
+
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
 
-    if not api_key and not is_bedrock:
+    if not config.get_api_key() and not is_bedrock:
         console.print("[red]Error: No API key configured.[/red]")
         raise typer.Exit(1)
 
     bus = MessageBus()
-    provider = LiteLLMProvider(
-        api_key=api_key,
-        api_base=api_base,
-        default_model=config.agents.defaults.model
-    )
+    provider = get_provider(config)
     
     agent_loop = AgentLoop(
         bus=bus,
@@ -642,12 +652,15 @@ def status():
         has_anthropic = bool(config.providers.anthropic.api_key)
         has_openai = bool(config.providers.openai.api_key)
         has_gemini = bool(config.providers.gemini.api_key)
+        has_http = bool(config.providers.http.api_base or config.providers.http.api_key)
         has_vllm = bool(config.providers.vllm.api_base)
-        
+
         console.print(f"OpenRouter API: {'[green]✓[/green]' if has_openrouter else '[dim]not set[/dim]'}")
         console.print(f"Anthropic API: {'[green]✓[/green]' if has_anthropic else '[dim]not set[/dim]'}")
         console.print(f"OpenAI API: {'[green]✓[/green]' if has_openai else '[dim]not set[/dim]'}")
         console.print(f"Gemini API: {'[green]✓[/green]' if has_gemini else '[dim]not set[/dim]'}")
+        http_status = f"[green]✓ {config.providers.http.api_base}[/green]" if has_http else "[dim]not set[/dim]"
+        console.print(f"HTTP Provider: {http_status}")
         vllm_status = f"[green]✓ {config.providers.vllm.api_base}[/green]" if has_vllm else "[dim]not set[/dim]"
         console.print(f"vLLM/Local: {vllm_status}")
 
