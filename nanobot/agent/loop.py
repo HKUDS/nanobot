@@ -326,11 +326,17 @@ class AgentLoop:
         Returns:
             The agent's response.
         """
+        # Respect caller-provided session key (format: channel:chat_id).
+        if ":" in session_key:
+            channel, chat_id = session_key.split(":", 1)
+        else:
+            channel, chat_id = "cli", session_key
+
         msg = InboundMessage(
-            channel="cli",
+            channel=channel,
             sender_id="user",
-            chat_id="direct",
-            content=content
+            chat_id=chat_id,
+            content=content,
         )
         
         response = await self._process_message(msg)
