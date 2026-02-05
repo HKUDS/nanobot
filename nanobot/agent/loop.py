@@ -44,6 +44,7 @@ class AgentLoop:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
+        mcp_servers: dict[str, dict[str, Any]] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
@@ -55,6 +56,7 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
+        self.mcp_servers = mcp_servers or {}
         
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
@@ -67,9 +69,45 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
         )
+        self.mcp_manager: MCPManager | None = None
         
         self._running = False
+        self._initialized = False
         self._register_default_tools()
+    
+    async def initialize(self) -> None:
+        """Initialize async components including MCP."""
+        if self._initialized:
+            return
+        
+        # Initialize MCP if configured
+        if self.mcp_servers:
+            try:
+                # Import here to avoid circular imports
+                from nanobot.mcp.tool_adapter import MCPManager
+                
+                self.mcp_manager = MCPManager()
+                await self.mcp_manager.initialize(self.mcp_servers)
+                
+                # Register MCP tools
+                for tool in self.mcp_manager.get_tools():
+                    self.tools.register(tool)
+                
+                logger.info(f"MCP initialized with {len(self.mcp_manager.get_tools())} tools")
+            except ImportError:
+                logger.warning("MCP support not available. Install with: pip install nanobot-ai[mcp]")
+            except Exception as e:
+                logger.error(f"Failed to initialize MCP: {e}")
+                # Continue without MCP
+        
+        # Mark as initialized only after all components are set up
+        self._initialized = True
+    
+    async def shutdown(self) -> None:
+        """Shutdown async components."""
+        if self.mcp_manager:
+            await self.mcp_manager.close()
+        self._initialized = False
     
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
