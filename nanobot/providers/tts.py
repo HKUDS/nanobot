@@ -5,17 +5,16 @@ import os
 from enum import Enum
 from typing import Any
 
-from audiosample import AudioSample
 from deepdub import DeepdubClient
 from loguru import logger
 
 
 class OutputFormat(Enum):
     """Supported audio output formats."""
-    WAV = "wav"      # Uncompressed, best quality
     MP3 = "mp3"      # Compressed, widely compatible
-    OGG = "ogg"      # Open format, good compression
     OPUS = "opus"    # Low latency, good for streaming
+    MULAW = "mulaw"  # Telephony format (8kHz)
+    PCM = "s16le"    # PCM 16-bit little endian
 
 
 # Supported sample rates (Hz)
@@ -30,12 +29,13 @@ class DeepDubTTSProvider:
     - Persistent WebSocket connection (lazy initialization)
     - Auto-reconnect with exponential backoff on errors
     - Thread-safe connection management
-    - Returns AudioSample for flexible format conversion
+    - Returns audio bytes in the requested format
     
     Usage:
         tts = DeepDubTTSProvider(api_key="...", voice_prompt_id="...")
-        audio = await tts.say("Hello world")
-        audio.write("output.mp3")
+        audio_bytes = await tts.say("Hello world")
+        with open("output.mp3", "wb") as f:
+            f.write(audio_bytes)
         await tts.close()
     """
     
@@ -129,9 +129,9 @@ class DeepDubTTSProvider:
         voice_prompt_id: str | None = None,
         model: str | None = None,
         locale: str | None = None,
-        output_format: OutputFormat = OutputFormat.WAV,
-        sample_rate: int = 48000,
-    ) -> AudioSample:
+        output_format: OutputFormat = OutputFormat.MP3,
+        sample_rate: int | None = None,
+    ) -> bytes:
         """
         Convert text to speech.
         
@@ -140,11 +140,11 @@ class DeepDubTTSProvider:
             voice_prompt_id: Voice prompt ID (overrides default).
             model: TTS model (overrides default).
             locale: Locale for speech (overrides default).
-            output_format: Desired output format (wav, mp3, ogg, opus).
-            sample_rate: Sample rate in Hz (8000-48000).
+            output_format: Desired output format (mp3, opus, mulaw).
+            sample_rate: Sample rate in Hz. Default: 48000 (or 8000 for mulaw).
         
         Returns:
-            AudioSample object that can be written to file or converted to bytes.
+            Audio data as bytes in the requested format.
         
         Raises:
             ValueError: If required parameters are missing or invalid.
@@ -161,20 +161,13 @@ class DeepDubTTSProvider:
         use_model = model or self.model
         use_locale = locale or self.locale
         
+        # Default sample rate: 8000 for mulaw, 48000 otherwise
+        if sample_rate is None:
+            sample_rate = 8000 if output_format == OutputFormat.MULAW else 48000
+        
         # Validate sample rate
         if sample_rate not in SUPPORTED_SAMPLE_RATES:
             raise ValueError(f"Sample rate must be one of {SUPPORTED_SAMPLE_RATES}")
-        
-        # Map output format to DeepDub format parameter
-        format_map = {
-            OutputFormat.WAV: None,  # Default, raw PCM
-            OutputFormat.MP3: "mp3",
-            OutputFormat.OGG: "opus",  # DeepDub uses opus for ogg
-            OutputFormat.OPUS: "opus",
-            OutputFormat.MULAW: "mulaw",
-            OutputFormat.PCM: "s16le",
-        }
-        dd_format = format_map.get(output_format)
         
         # Try to use existing connection, reconnect on failure
         max_attempts = 2  # Try once, reconnect and try again if needed
@@ -184,31 +177,26 @@ class DeepDubTTSProvider:
             try:
                 conn = await self._ensure_connected()
                 
-                # Build the request
-                audio_chunks: list[AudioSample] = []
+                # Use the async streaming TTS - collect all chunks
+                audio_chunks: list[bytes] = []
                 
-                # Use the async streaming TTS
                 async for chunk in conn.async_tts(
                     text=text,
                     voicePromptId=voice_id,
                     model=use_model,
                     locale=use_locale,
-                    format=dd_format,
-                    sampleRate=sample_rate if dd_format else None,
+                    format=output_format.value,
+                    sampleRate=sample_rate,
                     realtime=True,
                 ):
                     if chunk:
                         audio_chunks.append(chunk)
                 
-                # Combine all chunks into a single AudioSample
                 if not audio_chunks:
                     raise RuntimeError("No audio data received from DeepDub")
                 
-                result = audio_chunks[0]
-                for chunk in audio_chunks[1:]:
-                    result += chunk
-                
-                logger.debug(f"TTS completed: {len(text)} chars -> {len(result)} samples")
+                result = b"".join(audio_chunks)
+                logger.debug(f"TTS completed: {len(text)} chars -> {len(result)} bytes")
                 return result
                 
             except (ConnectionError, OSError) as e:

@@ -108,7 +108,7 @@ class SayTool(Tool):
                     "type": "string",
                     "description": (
                         "Output filename (e.g., 'greeting.mp3'). Extension determines format. "
-                        "Supported: .wav, .mp3, .ogg, .opus. If not provided, uses auto-generated name."
+                        "Supported: .mp3, .opus. If not provided, uses auto-generated name."
                     )
                 },
                 "voice_prompt_id": {
@@ -121,7 +121,7 @@ class SayTool(Tool):
                 },
                 "sample_rate": {
                     "type": "integer",
-                    "description": f"Sample rate in Hz. Options: {SUPPORTED_SAMPLE_RATES}. Default: 48000",
+                    "description": f"Sample rate in Hz. Options: {SUPPORTED_SAMPLE_RATES}. Default: 48000 (8000 for mulaw)",
                     "enum": SUPPORTED_SAMPLE_RATES
                 }
             },
@@ -134,7 +134,7 @@ class SayTool(Tool):
         filename: str | None = None,
         voice_prompt_id: str | None = None,
         locale: str | None = None,
-        sample_rate: int = 48000,
+        sample_rate: int | None = None,
         **kwargs: Any
     ) -> str:
         """
@@ -145,7 +145,7 @@ class SayTool(Tool):
             filename: Output filename (auto-generated if not provided).
             voice_prompt_id: Voice prompt ID (overrides default).
             locale: Locale for speech (overrides default).
-            sample_rate: Sample rate in Hz.
+            sample_rate: Sample rate in Hz. Default: 48000 (8000 for mulaw).
         
         Returns:
             Path to the saved audio file or error message.
@@ -161,19 +161,18 @@ class SayTool(Tool):
             return "Error: No voice_prompt_id provided. Please specify a voice."
         
         # Determine output format from filename
-        output_format = OutputFormat.WAV
+        output_format = OutputFormat.MP3
         if filename:
             ext = Path(filename).suffix.lower()
             format_map = {
-                ".wav": OutputFormat.WAV,
                 ".mp3": OutputFormat.MP3,
-                ".ogg": OutputFormat.OGG,
                 ".opus": OutputFormat.OPUS,
+                ".ogg": OutputFormat.OPUS,  # Use opus for ogg container
             }
             if ext in format_map:
                 output_format = format_map[ext]
             elif ext:
-                return f"Error: Unsupported format '{ext}'. Use .wav, .mp3, .ogg, or .opus"
+                return f"Error: Unsupported format '{ext}'. Use .mp3 or .opus"
         
         # Determine output path
         output_dir = Path(self._output_dir) if self._output_dir else Path.cwd() / "audio"
@@ -192,8 +191,13 @@ class SayTool(Tool):
         try:
             provider = self._get_provider()
             
-            # Generate speech
-            audio = await provider.say(
+            # Determine actual sample rate (default: 8000 for mulaw, 48000 otherwise)
+            actual_sample_rate = sample_rate
+            if actual_sample_rate is None:
+                actual_sample_rate = 8000 if output_format == OutputFormat.MULAW else 48000
+            
+            # Generate speech - returns bytes directly
+            audio_bytes = await provider.say(
                 text=text,
                 voice_prompt_id=voice_id,
                 locale=locale or self._locale,
@@ -201,16 +205,16 @@ class SayTool(Tool):
                 sample_rate=sample_rate,
             )
             
-            # Save audio
-            audio.write(str(output_path))
+            # Save audio bytes to file
+            with open(output_path, "wb") as f:
+                f.write(audio_bytes)
             
             # Return success with file info
-            duration = len(audio) / audio.sample_rate if hasattr(audio, 'sample_rate') else "unknown"
             return (
                 f"Audio saved to: {output_path}\n"
                 f"Format: {output_format.value}\n"
-                f"Sample rate: {sample_rate}Hz\n"
-                f"Duration: {duration:.2f}s" if isinstance(duration, float) else f"Duration: {duration}"
+                f"Sample rate: {actual_sample_rate}Hz\n"
+                f"Size: {len(audio_bytes)} bytes"
             )
             
         except ValueError as e:

@@ -28,10 +28,10 @@ say(text="Welcome to the app!", filename="welcome.mp3")
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | text | Text to convert to speech | (required) |
-| filename | Output filename (extension sets format) | auto-generated |
+| filename | Output filename (.mp3 or .opus) | auto-generated |
 | voice_prompt_id | Voice to use | configured default |
 | locale | Language/accent (e.g., "en-US", "es-ES") | en-US |
-| sample_rate | Audio quality: 8000-48000 Hz | 48000 |
+| sample_rate | Audio quality: 8000-48000 Hz | 48000 (8000 for mulaw) |
 
 ## Output Formats
 
@@ -39,10 +39,8 @@ Format is determined by filename extension:
 
 | Extension | Format | Use Case |
 |-----------|--------|----------|
-| .wav | Uncompressed | Best quality, editing |
-| .mp3 | Compressed | General use, sharing |
-| .ogg | Open format | Web, streaming |
-| .opus | Low latency | Real-time, VoIP |
+| .mp3 | Compressed | General use, sharing (default) |
+| .opus | Low latency | Real-time, VoIP, streaming |
 
 ## Supported Locales
 
@@ -85,7 +83,7 @@ say(text="Bonjour, comment allez-vous?", locale="fr-FR", filename="french_greeti
 
 ### Phone-quality audio
 ```
-say(text="Press 1 for sales, press 2 for support.", sample_rate=8000, filename="ivr_menu.wav")
+say(text="Press 1 for sales, press 2 for support.", sample_rate=8000, filename="ivr_menu.mp3")
 ```
 
 ### Generate multiple files
