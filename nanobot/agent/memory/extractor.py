@@ -36,6 +36,47 @@ TRIVIAL_PATTERNS = [
     r'^[\s\W]*$',
 ]
 
+# Shared keywords for heuristic fact extraction (used by both extractor and compaction)
+FACT_KEYWORDS = [
+    "my name is", "i am", "i'm", "i work", "i live", "i prefer",
+    "remember that", "note that", "important:", "email:", "phone:",
+    "address:", "birthday:", "project uses", "using", "configured to"
+]
+
+
+def extract_facts_from_messages(messages: list[dict[str, Any]], max_facts: int = 10) -> list[str]:
+    """Extract key facts from messages using heuristics. Shared utility function.
+
+    Args:
+        messages: List of message dicts with 'role' and 'content' keys.
+        max_facts: Maximum number of facts to extract.
+
+    Returns:
+        List of extracted fact strings.
+    """
+    facts = []
+    seen = set()
+
+    for msg in messages:
+        content = msg.get("content", "")
+        if not content or msg.get("role") == "system":
+            continue
+
+        for line in content.split("\n"):
+            line = line.strip()
+            if len(line) < 10:
+                continue
+
+            if any(kw in line.lower() for kw in FACT_KEYWORDS):
+                fact = line[:200]
+                if fact not in seen:
+                    facts.append(fact)
+                    seen.add(fact)
+                    if len(facts) >= max_facts:
+                        return facts
+
+    return facts
+
 
 @dataclass
 class ExtractedFact:

@@ -5,6 +5,8 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.agent.memory.extractor import extract_facts_from_messages
+
 
 @dataclass
 class CompactionConfig:
@@ -65,34 +67,9 @@ class SessionCompactor:
         return compacted
 
     def _extract_facts(self, messages: list[dict[str, Any]]) -> str:
-        """Extract key facts from old messages using heuristics."""
-        facts = []
-        seen = set()
-        keywords = [
-            "my name is", "i am", "i'm", "i work", "i live", "i prefer",
-            "remember that", "note that", "important:", "email:", "phone:",
-            "address:", "birthday:", "project uses", "using", "configured to"
-        ]
-
-        for msg in messages:
-            content = msg.get("content", "")
-            if not content or msg.get("role") == "system":
-                continue
-
-            for line in content.split("\n"):
-                line = line.strip()
-                if len(line) < 10:
-                    continue
-
-                if any(kw in line.lower() for kw in keywords):
-                    fact = line[:200]
-                    if fact not in seen:
-                        facts.append(f"- {fact}")
-                        seen.add(fact)
-                        if len(facts) >= self.config.max_facts:
-                            return "\n".join(facts)
-
-        return "\n".join(facts[:self.config.max_facts])
+        """Extract key facts from old messages using shared heuristics."""
+        facts = extract_facts_from_messages(messages, max_facts=self.config.max_facts)
+        return "\n".join(f"- {fact}" for fact in facts)
 
     def _summarize(self, messages: list[dict[str, Any]]) -> str:
         """Summarize middle-section messages using heuristics."""
