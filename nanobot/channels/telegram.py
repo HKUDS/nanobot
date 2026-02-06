@@ -13,6 +13,42 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
 
 
+def _split_long_message(text: str, max_length: int = 4096) -> list[str]:
+    """
+    Split a long message into chunks that fit Telegram's limit.
+    Tries to split at paragraph breaks, then line breaks, then at max_length.
+    """
+    if len(text) <= max_length:
+        return [text]
+    
+    chunks = []
+    remaining = text
+    
+    while remaining:
+        if len(remaining) <= max_length:
+            chunks.append(remaining)
+            break
+        
+        # Find best split point: prefer paragraph, then line, then hard cut
+        chunk = remaining[:max_length]
+        split_pos = max_length
+        
+        # Try to split at paragraph break (double newline)
+        para_break = chunk.rfind('\n\n')
+        if para_break > max_length * 0.5:  # At least 50% of chunk
+            split_pos = para_break + 2
+        else:
+            # Try to split at line break
+            line_break = chunk.rfind('\n')
+            if line_break > max_length * 0.5:
+                split_pos = line_break + 1
+        
+        chunks.append(remaining[:split_pos].rstrip())
+        remaining = remaining[split_pos:].lstrip()
+    
+    return chunks
+
+
 def _markdown_to_telegram_html(text: str) -> str:
     """
     Convert markdown to Telegram-safe HTML.
@@ -165,23 +201,36 @@ class TelegramChannel(BaseChannel):
             if msg.media:
                 await self._send_with_media(chat_id, msg.content, msg.media)
             else:
-                # Text-only message
+                # Text-only message - split if too long
                 html_content = _markdown_to_telegram_html(msg.content)
-                await self._app.bot.send_message(
-                    chat_id=chat_id,
-                    text=html_content,
-                    parse_mode="HTML"
-                )
+                chunks = _split_long_message(html_content, max_length=4096)
+                
+                for i, chunk in enumerate(chunks):
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=chunk,
+                        parse_mode="HTML"
+                    )
+                    # Add small delay between chunks to avoid rate limits
+                    if i < len(chunks) - 1:
+                        await asyncio.sleep(0.1)
+                        
+                if len(chunks) > 1:
+                    logger.info(f"Sent long message in {len(chunks)} parts")
         except ValueError:
             logger.error(f"Invalid chat_id: {msg.chat_id}")
         except Exception as e:
             # Fallback to plain text if HTML parsing fails
             logger.warning(f"Send failed, falling back to plain text: {e}")
             try:
-                await self._app.bot.send_message(
-                    chat_id=int(msg.chat_id),
-                    text=msg.content
-                )
+                # Also split plain text if too long
+                chunks = _split_long_message(msg.content, max_length=4096)
+                for chunk in chunks:
+                    await self._app.bot.send_message(
+                        chat_id=int(msg.chat_id),
+                        text=chunk
+                    )
+                    await asyncio.sleep(0.1)
             except Exception as e2:
                 logger.error(f"Error sending Telegram message: {e2}")
     
@@ -190,7 +239,8 @@ class TelegramChannel(BaseChannel):
         import mimetypes
         from pathlib import Path
         
-        caption = content if content else None
+        # Telegram caption limit is 1024 characters
+        caption = content[:1024] if content else None
         
         for media_path in media_paths:
             path = Path(media_path)
