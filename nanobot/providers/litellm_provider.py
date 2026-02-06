@@ -1,11 +1,7 @@
-"""LiteLLM provider implementation for multi-provider support."""
-
-import os
 from typing import Any
-
+import json
 import litellm
 from litellm import acompletion
-
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 
@@ -35,33 +31,6 @@ class LiteLLMProvider(LLMProvider):
         # Track if using custom endpoint (vLLM, etc.)
         self.is_vllm = bool(api_base) and not self.is_openrouter
         
-        # Configure LiteLLM based on provider
-        if api_key:
-            if self.is_openrouter:
-                # OpenRouter mode - set key
-                os.environ["OPENROUTER_API_KEY"] = api_key
-            elif self.is_vllm:
-                # vLLM/custom endpoint - uses OpenAI-compatible API
-                os.environ["OPENAI_API_KEY"] = api_key
-            elif "deepseek" in default_model:
-                os.environ.setdefault("DEEPSEEK_API_KEY", api_key)
-            elif "anthropic" in default_model:
-                os.environ.setdefault("ANTHROPIC_API_KEY", api_key)
-            elif "openai" in default_model or "gpt" in default_model:
-                os.environ.setdefault("OPENAI_API_KEY", api_key)
-            elif "gemini" in default_model.lower():
-                os.environ.setdefault("GEMINI_API_KEY", api_key)
-            elif "zhipu" in default_model or "glm" in default_model or "zai" in default_model:
-                os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
-            elif "groq" in default_model:
-                os.environ.setdefault("GROQ_API_KEY", api_key)
-            elif "moonshot" in default_model or "kimi" in default_model:
-                os.environ.setdefault("MOONSHOT_API_KEY", api_key)
-                os.environ.setdefault("MOONSHOT_API_BASE", api_base or "https://api.moonshot.cn/v1")
-        
-        if api_base:
-            litellm.api_base = api_base
-        
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
     
@@ -75,7 +44,6 @@ class LiteLLMProvider(LLMProvider):
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
-        
         Args:
             messages: List of message dicts with 'role' and 'content'.
             tools: Optional list of tool definitions in OpenAI format.
@@ -88,20 +56,21 @@ class LiteLLMProvider(LLMProvider):
         """
         model = model or self.default_model
         
-        # For OpenRouter, prefix model name if not already prefixed
+        # 1. Normalize model names for specific providers
+        
+        # OpenRouter handling
         if self.is_openrouter and not model.startswith("openrouter/"):
             model = f"openrouter/{model}"
         
-        # For Zhipu/Z.ai, ensure prefix is present
-        # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
+        # For Zhipu/Z.ai
         if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
             model.startswith("zhipu/") or 
             model.startswith("zai/") or 
             model.startswith("openrouter/")
         ):
             model = f"zai/{model}"
-
-        # For Moonshot/Kimi, ensure moonshot/ prefix (before vLLM check)
+            
+        # For Moonshot/Kimi, ensure moonshot/ prefix
         if ("moonshot" in model.lower() or "kimi" in model.lower()) and not (
             model.startswith("moonshot/") or model.startswith("openrouter/")
         ):
@@ -111,9 +80,8 @@ class LiteLLMProvider(LLMProvider):
         if "gemini" in model.lower() and not model.startswith("gemini/"):
             model = f"gemini/{model}"
 
-        # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
-        # Convert openai/ prefix to hosted_vllm/ if user specified it
-        if self.is_vllm:
+        # For vLLM/custom endpoint
+        if self.is_vllm and not (model.startswith("hosted_vllm/") or model.startswith("openai/") or model.startswith("openrouter/")):
             model = f"hosted_vllm/{model}"
         
         # kimi-k2.5 only supports temperature=1.0
@@ -127,16 +95,21 @@ class LiteLLMProvider(LLMProvider):
             "temperature": temperature,
         }
         
-        # Pass api_base directly for custom endpoints (vLLM, etc.)
+        # Pass API key explicitly to avoid environment pollution
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+            
+        # Pass custom API base if provided
         if self.api_base:
             kwargs["api_base"] = self.api_base
-        
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
         
         try:
             response = await acompletion(**kwargs)
+            actual_model = response.get("model", "unknown")
+            print(f"LITELLM RESPONSE: model={actual_model}")
             return self._parse_response(response)
         except Exception as e:
             # Return error as content for graceful handling
@@ -156,7 +129,6 @@ class LiteLLMProvider(LLMProvider):
                 # Parse arguments from JSON string if needed
                 args = tc.function.arguments
                 if isinstance(args, str):
-                    import json
                     try:
                         args = json.loads(args)
                     except json.JSONDecodeError:

@@ -78,6 +78,7 @@ class ProvidersConfig(BaseModel):
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
+    custom: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -122,58 +123,63 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
     
-    def _match_provider(self, model: str | None = None) -> ProviderConfig | None:
-        """Match a provider based on model name."""
-        model = (model or self.agents.defaults.model).lower()
-        # Map of keywords to provider configs
-        providers = {
-            "openrouter": self.providers.openrouter,
-            "deepseek": self.providers.deepseek,
-            "anthropic": self.providers.anthropic,
-            "claude": self.providers.anthropic,
-            "openai": self.providers.openai,
-            "gpt": self.providers.openai,
-            "gemini": self.providers.gemini,
-            "zhipu": self.providers.zhipu,
-            "glm": self.providers.zhipu,
-            "zai": self.providers.zhipu,
-            "groq": self.providers.groq,
-            "moonshot": self.providers.moonshot,
-            "kimi": self.providers.moonshot,
-            "vllm": self.providers.vllm,
-        }
-        for keyword, provider in providers.items():
-            if keyword in model and provider.api_key:
-                return provider
-        return None
-
-    def get_api_key(self, model: str | None = None) -> str | None:
-        """Get API key for the given model (or default model). Falls back to first available key."""
-        # Try matching by model name first
-        matched = self._match_provider(model)
-        if matched:
-            return matched.api_key
-        # Fallback: return first available key
-        for provider in [
-            self.providers.openrouter, self.providers.deepseek,
-            self.providers.anthropic, self.providers.openai,
-            self.providers.gemini, self.providers.zhipu,
-            self.providers.moonshot, self.providers.vllm,
-            self.providers.groq,
-        ]:
-            if provider.api_key:
-                return provider.api_key
-        return None
+    def get_api_key(self, model_name: str | None = None) -> str | None:
+        """Get API key based on model name prefix or priority order."""
+        if model_name:
+            if model_name.startswith("anthropic/"):
+                return self.providers.anthropic.api_key or self.get_api_key()
+            if model_name.startswith("openai/"):
+                return self.providers.openai.api_key or self.get_api_key()
+            if model_name.startswith("openrouter/"):
+                return self.providers.openrouter.api_key or self.get_api_key()
+            if model_name.startswith("deepseek/"):
+                return self.providers.deepseek.api_key or self.providers.custom.api_key or self.get_api_key()
+            if model_name.startswith("groq/"):
+                return self.providers.groq.api_key or self.get_api_key()
+            if model_name.startswith("gemini/"):
+                return self.providers.gemini.api_key or self.get_api_key()
+            if model_name.startswith("zai/") or model_name.startswith("zhipu/"):
+                return self.providers.zhipu.api_key or self.get_api_key()
+            if model_name.startswith("moonshot/") or model_name.startswith("kimi/"):
+                return self.providers.moonshot.api_key or self.get_api_key()
+            if model_name.startswith("vllm/") or model_name.startswith("hosted_vllm/"):
+                return self.providers.vllm.api_key or self.get_api_key()
+            if model_name.startswith("xai/"):
+                # Explicit handling for xAI if used via custom or future provider
+                return self.providers.custom.api_key
+        
+        # Priority fallback
+        return (
+            self.providers.openrouter.api_key or
+            self.providers.deepseek.api_key or
+            self.providers.anthropic.api_key or
+            self.providers.openai.api_key or
+            self.providers.gemini.api_key or
+            self.providers.zhipu.api_key or
+            self.providers.moonshot.api_key or
+            self.providers.groq.api_key or
+            self.providers.vllm.api_key or
+            self.providers.custom.api_key or
+            None
+        )
     
-    def get_api_base(self, model: str | None = None) -> str | None:
-        """Get API base URL based on model name."""
-        model = (model or self.agents.defaults.model).lower()
-        if "openrouter" in model:
+    def get_api_base(self, model_name: str | None = None) -> str | None:
+        """Get API base URL based on model name or explicit provider config."""
+        if model_name:
+            if model_name.startswith("openrouter/"):
+                return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
+            if model_name.startswith("deepseek/"):
+                return self.providers.deepseek.api_base
+            if model_name.startswith("moonshot/"):
+                return self.providers.moonshot.api_base or "https://api.moonshot.cn/v1"
+            if model_name.startswith("vllm/") or model_name.startswith("hosted_vllm/"):
+                return self.providers.vllm.api_base
+            if model_name.startswith("zai/") or model_name.startswith("zhipu/"):
+                return self.providers.zhipu.api_base
+        
+        # Explicit priority fallback
+        if self.providers.openrouter.api_key:
             return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
-        if any(k in model for k in ("zhipu", "glm", "zai")):
-            return self.providers.zhipu.api_base
-        if "vllm" in model:
-            return self.providers.vllm.api_base
         return None
     
     class Config:
