@@ -22,6 +22,15 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
 
 
+async def _retain_fire_and_forget(base_url: str, bank_id: str, content: str) -> None:
+    """Fire-and-forget retain for Hindsight; logs and swallows errors."""
+    try:
+        from nanobot.agent.hindsight_client import retain
+        await retain(base_url, bank_id, content)
+    except Exception as e:
+        logger.warning(f"Hindsight retain (background) failed: {e}")
+
+
 class AgentLoop:
     """
     The agent loop is the core processing engine.
@@ -42,6 +51,7 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 20,
         brave_api_key: str | None = None,
+        hindsight_config: Any = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
@@ -54,11 +64,12 @@ class AgentLoop:
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
+        self.hindsight_config = hindsight_config
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         
-        self.context = ContextBuilder(workspace)
+        self.context = ContextBuilder(workspace, hindsight_config=hindsight_config)
         self.sessions = SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -174,10 +185,11 @@ class AgentLoop:
             cron_tool.set_context(msg.channel, msg.chat_id)
         
         # Build initial messages (use get_history for LLM-formatted messages)
-        messages = self.context.build_messages(
+        messages = await self.context.build_messages(
             history=session.get_history(),
             current_message=msg.content,
             media=msg.media if msg.media else None,
+            session_key=msg.session_key,
             channel=msg.channel,
             chat_id=msg.chat_id,
         )
@@ -234,7 +246,19 @@ class AgentLoop:
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
-        
+
+        # Hindsight retain (fire-and-forget)
+        if self.hindsight_config and getattr(self.hindsight_config, "enabled", False):
+            bank_id = self.context._hindsight_bank_id(msg.session_key)
+            content = f"user: {msg.content}\nassistant: {final_content}"
+            asyncio.create_task(
+                _retain_fire_and_forget(
+                    self.hindsight_config.base_url,
+                    bank_id,
+                    content,
+                )
+            )
+
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
@@ -278,9 +302,10 @@ class AgentLoop:
             cron_tool.set_context(origin_channel, origin_chat_id)
         
         # Build messages with the announce content
-        messages = self.context.build_messages(
+        messages = await self.context.build_messages(
             history=session.get_history(),
             current_message=msg.content,
+            session_key=session_key,
             channel=origin_channel,
             chat_id=origin_chat_id,
         )

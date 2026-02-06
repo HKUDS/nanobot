@@ -4,10 +4,13 @@ import base64
 import mimetypes
 import platform
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import HindsightConfig
 
 
 class ContextBuilder:
@@ -20,17 +23,23 @@ class ContextBuilder:
     
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, hindsight_config: "HindsightConfig | None" = None):
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self.hindsight_config = hindsight_config
     
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        hindsight_context: str = "",
+    ) -> str:
         """
-        Build the system prompt from bootstrap files, memory, and skills.
+        Build the system prompt from bootstrap files, memory, skills, and optional Hindsight.
         
         Args:
             skill_names: Optional list of skills to include.
+            hindsight_context: Optional text from Hindsight recall/reflect to inject.
         
         Returns:
             Complete system prompt.
@@ -49,6 +58,10 @@ class ContextBuilder:
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
+        
+        # Hindsight (learned memory)
+        if hindsight_context and hindsight_context.strip():
+            parts.append(f"## Hindsight (learned memory)\n\n{hindsight_context.strip()}")
         
         # Skills - progressive loading
         # 1. Always-loaded skills: include full content
@@ -118,33 +131,57 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         
         return "\n\n".join(parts) if parts else ""
     
-    def build_messages(
+    async def build_messages(
         self,
         history: list[dict[str, Any]],
         current_message: str,
         skill_names: list[str] | None = None,
         media: list[str] | None = None,
+        session_key: str | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Build the complete message list for an LLM call.
+        When Hindsight is enabled, fetches recall (and optionally reflect) and injects into system prompt.
 
         Args:
             history: Previous conversation messages.
             current_message: The new user message.
             skill_names: Optional skills to include.
             media: Optional list of local file paths for images/media.
+            session_key: Optional session key for per-session Hindsight bank_id.
             channel: Current channel (telegram, feishu, etc.).
             chat_id: Current chat/user ID.
 
         Returns:
             List of messages including system prompt.
         """
+        hindsight_context = ""
+        if self.hindsight_config and self.hindsight_config.enabled and current_message.strip():
+            from nanobot.agent.hindsight_client import recall, reflect
+
+            bank_id = self._hindsight_bank_id(session_key)
+            recall_text = await recall(
+                self.hindsight_config.base_url,
+                bank_id,
+                current_message.strip()[:2000],
+            )
+            if recall_text:
+                hindsight_context = recall_text
+            if self.hindsight_config.use_reflect and current_message.strip():
+                reflect_text = await reflect(
+                    self.hindsight_config.base_url,
+                    bank_id,
+                    current_message.strip()[:2000],
+                )
+                if reflect_text:
+                    hindsight_context = (hindsight_context + "\n\n" + reflect_text).strip()
+
         messages = []
 
         # System prompt
-        system_prompt = self.build_system_prompt(skill_names)
+        system_prompt = self.build_system_prompt(skill_names, hindsight_context=hindsight_context)
         if channel and chat_id:
             system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
         messages.append({"role": "system", "content": system_prompt})
@@ -157,6 +194,13 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         messages.append({"role": "user", "content": user_content})
 
         return messages
+
+    def _hindsight_bank_id(self, session_key: str | None) -> str:
+        if not self.hindsight_config:
+            return "default"
+        if self.hindsight_config.bank_id_per_session and session_key:
+            return f"nanobot:{session_key}"
+        return self.hindsight_config.bank_id or "default"
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""

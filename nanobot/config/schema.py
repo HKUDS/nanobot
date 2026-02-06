@@ -109,6 +109,15 @@ class ToolsConfig(BaseModel):
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
 
 
+class HindsightConfig(BaseModel):
+    """Hindsight agent memory (optional). Semantic retain/recall/reflect alongside file memory."""
+    enabled: bool = False
+    base_url: str = "http://localhost:8888"
+    bank_id: str = "default"
+    use_reflect: bool = False  # When True, also call reflect() and add to context
+    bank_id_per_session: bool = False  # When True, bank_id is nanobot:{session_key}
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
@@ -116,7 +125,8 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
-    
+    hindsight: HindsightConfig = Field(default_factory=HindsightConfig)
+
     @property
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
