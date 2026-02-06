@@ -121,7 +121,7 @@ class LiteLLMProvider(LLMProvider):
         # Don't add vLLM prefix for models that already have a provider prefix
         if self.is_vllm and not any(model.startswith(p) for p in ("zhipu/", "zai/", "moonshot/", "minimax/", "gemini/", "openrouter/")):
             model = f"hosted_vllm/{model}"
-        
+
         # kimi-k2.5 only supports temperature=1.0
         if "kimi-k2.5" in model.lower():
             temperature = 1.0
@@ -132,12 +132,11 @@ class LiteLLMProvider(LLMProvider):
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        
-        # Pass api_base for custom endpoints
+
+        # Pass api_base and api_key for custom endpoints
         if self.api_base:
             kwargs["api_base"] = self.api_base
 
-        # Pass api_key for providers that need it (e.g., MiniMax)
         if self.api_key:
             kwargs["api_key"] = self.api_key
 
