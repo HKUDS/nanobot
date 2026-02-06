@@ -1,2 +1,0 @@
-# Manus provider implementation
-

@@ -1,2 +1,0 @@
-# OCR Endpoints
-

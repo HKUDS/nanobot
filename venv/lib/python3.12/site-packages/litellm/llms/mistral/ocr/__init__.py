@@ -1,2 +1,0 @@
-"""Mistral OCR transformation module."""
-

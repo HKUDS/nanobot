@@ -1,2 +1,0 @@
-# Manus Files API implementation
-

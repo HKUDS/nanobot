@@ -1,2 +1,0 @@
-# Fireworks AI Rerank
-
