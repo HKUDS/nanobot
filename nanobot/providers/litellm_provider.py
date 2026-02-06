@@ -31,9 +31,15 @@ class LiteLLMProvider(LLMProvider):
             (api_key and api_key.startswith("sk-or-")) or
             (api_base and "openrouter" in api_base)
         )
-        
+
+        # Detect Moonshot by api_base or model name
+        self.is_moonshot = (
+            (api_base and "moonshot" in api_base) or
+            ("moonshot" in default_model or "kimi" in default_model)
+        )
+
         # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        self.is_vllm = bool(api_base) and not self.is_openrouter and not self.is_moonshot
         
         # Configure LiteLLM based on provider
         if api_key:
@@ -56,8 +62,12 @@ class LiteLLMProvider(LLMProvider):
                 os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
-        
-        if api_base:
+            elif "moonshot" in default_model or "kimi" in default_model:
+                os.environ.setdefault("MOONSHOT_API_KEY", api_key)
+                if api_base:
+                    os.environ["MOONSHOT_API_BASE"] = api_base
+
+        if api_base and not self.is_moonshot:
             litellm.api_base = api_base
         
         # Disable LiteLLM logging noise
@@ -99,15 +109,21 @@ class LiteLLMProvider(LLMProvider):
             model.startswith("hosted_vllm/")
         ):
             model = f"zai/{model}"
-        
+
+        # For Moonshot/Kimi, ensure moonshot/ prefix (before vLLM check)
+        if ("moonshot" in model.lower() or "kimi" in model.lower()) and not (
+            model.startswith("moonshot/") or model.startswith("openrouter/")
+        ):
+            model = f"moonshot/{model}"
+
+        # For Gemini, ensure gemini/ prefix if not already present
+        if "gemini" in model.lower() and not model.startswith("gemini/"):
+            model = f"gemini/{model}"
+
         # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
         # Convert openai/ prefix to hosted_vllm/ if user specified it
         if self.is_vllm:
             model = f"hosted_vllm/{model}"
-        
-        # For Gemini, ensure gemini/ prefix if not already present
-        if "gemini" in model.lower() and not model.startswith("gemini/"):
-            model = f"gemini/{model}"
         
         kwargs: dict[str, Any] = {
             "model": model,
@@ -115,7 +131,11 @@ class LiteLLMProvider(LLMProvider):
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        
+
+        # kimi-k2.5 only supports temperature=1.0
+        if "kimi-k2.5" in model.lower():
+            kwargs["temperature"] = 1.0
+
         # Pass api_base directly for custom endpoints (vLLM, etc.)
         if self.api_base:
             kwargs["api_base"] = self.api_base
