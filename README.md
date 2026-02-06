@@ -221,7 +221,11 @@ nanobot gateway
 - In the Bot settings, enable **MESSAGE CONTENT INTENT**
 - (Optional) Enable **SERVER MEMBERS INTENT** if you plan to use allow lists based on member data
 
-**3. Configure**
+**3. Get your User ID**
+- Discord Settings → Advanced → enable **Developer Mode**
+- Right-click your avatar → **Copy User ID**
+
+**4. Configure**
 
 ```json
 {
@@ -235,18 +239,13 @@ nanobot gateway
 }
 ```
 
-**Limitations (current implementation)**
-- Global allowlist only (`allowFrom`); no `groupPolicy`, `dm.policy`, or per-guild/per-channel rules
-- No `requireMention` or per-channel enable/disable
-- Outbound messages are text only (no file uploads)
-
-**4. Invite the bot**
+**5. Invite the bot**
 - OAuth2 → URL Generator
 - Scopes: `bot`
 - Bot Permissions: `Send Messages`, `Read Message History`
 - Open the generated invite URL and add the bot to your server
 
-**5. Run**
+**6. Run**
 
 ```bash
 nanobot gateway

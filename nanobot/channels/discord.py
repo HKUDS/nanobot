@@ -16,18 +16,11 @@ from nanobot.config.schema import DiscordConfig
 
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
-DEFAULT_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
+MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 
 
 class DiscordChannel(BaseChannel):
-    """
-    Discord channel using Gateway websocket.
-
-    Handles:
-    - Gateway connection + heartbeat
-    - MESSAGE_CREATE events
-    - REST API for outbound messages
-    """
+    """Discord channel using Gateway websocket."""
 
     name = "discord"
 
@@ -36,11 +29,9 @@ class DiscordChannel(BaseChannel):
         self.config: DiscordConfig = config
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._seq: int | None = None
-        self._session_id: str | None = None
         self._heartbeat_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
-        self._max_attachment_bytes = DEFAULT_MAX_ATTACHMENT_BYTES
 
     async def start(self) -> None:
         """Start the Discord gateway connection."""
@@ -142,7 +133,6 @@ class DiscordChannel(BaseChannel):
                 await self._start_heartbeat(interval_ms / 1000)
                 await self._identify()
             elif op == 0 and event_type == "READY":
-                self._session_id = payload.get("session_id")
                 logger.info("Discord gateway READY")
             elif op == 0 and event_type == "MESSAGE_CREATE":
                 await self._handle_message_create(payload)
@@ -209,75 +199,57 @@ class DiscordChannel(BaseChannel):
 
         content_parts = [content] if content else []
         media_paths: list[str] = []
+        media_dir = Path.home() / ".nanobot" / "media"
 
-        attachments = payload.get("attachments") or []
-        for attachment in attachments:
+        for attachment in payload.get("attachments") or []:
             url = attachment.get("url")
             filename = attachment.get("filename") or "attachment"
             size = attachment.get("size") or 0
             if not url or not self._http:
                 continue
-            if size and size > self._max_attachment_bytes:
+            if size and size > MAX_ATTACHMENT_BYTES:
                 content_parts.append(f"[attachment: {filename} - too large]")
                 continue
             try:
-                media_dir = Path.home() / ".nanobot" / "media"
                 media_dir.mkdir(parents=True, exist_ok=True)
-                safe_name = filename.replace("/", "_")
-                file_path = media_dir / f"{attachment.get('id', 'file')}_{safe_name}"
-                response = await self._http.get(url)
-                response.raise_for_status()
-                file_path.write_bytes(response.content)
+                file_path = media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
+                resp = await self._http.get(url)
+                resp.raise_for_status()
+                file_path.write_bytes(resp.content)
                 media_paths.append(str(file_path))
                 content_parts.append(f"[attachment: {file_path}]")
             except Exception as e:
                 logger.warning(f"Failed to download Discord attachment: {e}")
                 content_parts.append(f"[attachment: {filename} - download failed]")
 
-        message_id = str(payload.get("id", ""))
-        guild_id = payload.get("guild_id")
-        referenced = payload.get("referenced_message") or {}
-        reply_to_id = referenced.get("id")
+        reply_to = (payload.get("referenced_message") or {}).get("id")
 
         await self._start_typing(channel_id)
 
         await self._handle_message(
             sender_id=sender_id,
             chat_id=channel_id,
-            content="\n".join([p for p in content_parts if p]) or "[empty message]",
+            content="\n".join(p for p in content_parts if p) or "[empty message]",
             media=media_paths,
             metadata={
-                "message_id": message_id,
-                "guild_id": guild_id,
-                "channel_id": channel_id,
-                "author": {
-                    "id": author.get("id"),
-                    "username": author.get("username"),
-                    "discriminator": author.get("discriminator"),
-                },
-                "mentions": payload.get("mentions", []),
-                "reply_to": reply_to_id,
+                "message_id": str(payload.get("id", "")),
+                "guild_id": payload.get("guild_id"),
+                "reply_to": reply_to,
             },
         )
-
-    async def _send_typing(self, channel_id: str) -> None:
-        """Send a typing indicator to Discord."""
-        if not self._http:
-            return
-        url = f"{DISCORD_API_BASE}/channels/{channel_id}/typing"
-        headers = {"Authorization": f"Bot {self.config.token}"}
-        try:
-            await self._http.post(url, headers=headers)
-        except Exception as e:
-            logger.debug(f"Discord typing indicator failed: {e}")
 
     async def _start_typing(self, channel_id: str) -> None:
         """Start periodic typing indicator for a channel."""
         await self._stop_typing(channel_id)
 
         async def typing_loop() -> None:
+            url = f"{DISCORD_API_BASE}/channels/{channel_id}/typing"
+            headers = {"Authorization": f"Bot {self.config.token}"}
             while self._running:
-                await self._send_typing(channel_id)
+                try:
+                    await self._http.post(url, headers=headers)
+                except Exception:
+                    pass
                 await asyncio.sleep(8)
 
         self._typing_tasks[channel_id] = asyncio.create_task(typing_loop())
