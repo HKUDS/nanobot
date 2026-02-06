@@ -25,6 +25,7 @@ from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
+from nanobot.agent.tools import A2A_TOOL_AVAILABLE
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -129,6 +130,11 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+        # A2A client tool (for calling other A2A agents)
+        if A2A_TOOL_AVAILABLE:
+            from nanobot.agent.tools.a2a_client import A2AClientTool
+            self.tools.register(A2AClientTool())
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
