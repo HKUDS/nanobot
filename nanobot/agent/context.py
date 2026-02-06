@@ -73,7 +73,9 @@ Skills with available="false" need dependencies installed first - you can try in
     def _get_identity(self) -> str:
         """Get the core identity section."""
         from datetime import datetime
-        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        # Only include date in system prompt to improve prompt cache hit rate
+        # Time will be injected into user messages when needed
+        current_date = datetime.now().strftime("%Y-%m-%d (%A)")
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
@@ -87,8 +89,8 @@ You are nanobot, a helpful AI assistant. You have access to tools that allow you
 - Send messages to users on chat channels
 - Spawn subagents for complex background tasks
 
-## Current Time
-{now}
+## Current Date
+{current_date}
 
 ## Runtime
 {runtime}
@@ -141,6 +143,8 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         Returns:
             List of messages including system prompt.
         """
+        from datetime import datetime
+        
         messages = []
 
         # System prompt
@@ -153,7 +157,10 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         messages.extend(history)
 
         # Current message (with optional image attachments)
-        user_content = self._build_user_content(current_message, media)
+        # Inject current time into user message to avoid cache busting in system prompt
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        time_prefix = f"[Current time: {current_time}]\n\n"
+        user_content = self._build_user_content(time_prefix + current_message, media)
         messages.append({"role": "user", "content": user_content})
 
         return messages
