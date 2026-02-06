@@ -125,6 +125,37 @@ nanobot onboard
 ```
 
 
+To support OpenAI compatible custom providers:
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "apiKey": ""
+    }
+  },
+  "llm_providers": {
+    "my_provider": {
+      "type": "openai-compatible",
+      "apiKey":"your key",
+      "apiBase": "https://api.deepseek.com/v1"
+    }
+  }
+  "agents": {
+    "defaults": {
+      "model": "my_provider:deepseek/deepseek-chat"
+    }
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "apiKey": "BSA-xxx"
+      }
+    }
+  }
+}
+```
+
 **3. Chat**
 
 ```bash

@@ -66,6 +66,11 @@ class ProviderConfig(BaseModel):
     api_key: str = ""
     api_base: str | None = None
 
+class LLMProviderConfig(BaseModel):
+    """LLM provider configuration."""
+    type: str = "auto"
+    api_key: str = ""
+    api_base: str | None = None
 
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
@@ -114,6 +119,7 @@ class Config(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    llm_providers: dict[str, LLMProviderConfig] = Field(default_factory=dict)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     
