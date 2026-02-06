@@ -17,9 +17,9 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.subagent import SubagentManager
-from nanobot.agent.subagent import SubagentManager
-from nanobot.session.manager import SessionManager, Session
+from nanobot.session.manager import SessionManager
 
 
 class AgentLoop:
@@ -41,15 +41,21 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         max_iterations: int = 20,
-        brave_api_key: str | None = None
+        brave_api_key: str | None = None,
+        exec_config: "ExecToolConfig | None" = None,
+        cron_service: "CronService | None" = None,
     ):
+        from nanobot.config.schema import ExecToolConfig
+        from nanobot.cron.service import CronService
         self.bus = bus
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
-
+        self.exec_config = exec_config or ExecToolConfig()
+        self.cron_service = cron_service
+        
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
         self.tools = ToolRegistry()
@@ -59,6 +65,7 @@ class AgentLoop:
             bus=bus,
             model=self.model,
             brave_api_key=brave_api_key,
+            exec_config=self.exec_config,
         )
 
         self._running = False
@@ -73,8 +80,12 @@ class AgentLoop:
         self.tools.register(ListDirTool())
 
         # Shell tool
-        self.tools.register(ExecTool(working_dir=str(self.workspace)))
-
+        self.tools.register(ExecTool(
+            working_dir=str(self.workspace),
+            timeout=self.exec_config.timeout,
+            restrict_to_workspace=self.exec_config.restrict_to_workspace,
+        ))
+        
         # Web tools
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
@@ -86,7 +97,11 @@ class AgentLoop:
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
-
+        
+        # Cron tool (for scheduling)
+        if self.cron_service:
+            self.tools.register(CronTool(self.cron_service))
+    
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
         self._running = True
@@ -149,12 +164,18 @@ class AgentLoop:
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(msg.channel, msg.chat_id)
-
+        
+        cron_tool = self.tools.get("cron")
+        if isinstance(cron_tool, CronTool):
+            cron_tool.set_context(msg.channel, msg.chat_id)
+        
         # Build initial messages (use get_history for LLM-formatted messages)
         messages = self.context.build_messages(
             history=session.get_history(),
             current_message=msg.content,
             media=msg.media if msg.media else None,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
         )
 
         # Agent loop
@@ -247,11 +268,17 @@ class AgentLoop:
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(origin_channel, origin_chat_id)
-
+        
+        cron_tool = self.tools.get("cron")
+        if isinstance(cron_tool, CronTool):
+            cron_tool.set_context(origin_channel, origin_chat_id)
+        
         # Build messages with the announce content
         messages = self.context.build_messages(
             history=session.get_history(),
-            current_message=msg.content
+            current_message=msg.content,
+            channel=origin_channel,
+            chat_id=origin_chat_id,
         )
 
         # Agent loop (limited for announce handling)
@@ -307,22 +334,30 @@ class AgentLoop:
             chat_id=origin_chat_id,
             content=final_content
         )
-
-    async def process_direct(self, content: str, session_key: str = "cli:direct") -> str:
+    
+    async def process_direct(
+        self,
+        content: str,
+        session_key: str = "cli:direct",
+        channel: str = "cli",
+        chat_id: str = "direct",
+    ) -> str:
         """
-        Process a message directly (for CLI usage).
-
+        Process a message directly (for CLI or cron usage).
+        
         Args:
             content: The message content.
             session_key: Session identifier.
-
+            channel: Source channel (for context).
+            chat_id: Source chat ID (for context).
+        
         Returns:
             The agent's response.
         """
         msg = InboundMessage(
-            channel="cli",
+            channel=channel,
             sender_id="user",
-            chat_id="direct",
+            chat_id=chat_id,
             content=content
         )
 

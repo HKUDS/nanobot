@@ -115,7 +115,7 @@ class HeartbeatService:
                 response = await self.on_heartbeat(HEARTBEAT_PROMPT)
                 
                 # Check if agent said "nothing to do"
-                if HEARTBEAT_OK_TOKEN in response.upper().replace("_", ""):
+                if HEARTBEAT_OK_TOKEN.replace("_", "") in response.upper().replace("_", ""):
                     logger.info("Heartbeat: OK (no action needed)")
                 else:
                     logger.info(f"Heartbeat: completed task")
