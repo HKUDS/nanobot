@@ -29,7 +29,7 @@ dependencies = [
     "rich>=13.0.0",
     "croniter>=2.0.0",
     "python-telegram-bot>=21.0",
-    "lazyllm>=0.7.4"
+    "lazyllm>=0.7.4",
     "lark-oapi>=1.0.0",
 ]
 
