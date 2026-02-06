@@ -59,7 +59,8 @@ class LiteLLMProvider(LLMProvider):
                 os.environ.setdefault("MOONSHOT_API_KEY", api_key)
                 os.environ.setdefault("MOONSHOT_API_BASE", api_base or "https://api.moonshot.cn/v1")
             elif "minimax" in default_model.lower():
-                os.environ["MINIMAX_API_KEY"] = api_key
+                os.environ.setdefault("MINIMAX_API_KEY", api_key)
+                os.environ.setdefault("MINIMAX_API_BASE", api_base or "https://api.minimaxi.com/v1")
 
         if api_base:
             litellm.api_base = api_base
