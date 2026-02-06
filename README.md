@@ -16,11 +16,12 @@
 
 ⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
 
-📏 Real-time line count: **3,428 lines** (run `bash core_agent_lines.sh` to verify anytime)
+📏 Real-time line count: **4,874 lines** (run `bash core_agent_lines.sh` to verify anytime)
 
 ## 📢 News
 
 - **2026-02-06** ✨ Added Moonshot/Kimi provider, Discord channel, and enhanced security hardening!
+- **2026-02-06** 🎨 **Multi-modal support added!** Image analysis, text-to-speech, and video processing now available.
 - **2026-02-05** ✨ Added Feishu channel, DeepSeek provider, and enhanced scheduled tasks support!
 - **2026-02-04** 🚀 Released v0.1.3.post4 with multi-provider & Docker support! Check [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post4) for details.
 - **2026-02-03** ⚡ Integrated vLLM for local LLM support and improved natural language task scheduling!
@@ -169,6 +170,102 @@ nanobot agent -m "Hello from my local LLM!"
 
 > [!TIP]
 > The `apiKey` can be any non-empty string for local servers that don't require authentication.
+
+## 🎨 Multi-Modal Support
+
+nanobot supports multi-modal interactions including **image analysis**, **text-to-speech**, and **video processing**.
+
+### Image/Vision
+
+Send images to nanobot and have the AI analyze them. Works with Claude, GPT-4V, Gemini, and other vision-capable models.
+
+**Configuration:**
+
+```json
+{
+  "tools": {
+    "multimodal": {
+      "vision_enabled": true,
+      "max_image_size": 20971520
+    }
+  }
+}
+```
+
+**Usage:**
+
+```bash
+# CLI with image
+nanobot agent -m "What's in this image?" --image photo.jpg
+
+# Telegram: Send a photo directly to the bot
+# WhatsApp: Send an image to the bot
+```
+
+### Text-to-Speech (TTS)
+
+Have nanobot speak responses back to you.
+
+**Configuration:**
+
+```json
+{
+  "tools": {
+    "multimodal": {
+      "tts": {
+        "enabled": true,
+        "provider": "openai",
+        "voice": "alloy",
+        "apiKey": "sk-xxx"
+      }
+    }
+  }
+}
+```
+
+**Available Voices:** `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`
+
+**Usage:**
+
+```bash
+# Enable voice mode
+nanobot agent -m "Turn on voice mode"
+
+# Subsequent responses will be spoken
+nanobot agent -m "Tell me a joke"
+
+# Disable voice mode
+nanobot agent -m "Turn off voice mode"
+```
+
+### Video Analysis
+
+Send videos and nanobot will extract key frames for visual analysis and transcribe the audio track.
+
+**Configuration:**
+
+```json
+{
+  "tools": {
+    "multimodal": {
+      "max_video_frames": 5
+    }
+  }
+}
+```
+
+**Requirements:**
+- `ffmpeg` must be installed (`apt install ffmpeg` or `brew install ffmpeg`)
+
+**Usage:**
+
+```bash
+# Telegram: Send a video to the bot
+# The bot will:
+# 1. Extract up to 5 key frames for visual analysis
+# 2. Extract audio and transcribe it
+# 3. Provide a comprehensive analysis
+```
 
 ## 💬 Chat Apps
 
@@ -365,12 +462,74 @@ Config file: `~/.nanobot/config.json`
 ### Security
 
 > [!TIP]
-> For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
+> For production deployments, set `"tools.restrict_to_workspace": true` in your config to sandbox the agent.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
+| `tools.restrict_to_workspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
 | `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
+
+### Complete Configuration Example
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-opus-4-5",
+      "max_tokens": 8192,
+      "temperature": 0.7
+    }
+  },
+  "providers": {
+    "openrouter": {
+      "apiKey": "sk-or-v1-xxx"
+    },
+    "openai": {
+      "apiKey": "sk-xxx"
+    },
+    "groq": {
+      "apiKey": "gsk_xxx"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "YOUR_BOT_TOKEN",
+      "allowFrom": ["YOUR_USER_ID"]
+    },
+    "whatsapp": {
+      "enabled": false
+    }
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "apiKey": "BSA-xxx",
+        "max_results": 5
+      }
+    },
+    "exec": {
+      "timeout": 60
+    },
+    "multimodal": {
+      "vision_enabled": true,
+      "max_image_size": 20971520,
+      "max_video_frames": 5,
+      "tts": {
+        "enabled": false,
+        "provider": "openai",
+        "voice": "alloy",
+        "apiKey": ""
+      }
+    },
+    "restrict_to_workspace": false
+  },
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 18790
+  }
+}
+```
 
 
 ## CLI Reference
@@ -456,7 +615,7 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 
 - [x] **Voice Transcription** — Support for Groq Whisper (Issue #13)
-- [ ] **Multi-modal** — See and hear (images, voice, video)
+- [x] **Multi-modal** — See and hear (images, voice TTS, video)
 - [ ] **Long-term memory** — Never forget important context
 - [ ] **Better reasoning** — Multi-step planning and reflection
 - [ ] **More integrations** — Discord, Slack, email, calendar

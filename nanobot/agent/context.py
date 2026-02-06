@@ -1,10 +1,13 @@
 """Context builder for assembling agent prompts."""
 
+import asyncio
 import base64
 import mimetypes
 import platform
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
@@ -13,43 +16,45 @@ from nanobot.agent.skills import SkillsLoader
 class ContextBuilder:
     """
     Builds the context (system prompt + messages) for the agent.
-    
+
     Assembles bootstrap files, memory, skills, and conversation history
     into a coherent prompt for the LLM.
     """
-    
+
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
-    
-    def __init__(self, workspace: Path):
+    MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB default
+
+    def __init__(self, workspace: Path, max_image_size: int | None = None):
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
-    
+        self.max_image_size = max_image_size or self.MAX_IMAGE_SIZE
+
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
-        
+
         Args:
             skill_names: Optional list of skills to include.
-        
+
         Returns:
             Complete system prompt.
         """
         parts = []
-        
+
         # Core identity
         parts.append(self._get_identity())
-        
+
         # Bootstrap files
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
-        
+
         # Memory context
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
-        
+
         # Skills - progressive loading
         # 1. Always-loaded skills: include full content
         always_skills = self.skills.get_always_skills()
@@ -57,7 +62,7 @@ class ContextBuilder:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
-        
+
         # 2. Available skills: only show summary (agent uses read_file to load)
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
@@ -67,9 +72,9 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
-        
+
         return "\n\n---\n\n".join(parts)
-    
+
     def _get_identity(self) -> str:
         """Get the core identity section."""
         from datetime import datetime
@@ -77,7 +82,7 @@ Skills with available="false" need dependencies installed first - you can try in
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
-        
+
         return f"""# nanobot 🐈
 
 You are nanobot, a helpful AI assistant. You have access to tools that allow you to:
@@ -105,20 +110,20 @@ For normal conversation, just respond with text - do not call the message tool.
 
 Always be helpful, accurate, and concise. When using tools, explain what you're doing.
 When remembering something, write to {workspace_path}/memory/MEMORY.md"""
-    
+
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
-        
+
         for filename in self.BOOTSTRAP_FILES:
             file_path = self.workspace / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
                 parts.append(f"## {filename}\n\n{content}")
-        
+
         return "\n\n".join(parts) if parts else ""
-    
-    def build_messages(
+
+    async def build_messages(
         self,
         history: list[dict[str, Any]],
         current_message: str,
@@ -153,29 +158,79 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         messages.extend(history)
 
         # Current message (with optional image attachments)
-        user_content = self._build_user_content(current_message, media)
+        user_content = await self._build_user_content(current_message, media)
         messages.append({"role": "user", "content": user_content})
 
         return messages
 
-    def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
+    async def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
+        """
+        Build user message content with optional base64-encoded images.
+
+        Uses asyncio.to_thread for file I/O to avoid blocking the event loop.
+
+        Returns warnings for skipped images to inform the user.
+        """
         if not media:
             return text
-        
+
         images = []
+        warnings = []
+
         for path in media:
             p = Path(path)
             mime, _ = mimetypes.guess_type(path)
-            if not p.is_file() or not mime or not mime.startswith("image/"):
+
+            # Validate file exists and is an image
+            if not p.is_file():
+                logger.warning(f"Media file not found, skipping: {path}")
+                warnings.append(f"⚠️ Image file not found: {path}")
                 continue
-            b64 = base64.b64encode(p.read_bytes()).decode()
-            images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
-        
+
+            if not mime or not mime.startswith("image/"):
+                logger.debug(f"Skipping non-image media: {path} (mime: {mime})")
+                warnings.append(f"⚠️ Not an image file (type: {mime}): {path}")
+                continue
+
+            # Check file size before reading into memory
+            file_size = p.stat().st_size
+            if file_size > self.max_image_size:
+                logger.warning(
+                    f"Image too large ({file_size / 1024 / 1024:.1f}MB), skipping: {path}"
+                )
+                warnings.append(f"⚠️ Image too large ({file_size / 1024 / 1024:.1f}MB): {path}")
+                continue
+
+            # Encode to base64 using async I/O to avoid blocking event loop
+            try:
+                # Read file in thread pool to avoid blocking
+                file_bytes = await asyncio.to_thread(p.read_bytes)
+                b64 = base64.b64encode(file_bytes).decode()
+                images.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"}
+                })
+                logger.debug(f"Encoded image for vision: {path} ({file_size / 1024:.1f}KB)")
+            except Exception as e:
+                logger.error(f"Failed to encode image {path}: {e}")
+                warnings.append(f"⚠️ Failed to process image: {path}")
+                continue
+
+        # Build final content with warnings if any
+        if warnings:
+            warning_text = "\n\n" + "\n".join(warnings)
+            if images:
+                # Have valid images, append warnings to text
+                return images + [{"type": "text", "text": text + warning_text}]
+            else:
+                # No valid images, return text with warnings
+                return text + warning_text
+
         if not images:
             return text
+
         return images + [{"type": "text", "text": text}]
-    
+
     def add_tool_result(
         self,
         messages: list[dict[str, Any]],
@@ -185,13 +240,13 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
     ) -> list[dict[str, Any]]:
         """
         Add a tool result to the message list.
-        
+
         Args:
             messages: Current message list.
             tool_call_id: ID of the tool call.
             tool_name: Name of the tool.
             result: Tool execution result.
-        
+
         Returns:
             Updated message list.
         """
@@ -202,7 +257,7 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
             "content": result
         })
         return messages
-    
+
     def add_assistant_message(
         self,
         messages: list[dict[str, Any]],
@@ -211,19 +266,19 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
     ) -> list[dict[str, Any]]:
         """
         Add an assistant message to the message list.
-        
+
         Args:
             messages: Current message list.
             content: Message content.
             tool_calls: Optional tool calls.
-        
+
         Returns:
             Updated message list.
         """
         msg: dict[str, Any] = {"role": "assistant", "content": content or ""}
-        
+
         if tool_calls:
             msg["tool_calls"] = tool_calls
-        
+
         messages.append(msg)
         return messages
