@@ -21,7 +21,7 @@ class LiteLLMProvider(LLMProvider):
         self, 
         api_key: str | None = None, 
         api_base: str | None = None,
-        default_model: str = "anthropic/claude-opus-4-5"
+        default_model: str = "anthropic/claude-opus-4.5"
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
@@ -52,7 +52,9 @@ class LiteLLMProvider(LLMProvider):
             elif "gemini" in default_model.lower():
                 os.environ.setdefault("GEMINI_API_KEY", api_key)
             elif "zhipu" in default_model or "glm" in default_model or "zai" in default_model:
-                os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
+                # Zhipu/Zai requires specific env vars
+                os.environ["ZHIPUAI_API_KEY"] = api_key
+                os.environ["ZAI_API_KEY"] = api_key
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
         
