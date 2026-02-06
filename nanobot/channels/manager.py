@@ -39,7 +39,10 @@ class ChannelManager:
                 self.channels["telegram"] = TelegramChannel(
                     self.config.channels.telegram,
                     self.bus,
+                    transcription_provider=self.config.transcription.provider,
+                    transcription_fallback=self.config.transcription.fallback,
                     groq_api_key=self.config.providers.groq.api_key,
+                    gemini_api_key=self.config.providers.gemini.api_key,
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:

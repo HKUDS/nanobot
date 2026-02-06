@@ -98,6 +98,22 @@ class ToolsConfig(BaseModel):
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
 
 
+class TranscriptionConfig(BaseModel):
+    """Voice transcription configuration.
+    
+    Allows users to select their preferred transcription provider with fallback.
+    Supported providers: groq, gemini
+    
+    Example:
+        "transcription": {
+            "provider": "gemini",
+            "fallback": "groq"
+        }
+    """
+    provider: str = "groq"  # Primary provider (default: groq for backward compatibility)
+    fallback: str | None = None  # Optional fallback if primary fails
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
@@ -105,6 +121,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     
     @property
     def workspace_path(self) -> Path:

@@ -85,10 +85,21 @@ class TelegramChannel(BaseChannel):
     
     name = "telegram"
     
-    def __init__(self, config: TelegramConfig, bus: MessageBus, groq_api_key: str = ""):
+    def __init__(
+        self,
+        config: TelegramConfig,
+        bus: MessageBus,
+        transcription_provider: str = "groq",
+        transcription_fallback: str | None = None,
+        groq_api_key: str = "",
+        gemini_api_key: str = "",
+    ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
+        self.transcription_provider = transcription_provider
+        self.transcription_fallback = transcription_fallback
         self.groq_api_key = groq_api_key
+        self.gemini_api_key = gemini_api_key
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
     
@@ -253,8 +264,13 @@ class TelegramChannel(BaseChannel):
                 
                 # Handle voice transcription
                 if media_type == "voice" or media_type == "audio":
-                    from nanobot.providers.transcription import GroqTranscriptionProvider
-                    transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
+                    from nanobot.providers.transcription import get_transcription_provider
+                    transcriber = get_transcription_provider(
+                        provider=self.transcription_provider,
+                        fallback=self.transcription_fallback,
+                        groq_api_key=self.groq_api_key,
+                        gemini_api_key=self.gemini_api_key,
+                    )
                     transcription = await transcriber.transcribe(file_path)
                     if transcription:
                         logger.info(f"Transcribed {media_type}: {transcription[:50]}...")
