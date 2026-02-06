@@ -78,6 +78,7 @@ class ProvidersConfig(BaseModel):
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
+    minimax: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -140,6 +141,7 @@ class Config(BaseSettings):
             "groq": self.providers.groq,
             "moonshot": self.providers.moonshot,
             "kimi": self.providers.moonshot,
+            "minimax": self.providers.minimax,
             "vllm": self.providers.vllm,
         }
         for keyword, provider in providers.items():
@@ -159,7 +161,7 @@ class Config(BaseSettings):
             self.providers.anthropic, self.providers.openai,
             self.providers.gemini, self.providers.zhipu,
             self.providers.moonshot, self.providers.vllm,
-            self.providers.groq,
+            self.providers.groq, self.providers.minimax,
         ]:
             if provider.api_key:
                 return provider.api_key
@@ -174,6 +176,8 @@ class Config(BaseSettings):
             return self.providers.zhipu.api_base
         if "vllm" in model:
             return self.providers.vllm.api_base
+        if "minimax" in model:
+            return self.providers.minimax.api_base
         return None
     
     class Config:
