@@ -32,12 +32,20 @@ class LiteLLMProvider(LLMProvider):
             (api_base and "openrouter" in api_base)
         )
         
-        # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        # Track if using custom endpoint (vLLM, iFlow, etc.)
+        # Note: is_vllm must be checked AFTER is_iflow since iflow also has api_base
+        self.is_iflow = (
+            (api_base and "iflow" in api_base)
+        )
+        
+        self.is_vllm = bool(api_base) and not self.is_openrouter and not self.is_iflow
         
         # Configure LiteLLM based on provider
         if api_key:
-            if self.is_openrouter:
+            if self.is_iflow:
+                # iFlow is OpenAI-compatible, use OPENAI_API_KEY
+                os.environ["OPENAI_API_KEY"] = api_key
+            elif self.is_openrouter:
                 # OpenRouter mode - set key
                 os.environ["OPENROUTER_API_KEY"] = api_key
             elif self.is_vllm:
@@ -55,6 +63,8 @@ class LiteLLMProvider(LLMProvider):
                 os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
+            elif "iflow" in default_model:
+                os.environ.setdefault("IFLOW_API_KEY", api_key)
         
         if api_base:
             litellm.api_base = api_base
@@ -103,6 +113,10 @@ class LiteLLMProvider(LLMProvider):
         if self.is_vllm:
             model = f"hosted_vllm/{model}"
         
+        # For iFlow (OpenAI-compatible), use openai/ prefix
+        if self.is_iflow and not model.startswith("openai/"):
+            model = f"openai/{model}"
+        
         # For Gemini, ensure gemini/ prefix if not already present
         if "gemini" in model.lower() and not model.startswith("gemini/"):
             model = f"gemini/{model}"
@@ -114,9 +128,11 @@ class LiteLLMProvider(LLMProvider):
             "temperature": temperature,
         }
         
-        # Pass api_base directly for custom endpoints (vLLM, etc.)
+        # Pass api_base and api_key directly for custom endpoints (iFlow, vLLM, etc.)
         if self.api_base:
             kwargs["api_base"] = self.api_base
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
         
         if tools:
             kwargs["tools"] = tools
