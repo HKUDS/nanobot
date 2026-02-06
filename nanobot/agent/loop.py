@@ -230,6 +230,25 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
         
+        # Defensive SMART: Prune context window to prevent explosion
+        # Keep system prompt + last few user goals + recent tool context
+        if len(messages) > 25:
+            # Always keep the system prompt (index 0)
+            system = messages[:1]
+            
+            # Find all user messages (not tool results) - these represent user goals
+            user_msgs = [m for m in messages if m.get("role") == "user"]
+            goal_context = user_msgs[-3:] if user_msgs else []  # Keep last 3 user messages
+            
+            # Calculate remaining slots for recent context
+            remaining_slots = 25 - len(system) - len(goal_context)
+            recent = messages[-remaining_slots:] if remaining_slots > 0 else []
+            
+            # Rebuild message list with pruning
+            messages = system + goal_context + recent
+            logger.info(f"Context window managed: {len(messages)} total messages "
+                       f"(system=1 + goals={len(goal_context)} + recent={len(recent)})")
+        
         # Save to session
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
