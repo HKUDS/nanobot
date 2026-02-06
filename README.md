@@ -169,6 +169,38 @@ nanobot agent -m "Hello from my local LLM!"
 > [!TIP]
 > The `apiKey` can be any non-empty string for local servers that don't require authentication.
 
+## 🔌 OpenAI SDK Mode
+
+Directly connect to any OpenAI-compatible API endpoint without going through LiteLLM. Useful for custom model services, local deployments, or other services compatible with OpenAI API format.
+
+**Use Cases:**
+- Using custom endpoints (e.g., `http://localhost:4000`)
+- Using special model names (e.g., `GLM/glm-4.7-thinking-official`)
+- Need direct access to model API, bypassing LiteLLM abstraction
+
+**Configuration:**
+
+Set in `~/.nanobot/config.json`:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "provider": "openai",
+      "model": "gpt-4o"
+    }
+  },
+  "providers": {
+    "openai": {
+      "apiKey": "sk-xxx",
+      "apiBase": "https://api.openai.com/v1"
+    }
+  }
+}
+```
+
+Or run `nanobot onboard` and select **"OpenAI SDK"** option during initialization.
+
 ## 💬 Chat Apps
 
 Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime, anywhere.
@@ -355,10 +387,19 @@ Config file: `~/.nanobot/config.json`
 |----------|---------|-------------|
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
-| `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
+| `openai` | LLM (GPT direct or **OpenAI-compatible APIs**) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
+
+**Provider Implementation Selection:**
+
+Choose LLM provider implementation in `agents.defaults.provider`:
+
+| Provider | Description |
+|----------|-------------|
+| `litellm` (default) | Access multiple model providers via LiteLLM |
+| `openai` | Direct OpenAI SDK with custom endpoint and model name support |
 
 
 <details>
@@ -368,12 +409,17 @@ Config file: `~/.nanobot/config.json`
 {
   "agents": {
     "defaults": {
+      "provider": "litellm",
       "model": "anthropic/claude-opus-4-5"
     }
   },
   "providers": {
     "openrouter": {
       "apiKey": "sk-or-v1-xxx"
+    },
+    "openai": {
+      "apiKey": "sk-xxx",
+      "apiBase": "https://api.openai.com/v1"
     },
     "groq": {
       "apiKey": "gsk_xxx"

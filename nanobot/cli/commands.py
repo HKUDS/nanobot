@@ -45,30 +45,101 @@ def onboard():
     from nanobot.config.loader import get_config_path, save_config
     from nanobot.config.schema import Config
     from nanobot.utils.helpers import get_workspace_path
-    
+
     config_path = get_config_path()
-    
+
     if config_path.exists():
         console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
         if not typer.confirm("Overwrite?"):
             raise typer.Exit()
-    
+
     # Create default config
     config = Config()
+
+    # Step 1: Select provider implementation
+    console.print("\n[bold]选择 LLM Provider 实现:[/bold]")
+    console.print(" 1. LiteLLM (支持多个提供商)")
+    console.print(" 2. OpenAI SDK (直接连接 OpenAI 兼容 API)")
+
+    impl_choice = typer.prompt("输入选择", default="1")
+
+    use_openai_sdk = impl_choice == "2"
+
+    if use_openai_sdk:
+        config.agents.defaults.provider = "openai"
+
+        # Configure OpenAI SDK mode
+        console.print("\n[bold]配置 OpenAI SDK 模式[/bold]")
+        api_base = typer.prompt("输入 API Base URL (如 http://localhost:4000)", default="")
+        model = typer.prompt("输入模型名称 (如 GLM/glm-4.7-thinking-official)", default="gpt-4o")
+        api_key = typer.prompt("输入 API Key (可选，按 Enter 跳过)", default="", show_default=False)
+
+        config.agents.defaults.model = model
+        config.providers.openai.api_base = api_base if api_base else None
+        config.providers.openai.api_key = api_key
+    else:
+        config.agents.defaults.provider = "litellm"
+
+        # Interactive model selection (existing LiteLLM flow)
+        console.print("\n[bold]Select your preferred LLM provider:[/bold]")
+        providers = ["OpenRouter", "Anthropic", "OpenAI", "Zhipu AI (Z.AI)", "Gemini", "Groq"]
+        for i, p in enumerate(providers, 1):
+            console.print(f" {i}. {p}")
+
+        choice = typer.prompt("Enter choice", default="1")
+        selected_provider = providers[int(choice) - 1] if choice.isdigit() and 1 <= int(choice) <= len(providers) else "OpenRouter"
+
+        if selected_provider == "Zhipu AI (Z.AI)":
+            console.print("\n[bold]Select Zhipu AI model:[/bold]")
+            models = ["glm-4.7", "glm-4.7-flash", "glm-4.5-air", "glm-4.0"]
+            for i, m in enumerate(models, 1):
+                console.print(f" {i}. {m}")
+            model_choice = typer.prompt("Enter choice", default="1")
+            selected_model = models[int(model_choice) - 1] if model_choice.isdigit() and 1 <= int(model_choice) <= len(models) else "glm-4.7"
+            config.agents.defaults.model = f"zai/{selected_model}"
+
+            api_key = typer.prompt("Enter your Zhipu AI API Key", hide_input=True)
+            config.providers.zhipu.api_key = api_key
+        elif selected_provider == "Anthropic":
+            config.agents.defaults.model = "anthropic/claude-3-5-sonnet-20240620"
+            api_key = typer.prompt("Enter your Anthropic API Key", hide_input=True)
+            config.providers.anthropic.api_key = api_key
+        elif selected_provider == "OpenAI":
+            config.agents.defaults.model = "openai/gpt-4o"
+            api_key = typer.prompt("Enter your OpenAI API Key", hide_input=True)
+            config.providers.openai.api_key = api_key
+        elif selected_provider == "Gemini":
+            config.agents.defaults.model = "gemini/gemini-1.5-pro"
+            api_key = typer.prompt("Enter your Gemini API Key", hide_input=True)
+            config.providers.gemini.api_key = api_key
+        elif selected_provider == "Groq":
+            config.agents.defaults.model = "groq/llama-3.1-70b-versatile"
+            api_key = typer.prompt("Enter your Groq API Key", hide_input=True)
+            config.providers.groq.api_key = api_key
+        else:  # OpenRouter
+            config.agents.defaults.model = "openrouter/anthropic/claude-3.5-sonnet"
+            api_key = typer.prompt("Enter your OpenRouter API Key", hide_input=True)
+            config.providers.openrouter.api_key = api_key
+
     save_config(config)
     console.print(f"[green]✓[/green] Created config at {config_path}")
-    
+
     # Create workspace
     workspace = get_workspace_path()
     console.print(f"[green]✓[/green] Created workspace at {workspace}")
-    
+
     # Create default bootstrap files
     _create_workspace_templates(workspace)
-    
+
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
-    console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
-    console.print("     Get one at: https://openrouter.ai/keys")
+    if use_openai_sdk and not config.providers.openai.api_key:
+        console.print(" 1. 配置已保存，你可以直接使用 OpenAI SDK 模式")
+    elif not use_openai_sdk and not any([config.providers.openrouter.api_key, config.providers.anthropic.api_key,
+                config.providers.openai.api_key, config.providers.zhipu.api_key,
+                config.providers.gemini.api_key, config.providers.groq.api_key]):
+        console.print(" 1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
+        console.print("     Get one at: https://openrouter.ai/keys")
     console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
 
@@ -160,40 +231,26 @@ def gateway(
     """Start the nanobot gateway."""
     from nanobot.config.loader import load_config, get_data_dir
     from nanobot.bus.queue import MessageBus
-    from nanobot.providers.litellm_provider import LiteLLMProvider
+    from nanobot.providers.factory import create_provider
     from nanobot.agent.loop import AgentLoop
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
-    
+
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
-    
+
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    
+
     config = load_config()
-    
+
     # Create components
     bus = MessageBus()
-    
-    # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock)
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
-    model = config.agents.defaults.model
-    is_bedrock = model.startswith("bedrock/")
 
-    if not api_key and not is_bedrock:
-        console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
-        raise typer.Exit(1)
-    
-    provider = LiteLLMProvider(
-        api_key=api_key,
-        api_base=api_base,
-        default_model=config.agents.defaults.model
-    )
+    # Create provider using factory
+    provider = create_provider(config)
     
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
@@ -289,26 +346,13 @@ def agent(
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config
     from nanobot.bus.queue import MessageBus
-    from nanobot.providers.litellm_provider import LiteLLMProvider
+    from nanobot.providers.factory import create_provider
     from nanobot.agent.loop import AgentLoop
-    
-    config = load_config()
-    
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
-    model = config.agents.defaults.model
-    is_bedrock = model.startswith("bedrock/")
 
-    if not api_key and not is_bedrock:
-        console.print("[red]Error: No API key configured.[/red]")
-        raise typer.Exit(1)
+    config = load_config()
 
     bus = MessageBus()
-    provider = LiteLLMProvider(
-        api_key=api_key,
-        api_base=api_base,
-        default_model=config.agents.defaults.model
-    )
+    provider = create_provider(config)
     
     agent_loop = AgentLoop(
         bus=bus,
@@ -646,15 +690,21 @@ def status():
     console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
 
     if config_path.exists():
+        config = load_config()
+        console.print(f"Provider 实现: {config.agents.defaults.provider}")
         console.print(f"Model: {config.agents.defaults.model}")
-        
+
+        # Show additional info for OpenAI SDK mode
+        if config.agents.defaults.provider == "openai" and config.providers.openai.api_base:
+            console.print(f"API Base: {config.providers.openai.api_base}")
+
         # Check API keys
         has_openrouter = bool(config.providers.openrouter.api_key)
         has_anthropic = bool(config.providers.anthropic.api_key)
         has_openai = bool(config.providers.openai.api_key)
         has_gemini = bool(config.providers.gemini.api_key)
         has_vllm = bool(config.providers.vllm.api_base)
-        
+
         console.print(f"OpenRouter API: {'[green]✓[/green]' if has_openrouter else '[dim]not set[/dim]'}")
         console.print(f"Anthropic API: {'[green]✓[/green]' if has_anthropic else '[dim]not set[/dim]'}")
         console.print(f"OpenAI API: {'[green]✓[/green]' if has_openai else '[dim]not set[/dim]'}")

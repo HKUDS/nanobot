@@ -91,12 +91,17 @@ class LiteLLMProvider(LLMProvider):
         
         # For Zhipu/Z.ai, ensure prefix is present
         # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
+        # LiteLLM uses 'zai/' for Zhipu AI models
         if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
-            model.startswith("zhipu/") or 
-            model.startswith("zai/") or 
+            model.startswith("zhipu/") or
+            model.startswith("zai/") or
             model.startswith("openrouter/")
         ):
             model = f"zai/{model}"
+
+        # Also convert 'zhipu/' to 'zai/' if present
+        if model.startswith("zhipu/"):
+            model = model.replace("zhipu/", "zai/", 1)
         
         # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
         # Convert openai/ prefix to hosted_vllm/ if user specified it

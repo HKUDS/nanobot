@@ -19,6 +19,7 @@ classifiers = [
 dependencies = [
     "typer>=0.9.0",
     "litellm>=1.0.0",
+    "openai>=1.0.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "websockets>=12.0",
