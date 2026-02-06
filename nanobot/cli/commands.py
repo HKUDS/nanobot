@@ -374,6 +374,13 @@ def channels_status():
         wa.bridge_url
     )
 
+    dc = config.channels.discord
+    table.add_row(
+        "Discord",
+        "✓" if dc.enabled else "✗",
+        dc.gateway_url
+    )
+    
     # Telegram
     tg = config.channels.telegram
     tg_config = f"token: {tg.token[:10]}..." if tg.token else "[dim]not configured[/dim]"
