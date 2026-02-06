@@ -76,6 +76,9 @@ class LiteLLMProvider(LLMProvider):
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
 
+        # Drop unsupported parameters instead of raising errors
+        litellm.drop_params = True
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
