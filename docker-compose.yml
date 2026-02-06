@@ -23,3 +23,24 @@ services:
     # For WhatsApp bridge headless browser support
     # Uncomment if using WhatsApp channel
     # shm_size: '2gb'
+
+  # Test runner: docker compose --profile test run --rm test
+  test:
+    build: .
+    profiles: ["test"]
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        uv pip install --system pytest pytest-asyncio ruff &&
+        echo "=== Running tests ===" &&
+        pytest tests/ -v --tb=short &&
+        echo "=== Linting ===" &&
+        ruff check nanobot/ &&
+        echo "=== Format check ===" &&
+        ruff format --check nanobot/
+    volumes:
+      - ./tests:/app/tests:ro
+    environment:
+      - NANOBOT_WORKSPACE=/tmp/test-workspace
+    tmpfs:
+      - /tmp/test-workspace
