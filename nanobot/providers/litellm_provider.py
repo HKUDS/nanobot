@@ -31,9 +31,12 @@ class LiteLLMProvider(LLMProvider):
             (api_key and api_key.startswith("sk-or-")) or
             (api_base and "openrouter" in api_base)
         )
+
+        # Detect Anthropic-compatible base URL (MiniMax, etc.)
+        self.is_anthropic_custom = bool(api_base) and "anthropic" in api_base.lower()
         
-        # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        # Track if using custom endpoint (vLLM, etc.) but not OpenRouter or Anthropic
+        self.is_vllm = bool(api_base) and not (self.is_openrouter or self.is_anthropic_custom)
         
         # Configure LiteLLM based on provider
         if api_key:
@@ -88,6 +91,10 @@ class LiteLLMProvider(LLMProvider):
         # For OpenRouter, prefix model name if not already prefixed
         if self.is_openrouter and not model.startswith("openrouter/"):
             model = f"openrouter/{model}"
+
+        # For Anthropic-compatible custom endpoints (e.g., MiniMax), ensure anthropic/ prefix
+        if self.is_anthropic_custom and not model.startswith("anthropic/"):
+            model = f"anthropic/{model}"
         
         # For Zhipu/Z.ai, ensure prefix is present
         # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
@@ -121,7 +128,7 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
-        
+
         try:
             response = await acompletion(**kwargs)
             return self._parse_response(response)
