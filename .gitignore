@@ -14,3 +14,4 @@ docs/
 *.pyz
 *.pywz
 *.pyzz
+venv/ 
