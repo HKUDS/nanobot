@@ -209,6 +209,7 @@ def gateway(
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
+        mcp_servers=config.get_mcp_servers(),
     )
     
     # Set cron callback (needs agent)
@@ -258,6 +259,9 @@ def gateway(
     
     async def run():
         try:
+            # Initialize agent (including MCP)
+            await agent.initialize()
+            
             await cron.start()
             await heartbeat.start()
             await asyncio.gather(
@@ -270,6 +274,7 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            await agent.shutdown()
     
     asyncio.run(run())
 
@@ -316,13 +321,18 @@ def agent(
         workspace=config.workspace_path,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
+        mcp_servers=config.get_mcp_servers(),
     )
     
     if message:
         # Single message mode
         async def run_once():
-            response = await agent_loop.process_direct(message, session_id)
-            console.print(f"\n{__logo__} {response}")
+            await agent_loop.initialize()
+            try:
+                response = await agent_loop.process_direct(message, session_id)
+                console.print(f"\n{__logo__} {response}")
+            finally:
+                await agent_loop.shutdown()
         
         asyncio.run(run_once())
     else:
@@ -330,17 +340,21 @@ def agent(
         console.print(f"{__logo__} Interactive mode (Ctrl+C to exit)\n")
         
         async def run_interactive():
-            while True:
-                try:
-                    user_input = console.input("[bold blue]You:[/bold blue] ")
-                    if not user_input.strip():
-                        continue
-                    
-                    response = await agent_loop.process_direct(user_input, session_id)
-                    console.print(f"\n{__logo__} {response}\n")
-                except KeyboardInterrupt:
-                    console.print("\nGoodbye!")
-                    break
+            await agent_loop.initialize()
+            try:
+                while True:
+                    try:
+                        user_input = console.input("[bold blue]You:[/bold blue] ")
+                        if not user_input.strip():
+                            continue
+                        
+                        response = await agent_loop.process_direct(user_input, session_id)
+                        console.print(f"\n{__logo__} {response}\n")
+                    except KeyboardInterrupt:
+                        console.print("\nGoodbye!")
+                        break
+            finally:
+                await agent_loop.shutdown()
         
         asyncio.run(run_interactive())
 
@@ -661,6 +675,15 @@ def status():
         console.print(f"Gemini API: {'[green]✓[/green]' if has_gemini else '[dim]not set[/dim]'}")
         vllm_status = f"[green]✓ {config.providers.vllm.api_base}[/green]" if has_vllm else "[dim]not set[/dim]"
         console.print(f"vLLM/Local: {vllm_status}")
+        
+        # MCP Status
+        if config.tools.mcp.enabled:
+            mcp_count = len(config.tools.mcp.servers)
+            console.print(f"MCP: [green]✓ enabled ({mcp_count} servers)[/green]")
+            for name in config.tools.mcp.servers.keys():
+                console.print(f"  - {name}")
+        else:
+            console.print("MCP: [dim]disabled[/dim]")
 
 
 if __name__ == "__main__":

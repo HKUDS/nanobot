@@ -1,6 +1,8 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
+from typing import Any
+
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
@@ -102,10 +104,50 @@ class ExecToolConfig(BaseModel):
     restrict_to_workspace: bool = False  # If true, block commands accessing paths outside workspace
 
 
+class MCPServerConfig(BaseModel):
+    """
+    MCP server configuration.
+    
+    Supports both stdio (local) and sse (remote) transports.
+    
+    Stdio example:
+        {
+            "command": "python",
+            "args": ["/path/to/server.py"],
+            "env": {"KEY": "value"}
+        }
+    
+    SSE example:
+        {
+            "transport": "sse",
+            "url": "https://mcp.example.com/server",
+            "headers": {"Authorization": "Bearer token"}
+        }
+    """
+    # Transport type: "stdio" (default) or "sse"
+    transport: str = "stdio"
+    
+    # Stdio transport options
+    command: str = "python"
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    
+    # SSE transport options
+    url: str = ""  # Required for SSE transport
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
+class MCPConfig(BaseModel):
+    """MCP (Model Context Protocol) configuration."""
+    enabled: bool = False
+    servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
+
+
 class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
 
 
 class Config(BaseSettings):
@@ -144,6 +186,28 @@ class Config(BaseSettings):
         if self.providers.vllm.api_base:
             return self.providers.vllm.api_base
         return None
+    
+    def get_mcp_servers(self) -> dict[str, dict[str, Any]]:
+        """Get MCP servers configuration."""
+        if not self.tools.mcp.enabled:
+            return {}
+        
+        result = {}
+        for name, server in self.tools.mcp.servers.items():
+            cfg: dict[str, Any] = {"transport": server.transport}
+            
+            if server.transport == "sse":
+                cfg["url"] = server.url
+                if server.headers:
+                    cfg["headers"] = server.headers
+            else:
+                cfg["command"] = server.command
+                cfg["args"] = server.args
+                if server.env:
+                    cfg["env"] = server.env
+            
+            result[name] = cfg
+        return result
     
     class Config:
         env_prefix = "NANOBOT_"

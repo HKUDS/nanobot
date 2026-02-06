@@ -358,6 +358,47 @@ Config file: `~/.nanobot/config.json`
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 
+### MCP (Model Context Protocol)
+
+nanobot supports MCP - an open protocol for connecting AI assistants to external data sources and tools. This gives you instant access to hundreds of tools without writing code!
+
+Install MCP support:
+```bash
+pip install nanobot-ai[mcp]
+```
+
+**Configure MCP servers:**
+
+```json
+{
+  "tools": {
+    "mcp": {
+      "enabled": true,
+      "servers": {
+        "calculator": {
+          "transport": "stdio",
+          "command": "python",
+          "args": ["~/.nanobot/mcp/servers/calculator.py"]
+        },
+        "tavily": {
+          "transport": "sse",
+          "url": "https://tavily.api.tadata.com/mcp/tavily/your-endpoint"
+        }
+      }
+    }
+  }
+}
+```
+
+**Transport types:**
+- `stdio` - For local MCP servers (runs as subprocess)
+- `sse` - For remote MCP servers (HTTP/SSE connection)
+
+**Finding MCP servers:**
+- [Official MCP servers](https://github.com/modelcontextprotocol/servers) - PostgreSQL, GitHub, Slack, and more
+- [Tavily MCP](https://tavily.com) - Web search and extraction
+- Community servers on npm/PyPI
+
 
 <details>
 <summary><b>Full config example</b></summary>
