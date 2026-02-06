@@ -31,15 +31,24 @@ class LiteLLMProvider(LLMProvider):
             (api_key and api_key.startswith("sk-or-")) or
             (api_base and "openrouter" in api_base)
         )
-        
+
+        # Detect NVIDIA API by api_key prefix or api_base
+        self.is_nvidia = (
+            (api_key and api_key.startswith("nvapi-")) or
+            (api_base and "nvidia" in api_base)
+        )
+
         # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        self.is_vllm = bool(api_base) and not self.is_openrouter and not self.is_nvidia
         
         # Configure LiteLLM based on provider
         if api_key:
             if self.is_openrouter:
                 # OpenRouter mode - set key
                 os.environ["OPENROUTER_API_KEY"] = api_key
+            elif self.is_nvidia:
+                # NVIDIA API - uses OpenAI-compatible API
+                os.environ["OPENAI_API_KEY"] = api_key
             elif self.is_vllm:
                 # vLLM/custom endpoint - uses OpenAI-compatible API
                 os.environ["OPENAI_API_KEY"] = api_key
@@ -86,10 +95,18 @@ class LiteLLMProvider(LLMProvider):
         # For OpenRouter, prefix model name if not already prefixed
         if self.is_openrouter and not model.startswith("openrouter/"):
             model = f"openrouter/{model}"
-        
-        # For Zhipu/Z.ai, ensure prefix is present
+
+        # For NVIDIA NIM, use nvidia_nim/ prefix per LiteLLM docs
+        # Strip nvidia/ prefix if present and add nvidia_nim/
+        if self.is_nvidia:
+            if model.startswith("nvidia/"):
+                model = model[7:]  # Remove "nvidia/" prefix
+            if not model.startswith("nvidia_nim/"):
+                model = f"nvidia_nim/{model}"
+
+        # For Zhipu/Z.ai, ensure prefix is present (but not for nvidia)
         # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
-        if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
+        elif ("glm" in model.lower() or "zhipu" in model.lower()) and not (
             model.startswith("zhipu/") or 
             model.startswith("zai/") or 
             model.startswith("openrouter/")
