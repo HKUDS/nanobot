@@ -102,10 +102,27 @@ class ExecToolConfig(BaseModel):
     timeout: int = 60
 
 
+class TTSConfig(BaseModel):
+    """Text-to-speech configuration."""
+    enabled: bool = False  # Enable TTS output
+    provider: str = "openai"  # openai, elevenlabs
+    voice: str = "alloy"  # openai: alloy, echo, fable, onyx, nova, shimmer
+    api_key: str = ""  # Optional override for TTS provider
+
+
+class MultimodalConfig(BaseModel):
+    """Multi-modal capabilities configuration."""
+    vision_enabled: bool = True  # Enable image/vision analysis
+    max_image_size: int = 20 * 1024 * 1024  # 20MB default
+    max_video_frames: int = 5  # Max frames to extract from video
+    tts: TTSConfig = Field(default_factory=TTSConfig)
+
+
 class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    multimodal: MultimodalConfig = Field(default_factory=MultimodalConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
 
 

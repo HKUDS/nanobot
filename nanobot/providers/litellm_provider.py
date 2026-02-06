@@ -7,6 +7,7 @@ import litellm
 from litellm import acompletion
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from loguru import logger
 
 
 class LiteLLMProvider(LLMProvider):
@@ -75,28 +76,28 @@ class LiteLLMProvider(LLMProvider):
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
-        
+
         Args:
             messages: List of message dicts with 'role' and 'content'.
             tools: Optional list of tool definitions in OpenAI format.
             model: Model identifier (e.g., 'anthropic/claude-sonnet-4-5').
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
-        
+
         Returns:
             LLMResponse with content and/or tool calls.
         """
         model = model or self.default_model
-        
+
         # For OpenRouter, prefix model name if not already prefixed
         if self.is_openrouter and not model.startswith("openrouter/"):
             model = f"openrouter/{model}"
-        
+
         # For Zhipu/Z.ai, ensure prefix is present
         # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
         if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
-            model.startswith("zhipu/") or 
-            model.startswith("zai/") or 
+            model.startswith("zhipu/") or
+            model.startswith("zai/") or
             model.startswith("openrouter/")
         ):
             model = f"zai/{model}"
@@ -115,26 +116,29 @@ class LiteLLMProvider(LLMProvider):
         # Convert openai/ prefix to hosted_vllm/ if user specified it
         if self.is_vllm:
             model = f"hosted_vllm/{model}"
-        
+
         # kimi-k2.5 only supports temperature=1.0
         if "kimi-k2.5" in model.lower():
             temperature = 1.0
 
+        # Format content for multimodal support (vision)
+        formatted_messages = self._format_messages_for_provider(messages, model)
+
         kwargs: dict[str, Any] = {
             "model": model,
-            "messages": messages,
+            "messages": formatted_messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        
+
         # Pass api_base directly for custom endpoints (vLLM, etc.)
         if self.api_base:
             kwargs["api_base"] = self.api_base
-        
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
-        
+
         try:
             response = await acompletion(**kwargs)
             return self._parse_response(response)
@@ -144,6 +148,34 @@ class LiteLLMProvider(LLMProvider):
                 content=f"Error calling LLM: {str(e)}",
                 finish_reason="error",
             )
+
+    def _format_messages_for_provider(
+        self, messages: list[dict[str, Any]], model: str
+    ) -> list[dict[str, Any]]:
+        """
+        Format all messages in the list for the specific provider.
+
+        Args:
+            messages: List of message dicts.
+            model: Model name.
+
+        Returns:
+            Formatted messages list.
+        """
+        formatted = []
+        for msg in messages:
+            formatted_msg = {"role": msg["role"]}
+            if "content" in msg:
+                formatted_msg["content"] = self._format_content_for_provider(
+                    msg["content"], model
+                )
+            if "tool_calls" in msg:
+                formatted_msg["tool_calls"] = msg["tool_calls"]
+            if msg.get("role") == "tool":
+                formatted_msg["tool_call_id"] = msg.get("tool_call_id")
+                formatted_msg["name"] = msg.get("name")
+            formatted.append(formatted_msg)
+        return formatted
     
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
@@ -186,3 +218,114 @@ class LiteLLMProvider(LLMProvider):
     def get_default_model(self) -> str:
         """Get the default model."""
         return self.default_model
+
+    def _has_image_content(self, content: Any) -> bool:
+        """Check if content contains image data."""
+        if isinstance(content, str):
+            return False
+        if isinstance(content, list):
+            return any(item.get("type") == "image_url" for item in content)
+        return False
+
+    def _format_content_for_provider(self, content: Any, model: str) -> Any:
+        """
+        Format message content for specific provider's multimodal format.
+
+        Args:
+            content: Message content (str or list with images)
+            model: Model name to determine format
+
+        Returns:
+            Formatted content for the provider
+        """
+        # Handle text-only content
+        if isinstance(content, str):
+            return content
+
+        # No images, return as-is
+        if not self._has_image_content(content):
+            return content
+
+        # Format for specific provider
+        model_lower = model.lower()
+        if "claude" in model_lower or "anthropic" in model_lower:
+            return self._format_for_claude(content)
+        elif "gemini" in model_lower:
+            return self._format_for_gemini(content)
+        else:
+            # Default to OpenAI format (already in image_url format)
+            return content
+
+    def _format_for_claude(self, content: list) -> list:
+        """
+        Format content for Claude vision API.
+
+        Claude expects: {"type": "image", "source": {"type": "base64", "media_type": "...", "data": "..."}}
+        """
+        formatted = []
+        for item in content:
+            if item.get("type") == "image_url":
+                # Parse data URL (format: data:mime/type;base64,data)
+                url = item["image_url"]["url"]
+                if url.startswith("data:"):
+                    try:
+                        # Remove "data:" prefix and split
+                        mime_and_data = url[5:]
+                        if ";base64," in mime_and_data:
+                            mime_type, b64_data = mime_and_data.split(";base64,", 1)
+                            formatted.append({
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": mime_type,
+                                    "data": b64_data
+                                }
+                            })
+                        else:
+                            logger.warning(f"Invalid data URL format for Claude: {url[:50]}...")
+                            continue
+                    except Exception as e:
+                        logger.error(f"Error formatting image for Claude: {e}")
+                        continue
+                else:
+                    # Regular URL (not supported for Claude, need base64)
+                    logger.warning("Claude vision requires base64-encoded images, not URLs")
+                    continue
+            elif item.get("type") == "text":
+                formatted.append({"type": "text", "text": item["text"]})
+        return formatted
+
+    def _format_for_gemini(self, content: list) -> list:
+        """
+        Format content for Gemini vision API.
+
+        Gemini expects: {"inline_data": {"mime_type": "...", "data": "..."}}
+        """
+        parts = []
+        for item in content:
+            if item.get("type") == "image_url":
+                # Parse data URL
+                url = item["image_url"]["url"]
+                if url.startswith("data:"):
+                    try:
+                        mime_and_data = url[5:]
+                        if ";base64," in mime_and_data:
+                            mime_type, b64_data = mime_and_data.split(";base64,", 1)
+                            parts.append({
+                                "inline_data": {
+                                    "mime_type": mime_type,
+                                    "data": b64_data
+                                }
+                            })
+                        else:
+                            logger.warning(f"Invalid data URL format for Gemini: {url[:50]}...")
+                            continue
+                    except Exception as e:
+                        logger.error(f"Error formatting image for Gemini: {e}")
+                        continue
+                else:
+                    logger.warning("Gemini vision requires base64-encoded images, not URLs")
+                    continue
+            elif item.get("type") == "text":
+                parts.append({"text": item["text"]})
+        return parts

@@ -6,6 +6,8 @@ import platform
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 
@@ -13,17 +15,19 @@ from nanobot.agent.skills import SkillsLoader
 class ContextBuilder:
     """
     Builds the context (system prompt + messages) for the agent.
-    
+
     Assembles bootstrap files, memory, skills, and conversation history
     into a coherent prompt for the LLM.
     """
-    
+
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
-    
-    def __init__(self, workspace: Path):
+    MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB default
+
+    def __init__(self, workspace: Path, max_image_size: int | None = None):
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self.max_image_size = max_image_size or self.MAX_IMAGE_SIZE
     
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """
@@ -162,16 +166,40 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         """Build user message content with optional base64-encoded images."""
         if not media:
             return text
-        
+
         images = []
         for path in media:
             p = Path(path)
             mime, _ = mimetypes.guess_type(path)
-            if not p.is_file() or not mime or not mime.startswith("image/"):
+
+            # Validate file exists and is an image
+            if not p.is_file():
+                logger.warning(f"Media file not found, skipping: {path}")
                 continue
-            b64 = base64.b64encode(p.read_bytes()).decode()
-            images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
-        
+            if not mime or not mime.startswith("image/"):
+                logger.debug(f"Skipping non-image media: {path} (mime: {mime})")
+                continue
+
+            # Check file size
+            file_size = p.stat().st_size
+            if file_size > self.max_image_size:
+                logger.warning(
+                    f"Image too large ({file_size / 1024 / 1024:.1f}MB), skipping: {path}"
+                )
+                continue
+
+            # Encode to base64
+            try:
+                b64 = base64.b64encode(p.read_bytes()).decode()
+                images.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"}
+                })
+                logger.debug(f"Encoded image for vision: {path} ({file_size / 1024:.1f}KB)")
+            except Exception as e:
+                logger.error(f"Failed to encode image {path}: {e}")
+                continue
+
         if not images:
             return text
         return images + [{"type": "text", "text": text}]

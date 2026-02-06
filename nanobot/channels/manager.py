@@ -14,20 +14,56 @@ from nanobot.config.schema import Config
 class ChannelManager:
     """
     Manages chat channels and coordinates message routing.
-    
+
     Responsibilities:
     - Initialize enabled channels (Telegram, WhatsApp, etc.)
     - Start/stop channels
     - Route outbound messages
     """
-    
+
     def __init__(self, config: Config, bus: MessageBus):
         self.config = config
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
-        
+        self._tts_provider: Any = None
+
+        self._init_tts_provider()
         self._init_channels()
+
+    def _init_tts_provider(self) -> None:
+        """Initialize TTS provider if enabled."""
+        if self.config.tools.multimodal.tts.enabled:
+            from nanobot.providers.tts import TTSProvider
+
+            api_key = self.config.tools.multimodal.tts.api_key or self.config.providers.openai.api_key
+            if not api_key:
+                logger.warning("TTS enabled but no API key configured")
+                return
+
+            self._tts_provider = TTSProvider(
+                provider=self.config.tools.multimodal.tts.provider,
+                api_key=api_key,
+                voice=self.config.tools.multimodal.tts.voice,
+            )
+            logger.info(f"TTS provider initialized: {self._tts_provider.provider}")
+
+    def _init_channels(self) -> None:
+
+        # Telegram channel
+        if self.config.channels.telegram.enabled:
+            try:
+                from nanobot.channels.telegram import TelegramChannel
+                self.channels["telegram"] = TelegramChannel(
+                    self.config.channels.telegram,
+                    self.bus,
+                    groq_api_key=self.config.providers.groq.api_key,
+                    tts_provider=self._tts_provider,
+                    max_video_frames=self.config.tools.multimodal.max_video_frames,
+                )
+                logger.info("Telegram channel enabled")
+            except ImportError as e:
+                logger.warning(f"Telegram channel not available: {e}")
     
     def _init_channels(self) -> None:
         """Initialize channels based on config."""

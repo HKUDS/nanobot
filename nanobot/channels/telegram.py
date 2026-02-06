@@ -2,6 +2,8 @@
 
 import asyncio
 import re
+from pathlib import Path
+from typing import Any
 
 from loguru import logger
 from telegram import Update
@@ -79,18 +81,39 @@ def _markdown_to_telegram_html(text: str) -> str:
 class TelegramChannel(BaseChannel):
     """
     Telegram channel using long polling.
-    
+
     Simple and reliable - no webhook/public IP needed.
     """
-    
+
     name = "telegram"
-    
-    def __init__(self, config: TelegramConfig, bus: MessageBus, groq_api_key: str = ""):
+
+    def __init__(
+        self,
+        config: TelegramConfig,
+        bus: MessageBus,
+        groq_api_key: str = "",
+        tts_provider: Any = None,
+        max_video_frames: int = 5,
+    ):
+        """
+        Initialize the Telegram channel.
+
+        Args:
+            config: Telegram configuration.
+            bus: Message bus for communication.
+            groq_api_key: Groq API key for transcription.
+            tts_provider: Optional TTS provider for voice output.
+            max_video_frames: Maximum frames to extract from videos.
+        """
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
+        self.tts_provider = tts_provider
+        self.max_video_frames = max_video_frames
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
+        self._voice_enabled: dict[str, bool] = {}  # Per-chat voice state
+        self._video_processor = None  # Lazy initialization
     
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -156,11 +179,19 @@ class TelegramChannel(BaseChannel):
         if not self._app:
             logger.warning("Telegram bot not running")
             return
-        
+
         try:
-            # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
-            # Convert markdown to Telegram HTML
+
+            # Check if voice output is requested
+            if msg.metadata.get("voice") or self._voice_enabled.get(msg.chat_id, False):
+                if self.tts_provider:
+                    await self._send_as_voice(chat_id, msg.content)
+                    return
+                else:
+                    logger.warning("Voice requested but TTS provider not configured")
+
+            # Regular text message
             html_content = _markdown_to_telegram_html(msg.content)
             await self._app.bot.send_message(
                 chat_id=chat_id,
@@ -179,6 +210,55 @@ class TelegramChannel(BaseChannel):
                 )
             except Exception as e2:
                 logger.error(f"Error sending Telegram message: {e2}")
+
+    async def _send_as_voice(self, chat_id: int, text: str) -> None:
+        """
+        Send text as a voice message.
+
+        Args:
+            chat_id: Telegram chat ID.
+            text: Text to synthesize and send.
+        """
+        if not self.tts_provider:
+            logger.warning("TTS provider not available")
+            return
+
+        # Generate audio file path
+        media_dir = Path.home() / ".nanobot" / "media"
+        media_dir.mkdir(parents=True, exist_ok=True)
+        audio_path = media_dir / f"voice_{chat_id}_{asyncio.current_task().get_name()}.mp3"
+
+        # Synthesize speech
+        success = await self.tts_provider.synthesize(text, audio_path)
+        if not success:
+            logger.warning("TTS synthesis failed, falling back to text")
+            await self._app.bot.send_message(chat_id=chat_id, text=text)
+            return
+
+        # Send voice message
+        try:
+            with open(audio_path, "rb") as f:
+                await self._app.bot.send_voice(chat_id=chat_id, voice=f)
+            logger.debug(f"Voice message sent to {chat_id}")
+        except Exception as e:
+            logger.error(f"Failed to send voice message: {e}")
+            # Fallback to text
+            await self._app.bot.send_message(chat_id=chat_id, text=text)
+        finally:
+            # Clean up audio file
+            if audio_path.exists():
+                audio_path.unlink()
+
+    def set_voice_enabled(self, chat_id: str, enabled: bool) -> None:
+        """
+        Enable or disable voice output for a specific chat.
+
+        Args:
+            chat_id: Chat identifier.
+            enabled: Whether voice should be enabled.
+        """
+        self._voice_enabled[chat_id] = enabled
+        logger.info(f"Voice output {'enabled' if enabled else 'disabled'} for chat {chat_id}")
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -221,10 +301,13 @@ class TelegramChannel(BaseChannel):
         # Handle media files
         media_file = None
         media_type = None
-        
+
         if message.photo:
             media_file = message.photo[-1]  # Largest photo
             media_type = "image"
+        elif message.video:
+            media_file = message.video
+            media_type = "video"
         elif message.voice:
             media_file = message.voice
             media_type = "voice"
@@ -234,25 +317,57 @@ class TelegramChannel(BaseChannel):
         elif message.document:
             media_file = message.document
             media_type = "file"
-        
+
         # Download media if present
         if media_file and self._app:
             try:
                 file = await self._app.bot.get_file(media_file.file_id)
                 ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
-                
+
                 # Save to workspace/media/
                 from pathlib import Path
                 media_dir = Path.home() / ".nanobot" / "media"
                 media_dir.mkdir(parents=True, exist_ok=True)
-                
+
                 file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
                 await file.download_to_drive(str(file_path))
-                
-                media_paths.append(str(file_path))
-                
-                # Handle voice transcription
-                if media_type == "voice" or media_type == "audio":
+
+                # Handle video: extract frames and audio
+                if media_type == "video":
+                    content_parts.append(f"[video: {file_path}]")
+
+                    # Extract frames for vision analysis
+                    if self._video_processor is None:
+                        from nanobot.agent.video import VideoProcessor
+                        workspace = Path.home() / ".nanobot" / "workspace"
+                        self._video_processor = VideoProcessor(
+                            workspace, max_frames=self.max_video_frames
+                        )
+
+                    if self._video_processor.is_ffmpeg_available():
+                        # Extract key frames
+                        frames = await self._video_processor.extract_key_frames(
+                            file_path, max_frames=self.max_video_frames
+                        )
+                        media_paths.extend(frames)
+                        logger.info(f"Extracted {len(frames)} frames from video")
+
+                        # Extract audio for transcription
+                        audio_path = await self._video_processor.extract_audio(file_path)
+                        if audio_path:
+                            from nanobot.providers.transcription import GroqTranscriptionProvider
+                            transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
+                            transcription = await transcriber.transcribe(audio_path)
+                            if transcription:
+                                content_parts.append(f"[video audio: {transcription}]")
+                                logger.info(f"Transcribed video audio: {transcription[:50]}...")
+                    else:
+                        logger.warning("ffmpeg not available, cannot process video frames")
+                        media_paths.append(str(file_path))
+
+                # Handle voice/audio transcription
+                elif media_type == "voice" or media_type == "audio":
+                    media_paths.append(str(file_path))
                     from nanobot.providers.transcription import GroqTranscriptionProvider
                     transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
                     transcription = await transcriber.transcribe(file_path)
@@ -262,8 +377,10 @@ class TelegramChannel(BaseChannel):
                     else:
                         content_parts.append(f"[{media_type}: {file_path}]")
                 else:
+                    # Images and other files
+                    media_paths.append(str(file_path))
                     content_parts.append(f"[{media_type}: {file_path}]")
-                    
+
                 logger.debug(f"Downloaded {media_type} to {file_path}")
             except Exception as e:
                 logger.error(f"Failed to download media: {e}")
