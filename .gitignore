@@ -15,3 +15,5 @@ docs/
 *.pyzz
 .venv/
 __pycache__/
+config.json
+cron/

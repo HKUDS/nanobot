@@ -1,5 +1,6 @@
 """Utility functions for nanobot."""
 
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -11,24 +12,27 @@ def ensure_dir(path: Path) -> Path:
 
 
 def get_data_path() -> Path:
-    """Get the nanobot data directory (~/.nanobot)."""
+    """Get the nanobot data directory (defaults to ~/.nanobot)."""
+    env_home = os.getenv("NANOBOT_HOME")
+    if env_home:
+        return ensure_dir(Path(env_home))
     return ensure_dir(Path.home() / ".nanobot")
 
 
 def get_workspace_path(workspace: str | None = None) -> Path:
     """
     Get the workspace path.
-    
+
     Args:
         workspace: Optional workspace path. Defaults to ~/.nanobot/workspace.
-    
+
     Returns:
         Expanded and ensured workspace path.
     """
     if workspace:
         path = Path(workspace).expanduser()
     else:
-        path = Path.home() / ".nanobot" / "workspace"
+        path = get_data_path() / "workspace"
     return ensure_dir(path)
 
 
@@ -78,10 +82,10 @@ def safe_filename(name: str) -> str:
 def parse_session_key(key: str) -> tuple[str, str]:
     """
     Parse a session key into channel and chat_id.
-    
+
     Args:
         key: Session key in format "channel:chat_id"
-    
+
     Returns:
         Tuple of (channel, chat_id)
     """

@@ -22,10 +22,11 @@ try:
     from raganything.sunteco.sunteco_rag_anything import CustomRAGAnything
 
     RAG_AVAILABLE = True
-except ImportError:
-    # Attempt to add relative path to sys.path for development environments
-    # /home/sunteco/phuongdd/sun_ai/BOT/nanobot/nanobot/agent/tools/rag.py
-    # to /home/sunteco/phuongdd/sun_ai/RAG/RAG-Anything
+except Exception as e:
+    # If import failed (ImportError or runtime error due to missing env vars)
+    logger.warning(f"Initial RAG import failed: {e}")
+
+    # Attempt to resolve path and load .env
     try:
         current_file = os.path.abspath(__file__)
         nanobot_root = os.path.dirname(
@@ -33,14 +34,26 @@ except ImportError:
         )
         workspace_root = os.path.dirname(os.path.dirname(nanobot_root))
         rag_path = os.path.join(workspace_root, "RAG", "RAG-Anything")
+
         if rag_path not in sys.path:
             sys.path.append(rag_path)
+
+        # Try loading .env from RAG directory
+        try:
+            from dotenv import load_dotenv
+
+            rag_env = os.path.join(rag_path, ".env")
+            if os.path.exists(rag_env):
+                logger.info(f"Loading RAG environment from {rag_env}")
+                load_dotenv(rag_env)
+        except ImportError:
+            pass
 
         from raganything.sunteco.sunteco_rag_anything import CustomRAGAnything
 
         RAG_AVAILABLE = True
-    except ImportError as e:
-        logger.warning(f"Failed to import RAGAnything: {e}")
+    except Exception as e:
+        logger.warning(f"Failed to initialize RAG-Anything: {e}")
         RAG_AVAILABLE = False
         CustomRAGAnything = None
 
