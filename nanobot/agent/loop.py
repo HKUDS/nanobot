@@ -69,7 +69,19 @@ class AgentLoop:
         )
         
         self._running = False
+        
+        # Concurrency safety
+        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._locks_lock = asyncio.Lock()  # Protect self._session_locks
+        
         self._register_default_tools()
+    
+    async def _get_session_lock(self, session_key: str) -> asyncio.Lock:
+        """Get or create a lock for a specific session."""
+        async with self._locks_lock:
+            if session_key not in self._session_locks:
+                self._session_locks[session_key] = asyncio.Lock()
+            return self._session_locks[session_key]
     
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -107,29 +119,51 @@ class AgentLoop:
         self._running = True
         logger.info("Agent loop started")
         
+        # Background tasks to track
+        tasks = set()
+        
         while self._running:
             try:
+                # Cleanup finished tasks
+                tasks = {t for t in tasks if not t.done()}
+                
                 # Wait for next message
                 msg = await asyncio.wait_for(
                     self.bus.consume_inbound(),
                     timeout=1.0
                 )
                 
-                # Process it
-                try:
-                    response = await self._process_message(msg)
-                    if response:
-                        await self.bus.publish_outbound(response)
-                except Exception as e:
-                    logger.error(f"Error processing message: {e}")
-                    # Send error response
-                    await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content=f"Sorry, I encountered an error: {str(e)}"
-                    ))
+                # Build a task for this message
+                task = asyncio.create_task(self._current_message_worker(msg))
+                tasks.add(task)
+                
             except asyncio.TimeoutError:
                 continue
+        
+        # Graceful shutdown: wait for pending tasks
+        if tasks:
+            logger.info(f"Waiting for {len(tasks)} background tasks to complete...")
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.info("All tasks completed.")
+    
+    async def _current_message_worker(self, msg: InboundMessage) -> None:
+        """Process a message with session locking."""
+        session_key = msg.session_key
+        lock = await self._get_session_lock(session_key)
+        
+        async with lock:
+            try:
+                response = await self._process_message(msg)
+                if response:
+                    await self.bus.publish_outbound(response)
+            except Exception as e:
+                logger.error(f"Error processing message: {e}")
+                # Send error response
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=f"Sorry, I encountered an error: {str(e)}"
+                ))
     
     def stop(self) -> None:
         """Stop the agent loop."""
@@ -214,7 +248,13 @@ class AgentLoop:
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments)
                     logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    
+                    try:
+                        result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    except Exception as e:
+                        logger.error(f"Tool execution failed: {tool_call.name} - {e}")
+                        result = f"Error executing tool {tool_call.name}: {str(e)}"
+                        
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -313,7 +353,13 @@ class AgentLoop:
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments)
                     logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    
+                    try:
+                        result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    except Exception as e:
+                        logger.error(f"Tool execution failed: {tool_call.name} - {e}")
+                        result = f"Error executing tool {tool_call.name}: {str(e)}"
+                        
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )

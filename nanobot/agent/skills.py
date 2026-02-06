@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import yaml
 from pathlib import Path
 
 # Default builtin skills directory (relative to this file)
@@ -188,7 +189,8 @@ class SkillsLoader:
     def _get_skill_meta(self, name: str) -> dict:
         """Get nanobot metadata for a skill (cached in frontmatter)."""
         meta = self.get_skill_metadata(name) or {}
-        return self._parse_nanobot_metadata(meta.get("metadata", ""))
+        # nanobot metadata is now a direct dict in YAML, not a JSON string
+        return meta.get("nanobot", {})
     
     def get_always_skills(self) -> list[str]:
         """Get skills marked as always=true that meet requirements."""
@@ -217,12 +219,9 @@ class SkillsLoader:
         if content.startswith("---"):
             match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
             if match:
-                # Simple YAML parsing
-                metadata = {}
-                for line in match.group(1).split("\n"):
-                    if ":" in line:
-                        key, value = line.split(":", 1)
-                        metadata[key.strip()] = value.strip().strip('"\'')
-                return metadata
+                try:
+                    return yaml.safe_load(match.group(1))
+                except yaml.YAMLError:
+                    return None
         
         return None
