@@ -13,7 +13,6 @@ def ensure_dir(path: Path) -> Path:
 
 def get_data_path() -> Path:
     """Get the nanobot data directory."""
-
     if env_home := os.environ.get("NANOBOT_HOME"):
         return ensure_dir(Path(env_home).expanduser())
 
