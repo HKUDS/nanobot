@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,10 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
+
+# Subagent context limits (tighter than main agent)
+_MAX_TOOL_RESULT_CHARS = 2000
+_MAX_CONTEXT_MESSAGES = 25
 
 
 class SubagentManager:
@@ -45,6 +50,32 @@ class SubagentManager:
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+
+    # ----- Context helpers (mirrors AgentLoop but tighter) -----
+
+    @staticmethod
+    def _truncate_result(result: str) -> str:
+        """Truncate tool result for subagent context."""
+        clean = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', result)
+        if len(clean) <= _MAX_TOOL_RESULT_CHARS:
+            return clean
+        half = _MAX_TOOL_RESULT_CHARS // 2
+        return (
+            clean[:half]
+            + f"\n\n... [truncated {len(clean) - _MAX_TOOL_RESULT_CHARS} chars] ...\n\n"
+            + clean[-half:]
+        )
+
+    @staticmethod
+    def _compact(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Compact subagent messages — keep system + goal + recent tail."""
+        if len(messages) <= _MAX_CONTEXT_MESSAGES:
+            return messages
+        protected = messages[:2]
+        tail = messages[2:][-(_MAX_CONTEXT_MESSAGES - 2):]
+        while tail and tail[0].get("role") == "tool":
+            tail = tail[1:]
+        return protected + tail
     
     async def spawn(
         self,
@@ -124,6 +155,9 @@ class SubagentManager:
             
             while iteration < max_iterations:
                 iteration += 1
+
+                # Compact before each LLM call
+                messages = self._compact(messages)
                 
                 response = await self.provider.chat(
                     messages=messages,
@@ -150,19 +184,25 @@ class SubagentManager:
                         "tool_calls": tool_call_dicts,
                     })
                     
-                    # Execute tools
+                    # Execute tools — truncate results at source
                     for tool_call in response.tool_calls:
                         args_str = json.dumps(tool_call.arguments)
                         logger.debug(f"Subagent [{task_id}] executing: {tool_call.name} with arguments: {args_str}")
-                        result = await tools.execute(tool_call.name, tool_call.arguments)
+                        raw_result = await tools.execute(tool_call.name, tool_call.arguments)
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
                             "name": tool_call.name,
-                            "content": result,
+                            "content": self._truncate_result(raw_result),
                         })
                 else:
-                    final_result = response.content
+                    if response.content:
+                        final_result = response.content
+                        break
+                    # Retry once on empty response
+                    if iteration < max_iterations:
+                        logger.warning(f"Subagent [{task_id}] got empty response, retrying")
+                        continue
                     break
             
             if final_result is None:

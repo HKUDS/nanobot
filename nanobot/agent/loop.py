@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,11 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
+
+# --- Context window safety constants ---
+MAX_TOOL_RESULT_CHARS = 3000     # Truncate any single tool result beyond this
+MAX_CONTEXT_MESSAGES = 30        # Sliding window cap per LLM call
+EMPTY_RESPONSE_RETRIES = 1      # Retry count when LLM returns empty
 
 
 class AgentLoop:
@@ -72,7 +78,73 @@ class AgentLoop:
         )
         
         self._running = False
+        self._chat_locks: dict[str, asyncio.Lock] = {}
         self._register_default_tools()
+
+    # ----- Context window helpers -----
+
+    @staticmethod
+    def _truncate_tool_result(result: str) -> str:
+        """Truncate a single tool result to keep context lean.
+
+        Strips ANSI escape codes, then caps total length.  Leaves a clear
+        note so the LLM knows data was trimmed (and doesn't retry the same
+        tool to "see the rest").
+        """
+        # Strip ANSI escape sequences
+        clean = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', result)
+
+        if len(clean) <= MAX_TOOL_RESULT_CHARS:
+            return clean
+
+        half = MAX_TOOL_RESULT_CHARS // 2
+        return (
+            clean[:half]
+            + f"\n\n... [truncated {len(clean) - MAX_TOOL_RESULT_CHARS} chars — "
+            + "data omitted to save context, do NOT re-run this tool to see more] ...\n\n"
+            + clean[-half:]
+        )
+
+    @staticmethod
+    def _compact_context(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Sliding-window prune that never orphans tool-call / tool-result pairs.
+
+        Keeps:
+          • messages[0]  — system prompt  (always)
+          • messages[1]  — first user msg (the goal)
+          • tail slice   — most recent messages, but never splits an
+                           assistant(tool_calls) from its tool results.
+        """
+        if len(messages) <= MAX_CONTEXT_MESSAGES:
+            return messages
+
+        # Always keep system prompt + first user message (the goal)
+        protected = messages[:2]
+        remaining = messages[2:]
+
+        budget = MAX_CONTEXT_MESSAGES - len(protected)
+        if budget <= 0:
+            return protected
+
+        # Take from the end, but if we'd start mid-way through a
+        # tool-result block, walk backwards to include the assistant msg
+        # that triggered it.
+        tail = remaining[-budget:]
+
+        # If first message in tail is a tool result, it's orphaned —
+        # drop orphaned tool results from the front of the tail.
+        while tail and tail[0].get("role") == "tool":
+            tail = tail[1:]
+
+        result = protected + tail
+        logger.debug(f"Context compacted: {len(messages)} → {len(result)} messages")
+        return result
+
+    def _get_chat_lock(self, key: str) -> asyncio.Lock:
+        """Per-chat lock to prevent concurrent message corruption."""
+        if key not in self._chat_locks:
+            self._chat_locks[key] = asyncio.Lock()
+        return self._chat_locks[key]
     
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -151,114 +223,111 @@ class AgentLoop:
             The response message, or None if no response needed.
         """
         # Handle system messages (subagent announces)
-        # The chat_id contains the original "channel:chat_id" to route back to
         if msg.channel == "system":
             return await self._process_system_message(msg)
         
         logger.info(f"Processing message from {msg.channel}:{msg.sender_id}")
         
-        # Get or create session
-        session = self.sessions.get_or_create(msg.session_key)
-        
-        # Update tool contexts
-        message_tool = self.tools.get("message")
-        if isinstance(message_tool, MessageTool):
-            message_tool.set_context(msg.channel, msg.chat_id)
-        
-        spawn_tool = self.tools.get("spawn")
-        if isinstance(spawn_tool, SpawnTool):
-            spawn_tool.set_context(msg.channel, msg.chat_id)
-        
-        cron_tool = self.tools.get("cron")
-        if isinstance(cron_tool, CronTool):
-            cron_tool.set_context(msg.channel, msg.chat_id)
-        
-        # Build initial messages (use get_history for LLM-formatted messages)
-        messages = self.context.build_messages(
-            history=session.get_history(),
-            current_message=msg.content,
-            media=msg.media if msg.media else None,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-        )
-        
-        # Agent loop
-        iteration = 0
-        final_content = None
-        
-        while iteration < self.max_iterations:
-            iteration += 1
+        # Per-chat lock prevents concurrent corruption on same session
+        async with self._get_chat_lock(msg.session_key):
+            # Get or create session
+            session = self.sessions.get_or_create(msg.session_key)
             
-            # Call LLM
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model
+            # Update tool contexts
+            message_tool = self.tools.get("message")
+            if isinstance(message_tool, MessageTool):
+                message_tool.set_context(msg.channel, msg.chat_id)
+            
+            spawn_tool = self.tools.get("spawn")
+            if isinstance(spawn_tool, SpawnTool):
+                spawn_tool.set_context(msg.channel, msg.chat_id)
+            
+            cron_tool = self.tools.get("cron")
+            if isinstance(cron_tool, CronTool):
+                cron_tool.set_context(msg.channel, msg.chat_id)
+            
+            # Build initial messages
+            messages = self.context.build_messages(
+                history=session.get_history(),
+                current_message=msg.content,
+                media=msg.media if msg.media else None,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
             )
             
-            # Handle tool calls
-            if response.has_tool_calls:
-                # Add assistant message with tool calls
-                tool_call_dicts = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments)  # Must be JSON string
-                        }
-                    }
-                    for tc in response.tool_calls
-                ]
-                messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts
+            # Agent loop
+            iteration = 0
+            final_content = None
+            
+            while iteration < self.max_iterations:
+                iteration += 1
+                
+                # Compact context BEFORE each LLM call (prevents explosion)
+                messages = self._compact_context(messages)
+                
+                # Call LLM
+                response = await self.provider.chat(
+                    messages=messages,
+                    tools=self.tools.get_definitions(),
+                    model=self.model
                 )
                 
-                # Execute tools
-                for tool_call in response.tool_calls:
-                    args_str = json.dumps(tool_call.arguments)
-                    logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
+                # Handle tool calls
+                if response.has_tool_calls:
+                    tool_call_dicts = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": json.dumps(tc.arguments)
+                            }
+                        }
+                        for tc in response.tool_calls
+                    ]
+                    messages = self.context.add_assistant_message(
+                        messages, response.content, tool_call_dicts
                     )
-            else:
-                # No tool calls, we're done
-                final_content = response.content
-                break
-        
-        if final_content is None:
-            final_content = "I've completed processing but have no response to give."
-        
-        # Defensive SMART: Prune context window to prevent explosion
-        # Keep system prompt + last few user goals + recent tool context
-        if len(messages) > 25:
-            # Always keep the system prompt (index 0)
-            system = messages[:1]
+                    
+                    # Execute tools — truncate results at source
+                    for tool_call in response.tool_calls:
+                        args_str = json.dumps(tool_call.arguments)
+                        logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
+                        raw_result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                        result = self._truncate_tool_result(raw_result)
+                        messages = self.context.add_tool_result(
+                            messages, tool_call.id, tool_call.name, result
+                        )
+                else:
+                    # Got a response — but guard against empty/None
+                    if response.content:
+                        final_content = response.content
+                        break
+                    
+                    # LLM returned empty: retry once before giving up
+                    if iteration <= self.max_iterations - EMPTY_RESPONSE_RETRIES:
+                        logger.warning(f"LLM returned empty on iteration {iteration}, retrying")
+                        continue
+                    
+                    final_content = None
+                    break
             
-            # Find all user messages (not tool results) - these represent user goals
-            user_msgs = [m for m in messages if m.get("role") == "user"]
-            goal_context = user_msgs[-3:] if user_msgs else []  # Keep last 3 user messages
+            if final_content is None:
+                final_content = "I've completed processing but have no response to give."
             
-            # Calculate remaining slots for recent context
-            remaining_slots = 25 - len(system) - len(goal_context)
-            recent = messages[-remaining_slots:] if remaining_slots > 0 else []
+            # Save to session (safe — disk errors don't crash the agent)
+            try:
+                session.add_message("user", msg.content)
+                session.add_message("assistant", final_content)
+                self.sessions.save(session)
+            except Exception as e:
+                logger.error(f"Failed to save session {msg.session_key}: {e}")
             
-            # Rebuild message list with pruning
-            messages = system + goal_context + recent
-            logger.info(f"Context window managed: {len(messages)} total messages "
-                       f"(system=1 + goals={len(goal_context)} + recent={len(recent)})")
-        
-        # Save to session
-        session.add_message("user", msg.content)
-        session.add_message("assistant", final_content)
-        self.sessions.save(session)
-        
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=final_content
-        )
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=final_content
+            )
     
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
@@ -310,6 +379,9 @@ class AgentLoop:
         
         while iteration < self.max_iterations:
             iteration += 1
+
+            # Compact context before each LLM call
+            messages = self._compact_context(messages)
             
             response = await self.provider.chat(
                 messages=messages,
@@ -336,21 +408,33 @@ class AgentLoop:
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments)
                     logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    raw_result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    result = self._truncate_tool_result(raw_result)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
             else:
-                final_content = response.content
+                if response.content:
+                    final_content = response.content
+                    break
+
+                if iteration <= self.max_iterations - EMPTY_RESPONSE_RETRIES:
+                    logger.warning(f"LLM returned empty on iteration {iteration} (system), retrying")
+                    continue
+
+                final_content = None
                 break
         
         if final_content is None:
             final_content = "Background task completed."
         
-        # Save to session (mark as system message in history)
-        session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
-        session.add_message("assistant", final_content)
-        self.sessions.save(session)
+        # Save to session (safe — disk errors don't crash the agent)
+        try:
+            session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
+            session.add_message("assistant", final_content)
+            self.sessions.save(session)
+        except Exception as e:
+            logger.error(f"Failed to save session {session_key}: {e}")
         
         return OutboundMessage(
             channel=origin_channel,
