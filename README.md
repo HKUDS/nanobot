@@ -150,6 +150,10 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
     "vllm": {
       "apiKey": "dummy",
       "apiBase": "http://localhost:8000/v1"
+    },
+    "custom": {
+      "apiKey": "sk-or-v1-xxx",
+      "apiBase": "https://custom-endpoint.ai/api/v1"
     }
   },
   "agents": {
