@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Coroutine
 
@@ -16,26 +17,44 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+# When there are no jobs (or no next run), wake this often to reload store from disk (e.g. jobs added via exec)
+POLL_WHEN_EMPTY_SEC = 30
+
+
 def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
     """Compute next run time in ms."""
     if schedule.kind == "at":
         return schedule.at_ms if schedule.at_ms and schedule.at_ms > now_ms else None
-    
+
     if schedule.kind == "every":
         if not schedule.every_ms or schedule.every_ms <= 0:
             return None
         # Next interval from now
         return now_ms + schedule.every_ms
-    
+
     if schedule.kind == "cron" and schedule.expr:
         try:
             from croniter import croniter
-            cron = croniter(schedule.expr, time.time())
-            next_time = cron.get_next()
-            return int(next_time * 1000)
+            from zoneinfo import ZoneInfo
+            from datetime import timezone
+            now_sec = now_ms / 1000
+            # If tz set: interpret cron in that timezone
+            if schedule.tz:
+                tz = ZoneInfo(schedule.tz)
+                now_utc = datetime.fromtimestamp(now_sec, tz=timezone.utc)
+                now_in_tz = now_utc.astimezone(tz)
+                cron = croniter(schedule.expr, now_in_tz)
+                next_dt = cron.get_next(datetime)
+                if next_dt.tzinfo is None:
+                    next_dt = next_dt.replace(tzinfo=tz)
+            else:
+                local_dt = datetime.fromtimestamp(now_sec)
+                cron = croniter(schedule.expr, local_dt)
+                next_dt = cron.get_next(datetime)
+            return int(next_dt.timestamp() * 1000)
         except Exception:
             return None
-    
+
     return None
 
 
@@ -53,11 +72,13 @@ class CronService:
         self._timer_task: asyncio.Task | None = None
         self._running = False
     
-    def _load_store(self) -> CronStore:
-        """Load jobs from disk."""
+    def _load_store(self, force_reload: bool = False) -> CronStore:
+        """Load jobs from disk. If force_reload is True, re-read from file (sync with external changes)."""
+        if force_reload:
+            self._store = None
         if self._store:
             return self._store
-        
+
         if self.store_path.exists():
             try:
                 data = json.loads(self.store_path.read_text())
@@ -178,29 +199,33 @@ class CronService:
         return min(times) if times else None
     
     def _arm_timer(self) -> None:
-        """Schedule the next timer tick."""
+        """Schedule the next timer tick. When no jobs are due, poll periodically to pick up jobs added on disk."""
         if self._timer_task:
             self._timer_task.cancel()
-        
-        next_wake = self._get_next_wake_ms()
-        if not next_wake or not self._running:
+        if not self._running:
             return
-        
-        delay_ms = max(0, next_wake - _now_ms())
-        delay_s = delay_ms / 1000
-        
+
+        next_wake = self._get_next_wake_ms()
+        if next_wake is not None:
+            delay_ms = max(0, next_wake - _now_ms())
+            delay_s = delay_ms / 1000
+        else:
+            delay_s = POLL_WHEN_EMPTY_SEC
+        delay_s = min(delay_s, POLL_WHEN_EMPTY_SEC)
+
         async def tick():
             await asyncio.sleep(delay_s)
             if self._running:
                 await self._on_timer()
-        
+
         self._timer_task = asyncio.create_task(tick())
-    
+
     async def _on_timer(self) -> None:
         """Handle timer tick - run due jobs."""
+        self._load_store(force_reload=True)
         if not self._store:
             return
-        
+
         now = _now_ms()
         due_jobs = [
             j for j in self._store.jobs
@@ -262,12 +287,14 @@ class CronService:
         deliver: bool = False,
         channel: str | None = None,
         to: str | None = None,
-        delete_after_run: bool = False,
+        delete_after_run: bool | None = None,
     ) -> CronJob:
         """Add a new job."""
+        if delete_after_run is None:
+            delete_after_run = schedule.kind == "at"
         store = self._load_store()
         now = _now_ms()
-        
+
         job = CronJob(
             id=str(uuid.uuid4())[:8],
             name=name,
@@ -322,7 +349,43 @@ class CronService:
                 self._arm_timer()
                 return job
         return None
-    
+
+    def update_job(
+        self,
+        job_id: str,
+        name: str | None = None,
+        message: str | None = None,
+        schedule: CronSchedule | None = None,
+        deliver: bool | None = None,
+        channel: str | None = None,
+        to: str | None = None,
+    ) -> CronJob | None:
+        """Update job fields."""
+        store = self._load_store()
+        for job in store.jobs:
+            if job.id == job_id:
+                if name is not None:
+                    job.name = name
+                if message is not None:
+                    job.payload.message = message
+                if schedule is not None:
+                    job.schedule = schedule
+                    if job.enabled:
+                        job.state.next_run_at_ms = _compute_next_run(schedule, _now_ms())
+                if deliver is not None:
+                    job.payload.deliver = deliver
+                if channel is not None:
+                    job.payload.channel = channel
+                if to is not None:
+                    job.payload.to = to
+
+                job.updated_at_ms = _now_ms()
+                self._save_store()
+                self._arm_timer()
+                logger.info(f"Cron: updated job '{job.name}' ({job.id})")
+                return job
+        return None
+
     async def run_job(self, job_id: str, force: bool = False) -> bool:
         """Manually run a job."""
         store = self._load_store()
