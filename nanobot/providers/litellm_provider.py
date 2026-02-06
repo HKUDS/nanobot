@@ -38,6 +38,9 @@ class LiteLLMProvider(LLMProvider):
         # api_key / api_base are fallback for auto-detection.
         self._gateway = find_gateway(provider_name, api_key, api_base)
         
+        # Detect GitHub Copilot (uses OAuth device flow, no API key)
+        self.is_github_copilot = "github_copilot" in default_model
+        
         # Configure environment variables
         if api_key:
             self._setup_env(api_key, api_base, default_model)
@@ -76,6 +79,10 @@ class LiteLLMProvider(LLMProvider):
     
     def _resolve_model(self, model: str) -> str:
         """Resolve model name by applying provider/gateway prefixes."""
+        # GitHub Copilot models pass through directly
+        if self.is_github_copilot:
+            return model
+        
         if self._gateway:
             # Gateway mode: apply gateway prefix, skip provider-specific prefixes
             prefix = self._gateway.litellm_prefix

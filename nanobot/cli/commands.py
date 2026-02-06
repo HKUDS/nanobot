@@ -892,7 +892,9 @@ def status():
             p = getattr(config.providers, spec.name, None)
             if p is None:
                 continue
-            if spec.is_local:
+            if spec.is_oauth:
+                console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
+            elif spec.is_local:
                 # Local deployments show api_base instead of api_key
                 if p.api_base:
                     console.print(f"{spec.label}: [green]✓ {p.api_base}[/green]")
