@@ -25,7 +25,7 @@ from nanobot.session.manager import SessionManager
 class AgentLoop:
     """
     The agent loop is the core processing engine.
-    
+
     It:
     1. Receives messages from the bus
     2. Builds context with history, memory, skills
@@ -33,7 +33,7 @@ class AgentLoop:
     4. Executes tool calls
     5. Sends responses back
     """
-    
+
     def __init__(
         self,
         bus: MessageBus,
@@ -67,10 +67,10 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
         )
-        
+
         self._running = False
         self._register_default_tools()
-    
+
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         # File tools
@@ -78,7 +78,7 @@ class AgentLoop:
         self.tools.register(WriteFileTool())
         self.tools.register(EditFileTool())
         self.tools.register(ListDirTool())
-        
+
         # Shell tool
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
@@ -89,11 +89,11 @@ class AgentLoop:
         # Web tools
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
-        
+
         # Message tool
         message_tool = MessageTool(send_callback=self.bus.publish_outbound)
         self.tools.register(message_tool)
-        
+
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
@@ -106,7 +106,7 @@ class AgentLoop:
         """Run the agent loop, processing messages from the bus."""
         self._running = True
         logger.info("Agent loop started")
-        
+
         while self._running:
             try:
                 # Wait for next message
@@ -114,7 +114,7 @@ class AgentLoop:
                     self.bus.consume_inbound(),
                     timeout=1.0
                 )
-                
+
                 # Process it
                 try:
                     response = await self._process_message(msg)
@@ -124,25 +124,25 @@ class AgentLoop:
                     logger.error(f"Error processing message: {e}")
                     # Send error response
                     await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
                         content=f"Sorry, I encountered an error: {str(e)}"
                     ))
             except asyncio.TimeoutError:
                 continue
-    
+
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
         logger.info("Agent loop stopping")
-    
+
     async def _process_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
         Process a single inbound message.
-        
+
         Args:
             msg: The inbound message to process.
-        
+
         Returns:
             The response message, or None if no response needed.
         """
@@ -150,17 +150,17 @@ class AgentLoop:
         # The chat_id contains the original "channel:chat_id" to route back to
         if msg.channel == "system":
             return await self._process_system_message(msg)
-        
+
         logger.info(f"Processing message from {msg.channel}:{msg.sender_id}")
-        
+
         # Get or create session
         session = self.sessions.get_or_create(msg.session_key)
-        
+
         # Update tool contexts
         message_tool = self.tools.get("message")
         if isinstance(message_tool, MessageTool):
             message_tool.set_context(msg.channel, msg.chat_id)
-        
+
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(msg.channel, msg.chat_id)
@@ -177,21 +177,21 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
         )
-        
+
         # Agent loop
         iteration = 0
         final_content = None
-        
+
         while iteration < self.max_iterations:
             iteration += 1
-            
+
             # Call LLM
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
-            
+
             # Handle tool calls
             if response.has_tool_calls:
                 # Add assistant message with tool calls
@@ -209,7 +209,7 @@ class AgentLoop:
                 messages = self.context.add_assistant_message(
                     messages, response.content, tool_call_dicts
                 )
-                
+
                 # Execute tools
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments)
@@ -222,30 +222,30 @@ class AgentLoop:
                 # No tool calls, we're done
                 final_content = response.content
                 break
-        
+
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
-        
+
         # Save to session
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
-        
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=final_content
-        )
-    
+
+        # Check if summarization is needed
+        if len(session.messages) > 40:
+            asyncio.create_task(self._summarize_session(session))
+
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=final_content)
+
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
         Process a system message (e.g., subagent announce).
-        
+
         The chat_id field contains "original_channel:original_chat_id" to route
         the response back to the correct destination.
         """
         logger.info(f"Processing system message from {msg.sender_id}")
-        
+
         # Parse origin from chat_id (format: "channel:chat_id")
         if ":" in msg.chat_id:
             parts = msg.chat_id.split(":", 1)
@@ -255,16 +255,16 @@ class AgentLoop:
             # Fallback
             origin_channel = "cli"
             origin_chat_id = msg.chat_id
-        
+
         # Use the origin session for context
         session_key = f"{origin_channel}:{origin_chat_id}"
         session = self.sessions.get_or_create(session_key)
-        
+
         # Update tool contexts
         message_tool = self.tools.get("message")
         if isinstance(message_tool, MessageTool):
             message_tool.set_context(origin_channel, origin_chat_id)
-        
+
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(origin_channel, origin_chat_id)
@@ -280,20 +280,20 @@ class AgentLoop:
             channel=origin_channel,
             chat_id=origin_chat_id,
         )
-        
+
         # Agent loop (limited for announce handling)
         iteration = 0
         final_content = None
-        
+
         while iteration < self.max_iterations:
             iteration += 1
-            
+
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
-            
+
             if response.has_tool_calls:
                 tool_call_dicts = [
                     {
@@ -309,7 +309,7 @@ class AgentLoop:
                 messages = self.context.add_assistant_message(
                     messages, response.content, tool_call_dicts
                 )
-                
+
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments)
                     logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
@@ -320,15 +320,15 @@ class AgentLoop:
             else:
                 final_content = response.content
                 break
-        
+
         if final_content is None:
             final_content = "Background task completed."
-        
+
         # Save to session (mark as system message in history)
         session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
         session.add_message("assistant", final_content)
         self.sessions.save(session)
-        
+
         return OutboundMessage(
             channel=origin_channel,
             chat_id=origin_chat_id,
@@ -360,6 +360,61 @@ class AgentLoop:
             chat_id=chat_id,
             content=content
         )
-        
+
         response = await self._process_message(msg)
         return response.content if response else ""
+
+    async def _summarize_session(self, session: Session) -> None:
+        """
+        Summarize the session history to reduce context window usage.
+
+        Args:
+            session: The session to summarize.
+        """
+        try:
+            # Keep the last 10 messages, summarize the rest
+            keep_count = 10
+            if len(session.messages) <= keep_count:
+                return
+
+            to_summarize = session.messages[:-keep_count]
+            kept_messages = session.messages[-keep_count:]
+
+            logger.info(
+                f"Summarizing session {session.key}: collapsing {len(to_summarize)} messages"
+            )
+
+            # Build summarization prompt
+            prompt = (
+                "Please summarize the following conversation history into a concise paragraph. "
+            )
+            if session.summary:
+                prompt += f"incorporating the existing summary:\n{session.summary}\n\n"
+            else:
+                prompt += "Capture key details, decisions, and user preferences.\n\n"
+
+            prompt += "New messages to summarize:\n"
+            for m in to_summarize:
+                prompt += f"{m['role']}: {m['content']}\n"
+
+            # Call LLM for summary
+            # We use a simple message structure here
+            messages = [{"role": "user", "content": prompt}]
+
+            response = await self.provider.chat(
+                messages=messages,
+                tools=[],  # No tools needed for summarization
+                model=self.model,
+            )
+
+            new_summary = response.content
+
+            # Update session
+            session.summary = new_summary
+            session.messages = kept_messages
+            self.sessions.save(session)
+
+            logger.info(f"Session {session.key} summarized. New summary length: {len(new_summary)}")
+
+        except Exception as e:
+            logger.error(f"Error summarizing session {session.key}: {e}")
