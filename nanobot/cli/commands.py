@@ -184,9 +184,10 @@ def gateway(
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
 
-    if not api_key and not is_bedrock:
-        console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
+    if not api_key and not is_bedrock and not api_base:
+        console.print("[red]Error: No API key or local endpoint configured.[/red]")
+        console.print("Set an API key in ~/.nanobot/config.json under providers.openrouter.apiKey")
+        console.print("Or configure a local endpoint under providers.vllm.apiBase")
         raise typer.Exit(1)
     
     provider = LiteLLMProvider(
@@ -300,8 +301,10 @@ def agent(
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
 
-    if not api_key and not is_bedrock:
-        console.print("[red]Error: No API key configured.[/red]")
+    if not api_key and not is_bedrock and not api_base:
+        console.print("[red]Error: No API key or local endpoint configured.[/red]")
+        console.print("Set an API key in ~/.nanobot/config.json under providers.openrouter.apiKey")
+        console.print("Or configure a local endpoint under providers.vllm.apiBase")
         raise typer.Exit(1)
 
     bus = MessageBus()
