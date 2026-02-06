@@ -107,6 +107,11 @@ class WhatsAppChannel(BaseChannel):
             # Extract just the phone number as chat_id
             chat_id = sender.split("@")[0] if "@" in sender else sender
             
+            # Handle voice transcription if it's a voice message
+            if content == "[Voice Message]":
+                logger.info(f"Voice message received from {chat_id}, but direct download from bridge is not yet supported.")
+                content = "[Voice Message: Transcription not available for WhatsApp yet]"
+            
             await self._handle_message(
                 sender_id=chat_id,
                 chat_id=sender,  # Use full JID for replies
