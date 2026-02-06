@@ -44,6 +44,7 @@ class AgentLoop:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
+        restrict_to_workspace: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
@@ -55,6 +56,7 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
+        self.restrict_to_workspace = restrict_to_workspace
         
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
@@ -66,6 +68,7 @@ class AgentLoop:
             model=self.model,
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
+            restrict_to_workspace=restrict_to_workspace,
         )
         
         self._running = False
@@ -74,7 +77,7 @@ class AgentLoop:
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         # File tools (restrict to workspace if configured)
-        allowed_dir = self.workspace if self.exec_config.restrict_to_workspace else None
+        allowed_dir = self.workspace if self.restrict_to_workspace else None
         self.tools.register(ReadFileTool(allowed_dir=allowed_dir))
         self.tools.register(WriteFileTool(allowed_dir=allowed_dir))
         self.tools.register(EditFileTool(allowed_dir=allowed_dir))
@@ -84,7 +87,7 @@ class AgentLoop:
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.exec_config.restrict_to_workspace,
+            restrict_to_workspace=self.restrict_to_workspace,
         ))
         
         # Web tools
