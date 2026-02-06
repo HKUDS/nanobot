@@ -36,35 +36,40 @@ class LiteLLMProvider(LLMProvider):
         # Track if using custom endpoint (vLLM, etc.)
         self.is_vllm = bool(api_base) and not self.is_openrouter
 
-        # Configure LiteLLM based on provider
-        if api_key:
-            if self.is_openrouter:
-                # OpenRouter mode - set key
-                os.environ["OPENROUTER_API_KEY"] = api_key
-            elif self.is_vllm:
-                # vLLM/custom endpoint - uses OpenAI-compatible API
-                os.environ["HOSTED_VLLM_API_KEY"] = api_key
-            elif "deepseek" in default_model:
-                os.environ.setdefault("DEEPSEEK_API_KEY", api_key)
-            elif "anthropic" in default_model:
-                os.environ.setdefault("ANTHROPIC_API_KEY", api_key)
-            elif "openai" in default_model or "gpt" in default_model:
-                os.environ.setdefault("OPENAI_API_KEY", api_key)
-            elif "gemini" in default_model.lower():
-                os.environ.setdefault("GEMINI_API_KEY", api_key)
-            elif "zhipu" in default_model or "glm" in default_model or "zai" in default_model:
-                os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
-            elif "groq" in default_model:
-                os.environ.setdefault("GROQ_API_KEY", api_key)
-            elif "moonshot" in default_model or "kimi" in default_model:
-                os.environ.setdefault("MOONSHOT_API_KEY", api_key)
-                os.environ.setdefault("MOONSHOT_API_BASE", api_base or "https://api.moonshot.cn/v1")
-
-        if api_base:
-            litellm.api_base = api_base
+        # Store provider detection based on default_model for API key mapping
+        self._provider_env_key = self._get_provider_env_key(default_model)
 
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
+
+    def _get_provider_env_key(self, model: str) -> str | None:
+        """
+        Get the environment variable key for a given provider/model.
+
+        This is used only as a fallback to read from environment if no api_key
+        was provided during initialization. We don't write to environment anymore
+        to avoid race conditions with multiple instances.
+        """
+        model_lower = model.lower()
+        if self.is_openrouter:
+            return "OPENROUTER_API_KEY"
+        elif self.is_vllm:
+            return "OPENAI_API_KEY"
+        elif "deepseek" in model_lower:
+            return "DEEPSEEK_API_KEY"
+        elif "anthropic" in model_lower or "claude" in model_lower:
+            return "ANTHROPIC_API_KEY"
+        elif "openai" in model_lower or "gpt" in model_lower:
+            return "OPENAI_API_KEY"
+        elif "gemini" in model_lower:
+            return "GEMINI_API_KEY"
+        elif "zhipu" in model_lower or "glm" in model_lower or "zai" in model_lower:
+            return "ZHIPUAI_API_KEY"
+        elif "groq" in model_lower:
+            return "GROQ_API_KEY"
+        elif "moonshot" in model_lower or "kimi" in model_lower:
+            return "MOONSHOT_API_KEY"
+        return None
 
     async def chat(
         self,
@@ -130,6 +135,16 @@ class LiteLLMProvider(LLMProvider):
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
+
+        # Pass api_key directly to avoid race conditions with multiple instances
+        # This takes precedence over environment variables
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        elif self._provider_env_key:
+            # Fallback: read from environment (but don't write to it)
+            env_key = os.environ.get(self._provider_env_key)
+            if env_key:
+                kwargs["api_key"] = env_key
 
         # Pass api_base directly for custom endpoints (vLLM, etc.)
         if self.api_base:

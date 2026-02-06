@@ -163,11 +163,17 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
+        """
+        Build user message content with optional base64-encoded images.
+
+        Returns warnings for skipped images to inform the user.
+        """
         if not media:
             return text
 
         images = []
+        warnings = []
+
         for path in media:
             p = Path(path)
             mime, _ = mimetypes.guess_type(path)
@@ -175,20 +181,24 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
             # Validate file exists and is an image
             if not p.is_file():
                 logger.warning(f"Media file not found, skipping: {path}")
-                continue
-            if not mime or not mime.startswith("image/"):
-                logger.debug(f"Skipping non-image media: {path} (mime: {mime})")
+                warnings.append(f"⚠️ Image file not found: {path}")
                 continue
 
-            # Check file size
+            if not mime or not mime.startswith("image/"):
+                logger.debug(f"Skipping non-image media: {path} (mime: {mime})")
+                warnings.append(f"⚠️ Not an image file (type: {mime}): {path}")
+                continue
+
+            # Check file size before reading into memory
             file_size = p.stat().st_size
             if file_size > self.max_image_size:
                 logger.warning(
                     f"Image too large ({file_size / 1024 / 1024:.1f}MB), skipping: {path}"
                 )
+                warnings.append(f"⚠️ Image too large ({file_size / 1024 / 1024:.1f}MB): {path}")
                 continue
 
-            # Encode to base64
+            # Encode to base64 (read in one operation - Python handles memory efficiently)
             try:
                 b64 = base64.b64encode(p.read_bytes()).decode()
                 images.append({
@@ -198,10 +208,22 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
                 logger.debug(f"Encoded image for vision: {path} ({file_size / 1024:.1f}KB)")
             except Exception as e:
                 logger.error(f"Failed to encode image {path}: {e}")
+                warnings.append(f"⚠️ Failed to process image: {path}")
                 continue
+
+        # Build final content with warnings if any
+        if warnings:
+            warning_text = "\n\n" + "\n".join(warnings)
+            if images:
+                # Have valid images, append warnings to text
+                return images + [{"type": "text", "text": text + warning_text}]
+            else:
+                # No valid images, return text with warnings
+                return text + warning_text
 
         if not images:
             return text
+
         return images + [{"type": "text", "text": text}]
 
     def add_tool_result(

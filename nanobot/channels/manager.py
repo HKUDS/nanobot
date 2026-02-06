@@ -1,6 +1,7 @@
 """Channel manager for coordinating chat channels."""
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -8,6 +9,7 @@ from loguru import logger
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
+from nanobot.providers.tts import TTSProvider
 
 
 class ChannelManager:
@@ -25,7 +27,12 @@ class ChannelManager:
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
-        self._tts_provider: Any = None
+        self._tts_provider: TTSProvider | None = None
+
+        # Initialize cleanup registry
+        from nanobot.utils.media_cleanup import MediaCleanupRegistry
+        media_dir = Path.home() / ".nanobot" / "media"
+        self._cleanup_registry = MediaCleanupRegistry(media_dir)
 
         self._init_tts_provider()
         self._init_channels()
@@ -55,8 +62,16 @@ class ChannelManager:
                 provider=provider,
                 api_key=api_key,
                 voice=self.config.tools.multimodal.tts.voice,
+                model=self.config.tools.multimodal.tts.model,
+                max_text_length=self.config.tools.multimodal.tts.max_text_length,
+                timeout=self.config.tools.multimodal.tts.timeout,
             )
-            logger.info(f"TTS provider initialized: {self._tts_provider.provider}")
+            logger.info(
+                f"TTS provider initialized: {self._tts_provider.provider} "
+                f"(model={self._tts_provider.model}, "
+                f"voice={self._tts_provider.voice}, "
+                f"max_length={self._tts_provider.max_text_length})"
+            )
 
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
@@ -72,6 +87,7 @@ class ChannelManager:
                     tts_provider=self._tts_provider,
                     max_video_frames=self.config.tools.multimodal.max_video_frames,
                     workspace=self.config.workspace_path,
+                    cleanup_registry=self._cleanup_registry,
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:
