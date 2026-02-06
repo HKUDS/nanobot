@@ -1,0 +1,122 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "nanobot: Onboard (Initialize)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "nanobot.cli.commands",
+            "args": ["onboard"],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "nanobot: Agent (Single Message)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "nanobot.cli.commands",
+            "args": ["agent", "-m", "Hello, how are you?"],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+        },
+        {
+            "name": "nanobot: Agent (Interactive Mode)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "nanobot.cli.commands",
+            "args": ["agent"],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "nanobot: Gateway (Server)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "nanobot.cli.commands",
+            "args": ["gateway"],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "nanobot: Status",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "nanobot.cli.commands",
+            "args": ["status"],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "nanobot: Cron List",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "nanobot.cli.commands",
+            "args": ["cron", "list"],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "nanobot: Channels Status",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "nanobot.cli.commands",
+            "args": ["channels", "status"],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "nanobot: Test with pytest",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "-v",
+                "--tb=short"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "nanobot: Test Specific File",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "${file}",
+                "-v",
+                "--tb=short"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

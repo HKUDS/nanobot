@@ -13,5 +13,6 @@ docs/
 *.pyz
 *.pywz
 *.pyzz
+uv.lock
 .venv/
 __pycache__/
