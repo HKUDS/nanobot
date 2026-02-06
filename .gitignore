@@ -15,3 +15,5 @@ docs/
 *.pyzz
 .venv/
 __pycache__/
+poetry.lock
+.pytest_cache/
