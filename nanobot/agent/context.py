@@ -2,6 +2,7 @@
 
 import base64
 import mimetypes
+import platform
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +75,8 @@ Skills with available="false" need dependencies installed first - you can try in
         from datetime import datetime
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         workspace_path = str(self.workspace.expanduser().resolve())
+        system = platform.system()
+        runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
         
         return f"""# nanobot 🐈
 
@@ -86,6 +89,9 @@ You are nanobot, a helpful AI assistant. You have access to tools that allow you
 
 ## Current Time
 {now}
+
+## Runtime
+{runtime}
 
 ## Workspace
 Your workspace is at: {workspace_path}

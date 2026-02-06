@@ -30,10 +30,20 @@ class FeishuConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
 
 
+class DiscordConfig(BaseModel):
+    """Discord channel configuration."""
+    enabled: bool = False
+    token: str = ""  # Bot token from Discord Developer Portal
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
+    gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
+    intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
 
 
