@@ -3,32 +3,10 @@
 import asyncio
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
-
-
-# List of potentially dangerous command patterns
-DANGEROUS_PATTERNS = [
-    r'rm\s+-rf\s+/(?:\s|$)',  # rm -rf / (at root, followed by space or end)
-    r':\(\)\{\s*:\|:&\s*\};:',  # fork bomb
-    r'mkfs\.',  # format filesystem
-    r'dd\s+if=.*\s+of=/dev/(sd|hd)',  # overwrite disk
-    r'>\s*/dev/(sd|hd)',  # write to raw disk device
-]
-
-
-def validate_command_safety(command: str) -> tuple[bool, str | None]:
-    """
-    Check if a command contains dangerous patterns.
-    
-    Returns:
-        Tuple of (is_dangerous, warning_message)
-    """
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, command, re.IGNORECASE):
-            return True, f"Warning: Command contains potentially dangerous pattern: {pattern}"
-    return False, None
 
 
 class ExecTool(Tool):
@@ -83,11 +61,6 @@ class ExecTool(Tool):
         }
     
     async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
-        # Check for dangerous command patterns
-        is_dangerous, warning = validate_command_safety(command)
-        if is_dangerous:
-            return f"Error: Refusing to execute dangerous command. {warning}"
-        
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
         if guard_error:

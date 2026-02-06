@@ -70,10 +70,9 @@ class BaseChannel(ABC):
         """
         allow_list = getattr(self.config, "allow_from", [])
         
-        # Fail-closed: if no allow list is configured, deny access
-        # Users must explicitly configure allowed senders
+        # If no allow list, allow everyone
         if not allow_list:
-            return False
+            return True
         
         sender_str = str(sender_id)
         if sender_str in allow_list:

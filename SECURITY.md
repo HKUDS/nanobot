@@ -55,7 +55,7 @@ chmod 600 ~/.nanobot/config.json
 ```
 
 **Security Notes:**
-- Empty `allowFrom` list will **BLOCK ALL** users (fail-closed by design)
+- Empty `allowFrom` list will **ALLOW ALL** users (open by default for personal use)
 - Get your Telegram user ID from `@userinfobot`
 - Use full phone numbers with country code for WhatsApp
 - Review access logs regularly for unauthorized access attempts
@@ -120,7 +120,7 @@ npm audit fix
 ```
 
 **Important Notes:**
-- We've updated `litellm` to `>=1.61.15` to fix critical vulnerabilities
+- Keep `litellm` updated to the latest version for security fixes
 - We've updated `ws` to `>=8.17.1` to fix DoS vulnerability
 - Run `pip-audit` or `npm audit` regularly
 - Subscribe to security advisories for nanobot and its dependencies
@@ -214,7 +214,7 @@ If you suspect a security breach:
 ✅ **Authentication**
 - Allow-list based access control
 - Failed authentication attempt logging
-- Fail-closed by default (deny if no allowFrom configured)
+- Open by default (configure allowFrom for production use)
 
 ✅ **Resource Protection**
 - Command execution timeouts (60s default)
