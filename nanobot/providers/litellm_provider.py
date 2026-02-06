@@ -31,9 +31,13 @@ class LiteLLMProvider(LLMProvider):
             (api_key and api_key.startswith("sk-or-")) or
             (api_base and "openrouter" in api_base)
         )
-        
+
+        # Detect Zhipu AI by api_base (bigmodel.cn, z.ai, zhipuai domains)
+        self.is_zhipu = api_base and ("bigmodel.cn" in api_base or "z.ai" in api_base or "zhipuai" in api_base)
+
         # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        # Exclude known providers: OpenRouter and Zhipu
+        self.is_vllm = bool(api_base) and not self.is_openrouter and not self.is_zhipu
         
         # Configure LiteLLM based on provider
         if api_key:
@@ -52,7 +56,9 @@ class LiteLLMProvider(LLMProvider):
             elif "gemini" in default_model.lower():
                 os.environ.setdefault("GEMINI_API_KEY", api_key)
             elif "zhipu" in default_model or "glm" in default_model or "zai" in default_model:
+                # LiteLLM expects different env vars: ZHIPUAI_API_KEY for zhipu/ and ZAI_API_KEY for zai/
                 os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
+                os.environ.setdefault("ZAI_API_KEY", api_key)
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
             elif "moonshot" in default_model or "kimi" in default_model:
