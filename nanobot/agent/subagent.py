@@ -101,15 +101,15 @@ class SubagentManager:
         try:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
-            tools.register(ReadFileTool())
-            tools.register(WriteFileTool())
-            tools.register(ListDirTool())
-            self.tools.register(DeleteFileTool())
-            self.tools.register(CopyFileTool())
-            self.tools.register(MoveFileTool())
-            self.tools.register(FileInfoTool())
-            self.tools.register(SearchFilesTool())
-            tools.register(ExecTool(working_dir=str(self.workspace)))
+            allowed_dir = self.workspace if self.exec_config.restrict_to_workspace else None
+            tools.register(ReadFileTool(allowed_dir=allowed_dir))
+            tools.register(WriteFileTool(allowed_dir=allowed_dir))
+            tools.register(ListDirTool(allowed_dir=allowed_dir))
+            tools.register(ExecTool(
+                working_dir=str(self.workspace),
+                timeout=self.exec_config.timeout,
+                restrict_to_workspace=self.exec_config.restrict_to_workspace,
+            ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
             self.tools.register(OpenApplicationTool())
