@@ -119,6 +119,20 @@ class MemoryExtractionConfig(BaseModel):
     candidate_threshold: float = Field(default=0.7, alias="candidateThreshold")
 
 
+class DaemonConfig(BaseModel):
+    """Daemon mode: three-tier autonomous agent execution."""
+
+    enabled: bool = True
+    interval: int = Field(default=300, alias="interval")
+    triage_model: str | None = Field(default=None, alias="triageModel")
+    triage_provider: str | None = Field(default=None, alias="triageProvider")
+    execution_model: str | None = Field(default=None, alias="executionModel")
+    execution_provider: str | None = Field(default=None, alias="executionProvider")
+    strategy_file: str = Field(default="HEARTBEAT.md", alias="strategyFile")
+    max_iterations: int = Field(default=25, alias="maxIterations")
+    cooldown_after_action: int = Field(default=600, alias="cooldownAfterAction")
+
+
 class AgentDefaults(BaseModel):
     """Default agent configuration."""
 
@@ -134,6 +148,7 @@ class AgentDefaults(BaseModel):
     memory_extraction: MemoryExtractionConfig = Field(
         default_factory=MemoryExtractionConfig, alias="memoryExtraction"
     )
+    daemon: DaemonConfig = Field(default_factory=DaemonConfig, alias="daemon")
 
 
 class AgentsConfig(BaseModel):

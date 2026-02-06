@@ -157,6 +157,9 @@ class AgentLoop:
         # Cache for subsystem-specific LLM providers
         self._provider_cache: dict[str, LLMProvider] = {}
 
+        # Serializes daemon execution with user message processing
+        self._processing_lock = asyncio.Lock()
+
         self._running = False
         self._register_default_tools()
 
@@ -188,6 +191,11 @@ class AgentLoop:
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
+
+        # Tmux tool (persistent shell sessions)
+        from nanobot.agent.tools.tmux import TmuxTool
+
+        self.tools.register(TmuxTool())
 
         # Cron tool (for self-scheduling)
         if self.cron_service:
@@ -382,12 +390,19 @@ class AgentLoop:
         """
         Process a single inbound message.
 
+        Acquires processing lock to serialize with daemon execution.
+
         Args:
             msg: The inbound message to process.
 
         Returns:
             The response message, or None if no response needed.
         """
+        async with self._processing_lock:
+            return await self._process_message_unlocked(msg)
+
+    async def _process_message_unlocked(self, msg: InboundMessage) -> OutboundMessage | None:
+        """Inner message processing (called under lock)."""
         # Handle system messages (subagent announces)
         # The chat_id contains the original "channel:chat_id" to route back to
         if msg.channel == "system":

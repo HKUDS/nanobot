@@ -239,16 +239,36 @@ def gateway(
 
     cron.on_job = on_cron_job
 
-    # Create heartbeat service
+    # Create heartbeat / daemon service
+    daemon_cfg = config.agents.defaults.daemon
+
+    triage_provider = None
+    triage_model = None
+    if daemon_cfg.triage_model and daemon_cfg.triage_provider:
+        triage_key, triage_base = resolver.resolve(daemon_cfg.triage_provider)
+        if triage_key:
+            triage_provider = LiteLLMProvider(
+                api_key=triage_key,
+                api_base=triage_base,
+                default_model=daemon_cfg.triage_model,
+            )
+            triage_model = daemon_cfg.triage_model
+
     async def on_heartbeat(prompt: str) -> str:
         """Execute heartbeat through the agent."""
-        return await agent.process_direct(prompt, session_key="heartbeat")
+        return await agent.process_direct(prompt, session_key="daemon")
 
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
         on_heartbeat=on_heartbeat,
-        interval_s=30 * 60,  # 30 minutes
-        enabled=True,
+        interval_s=daemon_cfg.interval,
+        enabled=daemon_cfg.enabled,
+        triage_provider=triage_provider,
+        triage_model=triage_model,
+        execution_model=daemon_cfg.execution_model,
+        strategy_file=daemon_cfg.strategy_file,
+        max_iterations=daemon_cfg.max_iterations,
+        cooldown_after_action=daemon_cfg.cooldown_after_action,
     )
 
     if channels.enabled_channels:
@@ -260,7 +280,13 @@ def gateway(
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
 
-    console.print("[green]✓[/green] Heartbeat: every 30m")
+    if daemon_cfg.triage_model:
+        console.print(
+            f"[green]✓[/green] Daemon: tier 0-1-2 "
+            f"(every {daemon_cfg.interval}s, triage={daemon_cfg.triage_model})"
+        )
+    else:
+        console.print(f"[green]✓[/green] Heartbeat: every {daemon_cfg.interval}s")
 
     async def run():
         try:
