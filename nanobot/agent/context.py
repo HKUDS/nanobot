@@ -75,7 +75,8 @@ Skills with available="false" need dependencies installed first - you can try in
         from datetime import datetime
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         workspace_path = str(self.workspace.expanduser().resolve())
-        runtime_summary = self._get_runtime_environment_summary()
+        system = platform.system()
+        runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
         
         return f"""# nanobot 🐈
 
@@ -89,8 +90,8 @@ You are nanobot, a helpful AI assistant. You have access to tools that allow you
 ## Current Time
 {now}
 
-## Runtime Environment
-{runtime_summary}
+## Runtime
+{runtime}
 
 ## Workspace
 Your workspace is at: {workspace_path}
@@ -104,20 +105,6 @@ For normal conversation, just respond with text - do not call the message tool.
 
 Always be helpful, accurate, and concise. When using tools, explain what you're doing.
 When remembering something, write to {workspace_path}/memory/MEMORY.md"""
-
-    def _get_runtime_environment_summary(self) -> str:
-        """Get runtime environment information."""
-        system = platform.system()
-        system_map = {"Darwin": "MacOS", "Windows": "Windows", "Linux": "Linux"}
-        system_label = system_map.get(system, system)
-        release = platform.release()
-        machine = platform.machine()
-        python_version = platform.python_version()
-        node = platform.node()
-        return (
-            f"Runtime environment: OS {system_label} {release} ({machine}), "
-            f"Python {python_version}, Hostname {node}."
-        )
     
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
