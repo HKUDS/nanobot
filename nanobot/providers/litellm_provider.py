@@ -42,7 +42,7 @@ class LiteLLMProvider(LLMProvider):
                 os.environ["OPENROUTER_API_KEY"] = api_key
             elif self.is_vllm:
                 # vLLM/custom endpoint - uses OpenAI-compatible API
-                os.environ["OPENAI_API_KEY"] = api_key
+                os.environ["HOSTED_VLLM_API_KEY"] = api_key
             elif "deepseek" in default_model:
                 os.environ.setdefault("DEEPSEEK_API_KEY", api_key)
             elif "anthropic" in default_model:
