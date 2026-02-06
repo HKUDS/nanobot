@@ -278,6 +278,10 @@ class MediaCleanupRegistry:
         if cleaned > 0:
             logger.info(f"Cleaned up {cleaned} registered files on exit (errors: {errors})")
 
+        # Clear the registry after cleanup attempt
+        with self._cleanup_lock:
+            self._registered_files.clear()
+
         # Also cleanup old files
         old_files = self.cleanup_old_files()
         if old_files > 0:

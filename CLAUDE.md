@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Philosophy
 
-**Ultra-Lightweight**: nanobot maintains a core agent codebase of ~4,800 lines (excluding channels/, cli/, providers/). This is by design — the project prioritizes simplicity and readability over feature completeness. When adding features, consider whether they align with this philosophy or if they should be optional/external.
+**Ultra-Lightweight**: nanobot maintains a core agent codebase of ~4,900 lines (excluding channels/, cli/, providers/). This is by design — the project prioritizes simplicity and readability over feature completeness. When adding features, consider whether they align with this philosophy or if they should be optional/external.
 
 Run `bash core_agent_lines.sh` to verify the current line count. The script counts lines in: agent/, agent/tools/, bus/, config/, cron/, heartbeat/, session/, utils/, plus root files.
 
-Current line count: **4,833 lines** (as of 2026-02-06)
+Current line count: **4,915 lines** (as of 2026-02-06)
 
 **Provider Agnostic**: The agent supports multiple LLM providers (OpenRouter, Anthropic, OpenAI, Gemini, Groq, DeepSeek, Zhipu, vLLM, Moonshot) through a unified LiteLLM interface. Provider selection is automatic based on model name keywords in `Config._match_provider()`.
 
@@ -109,9 +109,9 @@ nanobot status
 
 ## Architecture Overview
 
-nanobot is an ultra-lightweight AI assistant framework (~4,800 lines). The architecture is built around a message bus that decouples communication channels from the agent processing loop.
+nanobot is an ultra-lightweight AI assistant framework (~4,900 lines). The architecture is built around a message bus that decouples communication channels from the agent processing loop.
 
-Current core agent: **4,833 lines** (run `bash core_agent_lines.sh` to verify)
+Current core agent: **4,915 lines** (run `bash core_agent_lines.sh` to verify)
 
 ### Core Components
 
@@ -494,7 +494,7 @@ The codebase includes multi-modal capabilities that are disabled by default and 
 
 ## Line Count Philosophy
 
-The project maintains an ultra-lightweight codebase. Run `bash core_agent_lines.sh` to verify the current line count. The core agent (excluding channels/, cli/, providers/) is currently **4,833 lines**.
+The project maintains an ultra-lightweight codebase. Run `bash core_agent_lines.sh` to verify the current line count. The core agent (excluding channels/, cli/, providers/) is currently **4,915 lines**.
 
 **When making changes:**
 - Prefer adding optional features over core complexity

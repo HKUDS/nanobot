@@ -4,16 +4,18 @@ import asyncio
 import re
 import uuid
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 from telegram import Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
+from nanobot.agent.video import VideoProcessor
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
+from nanobot.providers.tts import TTSProvider
+from nanobot.utils.media_cleanup import MediaCleanupRegistry
 from nanobot.utils.rate_limit import (
     transcription_rate_limiter,
     tts_rate_limiter,
@@ -104,10 +106,10 @@ class TelegramChannel(BaseChannel):
         config: TelegramConfig,
         bus: MessageBus,
         groq_api_key: str = "",
-        tts_provider: Any = None,
+        tts_provider: TTSProvider | None = None,
         max_video_frames: int = 5,
         workspace: Path | None = None,
-        cleanup_registry: Any = None,
+        cleanup_registry: MediaCleanupRegistry | None = None,
     ):
         """
         Initialize the Telegram channel.
@@ -130,7 +132,8 @@ class TelegramChannel(BaseChannel):
         self._cleanup_registry = cleanup_registry
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
-        self._video_processor = None  # Lazy initialization
+        # Initialize VideoProcessor upfront if ffmpeg is available
+        self._video_processor = VideoProcessor(self._workspace, max_frames=max_video_frames) if VideoProcessor.is_ffmpeg_available() else None
         self._tts_rate_limiter = tts_rate_limiter()
         self._transcription_rate_limiter = transcription_rate_limiter()
         self._video_rate_limiter = video_rate_limiter()
@@ -396,7 +399,6 @@ class TelegramChannel(BaseChannel):
                 ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
 
                 # Save to workspace/media/
-                from pathlib import Path
                 media_dir = Path.home() / ".nanobot" / "media"
                 media_dir.mkdir(parents=True, exist_ok=True)
 
@@ -425,57 +427,50 @@ class TelegramChannel(BaseChannel):
                         content_parts.append(f"[video processing: {error_msg}]")
                         # Skip processing but add file path to media
                         media_paths.append(str(file_path))
-                        # Continue to next media item
-                        continue
-
-                    # Check ffmpeg availability
-                    if not VideoProcessor.is_ffmpeg_available():
-                        msg = (
-                            "⚠️ Video processing requires ffmpeg. "
-                            "Install with: apt install ffmpeg or brew install ffmpeg"
-                        )
-                        logger.warning(msg)
-                        content_parts.append(f"[video processing: {msg}]")
-                        media_paths.append(str(file_path))
                     else:
-                        # Extract frames for vision analysis
-                        if self._video_processor is None:
-                            from nanobot.agent.video import VideoProcessor
-                            self._video_processor = VideoProcessor(
-                                self._workspace, max_frames=self.max_video_frames
+                        # Rate limit allowed - proceed with video processing
+                        # Check ffmpeg availability
+                        if not VideoProcessor.is_ffmpeg_available():
+                            msg = (
+                                "⚠️ Video processing requires ffmpeg. "
+                                "Install with: apt install ffmpeg or brew install ffmpeg"
                             )
-
-                        # Extract key frames
-                        frames = await self._video_processor.extract_key_frames(
-                            file_path, max_frames=self.max_video_frames
-                        )
-                        if frames:
-                            media_paths.extend(frames)
-                            logger.info(f"Extracted {len(frames)} frames from video")
+                            logger.warning(msg)
+                            content_parts.append(f"[video processing: {msg}]")
+                            media_paths.append(str(file_path))
                         else:
-                            content_parts.append("[video: frame extraction failed]")
-
-                        # Extract audio for transcription
-                        audio_path = await self._video_processor.extract_audio(file_path)
-                        if audio_path:
-                            # Check transcription rate limit
-                            is_allowed, error_msg = self._transcription_rate_limiter.is_allowed(sender_id)
-                            if not is_allowed:
-                                logger.warning(f"Transcription rate limit exceeded: {error_msg}")
-                                content_parts.append(f"[video audio: {error_msg}]")
+                            # Extract frames for vision analysis (VideoProcessor initialized in __init__)
+                            # Extract key frames
+                            frames = await self._video_processor.extract_key_frames(
+                                file_path, max_frames=self.max_video_frames
+                            )
+                            if frames:
+                                media_paths.extend(frames)
+                                logger.info(f"Extracted {len(frames)} frames from video")
                             else:
-                                from nanobot.providers.transcription import (
-                                    GroqTranscriptionProvider,
-                                )
-                                transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
-                                transcription = await transcriber.transcribe(audio_path)
-                                if transcription:
-                                    content_parts.append(f"[video audio: {transcription}]")
-                                    logger.info(f"Transcribed video audio: {transcription[:50]}...")
+                                content_parts.append("[video: frame extraction failed]")
 
-                        # Clean up extracted frames after processing
-                        if frames:
-                            self._video_processor.cleanup_frames(file_path)
+                            # Extract audio for transcription
+                            audio_path = await self._video_processor.extract_audio(file_path)
+                            if audio_path:
+                                # Check transcription rate limit
+                                is_allowed, error_msg = self._transcription_rate_limiter.is_allowed(sender_id)
+                                if not is_allowed:
+                                    logger.warning(f"Transcription rate limit exceeded: {error_msg}")
+                                    content_parts.append(f"[video audio: {error_msg}]")
+                                else:
+                                    from nanobot.providers.transcription import (
+                                        GroqTranscriptionProvider,
+                                    )
+                                    transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
+                                    transcription = await transcriber.transcribe(audio_path)
+                                    if transcription:
+                                        content_parts.append(f"[video audio: {transcription}]")
+                                        logger.info(f"Transcribed video audio: {transcription[:50]}...")
+
+                            # Clean up extracted frames after processing
+                            if frames:
+                                self._video_processor.cleanup_frames(file_path)
 
                 # Handle voice/audio transcription
                 elif media_type == "voice" or media_type == "audio":
