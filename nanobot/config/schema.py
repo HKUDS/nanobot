@@ -39,12 +39,30 @@ class DiscordConfig(BaseModel):
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 
 
+class A2AConfig(BaseModel):
+    """A2A Protocol channel configuration.
+    
+    Exposes nanobot as an A2A-compatible agent that other agents can discover
+    and communicate with. See: https://a2a-protocol.org
+    """
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 8080
+    public_host: str | None = None  # Public URL for agent card (e.g., https://myagent.example.com)
+    streaming: bool = True  # Enable streaming responses
+    request_timeout: int = 300  # Timeout for processing requests (seconds)
+    skills: list[dict] = Field(default_factory=list)  # Additional skills to advertise
+    # Authentication (optional)
+    auth_token: str | None = None  # Bearer token for authenticated requests
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    a2a: A2AConfig = Field(default_factory=A2AConfig)
 
 
 class AgentDefaults(BaseModel):

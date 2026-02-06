@@ -77,6 +77,20 @@ class ChannelManager:
                 logger.info("Feishu channel enabled")
             except ImportError as e:
                 logger.warning(f"Feishu channel not available: {e}")
+        
+        # A2A Protocol channel
+        if self.config.channels.a2a.enabled:
+            try:
+                from nanobot.channels.a2a import A2AChannel
+                self.channels["a2a"] = A2AChannel(
+                    self.config.channels.a2a,
+                    self.bus,
+                    agent_name=self.config.agents.defaults.model.split("/")[-1] if "/" in self.config.agents.defaults.model else "nanobot",
+                    agent_description="Ultra-lightweight AI assistant powered by nanobot",
+                )
+                logger.info(f"A2A channel enabled on port {self.config.channels.a2a.port}")
+            except ImportError as e:
+                logger.warning(f"A2A channel not available: {e}. Install with: pip install 'a2a-sdk[http-server]'")
     
     async def start_all(self) -> None:
         """Start WhatsApp channel and the outbound dispatcher."""

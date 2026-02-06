@@ -171,7 +171,7 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime, anywhere.
+Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, or the A2A protocol — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
@@ -179,6 +179,7 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime,
 | **Discord** | Easy (bot token + intents) |
 | **WhatsApp** | Medium (scan QR) |
 | **Feishu** | Medium (app credentials) |
+| **A2A** | Easy (just enable) — Agent-to-Agent protocol for multi-agent systems |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -339,6 +340,49 @@ nanobot gateway
 
 > [!TIP]
 > Feishu uses WebSocket to receive messages — no webhook or public IP needed!
+
+</details>
+
+<details>
+<summary><b>A2A Protocol</b> (Agent-to-Agent)</summary>
+
+Expose your nanobot as an A2A-compatible agent that other agents can discover and call.
+
+```bash
+pip install "nanobot-ai[a2a]"
+```
+
+**Configure**
+
+```json
+{
+  "channels": {
+    "a2a": {
+      "enabled": true,
+      "port": 8080,
+      "publicHost": "https://my-agent.example.com"
+    }
+  }
+}
+```
+
+**Run**
+
+```bash
+nanobot gateway
+```
+
+Your agent will be discoverable at:
+- Agent Card: `http://localhost:8080/.well-known/agent.json`
+- A2A Endpoint: `http://localhost:8080/`
+
+nanobot can also **call other A2A agents** using the built-in `call_a2a_agent` tool:
+
+```
+User: Ask the travel agent at https://travel.example.com to book a flight to Paris
+```
+
+See [A2A Protocol](https://a2a-protocol.org) for more info.
 
 </details>
 
