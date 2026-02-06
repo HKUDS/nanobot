@@ -311,6 +311,7 @@ Config file: `~/.nanobot/config.json`
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
+| `custom` | Custom gateways (Enterprise, etc.) |    |
 
 
 <details>
@@ -329,6 +330,12 @@ Config file: `~/.nanobot/config.json`
     },
     "groq": {
       "apiKey": "gsk_xxx"
+    },
+    "custom": {
+        "mygateway": {
+            "apiKey": "your-key",
+            "apiBase": "https://gateway.company.com/v1"
+        }
     }
   },
   "channels": {
