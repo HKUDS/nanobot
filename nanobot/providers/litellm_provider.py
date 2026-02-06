@@ -31,15 +31,9 @@ class LiteLLMProvider(LLMProvider):
             (api_key and api_key.startswith("sk-or-")) or
             (api_base and "openrouter" in api_base)
         )
-
-        # Detect Moonshot by api_base or model name
-        self.is_moonshot = (
-            (api_base and "moonshot" in api_base) or
-            ("moonshot" in default_model or "kimi" in default_model)
-        )
-
+        
         # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter and not self.is_moonshot
+        self.is_vllm = bool(api_base) and not self.is_openrouter
         
         # Configure LiteLLM based on provider
         if api_key:
@@ -64,10 +58,9 @@ class LiteLLMProvider(LLMProvider):
                 os.environ.setdefault("GROQ_API_KEY", api_key)
             elif "moonshot" in default_model or "kimi" in default_model:
                 os.environ.setdefault("MOONSHOT_API_KEY", api_key)
-                if api_base:
-                    os.environ["MOONSHOT_API_BASE"] = api_base
-
-        if api_base and not self.is_moonshot:
+                os.environ.setdefault("MOONSHOT_API_BASE", api_base or "https://api.moonshot.cn/v1")
+        
+        if api_base:
             litellm.api_base = api_base
         
         # Disable LiteLLM logging noise
@@ -125,17 +118,17 @@ class LiteLLMProvider(LLMProvider):
         if self.is_vllm:
             model = f"hosted_vllm/{model}"
         
+        # kimi-k2.5 only supports temperature=1.0
+        if "kimi-k2.5" in model.lower():
+            temperature = 1.0
+
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-
-        # kimi-k2.5 only supports temperature=1.0
-        if "kimi-k2.5" in model.lower():
-            kwargs["temperature"] = 1.0
-
+        
         # Pass api_base directly for custom endpoints (vLLM, etc.)
         if self.api_base:
             kwargs["api_base"] = self.api_base
