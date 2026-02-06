@@ -77,6 +77,7 @@ class ProvidersConfig(BaseModel):
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    iflow: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
@@ -141,6 +142,7 @@ class Config(BaseSettings):
             "moonshot": self.providers.moonshot,
             "kimi": self.providers.moonshot,
             "vllm": self.providers.vllm,
+            "iflow": self.providers.iflow,
         }
         for keyword, provider in providers.items():
             if keyword in model and provider.api_key:
@@ -159,7 +161,7 @@ class Config(BaseSettings):
             self.providers.anthropic, self.providers.openai,
             self.providers.gemini, self.providers.zhipu,
             self.providers.moonshot, self.providers.vllm,
-            self.providers.groq,
+            self.providers.groq, self.providers.iflow,
         ]:
             if provider.api_key:
                 return provider.api_key
@@ -174,6 +176,8 @@ class Config(BaseSettings):
             return self.providers.zhipu.api_base
         if "vllm" in model:
             return self.providers.vllm.api_base
+        if "iflow" in model or self.providers.iflow.api_base:
+            return self.providers.iflow.api_base
         return None
     
     class Config:
