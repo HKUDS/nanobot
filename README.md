@@ -90,7 +90,7 @@ pip install nanobot-ai
 
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Brave Search](https://brave.com/search/api/) or [Tavily](https://tavily.com) (optional, for web search)
 > You can also change the model to `minimax/minimax-m2` for lower cost.
 
 **1. Initialize**
@@ -116,12 +116,18 @@ nanobot onboard
   "tools": {
     "web": {
       "search": {
+        "enabled": true,
+        "provider": "brave",
         "apiKey": "BSA-xxx"
       }
     }
   }
 }
 ```
+
+> **Web Search Providers:**
+> - `brave` - [Brave Search API](https://brave.com/search/api/) (2000 free requests/month)
+> - `tavily` - [Tavily API](https://tavily.com) (1000 free requests/month, optimized for AI)
 
 
 **3. Chat**
@@ -405,7 +411,10 @@ Config file: `~/.nanobot/config.json`
   "tools": {
     "web": {
       "search": {
-        "apiKey": "BSA..."
+        "enabled": true,
+        "provider": "brave",
+        "apiKey": "BSA-xxx",
+        "maxResults": 5
       }
     }
   }

@@ -90,6 +90,94 @@ class WebSearchTool(Tool):
             return f"Error: {e}"
 
 
+class TavilySearchTool(Tool):
+    """Search the web using Tavily API (optimized for AI applications)."""
+    
+    name = "web_search"
+    description = "Search the web. Returns titles, URLs, snippets and AI-generated summary."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query"},
+            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10},
+            "search_depth": {"type": "string", "enum": ["basic", "advanced"], "description": "Search depth (basic=fast, advanced=thorough)"},
+            "include_answer": {"type": "boolean", "description": "Include AI-generated answer summary"}
+        },
+        "required": ["query"]
+    }
+    
+    def __init__(self, api_key: str | None = None, max_results: int = 5):
+        self.api_key = api_key or os.environ.get("TAVILY_API_KEY", "")
+        self.max_results = max_results
+    
+    async def execute(
+        self,
+        query: str,
+        count: int | None = None,
+        search_depth: str = "basic",
+        include_answer: bool = True,
+        **kwargs: Any
+    ) -> str:
+        if not self.api_key:
+            return "Error: TAVILY_API_KEY not configured"
+        
+        try:
+            n = min(max(count or self.max_results, 1), 10)
+            
+            payload = {
+                "api_key": self.api_key,
+                "query": query,
+                "max_results": n,
+                "search_depth": search_depth,
+                "include_answer": include_answer,
+                "include_raw_content": False,
+            }
+            
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    "https://api.tavily.com/search",
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=30.0
+                )
+                r.raise_for_status()
+            
+            data = r.json()
+            results = data.get("results", [])
+            answer = data.get("answer")
+            
+            lines = [f"Results for: {query}\n"]
+            
+            # Include AI-generated answer if available
+            if answer:
+                lines.append(f"Summary: {answer}\n")
+            
+            if not results:
+                if answer:
+                    return "\n".join(lines)
+                return f"No results for: {query}"
+            
+            for i, item in enumerate(results[:n], 1):
+                title = item.get("title", "")
+                url = item.get("url", "")
+                content = item.get("content", "")
+                score = item.get("score", 0)
+                
+                lines.append(f"{i}. {title}")
+                lines.append(f"   URL: {url}")
+                if content:
+                    # Truncate long content
+                    snippet = content[:300] + "..." if len(content) > 300 else content
+                    lines.append(f"   {snippet}")
+                lines.append(f"   (relevance: {score:.2f})")
+            
+            return "\n".join(lines)
+        except httpx.HTTPStatusError as e:
+            return f"Error: HTTP {e.response.status_code} - {e.response.text[:200]}"
+        except Exception as e:
+            return f"Error: {e}"
+
+
 class WebFetchTool(Tool):
     """Fetch and extract content from a URL using Readability."""
     

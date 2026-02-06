@@ -88,7 +88,9 @@ class GatewayConfig(BaseModel):
 
 class WebSearchConfig(BaseModel):
     """Web search tool configuration."""
-    api_key: str = ""  # Brave Search API key
+    enabled: bool = False  # Disabled by default until API key is configured
+    provider: str = "brave"  # "brave" or "tavily"
+    api_key: str = ""  # API key for the selected provider
     max_results: int = 5
 
 
