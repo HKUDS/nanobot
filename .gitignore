@@ -14,3 +14,4 @@ docs/
 *.pywz
 *.pyzz
 poetry.lock
+.pytest_cache/
