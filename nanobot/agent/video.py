@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +58,7 @@ class VideoProcessor:
         cmd = [
             "ffmpeg",
             "-i", str(video_path),
-            "-vf", f"fps=1/5,scale=640:-1",  # 1 frame every 5 sec, max width 640px
+            "-vf", "fps=1/5,scale=640:-1",  # 1 frame every 5 sec, max width 640px
             "-vframes", str(max_frames),
             "-y",  # Overwrite output files
             f"{output_prefix}_%d.jpg"
@@ -192,10 +193,17 @@ class VideoProcessor:
         # Get video stream info
         for stream in info.get("streams", []):
             if stream.get("codec_type") == "video":
+                # Parse frame rate safely (format: "numerator/denominator")
+                frame_rate_str = stream.get("r_frame_rate", "0/1")
+                try:
+                    fps = float(Fraction(frame_rate_str))
+                except (ValueError, ZeroDivisionError):
+                    fps = 0.0
+
                 result.update({
                     "width": stream.get("width"),
                     "height": stream.get("height"),
-                    "fps": eval(stream.get("r_frame_rate", "0/1")),
+                    "fps": fps,
                     "codec": stream.get("codec_name"),
                 })
                 break  # Use first video stream

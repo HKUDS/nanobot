@@ -1,6 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
+
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
@@ -133,12 +134,12 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
-    
+
     @property
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
-    
+
     def _match_provider(self, model: str | None = None) -> ProviderConfig | None:
         """Match a provider based on model name."""
         model = (model or self.agents.defaults.model).lower()
@@ -181,7 +182,7 @@ class Config(BaseSettings):
             if provider.api_key:
                 return provider.api_key
         return None
-    
+
     def get_api_base(self, model: str | None = None) -> str | None:
         """Get API base URL based on model name."""
         model = (model or self.agents.defaults.model).lower()
@@ -192,7 +193,7 @@ class Config(BaseSettings):
         if "vllm" in model:
             return self.providers.vllm.api_base
         return None
-    
+
     class Config:
         env_prefix = "NANOBOT_"
         env_nested_delimiter = "__"
