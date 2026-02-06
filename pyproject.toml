@@ -113,6 +113,12 @@ dev = [
     "python-socketio>=5.16.0,<6.0.0",
     "msgpack>=1.1.0,<2.0.0",
 ]
+a2a = [
+    "a2a-sdk[http-server]>=0.2.0,<1.0.0",
+]
+all = [
+    "a2a-sdk[http-server]>=0.2.0,<1.0.0",
+]
 
 [project.scripts]
 nanobot = "nanobot.cli.entry:main"
