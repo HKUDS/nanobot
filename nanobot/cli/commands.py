@@ -175,20 +175,19 @@ def gateway(
     
     config = load_config()
     
-    # Create components
-    bus = MessageBus()
-    
     # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock)
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
     model = config.agents.defaults.model
+    api_key = config.get_api_key(model)
+    api_base = config.get_api_base(model)
     is_bedrock = model.startswith("bedrock/")
 
     if not api_key and not is_bedrock:
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers.openrouter.apiKey")
         raise typer.Exit(1)
-    
+
+    # Create components
+    bus = MessageBus()
     provider = LiteLLMProvider(
         api_key=api_key,
         api_base=api_base,
@@ -295,9 +294,9 @@ def agent(
     
     config = load_config()
     
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
     model = config.agents.defaults.model
+    api_key = config.get_api_key(model)
+    api_base = config.get_api_base(model)
     is_bedrock = model.startswith("bedrock/")
 
     if not api_key and not is_bedrock:
@@ -656,6 +655,7 @@ def status():
         has_openai = bool(config.providers.openai.api_key)
         has_gemini = bool(config.providers.gemini.api_key)
         has_vllm = bool(config.providers.vllm.api_base)
+        has_custom = bool(config.providers.custom.api_key)
         
         console.print(f"OpenRouter API: {'[green]✓[/green]' if has_openrouter else '[dim]not set[/dim]'}")
         console.print(f"Anthropic API: {'[green]✓[/green]' if has_anthropic else '[dim]not set[/dim]'}")
@@ -663,6 +663,7 @@ def status():
         console.print(f"Gemini API: {'[green]✓[/green]' if has_gemini else '[dim]not set[/dim]'}")
         vllm_status = f"[green]✓ {config.providers.vllm.api_base}[/green]" if has_vllm else "[dim]not set[/dim]"
         console.print(f"vLLM/Local: {vllm_status}")
+        console.print(f"Custom API: {'[green]✓[/green]' if has_custom else '[dim]not set[/dim]'}")
 
 
 if __name__ == "__main__":
