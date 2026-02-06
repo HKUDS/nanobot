@@ -187,11 +187,11 @@ def gateway(
     provider_name = None
     provider_type = None
     if ":" in model:
-        model = model.split(":")[1]  # Strip provider prefix
         provider_name = model.split(":")[0]
-        api_key = config.providers.providers.get(provider_name, ProviderConfig()).api_key or api_key
-        api_base = config.providers.providers.get(provider_name, ProviderConfig()).api_base or api_base
-        provider_type = config.providers.providers.get(provider_name, ProviderConfig()).type or None
+        model = model.split(":")[1]  # Strip provider prefix
+        api_key = config.llm_providers[provider_name].api_key or api_key
+        api_base = config.llm_providers[provider_name].api_base or api_base
+        provider_type = config.llm_providers[provider_name].type or None
 
     is_bedrock = model.startswith("bedrock/")
 
@@ -201,7 +201,7 @@ def gateway(
         raise typer.Exit(1)
     
     provider = None
-    if provider_type == "openai_compatible":
+    if provider_type == "openai-compatible":
         provider = OpenAICompatibleLLMProvider(
             api_key=api_key,
             api_base=api_base,
@@ -219,7 +219,6 @@ def gateway(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
