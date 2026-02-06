@@ -38,7 +38,6 @@ def main(
 # Onboard / Setup
 # ============================================================================
 
-
 @app.command()
 def onboard():
     """Initialize nanobot configuration and workspace."""
