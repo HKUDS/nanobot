@@ -217,6 +217,7 @@ def gateway(
         compaction_config=config.agents.defaults.compaction,
         memory_config=config.agents.defaults.memory,
         provider_resolver=resolver,
+        memory_extraction=config.agents.defaults.memory_extraction,
     )
 
     # Set the cron callback using agent's process_direct
@@ -323,6 +324,7 @@ def agent(
         compaction_config=config.agents.defaults.compaction,
         memory_config=config.agents.defaults.memory,
         provider_resolver=resolver,
+        memory_extraction=config.agents.defaults.memory_extraction,
     )
 
     if message:
