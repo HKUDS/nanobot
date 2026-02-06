@@ -55,10 +55,13 @@ class LiteLLMProvider(LLMProvider):
                 os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
             elif "groq" in default_model:
                 os.environ.setdefault("GROQ_API_KEY", api_key)
-            elif "moonshot" in default_model or "kimi" in default_model:
+            elif "moonshot" in default_model.lower() or "kimi" in default_model.lower():
                 os.environ.setdefault("MOONSHOT_API_KEY", api_key)
                 os.environ.setdefault("MOONSHOT_API_BASE", api_base or "https://api.moonshot.cn/v1")
-        
+            elif "minimax" in default_model.lower():
+                os.environ.setdefault("MINIMAX_API_KEY", api_key)
+                os.environ.setdefault("MINIMAX_API_BASE", api_base or "https://api.minimaxi.com/v1")
+
         if api_base:
             litellm.api_base = api_base
         
@@ -107,15 +110,19 @@ class LiteLLMProvider(LLMProvider):
         ):
             model = f"moonshot/{model}"
 
+        # For MiniMax, ensure minimax/ prefix
+        if "minimax" in model.lower() and not model.startswith("minimax/"):
+            model = f"minimax/{model}"
+
         # For Gemini, ensure gemini/ prefix if not already present
         if "gemini" in model.lower() and not model.startswith("gemini/"):
             model = f"gemini/{model}"
 
         # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
-        # Convert openai/ prefix to hosted_vllm/ if user specified it
-        if self.is_vllm:
+        # Don't add vLLM prefix for models that already have a provider prefix
+        if self.is_vllm and not any(model.startswith(p) for p in ("zhipu/", "zai/", "moonshot/", "minimax/", "gemini/", "openrouter/")):
             model = f"hosted_vllm/{model}"
-        
+
         # kimi-k2.5 only supports temperature=1.0
         if "kimi-k2.5" in model.lower():
             temperature = 1.0
@@ -126,11 +133,14 @@ class LiteLLMProvider(LLMProvider):
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        
-        # Pass api_base directly for custom endpoints (vLLM, etc.)
+
+        # Pass api_base and api_key for custom endpoints
         if self.api_base:
             kwargs["api_base"] = self.api_base
-        
+
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
