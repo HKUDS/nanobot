@@ -19,6 +19,7 @@ from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.commands import CommandHandler
 from nanobot.session.manager import SessionManager
 
 
@@ -45,8 +46,9 @@ class AgentLoop:
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
+        config: "Config | None" = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, Config
         from nanobot.cron.service import CronService
         self.bus = bus
         self.provider = provider
@@ -57,10 +59,15 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.config = config
+        
+        # Session overrides: maps original session_key to override key
+        self._session_overrides: dict[str, str] = {}
         
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
         self.tools = ToolRegistry()
+        self.commands = CommandHandler()
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -105,6 +112,24 @@ class AgentLoop:
         # Cron tool (for scheduling)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+    
+    def _get_config_dict(self) -> dict:
+        """Get config as dict for command context."""
+        if not self.config:
+            return {}
+        
+        # Convert config to dict with provider info
+        providers = {}
+        if hasattr(self.config, 'providers'):
+            for provider_name in ['opencode', 'openrouter', 'anthropic', 'openai', 'gemini']:
+                provider = getattr(self.config.providers, provider_name, None)
+                if provider:
+                    providers[provider_name] = {
+                        "apiKey": getattr(provider, 'api_key', None),
+                        "apiBase": getattr(provider, 'api_base', None),
+                    }
+        
+        return {"providers": providers}
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -156,9 +181,36 @@ class AgentLoop:
             return await self._process_system_message(msg)
         
         logger.info(f"Processing message from {msg.channel}:{msg.sender_id}")
+        logger.debug(f"DEBUG MSG CONTENT: '{msg.content}'")
         
-        # Get or create session
-        session = self.sessions.get_or_create(msg.session_key)
+        # Get or create session (check for overrides first)
+        original_session_key = msg.session_key
+        session_key = self._session_overrides.get(original_session_key, original_session_key)
+        session = self.sessions.get_or_create(session_key)
+        
+        # Handle slash commands (System Commands)
+        # These are strictly setters/getters and should NOT go to the LLM.
+        if self.commands.is_command(msg.content):
+            # Build context for command execution
+            cmd_context = {
+                "model": self.model,
+                "channel": msg.channel,
+                "chat_id": msg.chat_id,
+                "workspace": str(self.workspace),
+                "session": session,
+                "sessions": self.sessions,
+                "tools": self.tools,
+                "context_builder": self.context,
+                "set_model": lambda m: setattr(self, "model", m),
+                "set_session": lambda key: self._session_overrides.update({original_session_key: key}),
+                "config": self._get_config_dict(),
+            }
+            result = self.commands.execute(msg.content, cmd_context)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=result.content
+            )
         
         # Update tool contexts
         message_tool = self.tools.get("message")
