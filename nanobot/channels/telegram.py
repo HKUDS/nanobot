@@ -6,6 +6,7 @@ import re
 from loguru import logger
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -100,10 +101,17 @@ class TelegramChannel(BaseChannel):
         
         self._running = True
         
+        # Configure request with proxy if enabled
+        request = HTTPXRequest()
+        if self.config.proxy:
+            logger.info(f"Using proxy for Telegram: {self.config.proxy}")
+            request = HTTPXRequest(proxy=self.config.proxy)
+
         # Build the application
         self._app = (
             Application.builder()
             .token(self.config.token)
+            .request(request)
             .build()
         )
         
