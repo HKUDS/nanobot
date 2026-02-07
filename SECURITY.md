@@ -49,6 +49,13 @@ chmod 600 ~/.nanobot/config.json
     "whatsapp": {
       "enabled": true,
       "allowFrom": ["+1234567890"]
+    },
+    "wechat": {
+      "enabled": true,
+      "appId": "wx1234567890abcdef",
+      "appSecret": "your_app_secret",
+      "token": "your_token",
+      "allowFrom": ["o6_bmjrPTlm6_2sgVt7hMZOPfL2M"]
     }
   }
 }
@@ -58,6 +65,7 @@ chmod 600 ~/.nanobot/config.json
 - Empty `allowFrom` list will **ALLOW ALL** users (open by default for personal use)
 - Get your Telegram user ID from `@userinfobot`
 - Use full phone numbers with country code for WhatsApp
+- Use WeChat OpenIDs for WeChat Official Account access control
 - Review access logs regularly for unauthorized access attempts
 
 ### 3. Shell Command Execution
@@ -98,6 +106,16 @@ File operations have path traversal protection, but:
 - The bridge runs on `localhost:3001` by default
 - If exposing to network, use proper authentication and TLS
 - Keep authentication data in `~/.nanobot/whatsapp-auth` secure (mode 0700)
+
+**WeChat Webhook Server:**
+- Requires public HTTPS endpoint (WeChat doesn't support HTTP or localhost)
+- Use nginx reverse proxy or cloudflare tunnel for HTTPS
+- Webhook server runs on `0.0.0.0:18790` by default
+- **CRITICAL**: Signature verification is MANDATORY - validates all incoming webhooks
+- Store WeChat `token`, `appId`, and `appSecret` securely in config with 0600 permissions
+- WeChat has a 5-second response timeout - long operations run asynchronously
+- Monitor webhook logs for suspicious activity or failed signature verifications
+- Consider firewall rules to restrict webhook access to WeChat IP ranges
 
 ### 6. Dependency Security
 

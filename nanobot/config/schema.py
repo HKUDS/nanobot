@@ -30,6 +30,17 @@ class FeishuConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
 
 
+class WeChatConfig(BaseModel):
+    """WeChat Official Account configuration."""
+    enabled: bool = False
+    app_id: str = ""  # 开发者ID(AppID)
+    app_secret: str = ""  # 开发者密码(AppSecret)
+    token: str = ""  # 令牌(Token) - for signature verification
+    encoding_aes_key: str = ""  # 消息加解密密钥(EncodingAESKey) - optional
+    webhook_path: str = "/webhook/wechat"  # Webhook URL path
+    allow_from: list[str] = Field(default_factory=list)  # Allowed OpenIDs
+
+
 class DiscordConfig(BaseModel):
     """Discord channel configuration."""
     enabled: bool = False
@@ -45,6 +56,7 @@ class ChannelsConfig(BaseModel):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    wechat: WeChatConfig = Field(default_factory=WeChatConfig)
 
 
 class AgentDefaults(BaseModel):
@@ -87,6 +99,7 @@ class GatewayConfig(BaseModel):
     """Gateway/server configuration."""
     host: str = "0.0.0.0"
     port: int = 18790
+    webhook_enabled: bool = False  # Enable webhook server for channels like WeChat
 
 
 class WebSearchConfig(BaseModel):
