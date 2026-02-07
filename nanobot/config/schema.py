@@ -120,7 +120,15 @@ class Config(BaseSettings):
     @property
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
-        return Path(self.agents.defaults.workspace).expanduser()
+        from nanobot.utils.helpers import get_root_path
+        configured = Path(self.agents.defaults.workspace).expanduser()
+        root = get_root_path()
+
+        # If workspace is the default and a custom root is set, use the custom root
+        if str(root) != str(Path.home()) and str(configured) == str(Path.home() / ".nanobot" / "workspace"):
+            return root / ".nanobot" / "workspace"
+
+        return configured
     
     def _match_provider(self, model: str | None = None) -> ProviderConfig | None:
         """Match a provider based on model name."""

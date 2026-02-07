@@ -175,7 +175,8 @@ class FeishuChannel(BaseChannel):
             ext = self._get_extension(media_type)
 
             # Create media directory
-            media_dir = Path.home() / ".nanobot" / "media"
+            from nanobot.utils.helpers import get_data_path
+            media_dir = get_data_path() / "media"
             media_dir.mkdir(parents=True, exist_ok=True)
 
             # Generate file path
