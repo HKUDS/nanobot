@@ -7,6 +7,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from nanobot.agent.context import ContextBuilder
 from nanobot.agent.conversation_summarizer import ConversationSummarizer
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool

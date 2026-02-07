@@ -1,5 +1,6 @@
 """CLI commands for nanobot."""
 
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -23,7 +24,7 @@ def setup_logging():
     _logger.remove()  # 移除默认的 handler
     _logger.add(
         sys.stderr,
-        format="<level>{time:YYYY-MM-DD HH:mm:ss} | {name}:{function}:{line} | {message}",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} | {message}",
         level=level,
         colorize=True,
         backtrace=True,
