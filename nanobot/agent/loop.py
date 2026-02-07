@@ -18,6 +18,7 @@ from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.tools.mcp import MCPManager
 from nanobot.session.manager import SessionManager
 
 
@@ -42,6 +43,7 @@ class AgentLoop:
         max_iterations: int = 20,
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
+        mcp_config: dict[str, "MCPToolConfig"] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -51,6 +53,7 @@ class AgentLoop:
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
+        self.mcp_config = mcp_config or {}
         
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
@@ -63,6 +66,7 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
         )
+        self.mcp_manager = MCPManager()
         
         self._running = False
         self._register_default_tools()
@@ -96,37 +100,56 @@ class AgentLoop:
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
+        # Load MCP tools
+        if self.mcp_config:
+            logger.info(f"Loading MCP tools: {list(self.mcp_config.keys())}")
+            mcp_tools = await self.mcp_manager.load_tools(self.mcp_config)
+            for tool in mcp_tools:
+                logger.info(f"Registering MCP tool: {tool.name}")
+                self.tools.register(tool)
+        
         self._running = True
         logger.info("Agent loop started")
         
-        while self._running:
-            try:
-                # Wait for next message
-                msg = await asyncio.wait_for(
-                    self.bus.consume_inbound(),
-                    timeout=1.0
-                )
-                
-                # Process it
+        try:
+            while self._running:
                 try:
-                    response = await self._process_message(msg)
-                    if response:
-                        await self.bus.publish_outbound(response)
-                except Exception as e:
-                    logger.error(f"Error processing message: {e}")
-                    # Send error response
-                    await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content=f"Sorry, I encountered an error: {str(e)}"
-                    ))
-            except asyncio.TimeoutError:
-                continue
+                    # Wait for next message
+                    msg = await asyncio.wait_for(
+                        self.bus.consume_inbound(),
+                        timeout=1.0
+                    )
+                    
+                    # Process it
+                    try:
+                        response = await self._process_message(msg)
+                        if response:
+                            await self.bus.publish_outbound(response)
+                    except Exception as e:
+                        logger.error(f"Error processing message: {e}")
+                        # Send error response
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content=f"Sorry, I encountered an error: {str(e)}"
+                        ))
+                except asyncio.TimeoutError:
+                    continue
+        finally:
+            await self.cleanup()
     
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
         logger.info("Agent loop stopping")
+        # Cleanup MCP
+        # We can't await here because stop might be sync, but cleanup needs async
+        # Usually stop is called from signal handler or similar
+        # For now, rely on loop exit or explicit cleanup if possible
+        
+    async def cleanup(self):
+        """Cleanup resources."""
+        await self.mcp_manager.cleanup()
     
     async def _process_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """

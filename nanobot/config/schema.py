@@ -95,6 +95,15 @@ class ToolsConfig(BaseModel):
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
 
 
+class MCPToolConfig(BaseModel):
+    """MCP tool configuration."""
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+    url: str | None = None
+    transport: str = "stdio"  # "stdio" or "http" or "sse"
+    env: dict[str, str] = Field(default_factory=dict)
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
@@ -102,6 +111,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    mcp_tool: dict[str, MCPToolConfig] = Field(default_factory=dict)
     
     @property
     def workspace_path(self) -> Path:

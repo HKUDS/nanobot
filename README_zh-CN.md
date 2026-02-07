@@ -294,6 +294,36 @@ nanobot gateway
 
 </details>
 
+## 🔌 MCP 工具
+
+nanobot 支持 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)，允许你通过任何 MCP 服务器轻松扩展其能力。
+
+**配置** (`~/.nanobot/config.json`)
+
+在你的配置中添加 `mcp_tool` 部分：
+
+```json
+{
+  "mcp_tool": {
+    "math": {
+      "command": "python",
+      "args": ["/path/to/math_server.py"],
+      "transport": "stdio"
+    },
+    "weather": {
+      "url": "http://localhost:8000/mcp",
+      "transport": "http"
+    }
+  }
+}
+```
+
+支持的传输方式：
+- `stdio`: 运行本地命令 (推荐用于本地工具)
+- `http` / `sse`: 通过 HTTP/SSE 连接到远程 MCP 服务器
+
+这些服务器暴露的工具将被自动加载并可供 Agent 使用。
+
 ## ⚙️ 配置
 
 配置文件：`~/.nanobot/config.json`

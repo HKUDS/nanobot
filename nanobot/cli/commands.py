@@ -212,6 +212,7 @@ def gateway(
         max_iterations=config.agents.defaults.max_tool_iterations,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
+        mcp_config=config.mcp_tool,
     )
     
     # Create cron service
@@ -326,6 +327,7 @@ def agent(
         workspace=config.workspace_path,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
+        mcp_config=config.mcp_tool,
     )
     
     if message:

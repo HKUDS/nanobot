@@ -2,6 +2,7 @@
 
 import os
 import logging
+import json
 from typing import Any, Dict
 
 from langchain_core.messages import (
@@ -175,9 +176,30 @@ class LangChainProvider(LLMProvider):
                 tool_calls = msg.get("tool_calls")
                 if tool_calls:
                     # Convert OpenAI tool calls format back to LangChain format if needed
-                    # LangChain AIMessage accepts tool_calls param
-                    # tool_calls in msg are usually dicts from previous LLM response
-                    lc_messages.append(AIMessage(content=content or "", tool_calls=tool_calls))
+                    lc_tool_calls = []
+                    for tc in tool_calls:
+                        if "function" in tc:
+                            # OpenAI format conversion
+                            # OpenAI format: {"type": "function", "function": {"name": "...", "arguments": "..."}}
+                            # LangChain format: {"name": "...", "args": {...}, "id": "..."}
+                            try:
+                                args = tc["function"]["arguments"]
+                                if isinstance(args, str):
+                                    args = json.loads(args)
+                            except (json.JSONDecodeError, KeyError, TypeError):
+                                args = {}
+                                
+                            lc_tool_calls.append({
+                                "id": tc.get("id"),
+                                "name": tc["function"].get("name"),
+                                "args": args,
+                                "type": "tool_call"
+                            })
+                        else:
+                            # Already LangChain format or unknown
+                            lc_tool_calls.append(tc)
+                            
+                    lc_messages.append(AIMessage(content=content or "", tool_calls=lc_tool_calls))
                 else:
                     lc_messages.append(AIMessage(content=content or ""))
             elif role == "tool":
