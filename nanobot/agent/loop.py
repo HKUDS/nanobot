@@ -82,6 +82,11 @@ class AgentLoop:
         self.tools.register(WriteFileTool(allowed_dir=allowed_dir))
         self.tools.register(EditFileTool(allowed_dir=allowed_dir))
         self.tools.register(ListDirTool(allowed_dir=allowed_dir))
+        self.tools.register(MoveFileTool(allowed_dir=allowed_dir))
+        self.tools.register(DeleteFileTool(allowed_dir=allowed_dir))
+        self.tools.register(CopyFileTool(allowed_dir=allowed_dir))
+        self.tools.register(FileInfoTool(allowed_dir=allowed_dir))
+        self.tools.register(SearchFilesTool(allowed_dir=allowed_dir))
         
         # Shell tool
         self.tools.register(ExecTool(

@@ -215,6 +215,9 @@ class ListDirTool(Tool):
 class DeleteFileTool(Tool):
     """Tool to delete a file."""
 
+    def __init__(self, allowed_dir: Path | None = None):
+        self._allowed_dir = allowed_dir
+
     @property
     def name(self) -> str:
         return "delete_file"
@@ -254,6 +257,9 @@ class DeleteFileTool(Tool):
 
 class MoveFileTool(Tool):
     """Tool to move or rename a file."""
+
+    def __init__(self, allowed_dir: Path | None = None):
+        self._allowed_dir = allowed_dir
 
     @property
     def name(self) -> str:
@@ -303,6 +309,9 @@ class MoveFileTool(Tool):
 class CopyFileTool(Tool):
     """Tool to copy a file."""
 
+    def __init__(self, allowed_dir: Path | None = None):
+        self._allowed_dir = allowed_dir
+
     @property
     def name(self) -> str:
         return "copy_file"
@@ -351,6 +360,9 @@ class CopyFileTool(Tool):
 class FileInfoTool(Tool):
     """Tool to get file metadata."""
 
+    def __init__(self, allowed_dir: Path | None = None):
+        self._allowed_dir = allowed_dir
+
     @property
     def name(self) -> str:
         return "file_info"
@@ -394,6 +406,9 @@ class FileInfoTool(Tool):
 
 class SearchFilesTool(Tool):
     """Tool to search files by name pattern."""
+
+    def __init__(self, allowed_dir: Path | None = None):
+        self._allowed_dir = allowed_dir
 
     @property
     def name(self) -> str:
