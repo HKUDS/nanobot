@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -155,6 +157,17 @@ class AgentLoop:
         if msg.channel == "system":
             return await self._process_system_message(msg)
         
+        # Command: /restart
+        if msg.content.strip() == "/restart":
+            logger.info(f"Restart command received from {msg.sender_id}")
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Restarting... wait a few seconds"
+            ))
+            await asyncio.sleep(2)  # Wait for message delivery
+            os.execvp(sys.argv[0], sys.argv)
+
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info(f"Processing message from {msg.channel}:{msg.sender_id}: {preview}")
         
