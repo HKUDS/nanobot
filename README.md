@@ -172,13 +172,14 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime, anywhere.
+Talk to your nanobot through Telegram, Discord, WhatsApp, WeChat, or Feishu — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
 | **Telegram** | Easy (just a token) |
 | **Discord** | Easy (bot token + intents) |
 | **WhatsApp** | Medium (scan QR) |
+| **WeChat Official Account** | Medium (requires public server + HTTPS) |
 | **Feishu** | Medium (app credentials) |
 
 <details>
@@ -291,6 +292,105 @@ nanobot channels login
 # Terminal 2
 nanobot gateway
 ```
+
+</details>
+
+<details>
+<summary><b>WeChat Official Account (微信公众号)</b></summary>
+
+Requires a **public server** with **HTTPS** (WeChat doesn't support localhost).
+
+**1. Get credentials**
+
+- Log in to [WeChat Official Account Platform](https://mp.weixin.qq.com/)
+- Go to: **设置与开发** → **基本配置**
+- Get your **AppID** (开发者ID) and **AppSecret** (开发者密码)
+- Generate a **Token** (令牌) - any random string
+
+**2. Quick setup**
+
+```bash
+nanobot onboard
+# Follow the WeChat setup wizard when prompted
+```
+
+Or manually configure:
+
+```json
+{
+  "channels": {
+    "wechat": {
+      "enabled": true,
+      "appId": "wx1234567890abcdef",
+      "appSecret": "your_app_secret_here",
+      "token": "your_verification_token",
+      "encodingAesKey": "",
+      "webhookPath": "/webhook/wechat",
+      "allowFrom": []
+    }
+  },
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 18790,
+    "webhookEnabled": true
+  }
+}
+```
+
+> `allowFrom`: Leave empty to allow all users, or add OpenIDs like `["o6_bmjrPTlm6_2sgVt7hMZOPfL2M"]` to restrict access.
+
+**3. Deploy with HTTPS**
+
+WeChat requires HTTPS. Use one of these options:
+
+**Option A: nginx reverse proxy** (recommended for production)
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name your-domain.com;
+
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location /webhook/wechat {
+        proxy_pass http://localhost:18790;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+**Option B: ngrok** (for development/testing)
+
+```bash
+# Terminal 1: Start ngrok
+ngrok http 18790
+
+# Terminal 2: Start nanobot
+nanobot gateway
+```
+
+Use the ngrok HTTPS URL (e.g., `https://abc123.ngrok.io/webhook/wechat`) for WeChat webhook configuration.
+
+**4. Configure WeChat webhook**
+
+- Go back to WeChat admin panel: **设置与开发** → **基本配置**
+- Set webhook URL: `https://your-domain.com/webhook/wechat`
+- Set Token: (same as in your config)
+- Click **Submit** to verify
+
+**5. Run**
+
+```bash
+nanobot gateway
+```
+
+**Features supported:**
+- ✅ Text messages
+- ✅ Voice messages (auto-transcribed with Groq)
+- ✅ Image sharing
+- ✅ File sharing
 
 </details>
 

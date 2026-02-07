@@ -64,8 +64,38 @@ def onboard():
     
     # Create default bootstrap files
     _create_workspace_templates(workspace)
-    
-    console.print(f"\n{__logo__} nanobot is ready!")
+
+    # Optional: WeChat Official Account setup
+    console.print("\n[bold cyan]Optional: Setup WeChat Official Account?[/bold cyan]")
+    if typer.confirm("Configure WeChat channel?", default=False):
+        console.print("\n[bold]WeChat Official Account Setup:[/bold]")
+        console.print("1. Log in to https://mp.weixin.qq.com/")
+        console.print("2. Go to: 设置与开发 -> 基本配置")
+        console.print("3. Get your credentials:\n")
+
+        app_id = typer.prompt("   AppID (开发者ID)")
+        app_secret = typer.prompt("   AppSecret (开发者密码)", hide_input=True)
+        token = typer.prompt("   Token (令牌, any random string)")
+
+        console.print("\n4. Configure server on WeChat admin panel:")
+        console.print(f"   URL: http://YOUR_SERVER:18790/webhook/wechat")
+        console.print(f"   Token: {token}")
+        console.print("   EncodingAESKey: (optional, generate on WeChat page)")
+        console.print("\n5. Click 'Submit' on WeChat to verify\n")
+
+        # Update config
+        config.channels.wechat.enabled = True
+        config.channels.wechat.app_id = app_id
+        config.channels.wechat.app_secret = app_secret
+        config.channels.wechat.token = token
+        config.gateway.webhook_enabled = True
+
+        save_config(config)
+        console.print("[green]✓[/green] WeChat channel configured!\n")
+        console.print("[yellow]Note:[/yellow] WeChat requires HTTPS for production.")
+        console.print("Use nginx reverse proxy or cloudflare tunnel for HTTPS.\n")
+
+    console.print(f"{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
     console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
     console.print("     Get one at: https://openrouter.ai/keys")
@@ -390,6 +420,15 @@ def channels_status():
         "Telegram",
         "✓" if tg.enabled else "✗",
         tg_config
+    )
+
+    # WeChat
+    wc = config.channels.wechat
+    wc_config = f"AppID: {wc.app_id[:10]}..." if wc.app_id else "[dim]not configured[/dim]"
+    table.add_row(
+        "WeChat",
+        "✓" if wc.enabled else "✗",
+        wc_config
     )
 
     console.print(table)
