@@ -9,7 +9,6 @@ from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.conversation_summarizer import ConversationSummarizer
-from nanobot.agent.memory_updater import MemoryUpdater
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
@@ -72,7 +71,6 @@ class AgentLoop:
 
         summary_model = os.environ.get("NANOBOT_SUMMARY_MODEL") or self.model
         self.summarizer = ConversationSummarizer(workspace, provider, summary_model)
-        self.memory_updater = MemoryUpdater(workspace)
 
         self._running = False
         self._register_default_tools()
@@ -341,13 +339,13 @@ class AgentLoop:
         )
 
     async def _trigger_summary(self, session_key: str) -> None:
-        """触发对话总结并更新记忆。"""
+        """触发对话总结（只生成每日概要，不更新长期记忆）。"""
         try:
             logger.info(f"Triggering auto-summary for session: {session_key}")
 
+            # 只生成每日概要，不更新长期记忆（保留原有的手动记忆机制）
             summary = await self.summarizer.summarize_today()
             if summary:
-                self.memory_updater.update_long_term(summary)
                 logger.info(f"Auto-summary completed for {session_key}")
             else:
                 logger.warning(f"Auto-summary returned None for {session_key}")
