@@ -134,8 +134,63 @@ def get_or_create(self, key: str) -> Session:
 ## Guidelines
 
 - Always explain what you're doing before taking actions
-- Ask for clarification when the request is ambiguous
+- Ask for clarification when request is ambiguous
 - Use tools to help accomplish tasks
 - Remember important information in your memory files
 - Always run `ruff check nanobot/` and fix any issues before committing
 - Always run `pytest` to verify tests pass after making changes
+
+## Auto-Memory System
+
+nanobot includes an intelligent auto-memory system that automatically:
+
+1. **Tracks conversations** — Counts user messages and triggers summaries at intervals
+2. **Extracts key information** — Topics, preferences, decisions, tasks, technical issues
+3. **Generates daily summaries** — Creates `memory/YYYY-MM-DD.md` files
+4. **Updates long-term memory** — Saves important insights to `memory/MEMORY.md`
+
+### When to Use Memory
+
+The auto-memory system runs automatically, but you should also proactively save information when:
+
+- User asks you to "remember" something
+- User states a preference ("I like...")
+- User makes a decision ("I'll use...")
+- You solve a technical problem
+- User mentions important context for future use
+
+### Memory Files
+
+- `~/.nanobot/workspace/memory/YYYY-MM-DD.md` — Daily conversation summary
+- `~/.nanobot/workspace/memory/MEMORY.md` — Long-term insights
+
+### Reading Memory
+
+When helping a user, first read their memory:
+
+```python
+# Read long-term memory
+memory_content = Path.home() / ".nanobot" / "workspace" / "memory" / "MEMORY.md"
+if memory_content.exists():
+    existing_memory = memory_content.read_text(encoding="utf-8")
+    # Use this context in your responses
+```
+
+### Writing to Memory
+
+The auto-memory system handles most cases, but you can manually update memory:
+
+```python
+# Update long-term memory
+memory_file = Path.home() / ".nanobot" / "workspace" / "memory" / "MEMORY.md"
+new_info = "**用户偏好** 简洁的代码风格"
+memory_file.write_text(memory_file.read_text() + "\n\n" + new_info, encoding="utf-8")
+```
+
+### Best Practices
+
+1. **Use auto-memory** — Let the system track conversations automatically
+2. **Be concise** — Summaries should be brief but informative
+3. **Prioritize** — Only record information that's likely to be useful later
+4. **Deduplicate** — Check existing memory before adding new information
+5. **Format consistently** — Use markdown headers and bullet points

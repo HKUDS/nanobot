@@ -1,8 +1,17 @@
 """Agent core module."""
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.conversation_summarizer import ConversationSummarizer
+from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory_updater import MemoryUpdater
 from nanobot.agent.skills import SkillsLoader
 
-__all__ = ["AgentLoop", "ContextBuilder", "MemoryStore", "SkillsLoader"]
+__all__ = [
+    "AgentLoop",
+    "ContextBuilder",
+    "MemoryStore",
+    "SkillsLoader",
+    "ConversationSummarizer",
+    "MemoryUpdater",
+]

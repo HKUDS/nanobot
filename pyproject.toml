@@ -29,6 +29,7 @@ dependencies = [
     "rich>=13.0.0",
     "croniter>=2.0.0",
     "python-telegram-bot>=21.0",
+    "requests>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -60,6 +61,7 @@ include = [
     "nanobot/**/*.py",
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",
+    "nanobot/skills/**/*.py",
 ]
 
 [tool.hatch.build.targets.sdist]

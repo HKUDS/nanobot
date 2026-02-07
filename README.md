@@ -18,6 +18,7 @@
 
 ## 📢 News
 
+- **2026-02-07** ✨ Added intelligent auto-memory system — automatically summarizes conversations and updates long-term memory!
 - **2026-02-05** ✨ Added Feishu channel, DeepSeek provider, and enhanced scheduled tasks support!
 - **2026-02-04** 🚀 Released v0.1.3.post4 with multi-provider & Docker support! Check [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post4) for details.
 - **2026-02-03** ⚡ Integrated vLLM for local LLM support and improved natural language task scheduling!
@@ -298,6 +299,72 @@ nanobot gateway
 ## ⚙️ Configuration
 
 Config file: `~/.nanobot/config.json`
+
+### Auto-Memory
+
+nanobot automatically summarizes conversations and updates long-term memory.
+
+**Features**:
+- 📝 Auto-summarizes conversations every N messages (configurable)
+- 🧠 Extracts topics, preferences, decisions, tasks, and technical issues
+- 💾 Updates long-term memory with deduplication
+- 📊 Generates daily summary markdown files
+
+**Configuration** (`config.json`):
+
+```json
+{
+  "agents": {
+    "summary": {
+      "enabled": true,
+      "model": "",
+      "interval": 10,
+      "maxTokens": 4000
+    }
+  }
+}
+```
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `enabled` | Enable/disable auto-summary | `true` |
+| `model` | LLM model for summaries (empty = use default model) | `""` |
+| `interval` | Trigger summary every N user messages | `10` |
+| `maxTokens` | Maximum tokens for summary generation | `4000` |
+
+**Environment Variables**:
+
+```bash
+# Disable auto-summary
+export NANOBOT_AUTO_SUMMARY=false
+
+# Use a specific model for summaries
+export NANOBOT_SUMMARY_MODEL="deepseek/deepseek-chat"
+
+# Change trigger interval
+export NANOBOT_SUMMARY_INTERVAL=5
+```
+
+> [!NOTE]
+> The summary model follows this priority: `NANOBOT_SUMMARY_MODEL` (env) → `agents.summary.model` (config) → `agents.defaults.model` (main model) → `deepseek/deepseek-chat` (default)
+
+**Cost Optimization**: Use a cheaper model for summaries:
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-opus-4-5"
+    },
+    "summary": {
+      "model": "deepseek/deepseek-chat"
+    }
+  }
+}
+```
+
+**Output Files**:
+- `~/.nanobot/workspace/memory/YYYY-MM-DD.md` — Daily summary
+- `~/.nanobot/workspace/memory/MEMORY.md` — Long-term memory
 
 ### Providers
 
