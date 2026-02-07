@@ -195,7 +195,11 @@ def gateway(
         default_model=config.agents.defaults.model
     )
     
-    # Create agent
+    # Create cron service first (callback set after agent creation)
+    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    cron = CronService(cron_store_path)
+    
+    # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -204,27 +208,28 @@ def gateway(
         max_iterations=config.agents.defaults.max_tool_iterations,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
+        cron_service=cron,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
     )
     
-    # Create cron service
+    # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
         response = await agent.process_direct(
             job.payload.message,
-            session_key=f"cron:{job.id}"
+            session_key=f"cron:{job.id}",
+            channel=job.payload.channel or "cli",
+            chat_id=job.payload.to or "direct",
         )
-        # Optionally deliver to channel
         if job.payload.deliver and job.payload.to:
             from nanobot.bus.events import OutboundMessage
             await bus.publish_outbound(OutboundMessage(
-                channel=job.payload.channel or "whatsapp",
+                channel=job.payload.channel or "cli",
                 chat_id=job.payload.to,
                 content=response or ""
             ))
         return response
-    
-    cron_store_path = get_data_dir() / "cron" / "jobs.json"
-    cron = CronService(cron_store_path, on_job=on_cron_job)
+    cron.on_job = on_cron_job
     
     # Create heartbeat service
     async def on_heartbeat(prompt: str) -> str:
@@ -312,6 +317,7 @@ def agent(
         workspace=config.workspace_path,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
     )
     
     if message:
@@ -370,6 +376,13 @@ def channels_status():
         wa.bridge_url
     )
 
+    dc = config.channels.discord
+    table.add_row(
+        "Discord",
+        "✓" if dc.enabled else "✗",
+        dc.gateway_url
+    )
+    
     # Telegram
     tg = config.channels.telegram
     tg_config = f"token: {tg.token[:10]}..." if tg.token else "[dim]not configured[/dim]"

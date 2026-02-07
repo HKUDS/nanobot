@@ -16,19 +16,25 @@
 
 ⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
 
+📏 Real-time line count: **3,428 lines** (run `bash core_agent_lines.sh` to verify anytime)
+
 ## 📢 News
 
-- **2026-02-01** 🎉 nanobot launched! Welcome to try 🐈 nanobot!
+- **2026-02-06** ✨ Added Moonshot/Kimi provider, Discord channel, and enhanced security hardening!
+- **2026-02-05** ✨ Added Feishu channel, DeepSeek provider, and enhanced scheduled tasks support!
+- **2026-02-04** 🚀 Released v0.1.3.post4 with multi-provider & Docker support! Check [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post4) for details.
+- **2026-02-03** ⚡ Integrated vLLM for local LLM support and improved natural language task scheduling!
+- **2026-02-02** 🎉 nanobot officially launched! Welcome to try 🐈 nanobot!
 
 ## Key Features of nanobot:
 
-🪶 **Ultra-Lightweight**: Just ~4,000 lines of code — 99% smaller than Clawdbot - core functionality.
+🪶 **Ultra-Lightweight**: Just ~4,000 lines of core agent code — 99% smaller than Clawdbot.
 
 🔬 **Research-Ready**: Clean, readable code that's easy to understand, modify, and extend for research.
 
 ⚡️ **Lightning Fast**: Minimal footprint means faster startup, lower resource usage, and quicker iterations.
 
-💎 **Easy-to-Use**: One-click to depoly and you're ready to go.
+💎 **Easy-to-Use**: One-click to deploy and you're ready to go.
 
 ## 🏗️ Architecture
 
@@ -85,8 +91,7 @@ pip install nanobot-ai
 
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
-> You can also change the model to `minimax/minimax-m2` for lower cost.
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [DashScope](https://dashscope.console.aliyun.com) (Qwen) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
 
 **1. Initialize**
 
@@ -96,6 +101,7 @@ nanobot onboard
 
 **2. Configure** (`~/.nanobot/config.json`)
 
+For OpenRouter - recommended for global users:
 ```json
 {
   "providers": {
@@ -107,17 +113,9 @@ nanobot onboard
     "defaults": {
       "model": "anthropic/claude-opus-4-5"
     }
-  },
-  "tools": {
-    "web": {
-      "search": {
-        "apiKey": "BSA-xxx"
-      }
-    }
   }
 }
 ```
-
 
 **3. Chat**
 
@@ -166,11 +164,12 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram, WhatsApp, or Feishu — anytime, anywhere.
+Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
 | **Telegram** | Easy (just a token) |
+| **Discord** | Easy (bot token + intents) |
 | **WhatsApp** | Medium (scan QR) |
 | **Feishu** | Medium (app credentials) |
 
@@ -199,6 +198,50 @@ Talk to your nanobot through Telegram, WhatsApp, or Feishu — anytime, anywhere
 > Get your user ID from `@userinfobot` on Telegram.
 
 **3. Run**
+
+```bash
+nanobot gateway
+```
+
+</details>
+
+<details>
+<summary><b>Discord</b></summary>
+
+**1. Create a bot**
+- Go to https://discord.com/developers/applications
+- Create an application → Bot → Add Bot
+- Copy the bot token
+
+**2. Enable intents**
+- In the Bot settings, enable **MESSAGE CONTENT INTENT**
+- (Optional) Enable **SERVER MEMBERS INTENT** if you plan to use allow lists based on member data
+
+**3. Get your User ID**
+- Discord Settings → Advanced → enable **Developer Mode**
+- Right-click your avatar → **Copy User ID**
+
+**4. Configure**
+
+```json
+{
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "token": "YOUR_BOT_TOKEN",
+      "allowFrom": ["YOUR_USER_ID"]
+    }
+  }
+}
+```
+
+**5. Invite the bot**
+- OAuth2 → URL Generator
+- Scopes: `bot`
+- Bot Permissions: `Send Messages`, `Read Message History`
+- Open the generated invite URL and add the bot to your server
+
+**6. Run**
 
 ```bash
 nanobot gateway
@@ -306,57 +349,22 @@ Config file: `~/.nanobot/config.json`
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
+| `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
+| `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 
 
-<details>
-<summary><b>Full config example</b></summary>
+### Security
 
-```json
-{
-  "agents": {
-    "defaults": {
-      "model": "anthropic/claude-opus-4-5"
-    }
-  },
-  "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
-    },
-    "groq": {
-      "apiKey": "gsk_xxx"
-    }
-  },
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "123456:ABC...",
-      "allowFrom": ["123456789"]
-    },
-    "whatsapp": {
-      "enabled": false
-    },
-    "feishu": {
-      "enabled": false,
-      "appId": "cli_xxx",
-      "appSecret": "xxx",
-      "encryptKey": "",
-      "verificationToken": "",
-      "allowFrom": []
-    }
-  },
-  "tools": {
-    "web": {
-      "search": {
-        "apiKey": "BSA..."
-      }
-    }
-  }
-}
-```
+> [!TIP]
+> For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
 
-</details>
+| Option | Default | Description |
+|--------|---------|-------------|
+| `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
+| `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
+
 
 ## CLI Reference
 
