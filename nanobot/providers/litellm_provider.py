@@ -32,8 +32,11 @@ class LiteLLMProvider(LLMProvider):
             (api_base and "openrouter" in api_base)
         )
         
+        # Track if using InternLM (OpenAI-compatible custom endpoint)
+        self.is_internlm = "intern" in default_model.lower()
+
         # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        self.is_vllm = bool(api_base) and not self.is_openrouter and not self.is_internlm
         
         # Configure LiteLLM based on provider
         if api_key:
@@ -58,6 +61,8 @@ class LiteLLMProvider(LLMProvider):
             elif "moonshot" in default_model or "kimi" in default_model:
                 os.environ.setdefault("MOONSHOT_API_KEY", api_key)
                 os.environ.setdefault("MOONSHOT_API_BASE", api_base or "https://api.moonshot.cn/v1")
+            elif "intern" in default_model:
+                pass  # InternLM uses api_key/api_base passed directly in chat()
         
         if api_base:
             litellm.api_base = api_base
@@ -111,9 +116,15 @@ class LiteLLMProvider(LLMProvider):
         if "gemini" in model.lower() and not model.startswith("gemini/"):
             model = f"gemini/{model}"
 
+        # For InternLM, use openai/ prefix (OpenAI-compatible API)
+        if self.is_internlm:
+            if model.startswith("internlm/"):
+                model = model[len("internlm/"):]
+            model = f"openai/{model}"
+
         # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
         # Convert openai/ prefix to hosted_vllm/ if user specified it
-        if self.is_vllm:
+        elif self.is_vllm:
             model = f"hosted_vllm/{model}"
         
         # kimi-k2.5 only supports temperature=1.0
@@ -127,9 +138,13 @@ class LiteLLMProvider(LLMProvider):
             "temperature": temperature,
         }
         
-        # Pass api_base directly for custom endpoints (vLLM, etc.)
+        # Pass api_base directly for custom endpoints (vLLM, InternLM, etc.)
         if self.api_base:
             kwargs["api_base"] = self.api_base
+
+        # Pass api_key directly for providers that need it (InternLM, etc.)
+        if self.is_internlm and self.api_key:
+            kwargs["api_key"] = self.api_key
         
         if tools:
             kwargs["tools"] = tools

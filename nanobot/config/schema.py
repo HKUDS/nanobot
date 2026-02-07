@@ -78,6 +78,7 @@ class ProvidersConfig(BaseModel):
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
+    internlm: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -141,6 +142,7 @@ class Config(BaseSettings):
             "moonshot": self.providers.moonshot,
             "kimi": self.providers.moonshot,
             "vllm": self.providers.vllm,
+            "intern": self.providers.internlm,
         }
         for keyword, provider in providers.items():
             if keyword in model and provider.api_key:
@@ -159,7 +161,7 @@ class Config(BaseSettings):
             self.providers.anthropic, self.providers.openai,
             self.providers.gemini, self.providers.zhipu,
             self.providers.moonshot, self.providers.vllm,
-            self.providers.groq,
+            self.providers.groq, self.providers.internlm,
         ]:
             if provider.api_key:
                 return provider.api_key
@@ -174,6 +176,8 @@ class Config(BaseSettings):
             return self.providers.zhipu.api_base
         if "vllm" in model:
             return self.providers.vllm.api_base
+        if "intern" in model:
+            return self.providers.internlm.api_base or "https://chat.intern-ai.org.cn/api/v1"
         return None
     
     class Config:
