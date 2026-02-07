@@ -37,8 +37,17 @@ class LiteLLMProvider(LLMProvider):
         # Detect AiHubMix by api_base
         self.is_aihubmix = bool(api_base and "aihubmix" in api_base)
         
+        # Detect Zhipu BigModel (domestic China API)
+        self.is_zhipu_bigmodel = bool(api_base and "bigmodel.cn" in api_base)
+        
         # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter and not self.is_aihubmix
+        # Exclude known providers: OpenRouter, AiHubMix, Zhipu BigModel
+        self.is_vllm = (
+            bool(api_base) and 
+            not self.is_openrouter and 
+            not self.is_aihubmix and
+            not self.is_zhipu_bigmodel
+        )
         
         # Configure LiteLLM based on provider
         if api_key:
@@ -48,6 +57,9 @@ class LiteLLMProvider(LLMProvider):
             elif self.is_aihubmix:
                 # AiHubMix gateway - OpenAI-compatible
                 os.environ["OPENAI_API_KEY"] = api_key
+            elif self.is_zhipu_bigmodel:
+                # Zhipu BigModel uses OpenAI-compatible API, but use separate env var to avoid conflicts
+                os.environ["OPENAI_API_KEY"] = api_key
             elif self.is_vllm:
                 # vLLM/custom endpoint - uses OpenAI-compatible API
                 os.environ["HOSTED_VLLM_API_KEY"] = api_key
@@ -56,7 +68,9 @@ class LiteLLMProvider(LLMProvider):
             elif "anthropic" in default_model:
                 os.environ.setdefault("ANTHROPIC_API_KEY", api_key)
             elif "openai" in default_model or "gpt" in default_model:
-                os.environ.setdefault("OPENAI_API_KEY", api_key)
+                # Only set if not already set by other providers (like zhipu/aihubmix)
+                if "OPENAI_API_KEY" not in os.environ:
+                    os.environ["OPENAI_API_KEY"] = api_key
             elif "gemini" in default_model.lower():
                 os.environ.setdefault("GEMINI_API_KEY", api_key)
             elif "zhipu" in default_model or "glm" in default_model or "zai" in default_model:
@@ -101,8 +115,9 @@ class LiteLLMProvider(LLMProvider):
         
         # Auto-prefix model names for known providers
         # (keywords, target_prefix, skip_if_starts_with)
+        # Note: Zhipu BigModel uses OpenAI-compatible API, so don't prefix it here
         _prefix_rules = [
-            (("glm", "zhipu"), "zai", ("zhipu/", "zai/", "openrouter/", "hosted_vllm/")),
+            (("glm", "zhipu"), "zai", ("zhipu/", "zai/", "openrouter/", "hosted_vllm/", "openai/")),
             (("qwen", "dashscope"), "dashscope", ("dashscope/", "openrouter/")),
             (("moonshot", "kimi"), "moonshot", ("moonshot/", "openrouter/")),
             (("gemini",), "gemini", ("gemini/",)),
@@ -118,6 +133,10 @@ class LiteLLMProvider(LLMProvider):
             model = f"openrouter/{model}"
         elif self.is_aihubmix:
             model = f"openai/{model.split('/')[-1]}"
+        elif self.is_zhipu_bigmodel:
+            # Zhipu BigModel uses OpenAI-compatible API
+            if not model.startswith("openai/"):
+                model = f"openai/{model.split('/')[-1]}"
         elif self.is_vllm:
             model = f"hosted_vllm/{model}"
         

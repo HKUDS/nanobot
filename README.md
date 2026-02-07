@@ -162,6 +162,45 @@ nanobot agent -m "Hello from my local LLM!"
 > [!TIP]
 > The `apiKey` can be any non-empty string for local servers that don't require authentication.
 
+## 🇨🇳 Zhipu BigModel (国内智谱)
+
+Use Zhipu BigModel with GLM-4.7 and other GLM models for domestic China users.
+
+**1. Get API Key**
+- Visit [Zhipu Open Platform](https://open.bigmodel.cn)
+- Sign up and create an API key
+
+**2. Configure** (`~/.nanobot/config.json`)
+
+```json
+{
+  "providers": {
+    "zhipu": {
+      "api_key": "your-zhipuai-api-key",
+      "api_base": "https://open.bigmodel.cn/api/paas/v4/"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "glm-4.7"
+    }
+  }
+}
+```
+
+Supported models: `glm-4.7`, `glm-4.5`, `glm-4`, `glm-3-turbo`, etc.
+
+> [!CAUTION]
+> **Potential Issues:**
+> - If you configure both `zhipu` (domestic) and `openai` providers, there may be `OPENAI_API_KEY` environment variable conflicts
+> - For overseas users, use [z.ai](https://z.ai) instead of the domestic BigModel API
+
+**3. Chat**
+
+```bash
+nanobot agent -m "你好，请介绍一下自己"
+```
+
 ## 💬 Chat Apps
 
 Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime, anywhere.
@@ -354,6 +393,8 @@ Config file: `~/.nanobot/config.json`
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
+| `zhipu` | LLM (Zhipu BigModel, GLM-4.7, domestic China) | [open.bigmodel.cn](https://open.bigmodel.cn) |
+| `moonshot` | LLM (Moonshot/Kimi) | [moonshot.cn](https://moonshot.cn) |
 
 
 ### Security
