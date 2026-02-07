@@ -30,6 +30,7 @@ dependencies = [
     "croniter>=2.0.0",
     "python-telegram-bot>=21.0",
     "lark-oapi>=1.0.0",
+    "playwright>=1.40.0",
 ]
 
 [project.optional-dependencies]
