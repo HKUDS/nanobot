@@ -106,18 +106,17 @@ class TelegramChannel(BaseChannel):
             builder = builder.proxy(self.config.proxy).get_updates_proxy(self.config.proxy)
         self._app = builder.build()
         
-        # Add message handler for text, photos, voice, documents
-        self._app.add_handler(
-            MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL) 
-                & ~filters.COMMAND, 
-                self._on_message
-            )
-        )
-        
         # Add /start command handler
         from telegram.ext import CommandHandler
         self._app.add_handler(CommandHandler("start", self._on_start))
+        
+        # Add message handler for text, photos, voice, documents
+        self._app.add_handler(
+            MessageHandler(
+                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL), 
+                self._on_message
+            )
+        )
         
         logger.info("Starting Telegram bot (polling mode)...")
         
