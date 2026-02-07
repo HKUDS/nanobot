@@ -2,6 +2,7 @@
 
 import asyncio
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import typer
@@ -40,6 +41,17 @@ def main(
 # ============================================================================
 
 
+@asynccontextmanager
+async def _with_pulsing():
+    """Init Pulsing on enter, shutdown on exit. Yields the ActorSystem for admin APIs."""
+    import pulsing as pul
+    system = await pul.init()
+    try:
+        yield system
+    finally:
+        await pul.shutdown()
+
+
 def _validate_api_key(config):
     """Ensure config has an API key. Exits with rich error if not."""
     p = config.get_provider()
@@ -51,12 +63,9 @@ def _validate_api_key(config):
 
 
 async def _boot_agent(config):
-    """Init Pulsing, spawn ProviderActor + AgentActor. Returns agent ref."""
-    import pulsing as pul
+    """Spawn ProviderActor + AgentActor. Caller must ensure Pulsing is inited (e.g. _with_pulsing)."""
     from nanobot.actor.agent import AgentActor
     from nanobot.actor.provider import ProviderActor
-
-    await pul.init()
 
     _validate_api_key(config)
     await ProviderActor.spawn(config=config, name="provider")
@@ -300,51 +309,30 @@ def agent(
     from nanobot.config.loader import load_config
 
     config = load_config()
-
-    # Parse session_id into channel:chat_id
     if ":" in session_id:
-        parts = session_id.split(":", 1)
-        cli_channel, cli_chat_id = parts[0], parts[1]
+        cli_channel, cli_chat_id = session_id.split(":", 1)
     else:
         cli_channel, cli_chat_id = "cli", session_id
 
-    if message:
-        # Single-message mode (streaming)
-        async def run_once():
-            import pulsing as pul
-
-            try:
-                agent_actor = await _boot_agent(config)
+    async def run():
+        async with _with_pulsing():
+            agent_actor = await _boot_agent(config)
+            if message:
                 await _print_stream(agent_actor, cli_channel, cli_chat_id, message)
-            finally:
-                await pul.shutdown()
+                return
+            console.print(f"{__logo__} Interactive mode (Ctrl+C to exit)\n")
+            while True:
+                try:
+                    user_input = console.input("[bold blue]You:[/bold blue] ")
+                    if not user_input.strip():
+                        continue
+                    await _print_stream(agent_actor, cli_channel, cli_chat_id, user_input)
+                    sys.stdout.write("\n")
+                except KeyboardInterrupt:
+                    console.print("\nGoodbye!")
+                    break
 
-        asyncio.run(run_once())
-    else:
-        # Interactive mode (streaming)
-        console.print(f"{__logo__} Interactive mode (Ctrl+C to exit)\n")
-
-        async def run_interactive():
-            import pulsing as pul
-
-            try:
-                agent_actor = await _boot_agent(config)
-                while True:
-                    try:
-                        user_input = console.input("[bold blue]You:[/bold blue] ")
-                        if not user_input.strip():
-                            continue
-                        await _print_stream(
-                            agent_actor, cli_channel, cli_chat_id, user_input
-                        )
-                        sys.stdout.write("\n")  # blank line between exchanges
-                    except KeyboardInterrupt:
-                        console.print("\nGoodbye!")
-                        break
-            finally:
-                await pul.shutdown()
-
-        asyncio.run(run_interactive())
+    asyncio.run(run())
 
 
 # ============================================================================
@@ -603,17 +591,12 @@ def cron_run(
     force: bool = typer.Option(False, "--force", "-f", help="Run even if disabled"),
 ):
     """Manually run a job."""
+    from nanobot.actor.scheduler import SchedulerActor
 
     async def run():
-        import pulsing as pul
-        from nanobot.actor.scheduler import SchedulerActor
-
-        try:
-            await pul.init()
+        async with _with_pulsing():
             scheduler = await SchedulerActor.resolve("scheduler")
             return await scheduler.run_job(job_id, force=force)
-        finally:
-            await pul.shutdown()
 
     ok = asyncio.run(run())
     if ok:
@@ -685,34 +668,26 @@ def status(
 
 def _show_live_actor_status():
     """Query the running Pulsing system for actor status."""
+    from pulsing.admin import list_actors, health_check
 
     async def _query():
-        import pulsing as pul
-        from pulsing.admin import list_actors, health_check
-
         try:
-            system = await pul.init()
-            health = await health_check(system)
-            actors = await list_actors(system)
-
+            async with _with_pulsing() as system:
+                health = await health_check(system)
+                actors = await list_actors(system)
             console.print(f"  Health: [green]{health}[/green]")
-
             if actors:
                 table = Table(title="Running Actors")
                 table.add_column("Name", style="cyan")
                 table.add_column("Type", style="yellow")
                 table.add_column("Status", style="green")
-
                 for actor in actors:
                     name = getattr(actor, "name", str(actor))
                     atype = getattr(actor, "type_name", "unknown")
                     table.add_row(name, atype, "running")
-
                 console.print(table)
             else:
                 console.print("  [dim]No actors running (gateway not started?)[/dim]")
-
-            await pul.shutdown()
         except Exception as e:
             console.print(f"  [dim]Could not connect to Pulsing runtime: {e}[/dim]")
             console.print("  [dim]Start the gateway first: nanobot gateway[/dim]")

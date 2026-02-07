@@ -6,7 +6,7 @@ from typing import Any
 import pulsing as pul
 from loguru import logger
 
-from nanobot.actor.tool_loop import AgentChunk, run_tool_loop, run_tool_loop_stream
+from nanobot.actor.tool_loop import AgentChunk, run_tool_loop_stream
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.tools.base import ToolContext
 from nanobot.agent.tools.registry import ToolRegistry
@@ -119,41 +119,7 @@ class AgentActor:
         self.tools.register(CronTool(scheduler_name=self.scheduler_name))
 
     # ================================================================
-    # Non-streaming entry point
-    # ================================================================
-
-    async def process(
-        self,
-        channel: str,
-        sender_id: str,
-        chat_id: str,
-        content: str,
-        media: list[str] | None = None,
-    ) -> str:
-        """Process a message and return the response text."""
-        if channel == "system":
-            return await self._process_system_message(sender_id, chat_id, content)
-
-        logger.info(f"Processing from {channel}:{sender_id}: {content[:80]}")
-        session, provider, ctx, messages = await self._prepare(
-            channel, chat_id, content, media
-        )
-
-        result = await run_tool_loop(
-            provider=provider,
-            tools=self.tools,
-            messages=messages,
-            ctx=ctx,
-            model=self.model,
-            max_iterations=self.max_iterations,
-        )
-
-        logger.info(f"Response to {channel}:{sender_id}: {result[:120]}")
-        self._save_turn(session, content, result)
-        return result
-
-    # ================================================================
-    # Streaming entry point
+    # Streaming entry point (single implementation)
     # ================================================================
 
     async def process_stream(
@@ -164,12 +130,17 @@ class AgentActor:
         content: str,
         media: list[str] | None = None,
     ) -> AsyncIterator[AgentChunk]:
-        """Process a message and yield streaming chunks."""
+        """Process a message and yield streaming chunks. System channel yields one chunk then done."""
+        if channel == "system":
+            result = await self._process_system_message(sender_id, chat_id, content)
+            yield AgentChunk(kind="token", text=result)
+            yield AgentChunk(kind="done")
+            return
+
         logger.info(f"Processing (stream) from {channel}:{sender_id}: {content[:80]}")
         session, provider, ctx, messages = await self._prepare(
             channel, chat_id, content, media
         )
-
         full_text = ""
         async for chunk in run_tool_loop_stream(
             provider=provider,
@@ -188,6 +159,23 @@ class AgentActor:
             content,
             full_text or "I've completed processing but have no response to give.",
         )
+
+    async def process(
+        self,
+        channel: str,
+        sender_id: str,
+        chat_id: str,
+        content: str,
+        media: list[str] | None = None,
+    ) -> str:
+        """Process a message and return the response text (consumes process_stream)."""
+        full_text = ""
+        async for chunk in self.process_stream(
+            channel, sender_id, chat_id, content, media
+        ):
+            if chunk.kind == "token":
+                full_text += chunk.text
+        return full_text or "I've completed processing but have no response to give."
 
     # ================================================================
     # Announce (subagent results)
@@ -223,14 +211,18 @@ class AgentActor:
             content,
         )
 
-        result = await run_tool_loop(
+        result = ""
+        async for chunk in run_tool_loop_stream(
             provider=provider,
             tools=self.tools,
             messages=messages,
             ctx=ctx,
             model=self.model,
             max_iterations=self.max_iterations,
-        )
+        ):
+            if chunk.kind == "token":
+                result += chunk.text
+        result = result or "I've completed processing but have no response to give."
 
         self._save_turn(session, f"[System: {sender_id}] {content}", result)
 

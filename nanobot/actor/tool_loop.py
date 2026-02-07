@@ -19,10 +19,30 @@ from nanobot.agent.tools.base import ToolContext
 from nanobot.agent.tools.registry import ToolRegistry
 
 
+def _content_str(raw: Any) -> str:
+    """Normalize LLM content to a single string (handles list of content parts)."""
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, list):
+        parts = []
+        for block in raw:
+            if isinstance(block, dict):
+                parts.append(block.get("text", block.get("content", "")) or "")
+            elif hasattr(block, "text"):
+                parts.append(getattr(block, "text", "") or "")
+            else:
+                parts.append(str(block))
+        return "\n".join(p for p in parts if p)
+    return str(raw)
+
+
 def _parse_dsml_calls(content: str) -> list[tuple[str, str, dict]] | None:
     """If content contains DSML function_calls, return [(id, name, arguments), ...]; else None.
     Handles <|DSML|invoke name="..."> and <|DSML|parameter name="..." ...>value</|DSML|parameter>.
     """
+    content = _content_str(content)
     if not content or "invoke" not in content or "DSML" not in content:
         return None
     # Match pipe or fullwidth pipe
@@ -114,7 +134,7 @@ async def run_tool_loop_stream(
         )
 
         tool_calls = list(response.tool_calls) if response.has_tool_calls else []
-        content = response.content or ""
+        content = _content_str(response.content)
 
         if not tool_calls:
             dsml = _parse_dsml_calls(content)
