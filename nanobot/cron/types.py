@@ -32,7 +32,9 @@ class CronJobState(BaseModel):
 
     next_run_at_ms: int | None = Field(None, alias="nextRunAtMs")
     last_run_at_ms: int | None = Field(None, alias="lastRunAtMs")
-    last_status: Literal["ok", "error", "skipped"] | None = Field(None, alias="lastStatus")
+    last_status: Literal["ok", "error", "skipped"] | None = Field(
+        None, alias="lastStatus"
+    )
     last_error: str | None = Field(None, alias="lastError")
 
     model_config = {"populate_by_name": True}

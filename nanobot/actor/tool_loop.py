@@ -45,7 +45,10 @@ async def run_tool_loop(
         )
 
         if not response.has_tool_calls:
-            return response.content or "I've completed processing but have no response to give."
+            return (
+                response.content
+                or "I've completed processing but have no response to give."
+            )
 
         tc_dicts = [
             {
@@ -56,21 +59,27 @@ async def run_tool_loop(
             for tc in response.tool_calls
         ]
 
-        messages.append({
-            "role": "assistant",
-            "content": response.content or "",
-            "tool_calls": tc_dicts,
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": response.content or "",
+                "tool_calls": tc_dicts,
+            }
+        )
 
         for tc in response.tool_calls:
-            logger.info(f"Tool call: {tc.name}({json.dumps(tc.arguments, ensure_ascii=False)[:200]})")
+            logger.info(
+                f"Tool call: {tc.name}({json.dumps(tc.arguments, ensure_ascii=False)[:200]})"
+            )
             result = await tools.execute(tc.name, tc.arguments, ctx)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "name": tc.name,
-                "content": result,
-            })
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": tc.name,
+                    "content": result,
+                }
+            )
 
     return "I've completed processing but have no response to give."
 
@@ -125,25 +134,33 @@ async def run_tool_loop_stream(
             for tc in response.tool_calls
         ]
 
-        messages.append({
-            "role": "assistant",
-            "content": response.content or "",
-            "tool_calls": tc_dicts,
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": response.content or "",
+                "tool_calls": tc_dicts,
+            }
+        )
 
         for tc in response.tool_calls:
-            logger.info(f"Tool call: {tc.name}({json.dumps(tc.arguments, ensure_ascii=False)[:200]})")
+            logger.info(
+                f"Tool call: {tc.name}({json.dumps(tc.arguments, ensure_ascii=False)[:200]})"
+            )
             yield AgentChunk(kind="tool_call", tool_name=tc.name)
 
             result = await tools.execute(tc.name, tc.arguments, ctx)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "name": tc.name,
-                "content": result,
-            })
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": tc.name,
+                    "content": result,
+                }
+            )
 
             yield AgentChunk(kind="tool_result", text=result[:200], tool_name=tc.name)
 
-    yield AgentChunk(kind="token", text="I've completed processing but have no response to give.")
+    yield AgentChunk(
+        kind="token", text="I've completed processing but have no response to give."
+    )
     yield AgentChunk(kind="done")

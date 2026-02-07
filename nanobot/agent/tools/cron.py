@@ -22,6 +22,7 @@ class CronTool(Tool):
     async def _get_scheduler(self):
         """Resolve the SchedulerActor via Pulsing."""
         from nanobot.actor.scheduler import SchedulerActor
+
         return await SchedulerActor.resolve(self._scheduler_name)
 
     @property

@@ -17,27 +17,29 @@ def _markdown_to_telegram_html(text: str) -> str:
         return ""
 
     code_blocks: list[str] = []
+
     def save_code_block(m: re.Match) -> str:
         code_blocks.append(m.group(1))
         return f"\x00CB{len(code_blocks) - 1}\x00"
 
-    text = re.sub(r'```[\w]*\n?([\s\S]*?)```', save_code_block, text)
+    text = re.sub(r"```[\w]*\n?([\s\S]*?)```", save_code_block, text)
 
     inline_codes: list[str] = []
+
     def save_inline_code(m: re.Match) -> str:
         inline_codes.append(m.group(1))
         return f"\x00IC{len(inline_codes) - 1}\x00"
 
-    text = re.sub(r'`([^`]+)`', save_inline_code, text)
-    text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
-    text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
+    text = re.sub(r"`([^`]+)`", save_inline_code, text)
+    text = re.sub(r"^#{1,6}\s+(.+)$", r"\1", text, flags=re.MULTILINE)
+    text = re.sub(r"^>\s*(.*)$", r"\1", text, flags=re.MULTILINE)
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
-    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
-    text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
-    text = re.sub(r'(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])', r'<i>\1</i>', text)
-    text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)
-    text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
+    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
+    text = re.sub(r"(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])", r"<i>\1</i>", text)
+    text = re.sub(r"~~(.+?)~~", r"<s>\1</s>", text)
+    text = re.sub(r"^[-*]\s+", "• ", text, flags=re.MULTILINE)
 
     for i, code in enumerate(inline_codes):
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -55,8 +57,9 @@ class TelegramChannel(BaseChannel):
 
     name = "telegram"
 
-    def __init__(self, config: TelegramConfig, agent_name: str = "agent",
-                 groq_api_key: str = ""):
+    def __init__(
+        self, config: TelegramConfig, agent_name: str = "agent", groq_api_key: str = ""
+    ):
         super().__init__(config, agent_name)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
@@ -71,21 +74,24 @@ class TelegramChannel(BaseChannel):
 
         self._running = True
 
-        self._app = (
-            Application.builder()
-            .token(self.config.token)
-            .build()
-        )
+        self._app = Application.builder().token(self.config.token).build()
 
         self._app.add_handler(
             MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO
-                 | filters.Document.ALL) & ~filters.COMMAND,
+                (
+                    filters.TEXT
+                    | filters.PHOTO
+                    | filters.VOICE
+                    | filters.AUDIO
+                    | filters.Document.ALL
+                )
+                & ~filters.COMMAND,
                 self._on_message,
             )
         )
 
         from telegram.ext import CommandHandler
+
         self._app.add_handler(CommandHandler("start", self._on_start))
 
         logger.info("Starting Telegram bot (polling mode)...")
@@ -136,7 +142,9 @@ class TelegramChannel(BaseChannel):
             except Exception as e2:
                 logger.error(f"Error sending Telegram message: {e2}")
 
-    async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _on_start(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         """Handle /start command."""
         if not update.message or not update.effective_user:
             return
@@ -146,7 +154,9 @@ class TelegramChannel(BaseChannel):
             "Send me a message and I'll respond!"
         )
 
-    async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _on_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:
             return
@@ -188,9 +198,12 @@ class TelegramChannel(BaseChannel):
         if media_file and self._app:
             try:
                 file = await self._app.bot.get_file(media_file.file_id)
-                ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
+                ext = self._get_extension(
+                    media_type, getattr(media_file, "mime_type", None)
+                )
 
                 from pathlib import Path
+
                 media_dir = Path.home() / ".nanobot" / "media"
                 media_dir.mkdir(parents=True, exist_ok=True)
 
@@ -200,11 +213,16 @@ class TelegramChannel(BaseChannel):
                 media_paths.append(str(file_path))
 
                 if media_type in ("voice", "audio"):
-                    from nanobot.providers.transcription import GroqTranscriptionProvider
+                    from nanobot.providers.transcription import (
+                        GroqTranscriptionProvider,
+                    )
+
                     transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
                     transcription = await transcriber.transcribe(file_path)
                     if transcription:
-                        logger.info(f"Transcribed {media_type}: {transcription[:50]}...")
+                        logger.info(
+                            f"Transcribed {media_type}: {transcription[:50]}..."
+                        )
                         content_parts.append(f"[transcription: {transcription}]")
                     else:
                         content_parts.append(f"[{media_type}: {file_path}]")
@@ -238,8 +256,12 @@ class TelegramChannel(BaseChannel):
         """Get file extension based on media type."""
         if mime_type:
             ext_map = {
-                "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
-                "audio/ogg": ".ogg", "audio/mpeg": ".mp3", "audio/mp4": ".m4a",
+                "image/jpeg": ".jpg",
+                "image/png": ".png",
+                "image/gif": ".gif",
+                "audio/ogg": ".ogg",
+                "audio/mpeg": ".mp3",
+                "audio/mp4": ".m4a",
             }
             if mime_type in ext_map:
                 return ext_map[mime_type]

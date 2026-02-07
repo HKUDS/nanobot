@@ -9,7 +9,13 @@ from typing import Any
 import pulsing as pul
 from loguru import logger
 
-from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule, CronStore
+from nanobot.cron.types import (
+    CronJob,
+    CronJobState,
+    CronPayload,
+    CronSchedule,
+    CronStore,
+)
 
 
 def _now_ms() -> int:
@@ -29,6 +35,7 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
     if schedule.kind == "cron" and schedule.expr:
         try:
             from croniter import croniter
+
             cron = croniter(schedule.expr, time.time())
             next_time = cron.get_next()
             return int(next_time * 1000)
@@ -86,9 +93,12 @@ class SchedulerActor:
 
     # ========== Agent resolution ==========
 
-    async def _call_agent(self, channel: str, sender_id: str, chat_id: str, content: str) -> str:
+    async def _call_agent(
+        self, channel: str, sender_id: str, chat_id: str, content: str
+    ) -> str:
         """Resolve AgentActor and process a message."""
         from nanobot.actor.agent import AgentActor
+
         agent = await AgentActor.resolve(self.agent_name)
         return await agent.process(
             channel=channel,
@@ -106,7 +116,9 @@ class SchedulerActor:
 
         if self.cron_store_path.exists():
             try:
-                self._store = CronStore.model_validate_json(self.cron_store_path.read_text())
+                self._store = CronStore.model_validate_json(
+                    self.cron_store_path.read_text()
+                )
             except Exception as e:
                 logger.warning(f"Failed to load cron store: {e}")
                 self._store = CronStore()
@@ -120,7 +132,9 @@ class SchedulerActor:
         if not self._store:
             return
         self.cron_store_path.parent.mkdir(parents=True, exist_ok=True)
-        self.cron_store_path.write_text(self._store.model_dump_json(by_alias=True, indent=2))
+        self.cron_store_path.write_text(
+            self._store.model_dump_json(by_alias=True, indent=2)
+        )
 
     def _recompute_next_runs(self) -> None:
         if not self._store:
@@ -164,7 +178,8 @@ class SchedulerActor:
 
         now = _now_ms()
         due_jobs = [
-            j for j in self._store.jobs
+            j
+            for j in self._store.jobs
             if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
         ]
 
@@ -193,10 +208,13 @@ class SchedulerActor:
             if job.payload.deliver and job.payload.to and job.payload.channel:
                 try:
                     from nanobot.actor.channel import ChannelActor
+
                     ch = await ChannelActor.resolve(f"channel.{job.payload.channel}")
                     await ch.send_text(job.payload.to, response or "")
                 except Exception as e:
-                    logger.warning(f"Cron: could not deliver to channel.{job.payload.channel}: {e}")
+                    logger.warning(
+                        f"Cron: could not deliver to channel.{job.payload.channel}: {e}"
+                    )
 
             job.state.last_status = "ok"
             job.state.last_error = None
@@ -282,7 +300,9 @@ class SchedulerActor:
                 job.enabled = enabled
                 job.updated_at_ms = _now_ms()
                 if enabled:
-                    job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+                    job.state.next_run_at_ms = _compute_next_run(
+                        job.schedule, _now_ms()
+                    )
                 else:
                     job.state.next_run_at_ms = None
                 self._save_store()

@@ -81,7 +81,9 @@ class DiscordChannel(BaseChannel):
                     if response.status_code == 429:
                         data = response.json()
                         retry_after = float(data.get("retry_after", 1.0))
-                        logger.warning(f"Discord rate limited, retrying in {retry_after}s")
+                        logger.warning(
+                            f"Discord rate limited, retrying in {retry_after}s"
+                        )
                         await asyncio.sleep(retry_after)
                         continue
                     response.raise_for_status()
@@ -196,7 +198,10 @@ class DiscordChannel(BaseChannel):
                 continue
             try:
                 media_dir.mkdir(parents=True, exist_ok=True)
-                file_path = media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
+                file_path = (
+                    media_dir
+                    / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
+                )
                 resp = await self._http.get(url)
                 resp.raise_for_status()
                 file_path.write_bytes(resp.content)

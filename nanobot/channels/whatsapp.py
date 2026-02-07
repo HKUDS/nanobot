@@ -96,7 +96,9 @@ class WhatsAppChannel(BaseChannel):
                     f"Voice message received from {chat_id}, "
                     "but direct download from bridge is not yet supported."
                 )
-                content = "[Voice Message: Transcription not available for WhatsApp yet]"
+                content = (
+                    "[Voice Message: Transcription not available for WhatsApp yet]"
+                )
 
             await self._handle_message(
                 sender_id=chat_id,

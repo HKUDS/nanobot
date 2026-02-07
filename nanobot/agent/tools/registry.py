@@ -36,7 +36,9 @@ class ToolRegistry:
         """Get all tool definitions in OpenAI format."""
         return [tool.to_schema() for tool in self._tools.values()]
 
-    async def execute(self, name: str, params: dict[str, Any], ctx: ToolContext | None = None) -> str:
+    async def execute(
+        self, name: str, params: dict[str, Any], ctx: ToolContext | None = None
+    ) -> str:
         """
         Execute a tool by name with given parameters.
 
@@ -57,7 +59,9 @@ class ToolRegistry:
         try:
             errors = tool.validate_params(params)
             if errors:
-                return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
+                return f"Error: Invalid parameters for tool '{name}': " + "; ".join(
+                    errors
+                )
             return await tool.execute(ctx, **params)
         except Exception as e:
             return f"Error executing {name}: {str(e)}"

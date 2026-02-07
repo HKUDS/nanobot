@@ -103,10 +103,16 @@ class Tool(ABC):
                     errors.append(f"missing required {path + '.' + k if path else k}")
             for k, v in val.items():
                 if k in props:
-                    errors.extend(self._validate(v, props[k], path + '.' + k if path else k))
+                    errors.extend(
+                        self._validate(v, props[k], path + "." + k if path else k)
+                    )
         if t == "array" and "items" in schema:
             for i, item in enumerate(val):
-                errors.extend(self._validate(item, schema["items"], f"{path}[{i}]" if path else f"[{i}]"))
+                errors.extend(
+                    self._validate(
+                        item, schema["items"], f"{path}[{i}]" if path else f"[{i}]"
+                    )
+                )
         return errors
 
     def to_schema(self) -> dict[str, Any]:

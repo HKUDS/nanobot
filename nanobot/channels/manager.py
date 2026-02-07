@@ -13,7 +13,9 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
 
 
-def create_channels(config: Config, agent_name: str = "agent") -> dict[str, BaseChannel]:
+def create_channels(
+    config: Config, agent_name: str = "agent"
+) -> dict[str, BaseChannel]:
     """
     Instantiate all enabled channels from config.
 
@@ -25,6 +27,7 @@ def create_channels(config: Config, agent_name: str = "agent") -> dict[str, Base
     if config.channels.telegram.enabled:
         try:
             from nanobot.channels.telegram import TelegramChannel
+
             channels["telegram"] = TelegramChannel(
                 config.channels.telegram,
                 agent_name=agent_name,
@@ -38,6 +41,7 @@ def create_channels(config: Config, agent_name: str = "agent") -> dict[str, Base
     if config.channels.whatsapp.enabled:
         try:
             from nanobot.channels.whatsapp import WhatsAppChannel
+
             channels["whatsapp"] = WhatsAppChannel(
                 config.channels.whatsapp,
                 agent_name=agent_name,
@@ -50,6 +54,7 @@ def create_channels(config: Config, agent_name: str = "agent") -> dict[str, Base
     if config.channels.discord.enabled:
         try:
             from nanobot.channels.discord import DiscordChannel
+
             channels["discord"] = DiscordChannel(
                 config.channels.discord,
                 agent_name=agent_name,
@@ -62,6 +67,7 @@ def create_channels(config: Config, agent_name: str = "agent") -> dict[str, Base
     if config.channels.feishu.enabled:
         try:
             from nanobot.channels.feishu import FeishuChannel
+
             channels["feishu"] = FeishuChannel(
                 config.channels.feishu,
                 agent_name=agent_name,

@@ -58,6 +58,7 @@ class MessageTool(Tool):
         # Point-to-point: resolve the channel actor by Pulsing name
         try:
             from nanobot.actor.channel import ChannelActor
+
             ch = await ChannelActor.resolve(f"channel.{channel}")
         except Exception:
             return f"Error: Channel '{channel}' not available"

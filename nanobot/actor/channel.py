@@ -18,7 +18,9 @@ from loguru import logger
 from nanobot.channels.base import BaseChannel
 
 
-@pul.remote(restart_policy="on-failure", max_restarts=10, min_backoff=1.0, max_backoff=60.0)
+@pul.remote(
+    restart_policy="on-failure", max_restarts=10, min_backoff=1.0, max_backoff=60.0
+)
 class ChannelActor:
     """
     Pulsing actor wrapping a BaseChannel implementation.

@@ -68,6 +68,7 @@ class BaseChannel(ABC):
     async def _get_agent(self):
         """Resolve the AgentActor via Pulsing."""
         from nanobot.actor.agent import AgentActor
+
         return await AgentActor.resolve(self.agent_name)
 
     async def _handle_message(

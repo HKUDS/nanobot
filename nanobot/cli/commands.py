@@ -40,21 +40,14 @@ def main(
 # ============================================================================
 
 
-def _make_provider(config):
-    """Create LiteLLMProvider from config. Exits if no API key found."""
-    from nanobot.providers.litellm_provider import LiteLLMProvider
+def _validate_api_key(config):
+    """Ensure config has an API key. Exits with rich error if not."""
     p = config.get_provider()
     model = config.agents.defaults.model
     if not (p and p.api_key) and not model.startswith("bedrock/"):
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers section")
         raise typer.Exit(1)
-    return LiteLLMProvider(
-        api_key=p.api_key if p else None,
-        api_base=config.get_api_base(),
-        default_model=model,
-        extra_headers=p.extra_headers if p else None,
-    )
 
 
 async def _boot_agent(config):
@@ -65,8 +58,8 @@ async def _boot_agent(config):
 
     await pul.init()
 
-    provider = _make_provider(config)
-    await ProviderActor.spawn(provider=provider, name="provider")
+    _validate_api_key(config)
+    await ProviderActor.spawn(config=config, name="provider")
     return await AgentActor.spawn(config=config, name="agent")
 
 
@@ -74,7 +67,10 @@ async def _print_stream(agent_actor, channel: str, chat_id: str, content: str):
     """Send a message to the agent and print the streaming response."""
     prefix_printed = False
     async for chunk in agent_actor.process_stream(
-        channel=channel, sender_id="user", chat_id=chat_id, content=content,
+        channel=channel,
+        sender_id="user",
+        chat_id=chat_id,
+        content=content,
     ):
         if chunk.kind == "token":
             if not prefix_printed:
@@ -124,8 +120,10 @@ def onboard():
     console.print("\nNext steps:")
     console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
     console.print("     Get one at: https://openrouter.ai/keys")
-    console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
-    console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
+    console.print('  2. Chat: [cyan]nanobot agent -m "Hello!"[/cyan]')
+    console.print(
+        "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]"
+    )
 
 
 def _create_workspace_templates(workspace: Path):
@@ -181,7 +179,8 @@ Information about the user goes here.
     memory_dir.mkdir(exist_ok=True)
     memory_file = memory_dir / "MEMORY.md"
     if not memory_file.exists():
-        memory_file.write_text("""# Long-term Memory
+        memory_file.write_text(
+            """# Long-term Memory
 
 This file stores important information that should persist across sessions.
 
@@ -196,7 +195,8 @@ This file stores important information that should persist across sessions.
 ## Important Notes
 
 (Things to remember)
-""")
+"""
+        )
         console.print("  [dim]Created memory/MEMORY.md[/dim]")
 
 
@@ -219,12 +219,13 @@ def gateway(
 
     if verbose:
         import logging
+
         logging.basicConfig(level=logging.DEBUG)
 
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
 
     config = load_config()
-    provider = _make_provider(config)
+    _validate_api_key(config)
 
     # Create channel instances (not yet actors)
     channels = create_channels(config, agent_name="agent")
@@ -238,14 +239,15 @@ def gateway(
 
     async def run():
         import pulsing as pul
+
         await pul.init()
 
         channel_tasks = []
         try:
             cron_store_path = get_data_dir() / "cron" / "jobs.json"
 
-            # 1) Spawn ProviderActor
-            await ProviderActor.spawn(provider=provider, name="provider")
+            # 1) Spawn ProviderActor (takes config directly)
+            await ProviderActor.spawn(config=config, name="provider")
 
             # 2) Spawn SchedulerActor -- auto-starts via on_start()
             await SchedulerActor.spawn(
@@ -286,7 +288,9 @@ def gateway(
 
 @app.command()
 def agent(
-    message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
+    message: str = typer.Option(
+        None, "--message", "-m", help="Message to send to the agent"
+    ),
     session_id: str = typer.Option("cli:default", "--session", "-s", help="Session ID"),
 ):
     """Interact with the agent directly."""
@@ -305,6 +309,7 @@ def agent(
         # Single-message mode (streaming)
         async def run_once():
             import pulsing as pul
+
             try:
                 agent_actor = await _boot_agent(config)
                 await _print_stream(agent_actor, cli_channel, cli_chat_id, message)
@@ -318,6 +323,7 @@ def agent(
 
         async def run_interactive():
             import pulsing as pul
+
             try:
                 agent_actor = await _boot_agent(config)
                 while True:
@@ -325,7 +331,9 @@ def agent(
                         user_input = console.input("[bold blue]You:[/bold blue] ")
                         if not user_input.strip():
                             continue
-                        await _print_stream(agent_actor, cli_channel, cli_chat_id, user_input)
+                        await _print_stream(
+                            agent_actor, cli_channel, cli_chat_id, user_input
+                        )
                         sys.stdout.write("\n")  # blank line between exchanges
                     except KeyboardInterrupt:
                         console.print("\nGoodbye!")
@@ -359,27 +367,17 @@ def channels_status():
 
     # WhatsApp
     wa = config.channels.whatsapp
-    table.add_row(
-        "WhatsApp",
-        "✓" if wa.enabled else "✗",
-        wa.bridge_url
-    )
+    table.add_row("WhatsApp", "✓" if wa.enabled else "✗", wa.bridge_url)
 
     dc = config.channels.discord
-    table.add_row(
-        "Discord",
-        "✓" if dc.enabled else "✗",
-        dc.gateway_url
-    )
+    table.add_row("Discord", "✓" if dc.enabled else "✗", dc.gateway_url)
 
     # Telegram
     tg = config.channels.telegram
-    tg_config = f"token: {tg.token[:10]}..." if tg.token else "[dim]not configured[/dim]"
-    table.add_row(
-        "Telegram",
-        "✓" if tg.enabled else "✗",
-        tg_config
+    tg_config = (
+        f"token: {tg.token[:10]}..." if tg.token else "[dim]not configured[/dim]"
     )
+    table.add_row("Telegram", "✓" if tg.enabled else "✗", tg_config)
 
     console.print(table)
 
@@ -403,7 +401,9 @@ def _get_bridge_dir() -> Path:
 
     # Find source bridge: first check package data, then source dir
     pkg_bridge = Path(__file__).parent.parent / "bridge"  # nanobot/bridge (installed)
-    src_bridge = Path(__file__).parent.parent.parent / "bridge"  # repo root/bridge (dev)
+    src_bridge = (
+        Path(__file__).parent.parent.parent / "bridge"
+    )  # repo root/bridge (dev)
 
     source = None
     if (pkg_bridge / "package.json").exists():
@@ -422,15 +422,21 @@ def _get_bridge_dir() -> Path:
     user_bridge.parent.mkdir(parents=True, exist_ok=True)
     if user_bridge.exists():
         shutil.rmtree(user_bridge)
-    shutil.copytree(source, user_bridge, ignore=shutil.ignore_patterns("node_modules", "dist"))
+    shutil.copytree(
+        source, user_bridge, ignore=shutil.ignore_patterns("node_modules", "dist")
+    )
 
     # Install and build
     try:
         console.print("  Installing dependencies...")
-        subprocess.run(["npm", "install"], cwd=user_bridge, check=True, capture_output=True)
+        subprocess.run(
+            ["npm", "install"], cwd=user_bridge, check=True, capture_output=True
+        )
 
         console.print("  Building...")
-        subprocess.run(["npm", "run", "build"], cwd=user_bridge, check=True, capture_output=True)
+        subprocess.run(
+            ["npm", "run", "build"], cwd=user_bridge, check=True, capture_output=True
+        )
 
         console.print("[green]✓[/green] Bridge ready\n")
     except subprocess.CalledProcessError as e:
@@ -502,6 +508,7 @@ def cron_list(
     table.add_column("Next Run")
 
     import time
+
     for job in jobs:
         # Format schedule
         if job.schedule.kind == "every":
@@ -514,7 +521,9 @@ def cron_list(
         # Format next run
         next_run = ""
         if job.state.next_run_at_ms:
-            next_time = time.strftime("%Y-%m-%d %H:%M", time.localtime(job.state.next_run_at_ms / 1000))
+            next_time = time.strftime(
+                "%Y-%m-%d %H:%M", time.localtime(job.state.next_run_at_ms / 1000)
+            )
             next_run = next_time
 
         status = "[green]enabled[/green]" if job.enabled else "[dim]disabled[/dim]"
@@ -529,11 +538,17 @@ def cron_add(
     name: str = typer.Option(..., "--name", "-n", help="Job name"),
     message: str = typer.Option(..., "--message", "-m", help="Message for agent"),
     every: int = typer.Option(None, "--every", "-e", help="Run every N seconds"),
-    cron_expr: str = typer.Option(None, "--cron", "-c", help="Cron expression (e.g. '0 9 * * *')"),
+    cron_expr: str = typer.Option(
+        None, "--cron", "-c", help="Cron expression (e.g. '0 9 * * *')"
+    ),
     at: str = typer.Option(None, "--at", help="Run once at time (ISO format)"),
-    deliver: bool = typer.Option(False, "--deliver", "-d", help="Deliver response to channel"),
+    deliver: bool = typer.Option(
+        False, "--deliver", "-d", help="Deliver response to channel"
+    ),
     to: str = typer.Option(None, "--to", help="Recipient for delivery"),
-    channel: str = typer.Option(None, "--channel", help="Channel for delivery (e.g. 'telegram', 'whatsapp')"),
+    channel: str = typer.Option(
+        None, "--channel", help="Channel for delivery (e.g. 'telegram', 'whatsapp')"
+    ),
 ):
     """Add a scheduled job."""
     from nanobot.cron.types import CronSchedule
@@ -545,6 +560,7 @@ def cron_add(
         schedule = CronSchedule(kind="cron", expr=cron_expr)
     elif at:
         import datetime
+
         dt = datetime.datetime.fromisoformat(at)
         schedule = CronSchedule(kind="at", at_ms=int(dt.timestamp() * 1000))
     else:
@@ -618,7 +634,9 @@ def cron_run(
 
 @app.command()
 def status(
-    live: bool = typer.Option(False, "--live", "-l", help="Query running gateway for actor status"),
+    live: bool = typer.Option(
+        False, "--live", "-l", help="Query running gateway for actor status"
+    ),
 ):
     """Show nanobot status."""
     from nanobot.config.loader import load_config, get_config_path
@@ -629,8 +647,12 @@ def status(
 
     console.print(f"{__logo__} nanobot Status\n")
 
-    console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
-    console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
+    console.print(
+        f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}"
+    )
+    console.print(
+        f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}"
+    )
 
     if config_path.exists():
         console.print(f"Model: {config.agents.defaults.model}")
@@ -645,10 +667,16 @@ def status(
             "AiHubMix": bool(config.providers.aihubmix.api_key),
         }
         for name, has_key in providers_info.items():
-            console.print(f"{name} API: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+            console.print(
+                f"{name} API: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}"
+            )
 
         has_vllm = bool(config.providers.vllm.api_base)
-        vllm_status = f"[green]✓ {config.providers.vllm.api_base}[/green]" if has_vllm else "[dim]not set[/dim]"
+        vllm_status = (
+            f"[green]✓ {config.providers.vllm.api_base}[/green]"
+            if has_vllm
+            else "[dim]not set[/dim]"
+        )
         console.print(f"vLLM/Local: {vllm_status}")
 
     # Live actor status from Pulsing admin API
@@ -659,6 +687,7 @@ def status(
 
 def _show_live_actor_status():
     """Query the running Pulsing system for actor status."""
+
     async def _query():
         import pulsing as pul
         from pulsing.admin import list_actors, health_check

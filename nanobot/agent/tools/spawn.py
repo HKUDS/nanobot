@@ -1,6 +1,5 @@
 """Spawn tool for creating background subagents."""
 
-import asyncio
 from typing import Any
 
 from loguru import logger
@@ -49,14 +48,17 @@ class SpawnTool(Tool):
             "required": ["task"],
         }
 
-    async def execute(self, ctx: ToolContext, task: str, label: str | None = None, **kwargs: Any) -> str:
-        """Spawn a SubagentActor to execute the given task."""
+    async def execute(
+        self, ctx: ToolContext, task: str, label: str | None = None, **kwargs: Any
+    ) -> str:
+        """Spawn a SubagentActor — Pulsing on_start() auto-runs the task."""
         from nanobot.actor.subagent import SubagentActor
 
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
 
         try:
-            subagent = await SubagentActor.spawn(
+            # Just spawn — on_start() handles execution automatically
+            await SubagentActor.spawn(
                 config=self._config,
                 task=task,
                 label=display_label,
@@ -65,9 +67,6 @@ class SpawnTool(Tool):
                 agent_name=ctx.agent_name,
                 provider_name=self._provider_name,
             )
-
-            # Fire-and-forget: schedule run() in the background
-            asyncio.create_task(subagent.run())
 
             logger.info(f"Spawned SubagentActor: {display_label}")
             return f"Subagent [{display_label}] started. I'll notify you when it completes."

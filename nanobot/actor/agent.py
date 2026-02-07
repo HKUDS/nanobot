@@ -10,7 +10,12 @@ from nanobot.actor.tool_loop import AgentChunk, run_tool_loop, run_tool_loop_str
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.tools.base import ToolContext
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
+from nanobot.agent.tools.filesystem import (
+    ReadFileTool,
+    WriteFileTool,
+    EditFileTool,
+    ListDirTool,
+)
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
@@ -52,17 +57,42 @@ class AgentActor:
 
         self._register_default_tools()
 
+    # ================================================================
+    # Internal helpers
+    # ================================================================
+
     async def _get_provider(self):
         """Resolve the ProviderActor via Pulsing (lazy, cached)."""
         if self._provider is None:
             from nanobot.actor.provider import ProviderActor
+
             self._provider = await ProviderActor.resolve(self.provider_name)
             if not self.model:
                 self.model = self._provider.get_default_model()
         return self._provider
 
-    def _make_ctx(self, channel: str, chat_id: str) -> ToolContext:
-        return ToolContext(channel=channel, chat_id=chat_id, agent_name="agent")
+    async def _prepare(
+        self, channel: str, chat_id: str, content: str, media: list[str] | None = None
+    ):
+        """Common preamble: session + provider + context + messages."""
+        session_key = f"{channel}:{chat_id}"
+        session = self.sessions.get_or_create(session_key)
+        provider = await self._get_provider()
+        ctx = ToolContext(channel=channel, chat_id=chat_id, agent_name="agent")
+        messages = self.context.build_messages(
+            history=session.get_history(),
+            current_message=content,
+            media=media,
+            channel=channel,
+            chat_id=chat_id,
+        )
+        return session, provider, ctx, messages
+
+    def _save_turn(self, session, user_content: str, assistant_content: str):
+        """Common epilogue: persist the turn to session."""
+        session.add_message("user", user_content)
+        session.add_message("assistant", assistant_content)
+        self.sessions.save(session)
 
     def _register_default_tools(self) -> None:
         allowed_dir = self.workspace if self.restrict_to_workspace else None
@@ -70,18 +100,22 @@ class AgentActor:
         self.tools.register(WriteFileTool(allowed_dir=allowed_dir))
         self.tools.register(EditFileTool(allowed_dir=allowed_dir))
         self.tools.register(ListDirTool(allowed_dir=allowed_dir))
-        self.tools.register(ExecTool(
-            working_dir=str(self.workspace),
-            timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.restrict_to_workspace,
-        ))
+        self.tools.register(
+            ExecTool(
+                working_dir=str(self.workspace),
+                timeout=self.exec_config.timeout,
+                restrict_to_workspace=self.restrict_to_workspace,
+            )
+        )
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool())
-        self.tools.register(SpawnTool(
-            config=self.config,
-            provider_name=self.provider_name,
-        ))
+        self.tools.register(
+            SpawnTool(
+                config=self.config,
+                provider_name=self.provider_name,
+            )
+        )
         self.tools.register(CronTool(scheduler_name=self.scheduler_name))
 
     # ================================================================
@@ -100,23 +134,12 @@ class AgentActor:
         if channel == "system":
             return await self._process_system_message(sender_id, chat_id, content)
 
-        preview = content[:80] + "..." if len(content) > 80 else content
-        logger.info(f"Processing message from {channel}:{sender_id}: {preview}")
-
-        session_key = f"{channel}:{chat_id}"
-        session = self.sessions.get_or_create(session_key)
-        provider = await self._get_provider()
-        ctx = self._make_ctx(channel, chat_id)
-
-        messages = self.context.build_messages(
-            history=session.get_history(),
-            current_message=content,
-            media=media,
-            channel=channel,
-            chat_id=chat_id,
+        logger.info(f"Processing from {channel}:{sender_id}: {content[:80]}")
+        session, provider, ctx, messages = await self._prepare(
+            channel, chat_id, content, media
         )
 
-        final_content = await run_tool_loop(
+        result = await run_tool_loop(
             provider=provider,
             tools=self.tools,
             messages=messages,
@@ -125,14 +148,9 @@ class AgentActor:
             max_iterations=self.max_iterations,
         )
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info(f"Response to {channel}:{sender_id}: {preview}")
-
-        session.add_message("user", content)
-        session.add_message("assistant", final_content)
-        self.sessions.save(session)
-
-        return final_content
+        logger.info(f"Response to {channel}:{sender_id}: {result[:120]}")
+        self._save_turn(session, content, result)
+        return result
 
     # ================================================================
     # Streaming entry point
@@ -147,20 +165,9 @@ class AgentActor:
         media: list[str] | None = None,
     ) -> AsyncIterator[AgentChunk]:
         """Process a message and yield streaming chunks."""
-        preview = content[:80] + "..." if len(content) > 80 else content
-        logger.info(f"Processing (stream) from {channel}:{sender_id}: {preview}")
-
-        session_key = f"{channel}:{chat_id}"
-        session = self.sessions.get_or_create(session_key)
-        provider = await self._get_provider()
-        ctx = self._make_ctx(channel, chat_id)
-
-        messages = self.context.build_messages(
-            history=session.get_history(),
-            current_message=content,
-            media=media,
-            channel=channel,
-            chat_id=chat_id,
+        logger.info(f"Processing (stream) from {channel}:{sender_id}: {content[:80]}")
+        session, provider, ctx, messages = await self._prepare(
+            channel, chat_id, content, media
         )
 
         full_text = ""
@@ -176,11 +183,11 @@ class AgentActor:
                 full_text += chunk.text
             yield chunk
 
-        final_content = full_text or "I've completed processing but have no response to give."
-
-        session.add_message("user", content)
-        session.add_message("assistant", final_content)
-        self.sessions.save(session)
+        self._save_turn(
+            session,
+            content,
+            full_text or "I've completed processing but have no response to give.",
+        )
 
     # ================================================================
     # Announce (subagent results)
@@ -198,7 +205,10 @@ class AgentActor:
         )
 
     async def _process_system_message(
-        self, sender_id: str, chat_id: str, content: str
+        self,
+        sender_id: str,
+        chat_id: str,
+        content: str,
     ) -> str:
         logger.info(f"Processing system message from {sender_id}")
 
@@ -207,19 +217,13 @@ class AgentActor:
         else:
             origin_channel, origin_chat_id = "cli", chat_id
 
-        session_key = f"{origin_channel}:{origin_chat_id}"
-        session = self.sessions.get_or_create(session_key)
-        provider = await self._get_provider()
-        ctx = self._make_ctx(origin_channel, origin_chat_id)
-
-        messages = self.context.build_messages(
-            history=session.get_history(),
-            current_message=content,
-            channel=origin_channel,
-            chat_id=origin_chat_id,
+        session, provider, ctx, messages = await self._prepare(
+            origin_channel,
+            origin_chat_id,
+            content,
         )
 
-        final_content = await run_tool_loop(
+        result = await run_tool_loop(
             provider=provider,
             tools=self.tools,
             messages=messages,
@@ -228,17 +232,16 @@ class AgentActor:
             max_iterations=self.max_iterations,
         )
 
-        session.add_message("user", f"[System: {sender_id}] {content}")
-        session.add_message("assistant", final_content)
-        self.sessions.save(session)
+        self._save_turn(session, f"[System: {sender_id}] {content}", result)
 
         # Point-to-point delivery
         if origin_channel != "cli":
             try:
                 from nanobot.actor.channel import ChannelActor
+
                 ch = await ChannelActor.resolve(f"channel.{origin_channel}")
-                await ch.send_text(origin_chat_id, final_content)
+                await ch.send_text(origin_chat_id, result)
             except Exception as e:
                 logger.error(f"Error sending announce to {origin_channel}: {e}")
 
-        return final_content
+        return result

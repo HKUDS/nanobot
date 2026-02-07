@@ -1,6 +1,5 @@
-"""LLM provider abstraction module."""
+"""LLM provider module — canonical home is now actor.provider."""
 
-from nanobot.providers.base import LLMProvider, LLMResponse
-from nanobot.providers.litellm_provider import LiteLLMProvider
+from nanobot.actor.provider import LLMResponse, ProviderActor
 
-__all__ = ["LLMProvider", "LLMResponse", "LiteLLMProvider"]
+__all__ = ["LLMResponse", "ProviderActor"]

@@ -1,5 +1,10 @@
-"""SubagentActor: Pulsing actor for background task execution."""
+"""SubagentActor: Pulsing actor for background task execution.
 
+Spawned by SpawnTool. Pulsing's ``on_start()`` lifecycle hook auto-runs
+the task — no manual ``asyncio.create_task()`` needed.
+"""
+
+import asyncio
 import uuid
 from typing import Any
 
@@ -19,8 +24,9 @@ class SubagentActor:
     """
     A lightweight background agent for a specific task.
 
-    Accepts ``Config`` — extracts what it needs internally.
-    Resolves ProviderActor and AgentActor via Pulsing name resolution.
+    Lifecycle is managed by Pulsing:
+    - ``on_start()`` fires automatically after ``spawn()``
+    - Task execution and result announcement happen without manual scheduling
     """
 
     def __init__(
@@ -49,27 +55,38 @@ class SubagentActor:
         self.task_id = str(uuid.uuid4())[:8]
         self.tools = self._build_tools()
 
+    # ── Pulsing lifecycle ───────────────────────────────────────
+
+    async def on_start(self, actor_id: Any = None) -> None:
+        """Pulsing lifecycle hook: auto-execute the task after spawn."""
+        asyncio.create_task(self._execute())
+
+    # ── Internal ────────────────────────────────────────────────
+
     def _build_tools(self) -> ToolRegistry:
         tools = ToolRegistry()
         allowed_dir = self.workspace if self.restrict_to_workspace else None
         tools.register(ReadFileTool(allowed_dir=allowed_dir))
         tools.register(WriteFileTool(allowed_dir=allowed_dir))
         tools.register(ListDirTool(allowed_dir=allowed_dir))
-        tools.register(ExecTool(
-            working_dir=str(self.workspace),
-            timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.restrict_to_workspace,
-        ))
+        tools.register(
+            ExecTool(
+                working_dir=str(self.workspace),
+                timeout=self.exec_config.timeout,
+                restrict_to_workspace=self.restrict_to_workspace,
+            )
+        )
         tools.register(WebSearchTool(api_key=self.brave_api_key))
         tools.register(WebFetchTool())
         return tools
 
-    async def run(self) -> str:
+    async def _execute(self) -> None:
         """Execute the task and announce the result."""
         logger.info(f"SubagentActor [{self.task_id}] starting: {self.label}")
 
         try:
             from nanobot.actor.provider import ProviderActor
+
             provider = await ProviderActor.resolve(self.provider_name)
             model = self.model or provider.get_default_model()
 
@@ -89,13 +106,10 @@ class SubagentActor:
 
             logger.info(f"SubagentActor [{self.task_id}] completed")
             await self._announce(result, "ok")
-            return result
 
         except Exception as e:
-            error_msg = f"Error: {str(e)}"
             logger.error(f"SubagentActor [{self.task_id}] failed: {e}")
-            await self._announce(error_msg, "error")
-            return error_msg
+            await self._announce(f"Error: {e}", "error")
 
     async def _announce(self, result: str, status: str) -> None:
         status_text = "completed successfully" if status == "ok" else "failed"
@@ -107,6 +121,7 @@ class SubagentActor:
 
         try:
             from nanobot.actor.agent import AgentActor
+
             agent = await AgentActor.resolve(self.agent_name)
             await agent.announce(
                 origin_channel=self.origin_channel,

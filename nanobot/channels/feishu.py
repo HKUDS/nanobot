@@ -21,6 +21,7 @@ try:
         Emoji,
         P2ImMessageReceiveV1,
     )
+
     FEISHU_AVAILABLE = True
 except ImportError:
     FEISHU_AVAILABLE = False
@@ -66,18 +67,22 @@ class FeishuChannel(BaseChannel):
         self._running = True
         self._loop = asyncio.get_running_loop()
 
-        self._client = lark.Client.builder() \
-            .app_id(self.config.app_id) \
-            .app_secret(self.config.app_secret) \
-            .log_level(lark.LogLevel.INFO) \
+        self._client = (
+            lark.Client.builder()
+            .app_id(self.config.app_id)
+            .app_secret(self.config.app_secret)
+            .log_level(lark.LogLevel.INFO)
             .build()
+        )
 
-        event_handler = lark.EventDispatcherHandler.builder(
-            self.config.encrypt_key or "",
-            self.config.verification_token or "",
-        ).register_p2_im_message_receive_v1(
-            self._on_message_sync
-        ).build()
+        event_handler = (
+            lark.EventDispatcherHandler.builder(
+                self.config.encrypt_key or "",
+                self.config.verification_token or "",
+            )
+            .register_p2_im_message_receive_v1(self._on_message_sync)
+            .build()
+        )
 
         self._ws_client = lark.ws.Client(
             self.config.app_id,
@@ -114,29 +119,38 @@ class FeishuChannel(BaseChannel):
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
         try:
-            request = CreateMessageReactionRequest.builder() \
-                .message_id(message_id) \
+            request = (
+                CreateMessageReactionRequest.builder()
+                .message_id(message_id)
                 .request_body(
                     CreateMessageReactionRequestBody.builder()
                     .reaction_type(Emoji.builder().emoji_type(emoji_type).build())
                     .build()
-                ).build()
+                )
+                .build()
+            )
 
             response = self._client.im.v1.message_reaction.create(request)
 
             if not response.success():
-                logger.warning(f"Failed to add reaction: code={response.code}, msg={response.msg}")
+                logger.warning(
+                    f"Failed to add reaction: code={response.code}, msg={response.msg}"
+                )
             else:
                 logger.debug(f"Added {emoji_type} reaction to message {message_id}")
         except Exception as e:
             logger.warning(f"Error adding reaction: {e}")
 
-    async def _add_reaction(self, message_id: str, emoji_type: str = "THUMBSUP") -> None:
+    async def _add_reaction(
+        self, message_id: str, emoji_type: str = "THUMBSUP"
+    ) -> None:
         """Add a reaction emoji to a message (non-blocking)."""
         if not self._client or not Emoji:
             return
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
+        await loop.run_in_executor(
+            None, self._add_reaction_sync, message_id, emoji_type
+        )
 
     async def send_text(self, chat_id: str, content: str) -> None:
         """Send a text message through Feishu."""
@@ -152,15 +166,18 @@ class FeishuChannel(BaseChannel):
 
             msg_content = json.dumps({"text": content})
 
-            request = CreateMessageRequest.builder() \
-                .receive_id_type(receive_id_type) \
+            request = (
+                CreateMessageRequest.builder()
+                .receive_id_type(receive_id_type)
                 .request_body(
                     CreateMessageRequestBody.builder()
                     .receive_id(chat_id)
                     .msg_type("text")
                     .content(msg_content)
                     .build()
-                ).build()
+                )
+                .build()
+            )
 
             response = self._client.im.v1.message.create(request)
 
