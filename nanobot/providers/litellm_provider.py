@@ -43,6 +43,8 @@ class LiteLLMProvider(LLMProvider):
             elif self.is_vllm:
                 # vLLM/custom endpoint - uses OpenAI-compatible API
                 os.environ["HOSTED_VLLM_API_KEY"] = api_key
+            elif "nanogpt" in default_model:
+                os.environ.setdefault("NANOGPT_API_KEY", api_key)
             elif "deepseek" in default_model:
                 os.environ.setdefault("DEEPSEEK_API_KEY", api_key)
             elif "anthropic" in default_model:
@@ -94,30 +96,37 @@ class LiteLLMProvider(LLMProvider):
         if self.is_openrouter and not model.startswith("openrouter/"):
             model = f"openrouter/{model}"
         
+
+        # For Nanogpt, ensure nanogpt/ prefix
+        if "nanogpt" in model.lower() and not model.startswith("nanogpt/"):
+            model = f"nanogpt/{model}"
+
         # For Zhipu/Z.ai, ensure prefix is present
         # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
         if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
             model.startswith("zhipu/") or 
             model.startswith("zai/") or 
-            model.startswith("openrouter/")
+            model.startswith("openrouter/") or
+            model.startswith("nanogpt/")
         ):
             model = f"zai/{model}"
 
         # For DashScope/Qwen, ensure dashscope/ prefix
         if ("qwen" in model.lower() or "dashscope" in model.lower()) and not (
             model.startswith("dashscope/") or
-            model.startswith("openrouter/")
+            model.startswith("openrouter/") or
+            model.startswith("nanogpt/")
         ):
             model = f"dashscope/{model}"
 
         # For Moonshot/Kimi, ensure moonshot/ prefix (before vLLM check)
         if ("moonshot" in model.lower() or "kimi" in model.lower()) and not (
-            model.startswith("moonshot/") or model.startswith("openrouter/")
+            model.startswith("moonshot/") or model.startswith("openrouter/") or model.startswith("nanogpt/")
         ):
             model = f"moonshot/{model}"
 
         # For Gemini, ensure gemini/ prefix if not already present
-        if "gemini" in model.lower() and not model.startswith("gemini/"):
+        if "gemini" in model.lower() and not (model.startswith("gemini/") or model.startswith("nanogpt/")):
             model = f"gemini/{model}"
 
 
