@@ -110,6 +110,7 @@ class WebFetchTool(Tool):
     
     async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
         from readability import Document
+        import lxml.etree
 
         max_chars = maxChars or self.max_chars
 
@@ -117,7 +118,7 @@ class WebFetchTool(Tool):
         is_valid, error_msg = _validate_url(url)
         if not is_valid:
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url})
-
+        
         try:
             async with httpx.AsyncClient(
                 follow_redirects=True,
@@ -134,12 +135,27 @@ class WebFetchTool(Tool):
                 text, extractor = json.dumps(r.json(), indent=2), "json"
             # HTML
             elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
-                doc = Document(r.text)
-                content = self._to_markdown(doc.summary()) if extractMode == "markdown" else _strip_tags(doc.summary())
-                text = f"# {doc.title()}\n\n{content}" if doc.title() else content
-                extractor = "readability"
-            else:
-                text, extractor = r.text, "raw"
+                # Check if response body is empty
+                if not r.text or not r.text.strip():
+                    return json.dumps({"error": "Empty HTML response from server", "url": url, "status": r.status_code})
+                
+                try:
+                    doc = Document(r.text)
+                    summary = doc.summary()
+                    
+                    # Check if summary is empty
+                    if not summary or not summary.strip():
+                        # Fallback to raw text if readability couldn't extract content
+                        text = _strip_tags(r.text)
+                        extractor = "readability_fallback"
+                    else:
+                        content = self._to_markdown(summary) if extractMode == "markdown" else _strip_tags(summary)
+                        text = f"# {doc.title()}\n\n{content}" if doc.title() else content
+                        extractor = "readability"
+                except lxml.etree.ParserError as e:
+                    # If readability fails to parse, fall back to raw text extraction
+                    text = _strip_tags(r.text)
+                    extractor = "raw_fallback"
             
             truncated = len(text) > max_chars
             if truncated:
