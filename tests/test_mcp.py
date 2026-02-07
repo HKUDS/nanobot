@@ -15,11 +15,11 @@ async def test_mcp_load():
     
     # Config matching the one in config.json for 'math'
     config = {
-        # "stdio_time": MCPToolConfig(
-        #     command="/home/sheng/uv_project/mcphub_p/.venv/bin/python",
-        #     args=["/home/sheng/uv_project/mcphub_p/mcp_server/python/stdio_time/server.py"],
-        #     transport="stdio"
-        # ),
+        "stdio_time": MCPToolConfig(
+            command="/home/sheng/uv_project/mcphub_p/.venv/bin/python",
+            args=["/home/sheng/uv_project/mcphub_p/mcp_server/python/stdio_time/server.py"],
+            transport="stdio"
+        ),
         "http_email": MCPToolConfig(
             url="http://172.20.77.183:3000/mcp/python_stdio_email",
             transport="http"
