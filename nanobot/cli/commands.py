@@ -207,6 +207,7 @@ def gateway(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         brave_api_key=config.tools.web.search.api_key or None,
+        zhipu_api_key=config.providers.zhipu.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
     )
@@ -315,6 +316,7 @@ def agent(
         provider=provider,
         workspace=config.workspace_path,
         brave_api_key=config.tools.web.search.api_key or None,
+        zhipu_api_key=config.providers.zhipu.api_key or None,
         exec_config=config.tools.exec,
     )
     

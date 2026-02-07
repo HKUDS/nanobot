@@ -18,6 +18,7 @@ from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.mcp import register_zhipu_mcp_tools
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
 
@@ -42,6 +43,7 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 20,
         brave_api_key: str | None = None,
+        zhipu_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
     ):
@@ -53,9 +55,10 @@ class AgentLoop:
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
+        self.zhipu_api_key = zhipu_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
-        
+
         self.context = ContextBuilder(workspace)
         self.sessions = SessionManager(workspace)
         self.tools = ToolRegistry()
@@ -67,7 +70,7 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
         )
-        
+
         self._running = False
         self._register_default_tools()
     
@@ -78,30 +81,38 @@ class AgentLoop:
         self.tools.register(WriteFileTool())
         self.tools.register(EditFileTool())
         self.tools.register(ListDirTool())
-        
+
         # Shell tool
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.exec_config.restrict_to_workspace,
         ))
-        
+
         # Web tools
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
-        
+
         # Message tool
         message_tool = MessageTool(send_callback=self.bus.publish_outbound)
         self.tools.register(message_tool)
-        
+
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
-        
+
         # Cron tool (for scheduling)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
-    
+
+        # MCP tools (Zhipu)
+        if self.zhipu_api_key:
+            try:
+                register_zhipu_mcp_tools(self.tools, self.zhipu_api_key)
+                logger.info("Zhipu MCP tools registered successfully")
+            except Exception as e:
+                logger.warning(f"Failed to register Zhipu MCP tools: {e}")
+
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
         self._running = True
