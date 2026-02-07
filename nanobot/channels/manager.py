@@ -77,6 +77,17 @@ class ChannelManager:
                 logger.info("Feishu channel enabled")
             except ImportError as e:
                 logger.warning(f"Feishu channel not available: {e}")
+
+        # iMessage channel
+        if self.config.channels.imsg.enabled:
+            try:
+                from nanobot.channels.imsg import ImsgChannel
+                self.channels["imsg"] = ImsgChannel(
+                    self.config.channels.imsg, self.bus
+                )
+                logger.info("iMessage channel enabled")
+            except ImportError as e:
+                logger.warning(f"iMessage channel not available: {e}")
     
     async def start_all(self) -> None:
         """Start WhatsApp channel and the outbound dispatcher."""

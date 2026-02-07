@@ -119,6 +119,8 @@ class LiteLLMProvider(LLMProvider):
         elif self.is_aihubmix:
             model = f"openai/{model.split('/')[-1]}"
         elif self.is_vllm:
+            # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
+            # Convert openai/ prefix to hosted_vllm/ if user specified it
             model = f"hosted_vllm/{model}"
         
         # kimi-k2.5 only supports temperature=1.0
