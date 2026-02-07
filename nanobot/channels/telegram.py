@@ -19,61 +19,113 @@ def _markdown_to_telegram_html(text: str) -> str:
     """
     if not text:
         return ""
-    
+
     # 1. Extract and protect code blocks (preserve content from other processing)
     code_blocks: list[str] = []
     def save_code_block(m: re.Match) -> str:
         code_blocks.append(m.group(1))
         return f"\x00CB{len(code_blocks) - 1}\x00"
-    
+
     text = re.sub(r'```[\w]*\n?([\s\S]*?)```', save_code_block, text)
-    
+
     # 2. Extract and protect inline code
     inline_codes: list[str] = []
     def save_inline_code(m: re.Match) -> str:
         inline_codes.append(m.group(1))
         return f"\x00IC{len(inline_codes) - 1}\x00"
-    
+
     text = re.sub(r'`([^`]+)`', save_inline_code, text)
-    
+
     # 3. Headers # Title -> just the title text
     text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
-    
+
     # 4. Blockquotes > text -> just the text (before HTML escaping)
     text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
-    
+
     # 5. Escape HTML special characters
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    
+
     # 6. Links [text](url) - must be before bold/italic to handle nested cases
     text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
-    
+
     # 7. Bold **text** or __text__
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
-    
+
     # 8. Italic _text_ (avoid matching inside words like some_var_name)
     text = re.sub(r'(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])', r'<i>\1</i>', text)
-    
+
     # 9. Strikethrough ~~text~~
     text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)
-    
+
     # 10. Bullet lists - item -> • item
     text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
-    
+
     # 11. Restore inline code with HTML tags
     for i, code in enumerate(inline_codes):
         # Escape HTML in code content
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00IC{i}\x00", f"<code>{escaped}</code>")
-    
+
     # 12. Restore code blocks with HTML tags
     for i, code in enumerate(code_blocks):
         # Escape HTML in code content
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
-    
+
     return text
+
+
+def _chunk_message(text: str, max_length: int = 4096) -> list[str]:
+    """
+    Split a message into chunks that fit within Telegram's character limit.
+
+    Tries to split on natural boundaries (newlines, spaces) to avoid breaking
+    words or sentences mid-way.
+
+    Args:
+        text: The text to chunk
+        max_length: Maximum length per chunk (default 4096 for Telegram)
+
+    Returns:
+        List of text chunks, each within the max_length limit
+    """
+    if len(text) <= max_length:
+        return [text]
+
+    chunks = []
+    remaining = text
+
+    while len(remaining) > max_length:
+        # Take a chunk up to max_length
+        chunk = remaining[:max_length]
+
+        # Try to split on paragraph boundary (double newline) first
+        last_paragraph = chunk.rfind('\n\n')
+        if last_paragraph > max_length * 0.5:
+            split_at = last_paragraph + 2
+        else:
+            # Try to split on single newline
+            last_newline = chunk.rfind('\n')
+            if last_newline > max_length * 0.5:
+                split_at = last_newline + 1
+            else:
+                # Try to split on space to avoid breaking words
+                last_space = chunk.rfind(' ')
+                if last_space > max_length * 0.5:
+                    split_at = last_space + 1
+                else:
+                    # Last resort: split at max_length
+                    split_at = max_length
+
+        chunks.append(remaining[:split_at].rstrip())
+        remaining = remaining[split_at:].lstrip()
+
+    # Add any remaining text
+    if remaining:
+        chunks.append(remaining)
+
+    return chunks
 
 
 class TelegramChannel(BaseChannel):
@@ -156,29 +208,44 @@ class TelegramChannel(BaseChannel):
         if not self._app:
             logger.warning("Telegram bot not running")
             return
-        
+
         try:
             # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
             # Convert markdown to Telegram HTML
             html_content = _markdown_to_telegram_html(msg.content)
-            await self._app.bot.send_message(
-                chat_id=chat_id,
-                text=html_content,
-                parse_mode="HTML"
-            )
+
+            # Chunk the message if it's too long
+            chunks = _chunk_message(html_content)
+
+            # Send each chunk as a separate message
+            for i, chunk in enumerate(chunks):
+                try:
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=chunk,
+                        parse_mode="HTML"
+                    )
+                    # Log if message was split into multiple parts
+                    if len(chunks) > 1:
+                        logger.debug(f"Sent chunk {i+1}/{len(chunks)} to chat {chat_id}")
+                except Exception as e:
+                    # Fallback to plain text for this chunk if HTML parsing fails
+                    logger.warning(f"HTML parse failed for chunk {i+1}, falling back to plain text: {e}")
+                    try:
+                        # Chunk the original content for fallback
+                        plain_chunks = _chunk_message(msg.content)
+                        await self._app.bot.send_message(
+                            chat_id=chat_id,
+                            text=plain_chunks[i] if i < len(plain_chunks) else chunk
+                        )
+                    except Exception as e2:
+                        logger.error(f"Error sending Telegram message chunk {i+1}: {e2}")
+
         except ValueError:
             logger.error(f"Invalid chat_id: {msg.chat_id}")
         except Exception as e:
-            # Fallback to plain text if HTML parsing fails
-            logger.warning(f"HTML parse failed, falling back to plain text: {e}")
-            try:
-                await self._app.bot.send_message(
-                    chat_id=int(msg.chat_id),
-                    text=msg.content
-                )
-            except Exception as e2:
-                logger.error(f"Error sending Telegram message: {e2}")
+            logger.error(f"Error preparing Telegram message: {e}")
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
