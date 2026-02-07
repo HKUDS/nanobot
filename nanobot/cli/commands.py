@@ -652,15 +652,17 @@ def status():
         
         # Check API keys
         has_openrouter = bool(config.providers.openrouter.api_key)
+        has_deepseek = bool(config.providers.deepseek.api_key)
         has_anthropic = bool(config.providers.anthropic.api_key)
         has_openai = bool(config.providers.openai.api_key)
         has_gemini = bool(config.providers.gemini.api_key)
         has_vllm = bool(config.providers.vllm.api_base)
         
         console.print(f"OpenRouter API: {'[green]✓[/green]' if has_openrouter else '[dim]not set[/dim]'}")
-        console.print(f"Anthropic API: {'[green]✓[/green]' if has_anthropic else '[dim]not set[/dim]'}")
-        console.print(f"OpenAI API: {'[green]✓[/green]' if has_openai else '[dim]not set[/dim]'}")
-        console.print(f"Gemini API: {'[green]✓[/green]' if has_gemini else '[dim]not set[/dim]'}")
+        console.print(f"DeepSeek API:   {'[green]✓[/green]' if has_deepseek else '[dim]not set[/dim]'}")
+        console.print(f"Anthropic API:  {'[green]✓[/green]' if has_anthropic else '[dim]not set[/dim]'}")
+        console.print(f"OpenAI API:     {'[green]✓[/green]' if has_openai else '[dim]not set[/dim]'}")
+        console.print(f"Gemini API:     {'[green]✓[/green]' if has_gemini else '[dim]not set[/dim]'}")
         vllm_status = f"[green]✓ {config.providers.vllm.api_base}[/green]" if has_vllm else "[dim]not set[/dim]"
         console.print(f"vLLM/Local: {vllm_status}")
 
