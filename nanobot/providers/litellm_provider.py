@@ -48,9 +48,6 @@ class LiteLLMProvider(LLMProvider):
             elif self.is_aihubmix:
                 # AiHubMix gateway - OpenAI-compatible
                 os.environ["OPENAI_API_KEY"] = api_key
-            elif self.is_vllm:
-                # vLLM/custom endpoint - uses OpenAI-compatible API
-                os.environ["HOSTED_VLLM_API_KEY"] = api_key
             elif "deepseek" in default_model:
                 os.environ.setdefault("DEEPSEEK_API_KEY", api_key)
             elif "anthropic" in default_model:
@@ -60,8 +57,11 @@ class LiteLLMProvider(LLMProvider):
             elif "gemini" in default_model.lower():
                 os.environ.setdefault("GEMINI_API_KEY", api_key)
             elif "zhipu" in default_model or "glm" in default_model or "zai" in default_model:
-                os.environ.setdefault("ZAI_API_KEY", api_key)
-                os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
+                os.environ["ZAI_API_KEY"] = api_key
+                os.environ["ZHIPUAI_API_KEY"] = api_key
+                if api_base:
+                    os.environ["ZAI_API_BASE"] = api_base
+                    os.environ["ZHIPUAI_API_BASE"] = api_base
             elif "dashscope" in default_model or "qwen" in default_model.lower():
                 os.environ.setdefault("DASHSCOPE_API_KEY", api_key)
             elif "groq" in default_model:
@@ -69,9 +69,9 @@ class LiteLLMProvider(LLMProvider):
             elif "moonshot" in default_model or "kimi" in default_model:
                 os.environ.setdefault("MOONSHOT_API_KEY", api_key)
                 os.environ.setdefault("MOONSHOT_API_BASE", api_base or "https://api.moonshot.cn/v1")
-        
-        if api_base:
-            litellm.api_base = api_base
+            elif self.is_vllm:
+                # vLLM/custom endpoint - uses OpenAI-compatible API
+                os.environ["HOSTED_VLLM_API_KEY"] = api_key
         
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
