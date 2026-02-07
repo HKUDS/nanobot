@@ -1,6 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
+
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
@@ -117,12 +118,12 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
-    
+
     @property
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
-    
+
     def _match_provider(self, model: str | None = None) -> ProviderConfig | None:
         """Match a provider based on model name."""
         model = (model or self.agents.defaults.model).lower()
@@ -145,6 +146,11 @@ class Config(BaseSettings):
             "kimi": self.providers.moonshot,
             "vllm": self.providers.vllm,
         }
+        # Check prefix match first (e.g., "openrouter/")
+        for keyword, provider in providers.items():
+            if model.startswith(f"{keyword}/") and provider.api_key:
+                return provider
+        # Fallback to substring match
         for keyword, provider in providers.items():
             if keyword in model and provider.api_key:
                 return provider
@@ -167,18 +173,17 @@ class Config(BaseSettings):
             if provider.api_key:
                 return provider.api_key
         return None
-    
+
     def get_api_base(self, model: str | None = None) -> str | None:
         """Get API base URL based on model name."""
-        model = (model or self.agents.defaults.model).lower()
-        if "openrouter" in model:
-            return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
-        if any(k in model for k in ("zhipu", "glm", "zai")):
-            return self.providers.zhipu.api_base
-        if "vllm" in model:
-            return self.providers.vllm.api_base
+        matched = self._match_provider(model)
+        if matched and matched.api_base:
+            return matched.api_base
+        # Default for openrouter
+        if "openrouter" in (model or self.agents.defaults.model).lower():
+            return "https://openrouter.ai/api/v1"
         return None
-    
+
     class Config:
         env_prefix = "NANOBOT_"
         env_nested_delimiter = "__"
