@@ -78,6 +78,7 @@ class ProvidersConfig(BaseModel):
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
+    nvidia_nim: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -141,6 +142,8 @@ class Config(BaseSettings):
             "moonshot": self.providers.moonshot,
             "kimi": self.providers.moonshot,
             "vllm": self.providers.vllm,
+            "nvidia": self.providers.nvidia_nim,
+            "nim": self.providers.nvidia_nim,
         }
         for keyword, provider in providers.items():
             if keyword in model and provider.api_key:
@@ -159,7 +162,7 @@ class Config(BaseSettings):
             self.providers.anthropic, self.providers.openai,
             self.providers.gemini, self.providers.zhipu,
             self.providers.moonshot, self.providers.vllm,
-            self.providers.groq,
+            self.providers.groq, self.providers.nvidia_nim,
         ]:
             if provider.api_key:
                 return provider.api_key
@@ -172,6 +175,8 @@ class Config(BaseSettings):
             return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
         if any(k in model for k in ("zhipu", "glm", "zai")):
             return self.providers.zhipu.api_base
+        if "nvidia" in model or "nim" in model:
+            return self.providers.nvidia_nim.api_base or "https://integrate.api.nvidia.com/v1"
         if "vllm" in model:
             return self.providers.vllm.api_base
         return None

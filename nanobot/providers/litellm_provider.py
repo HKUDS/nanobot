@@ -32,14 +32,25 @@ class LiteLLMProvider(LLMProvider):
             (api_base and "openrouter" in api_base)
         )
         
+        # Detect NVIDIA NIM by api_key prefix or explicit api_base
+        self.is_nvidia_nim = (
+            (api_key and api_key.startswith("nvapi-")) or
+            (api_base and "nvidia" in api_base.lower())
+        )
+        
         # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        self.is_vllm = bool(api_base) and not self.is_openrouter and not self.is_nvidia_nim
         
         # Configure LiteLLM based on provider
         if api_key:
             if self.is_openrouter:
                 # OpenRouter mode - set key
                 os.environ["OPENROUTER_API_KEY"] = api_key
+            elif self.is_nvidia_nim:
+                # NVIDIA NIM mode - set key and optional base
+                os.environ["NVIDIA_NIM_API_KEY"] = api_key
+                if api_base:
+                    os.environ["NVIDIA_NIM_API_BASE"] = api_base
             elif self.is_vllm:
                 # vLLM/custom endpoint - uses OpenAI-compatible API
                 os.environ["HOSTED_VLLM_API_KEY"] = api_key
@@ -92,12 +103,18 @@ class LiteLLMProvider(LLMProvider):
         if self.is_openrouter and not model.startswith("openrouter/"):
             model = f"openrouter/{model}"
         
+        # For NVIDIA NIM, prefix model name if not already prefixed
+        if self.is_nvidia_nim and not model.startswith("nvidia_nim/"):
+            model = f"nvidia_nim/{model}"
+        
         # For Zhipu/Z.ai, ensure prefix is present
         # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
+        # Skip if using via NVIDIA NIM (nvidia_nim/z-ai/glm4.7)
         if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
             model.startswith("zhipu/") or 
             model.startswith("zai/") or 
-            model.startswith("openrouter/")
+            model.startswith("openrouter/") or
+            model.startswith("nvidia_nim/")
         ):
             model = f"zai/{model}"
 
