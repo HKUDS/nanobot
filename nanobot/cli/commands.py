@@ -190,7 +190,23 @@ def gateway(
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     
     config = load_config()
+    
+    # Create onboarding service
+    from nanobot.services.onboarding import OnboardingService
+    onboarding_service = OnboardingService(data_dir=str(get_data_dir()))
+    
     bus = MessageBus()
+    
+    # Subscribe to onboarding response handling
+    async def handle_onboarding_response(event):
+        if hasattr(event, 'content') and event.content:
+            parsed = onboarding_service.parse_response(event.content)
+            if parsed:
+                onboarding_service.update_user_file(parsed)
+                onboarding_service.update_soul_file(parsed)
+                await onboarding_service.mark_complete()
+    bus.subscribe("inbound.message", handle_onboarding_response)
+    
     provider = _make_provider(config)
     
     # Create cron service first (callback set after agent creation)
@@ -259,6 +275,24 @@ def gateway(
         try:
             await cron.start()
             await heartbeat.start()
+            
+            # Check for first run and send onboarding message
+            async def send_onboarding_message(channel_name: str, chat_id: str, message: str):
+                from nanobot.bus.events import OutboundMessage
+                await bus.publish_outbound(OutboundMessage(
+                    channel=channel_name,
+                    chat_id=chat_id,
+                    content=message
+                ))
+            
+            if onboarding_service.is_first_run() and channels.enabled_channels:
+                first_channel = channels.enabled_channels[0]
+                await onboarding_service.check_and_notify(
+                    channel_name=first_channel,
+                    chat_id="general",
+                    send_message_callback=send_onboarding_message
+                )
+            
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
