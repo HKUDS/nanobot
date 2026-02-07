@@ -66,15 +66,18 @@ class GoogleCalendarTool(Tool):
             "required": ["action"]
         }
 
-    async def execute(self, action: str, **kwargs: Any) -> str:
+    async def execute(self, **kwargs: Any) -> str:
         if not self.config.enabled:
             return "Google Calendar tool is disabled in configuration."
 
+        action = kwargs.get("action")
+        if not action:
+            return "Missing required parameter: 'action'."
         creds = self._get_credentials()
         if not creds:
             return (
                 f"Authentication required. Please:\n"
-                f"1. Place 'credentials.json' (from Google Cloud Console) in {self.config.credentials_path}\n"
+                f"1. Place the OAuth client secrets JSON (downloaded from Google Cloud Console) at {self.config.credentials_path}\n"
                 f"2. Run the setup script to generate the token (or ensure 'token.json' exists at {self.config.token_path})."
             )
 
