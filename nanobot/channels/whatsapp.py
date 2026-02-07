@@ -100,21 +100,25 @@ class WhatsAppChannel(BaseChannel):
         
         if msg_type == "message":
             # Incoming message from WhatsApp
+            # Deprecated by whatsapp: old phone number style typically: <phone>@s.whatspp.net
+            pn = data.get("pn", "")
+            # New LID sytle typically: 
             sender = data.get("sender", "")
             content = data.get("content", "")
             
-            # sender is typically: <phone>@s.whatsapp.net
-            # Extract just the phone number as chat_id
-            chat_id = sender.split("@")[0] if "@" in sender else sender
+            # Extract just the phone number or lid as chat_id
+            user_id = pn if pn else sender
+            sender_id = user_id.split("@")[0] if "@" in user_id else user_id
+            logger.info(f"Sender {sender}")
             
             # Handle voice transcription if it's a voice message
             if content == "[Voice Message]":
-                logger.info(f"Voice message received from {chat_id}, but direct download from bridge is not yet supported.")
+                logger.info(f"Voice message received from {sender_id}, but direct download from bridge is not yet supported.")
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
             
             await self._handle_message(
-                sender_id=chat_id,
-                chat_id=sender,  # Use full JID for replies
+                sender_id=sender_id,
+                chat_id=sender,  # Use full LID for replies
                 content=content,
                 metadata={
                     "message_id": data.get("id"),
