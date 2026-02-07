@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+from urllib.parse import urlparse
 
 from loguru import logger
 from telegram import Update
@@ -104,7 +105,21 @@ class TelegramChannel(BaseChannel):
         # Configure request with proxy if enabled
         request = HTTPXRequest()
         if self.config.proxy:
-            logger.info(f"Using proxy for Telegram: {self.config.proxy}")
+            # Redact credentials for logging
+            safe_proxy = self.config.proxy
+            try:
+                p = urlparse(self.config.proxy)
+                if p.password:
+                    # Reconstruct netloc with redacted password
+                    user = f"{p.username}:" if p.username else ""
+                    netloc = f"{user}****@{p.hostname}"
+                    if p.port:
+                        netloc += f":{p.port}"
+                    safe_proxy = p._replace(netloc=netloc).geturl()
+            except Exception:
+                safe_proxy = "********"
+                
+            logger.info(f"Using proxy for Telegram: {safe_proxy}")
             request = HTTPXRequest(proxy=self.config.proxy)
 
         # Build the application
