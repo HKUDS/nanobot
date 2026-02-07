@@ -73,6 +73,7 @@ class ProvidersConfig(BaseModel):
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
+    qwen: ProviderConfig = Field(default_factory=ProviderConfig)
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -129,6 +130,7 @@ class Config(BaseSettings):
         providers = {
             "openrouter": self.providers.openrouter,
             "deepseek": self.providers.deepseek,
+            "qwen": self.providers.qwen,
             "anthropic": self.providers.anthropic,
             "claude": self.providers.anthropic,
             "openai": self.providers.openai,
@@ -153,27 +155,14 @@ class Config(BaseSettings):
         matched = self._match_provider(model)
         if matched:
             return matched.api_key
-        # Fallback: return first available key
-        for provider in [
-            self.providers.openrouter, self.providers.deepseek,
-            self.providers.anthropic, self.providers.openai,
-            self.providers.gemini, self.providers.zhipu,
-            self.providers.moonshot, self.providers.vllm,
-            self.providers.groq,
-        ]:
-            if provider.api_key:
-                return provider.api_key
         return None
     
     def get_api_base(self, model: str | None = None) -> str | None:
         """Get API base URL based on model name."""
-        model = (model or self.agents.defaults.model).lower()
-        if "openrouter" in model:
-            return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
-        if any(k in model for k in ("zhipu", "glm", "zai")):
-            return self.providers.zhipu.api_base
-        if "vllm" in model:
-            return self.providers.vllm.api_base
+        # Try matching by model name first
+        matched = self._match_provider(model)
+        if matched:
+            return matched.api_base
         return None
     
     class Config:

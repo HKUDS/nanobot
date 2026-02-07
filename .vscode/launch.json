@@ -1,0 +1,228 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Agent: 交互模式",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "nanobot.cli.commands",
+      "args": [
+        "agent"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Agent: 单条消息测试",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "nanobot.cli.commands",
+      "args": [
+        "agent",
+        "-m",
+        "你好，请介绍一下自己"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Gateway: 启动网关服务",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "nanobot.cli.commands",
+      "args": [
+        "gateway",
+        "--port",
+        "18790"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Gateway: 启动网关(详细日志)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "nanobot.cli.commands",
+      "args": [
+        "gateway",
+        "--port",
+        "18790",
+        "--verbose"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Agent: 自定义会话ID",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "nanobot.cli.commands",
+      "args": [
+        "agent",
+        "-s",
+        "test-session",
+        "-m",
+        "记住我的名字是张三"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Onboard: 初始化配置",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "nanobot.cli.commands",
+      "args": [
+        "onboard"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Config: 查看配置",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "nanobot.cli.commands",
+      "args": [
+        "config"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Channels: 查看通道状态",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "nanobot.cli.commands",
+      "args": [
+        "channels",
+        "status"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Cron: 列出定时任务",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "nanobot.cli.commands",
+      "args": [
+        "cron",
+        "list"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Cron: 添加任务(示例)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "nanobot.cli.commands",
+      "args": [
+        "cron",
+        "add",
+        "0 9 * * *",
+        "每天早上9点提醒我查看邮件"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Tests: 运行所有测试",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/",
+        "-v"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Tests: 运行单个测试文件",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests/test_tool_validation.py",
+        "-v"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Python: 当前文件",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Python: 模块运行 (python -m nanobot)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "nanobot",
+      "args": [],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    }
+  ]
+}

@@ -33,18 +33,20 @@ class LiteLLMProvider(LLMProvider):
         )
         
         # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        self.is_vllm = False; # bool(api_base) and not self.is_openrouter
         
         # Configure LiteLLM based on provider
         if api_key:
             if self.is_openrouter:
                 # OpenRouter mode - set key
                 os.environ["OPENROUTER_API_KEY"] = api_key
+            elif "deepseek" in default_model:
+                os.environ.setdefault("DEEPSEEK_API_KEY", api_key)
+            elif "dashscope" in default_model:
+                os.environ.setdefault("DASHSCOPE_API_KEY", api_key)
             elif self.is_vllm:
                 # vLLM/custom endpoint - uses OpenAI-compatible API
                 os.environ["HOSTED_VLLM_API_KEY"] = api_key
-            elif "deepseek" in default_model:
-                os.environ.setdefault("DEEPSEEK_API_KEY", api_key)
             elif "anthropic" in default_model:
                 os.environ.setdefault("ANTHROPIC_API_KEY", api_key)
             elif "openai" in default_model or "gpt" in default_model:
