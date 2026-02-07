@@ -89,8 +89,15 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning(f"DingTalk channel not available: {e}")
 
+    async def _start_channel(self, name: str, channel: BaseChannel) -> None:
+        """Start a channel and log any exceptions."""
+        try:
+            await channel.start()
+        except Exception as e:
+            logger.error(f"Failed to start channel {name}: {e}")
+
     async def start_all(self) -> None:
-        """Start WhatsApp channel and the outbound dispatcher."""
+        """Start all channels and the outbound dispatcher."""
         if not self.channels:
             logger.warning("No channels enabled")
             return
@@ -98,11 +105,11 @@ class ChannelManager:
         # Start outbound dispatcher
         self._dispatch_task = asyncio.create_task(self._dispatch_outbound())
         
-        # Start WhatsApp channel
+        # Start channels
         tasks = []
         for name, channel in self.channels.items():
             logger.info(f"Starting {name} channel...")
-            tasks.append(asyncio.create_task(channel.start()))
+            tasks.append(asyncio.create_task(self._start_channel(name, channel)))
         
         # Wait for all to complete (they should run forever)
         await asyncio.gather(*tasks, return_exceptions=True)
