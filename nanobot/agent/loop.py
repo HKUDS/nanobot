@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import os
+import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -320,7 +322,7 @@ class AgentLoop:
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
-                                else ("cli", msg.chat_id))
+                                 else ("cli", msg.chat_id))
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
@@ -335,6 +337,17 @@ class AgentLoop:
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
+        
+        # Command: /restart
+        if msg.content.strip() == "/restart":
+            logger.info(f"Restart command received from {msg.sender_id}")
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Restarting... wait a few seconds"
+            ))
+            await asyncio.sleep(2)  # Wait for message delivery
+            os.execvp(sys.argv[0], sys.argv)
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
