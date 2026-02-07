@@ -39,12 +39,20 @@ class DiscordConfig(BaseModel):
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 
 
+class ImsgConfig(BaseModel):
+    """iMessage channel configuration."""
+    enabled: bool = False
+    # No auth needed for local CLI, but maybe allow_from
+    allow_from: list[str] = Field(default_factory=list)  # Allowed handles/numbers
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    imsg: ImsgConfig = Field(default_factory=ImsgConfig)
 
 
 class AgentDefaults(BaseModel):
@@ -81,6 +89,7 @@ class ProvidersConfig(BaseModel):
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
+    aixtb: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -140,13 +149,14 @@ class Config(BaseSettings):
             "zhipu": p.zhipu, "glm": p.zhipu, "zai": p.zhipu,
             "dashscope": p.dashscope, "qwen": p.dashscope,
             "groq": p.groq, "moonshot": p.moonshot, "kimi": p.moonshot, "vllm": p.vllm,
+            "aixtb": p.aixtb,
         }
         for kw, provider in keyword_map.items():
             if kw in model and provider.api_key:
                 return provider
         # Fallback: gateways first (can serve any model), then specific providers
         all_providers = [p.openrouter, p.aihubmix, p.anthropic, p.openai, p.deepseek,
-                         p.gemini, p.zhipu, p.dashscope, p.moonshot, p.vllm, p.groq]
+                         p.gemini, p.zhipu, p.dashscope, p.moonshot, p.vllm, p.groq, p.aixtb]
         return next((pr for pr in all_providers if pr.api_key), None)
 
     def get_api_key(self, model: str | None = None) -> str | None:

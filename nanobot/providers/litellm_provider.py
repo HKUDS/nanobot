@@ -69,6 +69,9 @@ class LiteLLMProvider(LLMProvider):
             elif "moonshot" in default_model or "kimi" in default_model:
                 os.environ.setdefault("MOONSHOT_API_KEY", api_key)
                 os.environ.setdefault("MOONSHOT_API_BASE", api_base or "https://api.moonshot.cn/v1")
+            elif "aixtb" in default_model:
+                os.environ.setdefault("OPENAI_API_KEY", api_key)
+                os.environ.setdefault("OPENAI_API_BASE", api_base)
         
         if api_base:
             litellm.api_base = api_base
@@ -118,8 +121,18 @@ class LiteLLMProvider(LLMProvider):
             model = f"openrouter/{model}"
         elif self.is_aihubmix:
             model = f"openai/{model.split('/')[-1]}"
-        elif self.is_vllm:
+        elif self.is_vllm and "aixtb" not in model:
+            # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
+            # Convert openai/ prefix to hosted_vllm/ if user specified it
+            # EXCEPTION: aixtb uses openai/ prefix, not hosted_vllm/
             model = f"hosted_vllm/{model}"
+        
+        # For aixtb, ensure openai/ prefix if not present (generic OpenAI-compatible)
+        if "aixtb" in model and not model.startswith("openai/"):
+            # If model is exactly "aixtb/model-router", upstream likely expects "model-router"
+            # We strip the "aixtb/" prefix for the actual API call
+            api_model = model.replace("aixtb/", "")
+            model = f"openai/{api_model}"
         
         # kimi-k2.5 only supports temperature=1.0
         if "kimi-k2.5" in model.lower():
