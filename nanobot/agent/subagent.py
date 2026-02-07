@@ -21,6 +21,12 @@ from nanobot.agent.tools.system import (
     SystemInfoTool,
     ScreenshotTool
 )
+from nanobot.agent.tools.spotify.playback import (
+    SpotifyPlayTool,
+    SpotifyPauseTool,
+    SpotifyNextTool,
+    SpotifyPreviousTool,
+)
 
 class SubagentManager:
     """
@@ -114,10 +120,14 @@ class SubagentManager:
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
-            self.tools.register(OpenApplicationTool())
-            self.tools.register(CloseApplicationTool())
-            self.tools.register(SystemInfoTool())
-            self.tools.register(ScreenshotTool())
+            tools.register(OpenApplicationTool())
+            tools.register(CloseApplicationTool())
+            tools.register(SystemInfoTool())
+            tools.register(ScreenshotTool())
+            tools.register(SpotifyPlayTool())
+            tools.register(SpotifyPauseTool())
+            tools.register(SpotifyNextTool())
+            tools.register(SpotifyPreviousTool())
             
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)

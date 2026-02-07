@@ -12,7 +12,23 @@ from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool, DeleteFileTool, MoveFileTool, CopyFileTool, FileInfoTool, SearchFilesTool
+from nanobot.agent.tools.filesystem import (
+    ReadFileTool,
+    WriteFileTool,
+    EditFileTool,
+    ListDirTool,
+    DeleteFileTool,
+    MoveFileTool,
+    CopyFileTool,
+    FileInfoTool,
+    SearchFilesTool
+)
+from nanobot.agent.tools.spotify.playback import (
+    SpotifyPlayTool,
+    SpotifyPauseTool,
+    SpotifyNextTool,
+    SpotifyPreviousTool,
+)
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
@@ -76,17 +92,16 @@ class AgentLoop:
     
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        # File tools (restrict to workspace if configured)
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
-        self.tools.register(ReadFileTool(allowed_dir=allowed_dir))
-        self.tools.register(WriteFileTool(allowed_dir=allowed_dir))
-        self.tools.register(EditFileTool(allowed_dir=allowed_dir))
-        self.tools.register(ListDirTool(allowed_dir=allowed_dir))
-        self.tools.register(MoveFileTool(allowed_dir=allowed_dir))
-        self.tools.register(DeleteFileTool(allowed_dir=allowed_dir))
-        self.tools.register(CopyFileTool(allowed_dir=allowed_dir))
-        self.tools.register(FileInfoTool(allowed_dir=allowed_dir))
-        self.tools.register(SearchFilesTool(allowed_dir=allowed_dir))
+        # File tools
+        self.tools.register(ReadFileTool())
+        self.tools.register(WriteFileTool())
+        self.tools.register(EditFileTool())
+        self.tools.register(ListDirTool())
+        self.tools.register(DeleteFileTool())
+        self.tools.register(CopyFileTool())
+        self.tools.register(MoveFileTool())
+        self.tools.register(FileInfoTool())
+        self.tools.register(SearchFilesTool())
         
         # Shell tool
         self.tools.register(ExecTool(
@@ -106,10 +121,19 @@ class AgentLoop:
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
+
+        # System control tool
+        self.tools.register(OpenApplicationTool())
+        self.tools.register(CloseApplicationTool())
+        self.tools.register(SystemInfoTool())
+        self.tools.register(ScreenshotTool())
+
+        # Spotify tool
+        self.tools.register(SpotifyNextTool())
+        self.tools.register(SpotifyPauseTool())
+        self.tools.register(SpotifyPlayTool())
+        self.tools.register(SpotifyPreviousTool())
         
-        # Cron tool (for scheduling)
-        if self.cron_service:
-            self.tools.register(CronTool(self.cron_service))
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
