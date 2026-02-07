@@ -12,6 +12,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import FeishuConfig
+from nanobot.channels.feishu_markdown import FeishuMarkdownConverter, should_render_markdown
 
 try:
     import lark_oapi as lark
@@ -60,6 +61,9 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._markdown_converter: FeishuMarkdownConverter | None = None
+        if self.config.render_markdown:
+            self._markdown_converter = FeishuMarkdownConverter()
     
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
@@ -161,7 +165,7 @@ class FeishuChannel(BaseChannel):
         if not self._client:
             logger.warning("Feishu client not initialized")
             return
-        
+
         try:
             # Determine receive_id_type based on chat_id format
             # open_id starts with "ou_", chat_id starts with "oc_"
@@ -169,30 +173,38 @@ class FeishuChannel(BaseChannel):
                 receive_id_type = "chat_id"
             else:
                 receive_id_type = "open_id"
-            
-            # Build text message content
-            content = json.dumps({"text": msg.content})
-            
+
+            # Determine message type and content
+            if self.config.render_markdown and self._markdown_converter and should_render_markdown(msg.content):
+                # Render as rich text (post format)
+                msg_type = "post"
+                post_content = self._markdown_converter.convert(msg.content)
+                content = json.dumps(post_content)
+            else:
+                # Send as plain text
+                msg_type = "text"
+                content = json.dumps({"text": msg.content})
+
             request = CreateMessageRequest.builder() \
                 .receive_id_type(receive_id_type) \
                 .request_body(
                     CreateMessageRequestBody.builder()
                     .receive_id(msg.chat_id)
-                    .msg_type("text")
+                    .msg_type(msg_type)
                     .content(content)
                     .build()
                 ).build()
-            
+
             response = self._client.im.v1.message.create(request)
-            
+
             if not response.success():
                 logger.error(
                     f"Failed to send Feishu message: code={response.code}, "
                     f"msg={response.msg}, log_id={response.get_log_id()}"
                 )
             else:
-                logger.debug(f"Feishu message sent to {msg.chat_id}")
-                
+                logger.debug(f"Feishu message sent to {msg.chat_id} (type={msg_type})")
+
         except Exception as e:
             logger.error(f"Error sending Feishu message: {e}")
     
