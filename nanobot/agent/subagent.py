@@ -12,21 +12,9 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, ListDirTool, MoveFileTool, DeleteFileTool, CopyFileTool, SearchFilesTool, FileInfoTool
+from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
-from nanobot.agent.tools.system import (
-    OpenApplicationTool,
-    CloseApplicationTool,
-    SystemInfoTool,
-    ScreenshotTool
-)
-from nanobot.agent.tools.spotify.playback import (
-    SpotifyPlayTool,
-    SpotifyPauseTool,
-    SpotifyNextTool,
-    SpotifyPreviousTool,
-)
 
 class SubagentManager:
     """
@@ -120,14 +108,6 @@ class SubagentManager:
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
-            tools.register(OpenApplicationTool())
-            tools.register(CloseApplicationTool())
-            tools.register(SystemInfoTool())
-            tools.register(ScreenshotTool())
-            tools.register(SpotifyPlayTool())
-            tools.register(SpotifyPauseTool())
-            tools.register(SpotifyNextTool())
-            tools.register(SpotifyPreviousTool())
             
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)
