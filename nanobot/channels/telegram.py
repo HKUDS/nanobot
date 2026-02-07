@@ -5,6 +5,7 @@ import re
 
 from loguru import logger
 from telegram import Update
+from telegram.constants import ChatAction
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
 from nanobot.bus.events import OutboundMessage
@@ -203,6 +204,13 @@ class TelegramChannel(BaseChannel):
         sender_id = str(user.id)
         if user.username:
             sender_id = f"{sender_id}|{user.username}"
+
+        # Show typing indicator as soon as we get the message
+        if self.is_allowed(sender_id):
+            try:
+                await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            except Exception as e:
+                logger.debug(f"Failed to send typing indicator: {e}")
         
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
