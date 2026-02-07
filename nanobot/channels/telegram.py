@@ -104,8 +104,10 @@ class TelegramChannel(BaseChannel):
         self._running = True
         retry_count = 0
         max_retries = 3
+        consecutive_failures = 0
+        max_consecutive_failures = 10  # Track consecutive failures for exponential backoff
         
-        while self._running and retry_count < max_retries:
+        while self._running:
             try:
                 # Build the application
                 self._app = (
@@ -139,6 +141,8 @@ class TelegramChannel(BaseChannel):
                 
                 # Start polling - blocks here until stopped
                 self._polling_started = True
+                consecutive_failures = 0  # Reset on successful connection
+                logger.info("Telegram polling active")
                 await self._app.updater.start_polling(
                     allowed_updates=["message"],
                     drop_pending_updates=True
@@ -150,6 +154,7 @@ class TelegramChannel(BaseChannel):
             except Conflict as e:
                 self._polling_started = False
                 retry_count += 1
+                consecutive_failures += 1
                 
                 logger.error(
                     f"Telegram polling conflict (attempt {retry_count}/{max_retries}): {e}"
@@ -165,13 +170,24 @@ class TelegramChannel(BaseChannel):
                     self._app = None
                 
                 # Retry with increasing delay
-                if retry_count < max_retries and self._running:
-                    wait_time = 2 ** retry_count  # 2s, 4s, 8s
+                if self._running:
+                    # Use exponential backoff, but cap at 5 minutes
+                    wait_time = min(2 ** consecutive_failures, 300)
+                    
+                    if retry_count >= max_retries:
+                        logger.warning(
+                            f"Max retries reached. Entering keep-alive mode with {wait_time}s backoff. "
+                            "Will continue attempting to reconnect..."
+                        )
+                        # Reset retry_count to allow continuous retries
+                        retry_count = 0
+                    
                     logger.info(f"Retrying in {wait_time}s...")
                     await asyncio.sleep(wait_time)
                     
             except Exception as e:
                 self._polling_started = False
+                consecutive_failures += 1
                 logger.error(f"Telegram error: {type(e).__name__}: {e}")
                 
                 # Clean up
@@ -183,7 +199,14 @@ class TelegramChannel(BaseChannel):
                         pass
                     self._app = None
                 
-                break
+                # Enter keep-alive mode with exponential backoff
+                if self._running:
+                    wait_time = min(2 ** consecutive_failures, 300)  # Cap at 5 minutes
+                    logger.warning(
+                        f"Entering keep-alive mode with {wait_time}s backoff. "
+                        "Will continue attempting to reconnect..."
+                    )
+                    await asyncio.sleep(wait_time)
     async def stop(self) -> None:
         """Stop the Telegram bot."""
         logger.info("Stopping Telegram bot...")
