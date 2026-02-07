@@ -164,6 +164,41 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
+## 🔗 Notion Integration
+
+nanobot can manage your Notion workspace via the new **Notion** skill. To enable it:
+
+1. **Create a Notion integration**
+   - Go to <https://www.notion.so/my-integrations>.
+   - Click **New integration**.
+   - Give it a name, select the workspace, and enable *Read content* (and *Insert/edit content* if you want write access).
+   - Copy the **Internal Integration Token**.
+
+2. **Store the token in your config file**
+   ```json
+   {
+     "providers": {
+       "notion": {
+         "apiKey": "YOUR_NOTION_INTEGRATION_TOKEN"
+       }
+     }
+   }
+   ```
+   Place this in `~/.nanobot/config.json` (or merge it with your existing providers).
+
+3. **Install the Python client**
+   ```bash
+   pip install notion-client
+   ```
+
+4. **Use the skill**
+   ```bash
+   nanobot agent -m "notion list-db"
+   ```
+   This will list all databases in your workspace.
+
+---
+
 Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime, anywhere.
 
 | Channel | Setup |
