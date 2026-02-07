@@ -242,10 +242,21 @@ class FeishuChannel(BaseChannel):
                     content = message.content or ""
             else:
                 content = MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]")
-            
+
             if not content:
                 return
-            
+
+            # Detect @mention in group chat
+            bot_mentioned = False
+            mentions = getattr(message, "mentions", None)
+            if chat_type == "group" and mentions:
+                bot_mentioned = True
+                # Strip @mention placeholders (e.g. @_user_1) from content
+                for mention in mentions:
+                    key = getattr(mention, "key", None)
+                    if key:
+                        content = content.replace(key, "").strip()
+
             # Forward to message bus
             reply_to = chat_id if chat_type == "group" else sender_id
             await self._handle_message(
@@ -256,6 +267,7 @@ class FeishuChannel(BaseChannel):
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
+                    "bot_mentioned": bot_mentioned,
                 }
             )
             

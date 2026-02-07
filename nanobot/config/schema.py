@@ -10,6 +10,7 @@ class WhatsAppConfig(BaseModel):
     enabled: bool = False
     bridge_url: str = "ws://localhost:3001"
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
+    group_reply_all: bool = True  # If False, only reply when @mentioned or replied to in groups
 
 
 class TelegramConfig(BaseModel):
@@ -18,6 +19,7 @@ class TelegramConfig(BaseModel):
     token: str = ""  # Bot token from @BotFather
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
+    group_reply_all: bool = True  # If False, only reply when @mentioned or replied to in groups
 
 
 class FeishuConfig(BaseModel):
@@ -28,6 +30,7 @@ class FeishuConfig(BaseModel):
     encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
     verification_token: str = ""  # Verification Token for event subscription (optional)
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
+    group_reply_all: bool = True  # If False, only reply when @mentioned in groups
 
 
 class DiscordConfig(BaseModel):
@@ -37,6 +40,7 @@ class DiscordConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
+    group_reply_all: bool = True  # If False, only reply when @mentioned in groups
 
 
 class ChannelsConfig(BaseModel):

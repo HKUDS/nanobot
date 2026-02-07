@@ -22,7 +22,7 @@ class BaseChannel(ABC):
     def __init__(self, config: Any, bus: MessageBus):
         """
         Initialize the channel.
-        
+
         Args:
             config: Channel-specific configuration.
             bus: The message bus for communication.
@@ -30,6 +30,7 @@ class BaseChannel(ABC):
         self.config = config
         self.bus = bus
         self._running = False
+        self._bot_name: str = ""  # Set by subclass after connecting (e.g. Telegram bot username)
     
     @abstractmethod
     async def start(self) -> None:
@@ -109,7 +110,18 @@ class BaseChannel(ABC):
                 f"Add them to allowFrom list in config to grant access."
             )
             return
-        
+
+        # Group chat filter: skip if not @mentioned or replied to
+        meta = metadata or {}
+        is_group = meta.get("is_group") or meta.get("chat_type") == "group"
+        group_reply_all = getattr(self.config, "group_reply_all", True)
+        if is_group and not group_reply_all:
+            mentioned = meta.get("bot_mentioned", False)
+            replied_to_bot = meta.get("reply_to_bot", False)
+            if not mentioned and not replied_to_bot:
+                logger.debug(f"Skipping group message (not mentioned/replied): {content[:50]}")
+                return
+
         msg = InboundMessage(
             channel=self.name,
             sender_id=str(sender_id),

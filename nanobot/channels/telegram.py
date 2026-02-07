@@ -90,6 +90,7 @@ class TelegramChannel(BaseChannel):
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
         self._app: Application | None = None
+        self._bot_id: int = 0
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
     
     async def start(self) -> None:
@@ -128,7 +129,9 @@ class TelegramChannel(BaseChannel):
         
         # Get bot info
         bot_info = await self._app.bot.get_me()
-        logger.info(f"Telegram bot @{bot_info.username} connected")
+        self._bot_name = bot_info.username or ""
+        self._bot_id = bot_info.id
+        logger.info(f"Telegram bot @{self._bot_name} connected")
         
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
@@ -270,9 +273,23 @@ class TelegramChannel(BaseChannel):
                 content_parts.append(f"[{media_type}: download failed]")
         
         content = "\n".join(content_parts) if content_parts else "[empty message]"
-        
+
+        is_group = message.chat.type != "private"
+
+        # Detect @mention and reply-to-bot for group filtering
+        bot_mentioned = False
+        reply_to_bot = False
+        if is_group and self._bot_name:
+            bot_mentioned = f"@{self._bot_name}" in content
+            # Strip @mention from content so the LLM sees clean text
+            if bot_mentioned:
+                content = content.replace(f"@{self._bot_name}", "").strip()
+            # Check if replying to a bot message
+            if message.reply_to_message and message.reply_to_message.from_user:
+                reply_to_bot = message.reply_to_message.from_user.id == self._bot_id
+
         logger.debug(f"Telegram message from {sender_id}: {content[:50]}...")
-        
+
         # Forward to the message bus
         await self._handle_message(
             sender_id=sender_id,
@@ -284,7 +301,9 @@ class TelegramChannel(BaseChannel):
                 "user_id": user.id,
                 "username": user.username,
                 "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
+                "is_group": is_group,
+                "bot_mentioned": bot_mentioned,
+                "reply_to_bot": reply_to_bot,
             }
         )
     
