@@ -6,7 +6,7 @@ import platform
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory import MemoryManager
 from nanobot.agent.skills import SkillsLoader
 
 
@@ -22,15 +22,20 @@ class ContextBuilder:
     
     def __init__(self, workspace: Path):
         self.workspace = workspace
-        self.memory = MemoryStore(workspace)
+        self.memory = MemoryManager(workspace)
         self.skills = SkillsLoader(workspace)
     
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        query: str = ""
+    ) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
         
         Args:
             skill_names: Optional list of skills to include.
+            query: Optional query to match memories against.
         
         Returns:
             Complete system prompt.
@@ -45,10 +50,10 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
         
-        # Memory context
-        memory = self.memory.get_memory_context()
-        if memory:
-            parts.append(f"# Memory\n\n{memory}")
+        # Memory context (query-aware retrieval)
+        memory_context = self.memory.get_memory_context(query=query)
+        if memory_context:
+            parts.append(f"# Relevant Memories\n\n{memory_context}")
         
         # Skills - progressive loading
         # 1. Always-loaded skills: include full content
@@ -143,8 +148,8 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         """
         messages = []
 
-        # System prompt
-        system_prompt = self.build_system_prompt(skill_names)
+        # System prompt (with query-aware memory retrieval)
+        system_prompt = self.build_system_prompt(skill_names, query=current_message)
         if channel and chat_id:
             system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
         messages.append({"role": "system", "content": system_prompt})

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.memory import MemoryManager
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
@@ -18,6 +20,7 @@ from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.memory import RememberTool, RecallTool, ForgetTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
 
@@ -59,6 +62,7 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         
         self.context = ContextBuilder(workspace)
+        self.memory = MemoryManager(workspace)
         self.sessions = SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -105,6 +109,11 @@ class AgentLoop:
         # Cron tool (for scheduling)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        
+        # Memory tools
+        self.tools.register(RememberTool(self.memory))
+        self.tools.register(RecallTool(self.memory))
+        self.tools.register(ForgetTool(self.memory))
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -240,11 +249,68 @@ class AgentLoop:
         session.add_message("assistant", final_content)
         self.sessions.save(session)
         
+        # Post-processing: Analyze for memory-worthy content
+        await self._post_process_memory(msg.content, final_content)
+        
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content
         )
+    
+    async def _post_process_memory(
+        self,
+        user_message: str,
+        assistant_response: str
+    ) -> None:
+        """
+        Analyze conversation for memory-worthy content and store it.
+        
+        This is called after each message processing to automatically
+        extract and store important information.
+        """
+        try:
+            # Simple pattern-based extraction for memory-worthy content
+            memory_patterns = [
+                (r"remember that (.+?)[.\n]", "user_fact"),
+                (r"I prefer (.+?)[.\n]", "preference"),
+                (r"I like (.+?)[.\n]", "preference"),
+                (r"don't forget (.+?)[.\n]", "important"),
+            ]
+            
+            # Combine user message and response for analysis
+            full_text = f"{user_message} {assistant_response}"
+            
+            for pattern, tag in memory_patterns:
+                matches = re.findall(pattern, full_text, re.IGNORECASE)
+                for match in matches:
+                    content = match.strip()
+                    if len(content) > 10 and len(content) < 500:
+                        # Score importance
+                        importance = self.memory.scorer.score(content, {"is_user_fact": tag == "user_fact"})
+                        
+                        # Only write if importance is high enough
+                        if importance >= 0.5:
+                            # Determine section based on tag
+                            section_map = {
+                                "user_fact": "User Information",
+                                "preference": "Preferences",
+                                "important": "Important Facts",
+                            }
+                            section = section_map.get(tag, "Important Facts")
+                            
+                            # Write to memory
+                            self.memory.write_memory(
+                                content=content,
+                                section=section,
+                                importance=importance,
+                                tags=[tag]
+                            )
+                            
+                            logger.info(f"Auto-memorized: [{importance:.2f}] {content[:50]}...")
+                            
+        except Exception as e:
+            logger.warning(f"Failed to process memory: {e}")
     
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
