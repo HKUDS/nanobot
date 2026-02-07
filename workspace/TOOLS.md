@@ -37,29 +37,31 @@ exec(command: str, working_dir: str = None) -> str
 ```
 
 **Safety Notes:**
-- Commands have a 60-second timeout
+- Commands have a configurable timeout (default 60s)
+- Dangerous commands are blocked (rm -rf, format, dd, shutdown, etc.)
 - Output is truncated at 10,000 characters
-- Use with caution for destructive operations
+- Optional `restrictToWorkspace` config to limit paths
 
 ## Web Access
 
 ### web_search
-Search the web using DuckDuckGo.
+Search the web using Brave Search API.
 ```
-web_search(query: str) -> str
+web_search(query: str, count: int = 5) -> str
 ```
 
-Returns top 5 search results with titles, URLs, and snippets.
+Returns search results with titles, URLs, and snippets. Requires `tools.web.search.apiKey` in config.
 
 ### web_fetch
 Fetch and extract main content from a URL.
 ```
-web_fetch(url: str) -> str
+web_fetch(url: str, extractMode: str = "markdown", maxChars: int = 50000) -> str
 ```
 
 **Notes:**
-- Content is extracted using trafilatura
-- Output is truncated at 8,000 characters
+- Content is extracted using readability
+- Supports markdown or plain text extraction
+- Output is truncated at 50,000 characters by default
 
 ## Communication
 
@@ -68,6 +70,16 @@ Send a message to the user (used internally).
 ```
 message(content: str, channel: str = None, chat_id: str = None) -> str
 ```
+
+## Background Tasks
+
+### spawn
+Spawn a subagent to handle a task in the background.
+```
+spawn(task: str, label: str = None) -> str
+```
+
+Use for complex or time-consuming tasks that can run independently. The subagent will complete the task and report back when done.
 
 ## Scheduled Reminders (Cron)
 

@@ -5,6 +5,7 @@ import json
 import os
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -12,6 +13,7 @@ from nanobot.agent.tools.base import Tool
 
 # Shared constants
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
+MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
 
 
 def _strip_tags(text: str) -> str:
@@ -26,6 +28,19 @@ def _normalize(text: str) -> str:
     """Normalize whitespace."""
     text = re.sub(r'[ \t]+', ' ', text)
     return re.sub(r'\n{3,}', '\n\n', text).strip()
+
+
+def _validate_url(url: str) -> tuple[bool, str]:
+    """Validate URL: must be http(s) with valid domain."""
+    try:
+        p = urlparse(url)
+        if p.scheme not in ('http', 'https'):
+            return False, f"Only http/https allowed, got '{p.scheme or 'none'}'"
+        if not p.netloc:
+            return False, "Missing domain"
+        return True, ""
+    except Exception as e:
+        return False, str(e)
 
 
 class WebSearchTool(Tool):
@@ -95,12 +110,21 @@ class WebFetchTool(Tool):
     
     async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
         from readability import Document
-        
+
         max_chars = maxChars or self.max_chars
-        
+
+        # Validate URL before fetching
+        is_valid, error_msg = _validate_url(url)
+        if not is_valid:
+            return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url})
+
         try:
-            async with httpx.AsyncClient() as client:
-                r = await client.get(url, headers={"User-Agent": USER_AGENT}, follow_redirects=True, timeout=30.0)
+            async with httpx.AsyncClient(
+                follow_redirects=True,
+                max_redirects=MAX_REDIRECTS,
+                timeout=30.0
+            ) as client:
+                r = await client.get(url, headers={"User-Agent": USER_AGENT})
                 r.raise_for_status()
             
             ctype = r.headers.get("content-type", "")
