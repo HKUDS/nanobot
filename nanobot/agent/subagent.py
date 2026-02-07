@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import random
 import re
 import uuid
 from pathlib import Path
@@ -57,15 +58,38 @@ class SubagentManager:
 
     @staticmethod
     def _truncate_result(result: str) -> str:
-        """Truncate tool result for subagent context."""
+        """Truncate tool result for subagent context.
+
+        Content-type-aware: JSON is prefix-truncated so the visible
+        portion remains valid syntax; plain text uses head truncation.
+        """
         clean = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', result)
         if len(clean) <= _MAX_TOOL_RESULT_CHARS:
             return clean
-        half = _MAX_TOOL_RESULT_CHARS // 2
+
+        # Detect JSON and handle it without breaking syntax
+        stripped = clean.lstrip()
+        if stripped and stripped[0] in ('{', '['):
+            try:
+                parsed = json.loads(clean)
+                pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
+                if len(pretty) <= _MAX_TOOL_RESULT_CHARS:
+                    return pretty
+                budget = _MAX_TOOL_RESULT_CHARS - 100  # room for sentinel
+                return (
+                    pretty[:budget]
+                    + f"\n\n... [JSON truncated — showed {budget} of {len(pretty)} chars. "
+                    + "Do NOT re-run this tool to see more.]"
+                )
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Plain text: head truncation with sentinel
+        budget = _MAX_TOOL_RESULT_CHARS - 80
         return (
-            clean[:half]
-            + f"\n\n... [truncated {len(clean) - _MAX_TOOL_RESULT_CHARS} chars] ...\n\n"
-            + clean[-half:]
+            clean[:budget]
+            + f"\n\n... [truncated — showed {budget} of {len(clean)} chars. "
+            + "Do NOT re-run this tool to see more.]"
         )
 
     @staticmethod
@@ -250,10 +274,16 @@ class SubagentManager:
                     if response.content:
                         final_result = response.content
                         break
-                    # Bounded retry on empty response
+                    # Bounded retry with exponential backoff + jitter
                     if empty_retries_left > 0:
                         empty_retries_left -= 1
-                        logger.warning(f"Subagent [{task_id}] got empty response, retries left: {empty_retries_left}")
+                        retry_num = _EMPTY_RESPONSE_RETRIES - empty_retries_left
+                        delay = min(2 ** retry_num + random.uniform(0, 1), 10.0)
+                        logger.warning(
+                            f"Subagent [{task_id}] got empty response, "
+                            f"retries left: {empty_retries_left}, backing off {delay:.1f}s"
+                        )
+                        await asyncio.sleep(delay)
                         continue
                     logger.warning(f"Subagent [{task_id}] empty response, no retries left — giving up")
                     break
