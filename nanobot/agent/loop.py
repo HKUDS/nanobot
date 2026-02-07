@@ -23,6 +23,12 @@ from nanobot.agent.tools.filesystem import (
     FileInfoTool,
     SearchFilesTool
 )
+from nanobot.agent.tools.system import (
+    OpenApplicationTool,
+    CloseApplicationTool,
+    SystemInfoTool,
+    ScreenshotTool
+)
 from nanobot.agent.tools.spotify.playback import (
     SpotifyPlayTool,
     SpotifyPauseTool,
