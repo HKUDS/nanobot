@@ -18,6 +18,7 @@ import litellm
 import pulsing as pul
 from litellm import acompletion
 
+from nanobot.errors import ProviderCallError
 
 # ── Data types ──────────────────────────────────────────────────────
 
@@ -157,7 +158,7 @@ class ProviderActor:
         try:
             return self._parse(await acompletion(**kw))
         except Exception as e:
-            return LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
+            raise ProviderCallError(str(e)) from e
 
     async def chat_stream(
         self,
@@ -178,7 +179,7 @@ class ProviderActor:
                 if text or finish:
                     yield StreamChunk(delta=text, finish_reason=finish)
         except Exception as e:
-            yield StreamChunk(delta=f"Error calling LLM: {e}", finish_reason="error")
+            raise ProviderCallError(str(e)) from e
 
     def get_default_model(self) -> str:
         return self.default_model

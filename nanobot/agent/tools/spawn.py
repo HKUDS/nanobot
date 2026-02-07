@@ -5,6 +5,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolContext
+from nanobot.actor.names import DEFAULT_PROVIDER_NAME
 
 
 class SpawnTool(Tool):
@@ -15,7 +16,7 @@ class SpawnTool(Tool):
     what it needs without the caller unpacking every field.
     """
 
-    def __init__(self, config: Any, provider_name: str = "provider"):
+    def __init__(self, config: Any, provider_name: str = DEFAULT_PROVIDER_NAME):
         self._config = config
         self._provider_name = provider_name
 

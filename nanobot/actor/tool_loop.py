@@ -13,6 +13,12 @@ from loguru import logger
 
 from nanobot.agent.tools.base import ToolContext
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.errors import (
+    ProviderCallError,
+    ToolExecutionError,
+    ToolNotFoundError,
+    ToolValidationError,
+)
 
 
 @dataclass
@@ -38,11 +44,16 @@ async def run_tool_loop(
     communication pattern (ask/tell) already covers sync vs async semantics.
     """
     for _ in range(max_iterations):
-        response = await provider.chat(
-            messages=messages,
-            tools=tools.get_definitions(),
-            model=model,
-        )
+        try:
+            response = await provider.chat(
+                messages=messages,
+                tools=tools.get_definitions(),
+                model=model,
+            )
+        except ProviderCallError:
+            raise
+        except Exception as e:
+            raise ProviderCallError(str(e)) from e
 
         if not response.has_tool_calls:
             return (
@@ -71,7 +82,12 @@ async def run_tool_loop(
             logger.info(
                 f"Tool call: {tc.name}({json.dumps(tc.arguments, ensure_ascii=False)[:200]})"
             )
-            result = await tools.execute(tc.name, tc.arguments, ctx)
+            try:
+                result = await tools.execute(tc.name, tc.arguments, ctx)
+            except (ToolNotFoundError, ToolValidationError, ToolExecutionError) as e:
+                # Tool errors should be visible to the LLM as a tool result,
+                # not masquerading as assistant content.
+                result = f"Error: {e}"
             messages.append(
                 {
                     "role": "tool",
@@ -103,19 +119,29 @@ async def run_tool_loop_stream(
         # After tool calls, try streaming for the final text response
         if had_tool_calls and iteration > 0:
             streamed = False
-            async for chunk in provider.chat_stream(messages=messages, model=model):
-                if chunk.delta:
-                    streamed = True
-                    yield AgentChunk(kind="token", text=chunk.delta)
+            try:
+                async for chunk in provider.chat_stream(messages=messages, model=model):
+                    if chunk.delta:
+                        streamed = True
+                        yield AgentChunk(kind="token", text=chunk.delta)
+            except ProviderCallError:
+                raise
+            except Exception as e:
+                raise ProviderCallError(str(e)) from e
             if streamed:
                 yield AgentChunk(kind="done")
                 return
 
-        response = await provider.chat(
-            messages=messages,
-            tools=tools.get_definitions(),
-            model=model,
-        )
+        try:
+            response = await provider.chat(
+                messages=messages,
+                tools=tools.get_definitions(),
+                model=model,
+            )
+        except ProviderCallError:
+            raise
+        except Exception as e:
+            raise ProviderCallError(str(e)) from e
 
         if not response.has_tool_calls:
             content = response.content or ""
@@ -148,7 +174,10 @@ async def run_tool_loop_stream(
             )
             yield AgentChunk(kind="tool_call", tool_name=tc.name)
 
-            result = await tools.execute(tc.name, tc.arguments, ctx)
+            try:
+                result = await tools.execute(tc.name, tc.arguments, ctx)
+            except (ToolNotFoundError, ToolValidationError, ToolExecutionError) as e:
+                result = f"Error: {e}"
             messages.append(
                 {
                     "role": "tool",

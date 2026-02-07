@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
+from nanobot.actor.names import DEFAULT_AGENT_NAME
+
 
 @dataclass
 class ToolContext:
@@ -17,7 +19,7 @@ class ToolContext:
 
     channel: str = ""
     chat_id: str = ""
-    agent_name: str = "agent"
+    agent_name: str = DEFAULT_AGENT_NAME
 
 
 class Tool(ABC):

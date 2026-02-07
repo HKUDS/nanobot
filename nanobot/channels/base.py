@@ -5,6 +5,8 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.actor.names import DEFAULT_AGENT_NAME
+
 
 class BaseChannel(ABC):
     """
@@ -16,7 +18,7 @@ class BaseChannel(ABC):
 
     name: str = "base"
 
-    def __init__(self, config: Any, agent_name: str = "agent"):
+    def __init__(self, config: Any, agent_name: str = DEFAULT_AGENT_NAME):
         """
         Initialize the channel.
 

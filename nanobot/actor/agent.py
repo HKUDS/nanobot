@@ -7,6 +7,12 @@ import pulsing as pul
 from loguru import logger
 
 from nanobot.actor.tool_loop import AgentChunk, run_tool_loop, run_tool_loop_stream
+from nanobot.errors import ProviderCallError
+from nanobot.actor.names import (
+    DEFAULT_AGENT_NAME,
+    DEFAULT_PROVIDER_NAME,
+    DEFAULT_SCHEDULER_NAME,
+)
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.tools.base import ToolContext
 from nanobot.agent.tools.registry import ToolRegistry
@@ -36,8 +42,8 @@ class AgentActor:
     def __init__(
         self,
         config: Any,
-        provider_name: str = "provider",
-        scheduler_name: str = "scheduler",
+        provider_name: str = DEFAULT_PROVIDER_NAME,
+        scheduler_name: str = DEFAULT_SCHEDULER_NAME,
     ):
         self.config = config
         self.workspace = config.workspace_path
@@ -78,7 +84,7 @@ class AgentActor:
         session_key = f"{channel}:{chat_id}"
         session = self.sessions.get_or_create(session_key)
         provider = await self._get_provider()
-        ctx = ToolContext(channel=channel, chat_id=chat_id, agent_name="agent")
+        ctx = ToolContext(channel=channel, chat_id=chat_id, agent_name=DEFAULT_AGENT_NAME)
         messages = self.context.build_messages(
             history=session.get_history(),
             current_message=content,
@@ -139,14 +145,17 @@ class AgentActor:
             channel, chat_id, content, media
         )
 
-        result = await run_tool_loop(
-            provider=provider,
-            tools=self.tools,
-            messages=messages,
-            ctx=ctx,
-            model=self.model,
-            max_iterations=self.max_iterations,
-        )
+        try:
+            result = await run_tool_loop(
+                provider=provider,
+                tools=self.tools,
+                messages=messages,
+                ctx=ctx,
+                model=self.model,
+                max_iterations=self.max_iterations,
+            )
+        except ProviderCallError as e:
+            result = f"调用 LLM 失败：{e}"
 
         logger.info(f"Response to {channel}:{sender_id}: {result[:120]}")
         self._save_turn(session, content, result)
@@ -171,17 +180,23 @@ class AgentActor:
         )
 
         full_text = ""
-        async for chunk in run_tool_loop_stream(
-            provider=provider,
-            tools=self.tools,
-            messages=messages,
-            ctx=ctx,
-            model=self.model,
-            max_iterations=self.max_iterations,
-        ):
-            if chunk.kind == "token":
-                full_text += chunk.text
-            yield chunk
+        try:
+            async for chunk in run_tool_loop_stream(
+                provider=provider,
+                tools=self.tools,
+                messages=messages,
+                ctx=ctx,
+                model=self.model,
+                max_iterations=self.max_iterations,
+            ):
+                if chunk.kind == "token":
+                    full_text += chunk.text
+                yield chunk
+        except ProviderCallError as e:
+            msg = f"调用 LLM 失败：{e}"
+            yield AgentChunk(kind="token", text=msg)
+            yield AgentChunk(kind="done")
+            full_text = msg
 
         self._save_turn(
             session,
@@ -223,14 +238,17 @@ class AgentActor:
             content,
         )
 
-        result = await run_tool_loop(
-            provider=provider,
-            tools=self.tools,
-            messages=messages,
-            ctx=ctx,
-            model=self.model,
-            max_iterations=self.max_iterations,
-        )
+        try:
+            result = await run_tool_loop(
+                provider=provider,
+                tools=self.tools,
+                messages=messages,
+                ctx=ctx,
+                model=self.model,
+                max_iterations=self.max_iterations,
+            )
+        except ProviderCallError as e:
+            result = f"调用 LLM 失败：{e}"
 
         self._save_turn(session, f"[System: {sender_id}] {content}", result)
 
@@ -238,8 +256,9 @@ class AgentActor:
         if origin_channel != "cli":
             try:
                 from nanobot.actor.channel import ChannelActor
+                from nanobot.actor.names import channel_actor_name
 
-                ch = await ChannelActor.resolve(f"channel.{origin_channel}")
+                ch = await ChannelActor.resolve(channel_actor_name(origin_channel))
                 await ch.send_text(origin_chat_id, result)
             except Exception as e:
                 logger.error(f"Error sending announce to {origin_channel}: {e}")

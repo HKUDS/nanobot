@@ -9,6 +9,11 @@ from rich.console import Console
 from rich.table import Table
 
 from nanobot import __version__, __logo__
+from nanobot.actor.names import (
+    DEFAULT_AGENT_NAME,
+    DEFAULT_PROVIDER_NAME,
+    DEFAULT_SCHEDULER_NAME,
+)
 
 app = typer.Typer(
     name="nanobot",
@@ -59,8 +64,8 @@ async def _boot_agent(config):
     await pul.init()
 
     _validate_api_key(config)
-    await ProviderActor.spawn(config=config, name="provider")
-    return await AgentActor.spawn(config=config, name="agent")
+    await ProviderActor.spawn(config=config, name=DEFAULT_PROVIDER_NAME)
+    return await AgentActor.spawn(config=config, name=DEFAULT_AGENT_NAME)
 
 
 async def _print_stream(agent_actor, channel: str, chat_id: str, content: str):
@@ -228,7 +233,7 @@ def gateway(
     _validate_api_key(config)
 
     # Create channel instances (not yet actors)
-    channels = create_channels(config, agent_name="agent")
+    channels = create_channels(config, agent_name=DEFAULT_AGENT_NAME)
 
     if channels:
         console.print(f"[green]✓[/green] Channels: {', '.join(channels.keys())}")
@@ -247,18 +252,18 @@ def gateway(
             cron_store_path = get_data_dir() / "cron" / "jobs.json"
 
             # 1) Spawn ProviderActor (takes config directly)
-            await ProviderActor.spawn(config=config, name="provider")
+            await ProviderActor.spawn(config=config, name=DEFAULT_PROVIDER_NAME)
 
             # 2) Spawn SchedulerActor -- auto-starts via on_start()
             await SchedulerActor.spawn(
                 cron_store_path=cron_store_path,
                 workspace=config.workspace_path,
-                agent_name="agent",
-                name="scheduler",
+                agent_name=DEFAULT_AGENT_NAME,
+                name=DEFAULT_SCHEDULER_NAME,
             )
 
             # 3) Spawn AgentActor -- resolves provider + scheduler by name
-            await AgentActor.spawn(config=config, name="agent")
+            await AgentActor.spawn(config=config, name=DEFAULT_AGENT_NAME)
 
             # 4) Spawn each channel as ChannelActor
             channel_tasks = await spawn_channel_actors(channels)
@@ -475,17 +480,13 @@ app.add_typer(cron_app, name="cron")
 
 
 def _make_scheduler_offline():
-    """Create a SchedulerActor for offline cron management (no agent, no start)."""
+    """Create a local cron store service (offline)."""
     from nanobot.config.loader import get_data_dir, load_config
-    from nanobot.actor.scheduler import SchedulerActor
+    from nanobot.cron.service import CronStoreService
 
     config = load_config()
     store_path = get_data_dir() / "cron" / "jobs.json"
-    # Create raw instance (not spawned as actor) for file-based cron management
-    return SchedulerActor(
-        cron_store_path=store_path,
-        workspace=config.workspace_path,
-    )
+    return CronStoreService(store_path)
 
 
 @cron_app.command("list")
@@ -568,7 +569,6 @@ def cron_add(
         raise typer.Exit(1)
 
     service = _make_scheduler_offline()
-
     job = service.add_job(
         name=name,
         schedule=schedule,
@@ -587,7 +587,6 @@ def cron_remove(
 ):
     """Remove a scheduled job."""
     service = _make_scheduler_offline()
-
     if service.remove_job(job_id):
         console.print(f"[green]✓[/green] Removed job {job_id}")
     else:
@@ -601,7 +600,6 @@ def cron_enable(
 ):
     """Enable or disable a job."""
     service = _make_scheduler_offline()
-
     job = service.enable_job(job_id, enabled=not disable)
     if job:
         status = "disabled" if disable else "enabled"
@@ -616,15 +614,25 @@ def cron_run(
     force: bool = typer.Option(False, "--force", "-f", help="Run even if disabled"),
 ):
     """Manually run a job."""
-    service = _make_scheduler_offline()
-
     async def run():
-        return await service.run_job(job_id, force=force)
+        import pulsing as pul
+        from nanobot.actor.scheduler import SchedulerActor
 
-    if asyncio.run(run()):
-        console.print(f"[green]✓[/green] Job executed")
+        try:
+            await pul.init()
+            scheduler = await SchedulerActor.resolve(DEFAULT_SCHEDULER_NAME)
+            return await scheduler.run_job(job_id, force=force)
+        finally:
+            await pul.shutdown()
+
+    ok = asyncio.run(run())
+    if ok:
+        console.print("[green]✓[/green] Job executed")
     else:
-        console.print(f"[red]Failed to run job {job_id}[/red]")
+        console.print(
+            "[red]Failed to run job.[/red] "
+            "[dim]Is the gateway running? Start it with: nanobot gateway[/dim]"
+        )
 
 
 # ============================================================================

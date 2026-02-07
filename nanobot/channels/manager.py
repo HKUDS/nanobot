@@ -11,10 +11,11 @@ from loguru import logger
 
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
+from nanobot.actor.names import DEFAULT_AGENT_NAME
 
 
 def create_channels(
-    config: Config, agent_name: str = "agent"
+    config: Config, agent_name: str = DEFAULT_AGENT_NAME
 ) -> dict[str, BaseChannel]:
     """
     Instantiate all enabled channels from config.
@@ -95,12 +96,13 @@ async def spawn_channel_actors(
     """
     import asyncio
     from nanobot.actor.channel import ChannelActor
+    from nanobot.actor.names import channel_actor_name
 
     tasks = []
     for name, channel in channels.items():
         actor = await ChannelActor.spawn(
             channel=channel,
-            name=f"channel.{name}",
+            name=channel_actor_name(name),
         )
         task = asyncio.create_task(actor.run())
         logger.info(f"Spawned channel.{name}")

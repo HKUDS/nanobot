@@ -6,6 +6,7 @@ Resolves SchedulerActor via Pulsing name -- no object reference needed.
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolContext
+from nanobot.actor.names import DEFAULT_SCHEDULER_NAME
 from nanobot.cron.types import CronSchedule
 
 
@@ -16,7 +17,7 @@ class CronTool(Tool):
     communication -- no object references passed in.
     """
 
-    def __init__(self, scheduler_name: str = "scheduler"):
+    def __init__(self, scheduler_name: str = DEFAULT_SCHEDULER_NAME):
         self._scheduler_name = scheduler_name
 
     async def _get_scheduler(self):

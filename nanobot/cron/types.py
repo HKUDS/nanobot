@@ -1,4 +1,13 @@
-"""Cron types (Pydantic models with camelCase JSON aliases)."""
+"""Cron types (stable contract).
+
+These Pydantic models are treated as a *public, stable contract* for cron jobs:
+- persisted JSON on disk (jobs.json)
+- potential future APIs (HTTP/UI)
+
+Implementation details (timers, execution, delivery) live in:
+- ``nanobot.cron.service.CronStoreService`` (pure local logic)
+- ``nanobot.actor.scheduler.SchedulerActor`` (Pulsing runtime)
+"""
 
 from typing import Literal
 

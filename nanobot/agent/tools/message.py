@@ -3,6 +3,7 @@
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolContext
+from nanobot.actor.names import channel_actor_name
 
 
 class MessageTool(Tool):
@@ -59,7 +60,7 @@ class MessageTool(Tool):
         try:
             from nanobot.actor.channel import ChannelActor
 
-            ch = await ChannelActor.resolve(f"channel.{channel}")
+            ch = await ChannelActor.resolve(channel_actor_name(channel))
         except Exception:
             return f"Error: Channel '{channel}' not available"
 

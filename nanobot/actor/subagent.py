@@ -5,6 +5,7 @@ the task — no manual ``asyncio.create_task()`` needed.
 """
 
 import asyncio
+import contextlib
 import uuid
 from typing import Any
 
@@ -12,6 +13,7 @@ import pulsing as pul
 from loguru import logger
 
 from nanobot.actor.tool_loop import run_tool_loop
+from nanobot.actor.names import DEFAULT_AGENT_NAME, DEFAULT_PROVIDER_NAME
 from nanobot.agent.tools.base import ToolContext
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, ListDirTool
@@ -36,8 +38,8 @@ class SubagentActor:
         label: str,
         origin_channel: str,
         origin_chat_id: str,
-        agent_name: str = "agent",
-        provider_name: str = "provider",
+        agent_name: str = DEFAULT_AGENT_NAME,
+        provider_name: str = DEFAULT_PROVIDER_NAME,
     ):
         self.workspace = config.workspace_path
         self.task = task
@@ -54,12 +56,21 @@ class SubagentActor:
 
         self.task_id = str(uuid.uuid4())[:8]
         self.tools = self._build_tools()
+        self._task: asyncio.Task | None = None
 
     # ── Pulsing lifecycle ───────────────────────────────────────
 
     async def on_start(self, actor_id: Any = None) -> None:
         """Pulsing lifecycle hook: auto-execute the task after spawn."""
-        asyncio.create_task(self._execute())
+        self._task = asyncio.create_task(self._execute())
+
+    async def on_stop(self) -> None:
+        """Cancel any in-flight execution task on shutdown."""
+        if self._task:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._task
+            self._task = None
 
     # ── Internal ────────────────────────────────────────────────
 

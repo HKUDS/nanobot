@@ -3,6 +3,7 @@
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolContext
+from nanobot.errors import ToolExecutionError, ToolNotFoundError, ToolValidationError
 
 
 class ToolRegistry:
@@ -52,19 +53,20 @@ class ToolRegistry:
         """
         tool = self._tools.get(name)
         if not tool:
-            return f"Error: Tool '{name}' not found"
+            raise ToolNotFoundError(f"Tool '{name}' not found")
 
         ctx = ctx or ToolContext()
 
+        errors = tool.validate_params(params)
+        if errors:
+            raise ToolValidationError(
+                f"Invalid parameters for tool '{name}': " + "; ".join(errors)
+            )
+
         try:
-            errors = tool.validate_params(params)
-            if errors:
-                return f"Error: Invalid parameters for tool '{name}': " + "; ".join(
-                    errors
-                )
             return await tool.execute(ctx, **params)
         except Exception as e:
-            return f"Error executing {name}: {str(e)}"
+            raise ToolExecutionError(f"Error executing {name}: {e}") from e
 
     @property
     def tool_names(self) -> list[str]:
