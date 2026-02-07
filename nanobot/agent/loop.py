@@ -20,7 +20,7 @@ from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.memory import RememberTool, RecallTool, ForgetTool
+from nanobot.agent.memory import RememberTool, RecallTool, ForgetTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
 

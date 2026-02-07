@@ -75,6 +75,7 @@ class MemoryIndex:
                         created_at=datetime.fromisoformat(entry["created_at"]),
                         updated_at=datetime.fromisoformat(entry["updated_at"])
                     )
+                    self.memories[memory.id] = memory
                     self._add_to_indexes(memory)
             except Exception as e:
                 logger.error(f"Failed to load memory index: {e}")
@@ -175,6 +176,7 @@ class MemoryIndex:
                     tags=tags,
                     layer="long-term"
                 )
+                self.memories[memory.id] = memory
                 self._add_to_indexes(memory)
 
         self.save()
