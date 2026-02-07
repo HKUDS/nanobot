@@ -39,12 +39,22 @@ class DiscordConfig(BaseModel):
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 
 
+class SignalConfig(BaseModel):
+    """Signal channel configuration using signal-cli."""
+
+    enabled: bool = False
+    phone_number: str = ""  # Bot's phone number (E.164 format, e.g. +1234567890)
+    cli_binary: str = "signal-cli"  # Path to signal-cli binary
+    allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    signal: SignalConfig = Field(default_factory=SignalConfig)
 
 
 class AgentDefaults(BaseModel):
