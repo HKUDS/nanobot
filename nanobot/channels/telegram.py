@@ -151,33 +151,54 @@ class TelegramChannel(BaseChannel):
             self._app = None
     
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Telegram."""
+        """Send a message through Telegram (with optional media)."""
         if not self._app:
             logger.warning("Telegram bot not running")
             return
         
         try:
-            # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
-            # Convert markdown to Telegram HTML
-            html_content = _markdown_to_telegram_html(msg.content)
-            await self._app.bot.send_message(
-                chat_id=chat_id,
-                text=html_content,
-                parse_mode="HTML"
-            )
         except ValueError:
             logger.error(f"Invalid chat_id: {msg.chat_id}")
+            return
+        
+        try:
+            # Handle media files
+            if msg.media:
+                await self._send_media(chat_id, msg.media, msg.content)
+                return
+            
+            # Text-only message
+            html_content = _markdown_to_telegram_html(msg.content)
+            await self._app.bot.send_message(chat_id=chat_id, text=html_content, parse_mode="HTML")
         except Exception as e:
-            # Fallback to plain text if HTML parsing fails
             logger.warning(f"HTML parse failed, falling back to plain text: {e}")
             try:
-                await self._app.bot.send_message(
-                    chat_id=int(msg.chat_id),
-                    text=msg.content
-                )
+                await self._app.bot.send_message(chat_id=chat_id, text=msg.content)
             except Exception as e2:
                 logger.error(f"Error sending Telegram message: {e2}")
+    
+    async def _send_media(self, chat_id: int, media: list[str], caption: str) -> None:
+        """Send media files (photos or documents) to chat."""
+        from pathlib import Path
+        
+        IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+        first_caption = caption[:1024] if caption else None
+        
+        for i, media_path in enumerate(media):
+            path = Path(media_path)
+            if not path.exists():
+                logger.warning(f"Media file not found: {media_path}")
+                continue
+            
+            # Only first media gets the caption
+            cap = first_caption if i == 0 else None
+            
+            with open(path, "rb") as f:
+                if path.suffix.lower() in IMAGE_EXTENSIONS:
+                    await self._app.bot.send_photo(chat_id=chat_id, photo=f, caption=cap)
+                else:
+                    await self._app.bot.send_document(chat_id=chat_id, document=f, caption=cap)
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
