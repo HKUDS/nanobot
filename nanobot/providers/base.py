@@ -1,6 +1,7 @@
 """Base LLM provider interface."""
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -8,6 +9,7 @@ from typing import Any
 @dataclass
 class ToolCallRequest:
     """A tool call request from the LLM."""
+
     id: str
     name: str
     arguments: dict[str, Any]
@@ -16,29 +18,38 @@ class ToolCallRequest:
 @dataclass
 class LLMResponse:
     """Response from an LLM provider."""
+
     content: str | None
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
     finish_reason: str = "stop"
     usage: dict[str, int] = field(default_factory=dict)
-    
+
     @property
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls."""
         return len(self.tool_calls) > 0
 
 
+@dataclass
+class StreamChunk:
+    """A single chunk from a streaming LLM response."""
+
+    delta: str  # Incremental text content
+    finish_reason: str | None = None  # "stop" on last chunk
+
+
 class LLMProvider(ABC):
     """
     Abstract base class for LLM providers.
-    
+
     Implementations should handle the specifics of each provider's API
     while maintaining a consistent interface.
     """
-    
+
     def __init__(self, api_key: str | None = None, api_base: str | None = None):
         self.api_key = api_key
         self.api_base = api_base
-    
+
     @abstractmethod
     async def chat(
         self,
@@ -50,19 +61,44 @@ class LLMProvider(ABC):
     ) -> LLMResponse:
         """
         Send a chat completion request.
-        
+
         Args:
             messages: List of message dicts with 'role' and 'content'.
             tools: Optional list of tool definitions.
             model: Model identifier (provider-specific).
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
-        
+
         Returns:
             LLMResponse with content and/or tool calls.
         """
         pass
-    
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> AsyncIterator[StreamChunk]:
+        """
+        Stream a chat completion response token by token.
+
+        Does NOT support tool calls (streaming is for final text responses only).
+        Default implementation falls back to non-streaming chat.
+
+        Yields:
+            StreamChunk with incremental text.
+        """
+        response = await self.chat(
+            messages=messages,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        if response.content:
+            yield StreamChunk(delta=response.content, finish_reason="stop")
+
     @abstractmethod
     def get_default_model(self) -> str:
         """Get the default model for this provider."""

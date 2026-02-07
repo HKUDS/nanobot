@@ -1,35 +1,29 @@
 """Spawn tool for creating background subagents."""
 
-from typing import Any, TYPE_CHECKING
+import asyncio
+from typing import Any
 
-from nanobot.agent.tools.base import Tool
+from loguru import logger
 
-if TYPE_CHECKING:
-    from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.tools.base import Tool, ToolContext
 
 
 class SpawnTool(Tool):
     """
-    Tool to spawn a subagent for background task execution.
-    
-    The subagent runs asynchronously and announces its result back
-    to the main agent when complete.
+    Tool to spawn a SubagentActor for background task execution.
+
+    Accepts ``Config`` — forwards it to SubagentActor so it can extract
+    what it needs without the caller unpacking every field.
     """
-    
-    def __init__(self, manager: "SubagentManager"):
-        self._manager = manager
-        self._origin_channel = "cli"
-        self._origin_chat_id = "direct"
-    
-    def set_context(self, channel: str, chat_id: str) -> None:
-        """Set the origin context for subagent announcements."""
-        self._origin_channel = channel
-        self._origin_chat_id = chat_id
-    
+
+    def __init__(self, config: Any, provider_name: str = "provider"):
+        self._config = config
+        self._provider_name = provider_name
+
     @property
     def name(self) -> str:
         return "spawn"
-    
+
     @property
     def description(self) -> str:
         return (
@@ -37,7 +31,7 @@ class SpawnTool(Tool):
             "Use this for complex or time-consuming tasks that can run independently. "
             "The subagent will complete the task and report back when done."
         )
-    
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -54,12 +48,30 @@ class SpawnTool(Tool):
             },
             "required": ["task"],
         }
-    
-    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
-        """Spawn a subagent to execute the given task."""
-        return await self._manager.spawn(
-            task=task,
-            label=label,
-            origin_channel=self._origin_channel,
-            origin_chat_id=self._origin_chat_id,
-        )
+
+    async def execute(self, ctx: ToolContext, task: str, label: str | None = None, **kwargs: Any) -> str:
+        """Spawn a SubagentActor to execute the given task."""
+        from nanobot.actor.subagent import SubagentActor
+
+        display_label = label or task[:30] + ("..." if len(task) > 30 else "")
+
+        try:
+            subagent = await SubagentActor.spawn(
+                config=self._config,
+                task=task,
+                label=display_label,
+                origin_channel=ctx.channel or "cli",
+                origin_chat_id=ctx.chat_id or "direct",
+                agent_name=ctx.agent_name,
+                provider_name=self._provider_name,
+            )
+
+            # Fire-and-forget: schedule run() in the background
+            asyncio.create_task(subagent.run())
+
+            logger.info(f"Spawned SubagentActor: {display_label}")
+            return f"Subagent [{display_label}] started. I'll notify you when it completes."
+
+        except Exception as e:
+            logger.error(f"Failed to spawn subagent: {e}")
+            return f"Error spawning subagent: {str(e)}"

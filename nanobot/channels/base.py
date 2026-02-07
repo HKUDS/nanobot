@@ -5,75 +5,57 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.bus.queue import MessageBus
-
 
 class BaseChannel(ABC):
     """
     Abstract base class for chat channel implementations.
-    
-    Each channel (Telegram, Discord, etc.) should implement this interface
-    to integrate with the nanobot message bus.
+
+    Each channel (Telegram, Discord, etc.) should implement this interface.
+    Channels call the agent actor directly and send responses themselves.
     """
-    
+
     name: str = "base"
-    
-    def __init__(self, config: Any, bus: MessageBus):
+
+    def __init__(self, config: Any, agent_name: str = "agent"):
         """
         Initialize the channel.
-        
+
         Args:
             config: Channel-specific configuration.
-            bus: The message bus for communication.
+            agent_name: Name of the AgentActor to resolve via Pulsing.
         """
         self.config = config
-        self.bus = bus
+        self.agent_name = agent_name
         self._running = False
-    
+
     @abstractmethod
     async def start(self) -> None:
-        """
-        Start the channel and begin listening for messages.
-        
-        This should be a long-running async task that:
-        1. Connects to the chat platform
-        2. Listens for incoming messages
-        3. Forwards messages to the bus via _handle_message()
-        """
+        """Start the channel and begin listening for messages."""
         pass
-    
+
     @abstractmethod
     async def stop(self) -> None:
         """Stop the channel and clean up resources."""
         pass
-    
+
     @abstractmethod
-    async def send(self, msg: OutboundMessage) -> None:
+    async def send_text(self, chat_id: str, content: str) -> None:
         """
-        Send a message through this channel.
-        
+        Send a text message through this channel.
+
         Args:
-            msg: The message to send.
+            chat_id: The chat/channel identifier.
+            content: The message text to send.
         """
         pass
-    
+
     def is_allowed(self, sender_id: str) -> bool:
-        """
-        Check if a sender is allowed to use this bot.
-        
-        Args:
-            sender_id: The sender's identifier.
-        
-        Returns:
-            True if allowed, False otherwise.
-        """
+        """Check if a sender is allowed to use this bot."""
         allow_list = getattr(self.config, "allow_from", [])
-        
-        # If no allow list, allow everyone
+
         if not allow_list:
             return True
-        
+
         sender_str = str(sender_id)
         if sender_str in allow_list:
             return True
@@ -82,26 +64,24 @@ class BaseChannel(ABC):
                 if part and part in allow_list:
                     return True
         return False
-    
+
+    async def _get_agent(self):
+        """Resolve the AgentActor via Pulsing."""
+        from nanobot.actor.agent import AgentActor
+        return await AgentActor.resolve(self.agent_name)
+
     async def _handle_message(
         self,
         sender_id: str,
         chat_id: str,
         content: str,
         media: list[str] | None = None,
-        metadata: dict[str, Any] | None = None
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Handle an incoming message from the chat platform.
-        
-        This method checks permissions and forwards to the bus.
-        
-        Args:
-            sender_id: The sender's identifier.
-            chat_id: The chat/channel identifier.
-            content: Message text content.
-            media: Optional list of media URLs.
-            metadata: Optional channel-specific metadata.
+
+        Checks permissions, calls the agent, and sends the response back.
         """
         if not self.is_allowed(sender_id):
             logger.warning(
@@ -109,18 +89,27 @@ class BaseChannel(ABC):
                 f"Add them to allowFrom list in config to grant access."
             )
             return
-        
-        msg = InboundMessage(
-            channel=self.name,
-            sender_id=str(sender_id),
-            chat_id=str(chat_id),
-            content=content,
-            media=media or [],
-            metadata=metadata or {}
-        )
-        
-        await self.bus.publish_inbound(msg)
-    
+
+        try:
+            agent = await self._get_agent()
+            response = await agent.process(
+                channel=self.name,
+                sender_id=str(sender_id),
+                chat_id=str(chat_id),
+                content=content,
+                media=media or [],
+            )
+            if response:
+                await self.send_text(str(chat_id), response)
+        except Exception as e:
+            logger.error(f"Error processing message on {self.name}: {e}")
+            try:
+                await self.send_text(
+                    str(chat_id), f"Sorry, I encountered an error: {str(e)}"
+                )
+            except Exception:
+                pass
+
     @property
     def is_running(self) -> bool:
         """Check if the channel is running."""

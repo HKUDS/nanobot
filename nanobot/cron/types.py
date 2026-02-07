@@ -1,59 +1,61 @@
-"""Cron types."""
+"""Cron types (Pydantic models with camelCase JSON aliases)."""
 
-from dataclasses import dataclass, field
 from typing import Literal
 
+from pydantic import BaseModel, Field
 
-@dataclass
-class CronSchedule:
+
+class CronSchedule(BaseModel):
     """Schedule definition for a cron job."""
+
     kind: Literal["at", "every", "cron"]
-    # For "at": timestamp in ms
-    at_ms: int | None = None
-    # For "every": interval in ms
-    every_ms: int | None = None
-    # For "cron": cron expression (e.g. "0 9 * * *")
+    at_ms: int | None = Field(None, alias="atMs")
+    every_ms: int | None = Field(None, alias="everyMs")
     expr: str | None = None
-    # Timezone for cron expressions
     tz: str | None = None
 
+    model_config = {"populate_by_name": True}
 
-@dataclass
-class CronPayload:
+
+class CronPayload(BaseModel):
     """What to do when the job runs."""
+
     kind: Literal["system_event", "agent_turn"] = "agent_turn"
     message: str = ""
-    # Deliver response to channel
     deliver: bool = False
-    channel: str | None = None  # e.g. "whatsapp"
-    to: str | None = None  # e.g. phone number
+    channel: str | None = None
+    to: str | None = None
 
 
-@dataclass
-class CronJobState:
+class CronJobState(BaseModel):
     """Runtime state of a job."""
-    next_run_at_ms: int | None = None
-    last_run_at_ms: int | None = None
-    last_status: Literal["ok", "error", "skipped"] | None = None
-    last_error: str | None = None
+
+    next_run_at_ms: int | None = Field(None, alias="nextRunAtMs")
+    last_run_at_ms: int | None = Field(None, alias="lastRunAtMs")
+    last_status: Literal["ok", "error", "skipped"] | None = Field(None, alias="lastStatus")
+    last_error: str | None = Field(None, alias="lastError")
+
+    model_config = {"populate_by_name": True}
 
 
-@dataclass
-class CronJob:
+class CronJob(BaseModel):
     """A scheduled job."""
+
     id: str
     name: str
     enabled: bool = True
-    schedule: CronSchedule = field(default_factory=lambda: CronSchedule(kind="every"))
-    payload: CronPayload = field(default_factory=CronPayload)
-    state: CronJobState = field(default_factory=CronJobState)
-    created_at_ms: int = 0
-    updated_at_ms: int = 0
-    delete_after_run: bool = False
+    schedule: CronSchedule = CronSchedule(kind="every")
+    payload: CronPayload = CronPayload()
+    state: CronJobState = CronJobState()
+    created_at_ms: int = Field(0, alias="createdAtMs")
+    updated_at_ms: int = Field(0, alias="updatedAtMs")
+    delete_after_run: bool = Field(False, alias="deleteAfterRun")
+
+    model_config = {"populate_by_name": True}
 
 
-@dataclass
-class CronStore:
+class CronStore(BaseModel):
     """Persistent store for cron jobs."""
+
     version: int = 1
-    jobs: list[CronJob] = field(default_factory=list)
+    jobs: list[CronJob] = []

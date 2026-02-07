@@ -9,8 +9,6 @@ import httpx
 import websockets
 from loguru import logger
 
-from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import DiscordConfig
 
@@ -24,8 +22,8 @@ class DiscordChannel(BaseChannel):
 
     name = "discord"
 
-    def __init__(self, config: DiscordConfig, bus: MessageBus):
-        super().__init__(config, bus)
+    def __init__(self, config: DiscordConfig, agent_name: str = "agent"):
+        super().__init__(config, agent_name)
         self.config: DiscordConfig = config
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._seq: int | None = None
@@ -34,27 +32,21 @@ class DiscordChannel(BaseChannel):
         self._http: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
-        """Start the Discord gateway connection."""
+        """Start the Discord gateway connection.
+
+        Connects once. The ChannelManager supervisor handles restarts
+        on failure with exponential backoff.
+        """
         if not self.config.token:
-            logger.error("Discord bot token not configured")
-            return
+            raise RuntimeError("Discord bot token not configured")
 
         self._running = True
         self._http = httpx.AsyncClient(timeout=30.0)
 
-        while self._running:
-            try:
-                logger.info("Connecting to Discord gateway...")
-                async with websockets.connect(self.config.gateway_url) as ws:
-                    self._ws = ws
-                    await self._gateway_loop()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.warning(f"Discord gateway error: {e}")
-                if self._running:
-                    logger.info("Reconnecting to Discord gateway in 5 seconds...")
-                    await asyncio.sleep(5)
+        logger.info("Connecting to Discord gateway...")
+        async with websockets.connect(self.config.gateway_url) as ws:
+            self._ws = ws
+            await self._gateway_loop()
 
     async def stop(self) -> None:
         """Stop the Discord channel."""
@@ -72,19 +64,14 @@ class DiscordChannel(BaseChannel):
             await self._http.aclose()
             self._http = None
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def send_text(self, chat_id: str, content: str) -> None:
         """Send a message through Discord REST API."""
         if not self._http:
             logger.warning("Discord HTTP client not initialized")
             return
 
-        url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
-        payload: dict[str, Any] = {"content": msg.content}
-
-        if msg.reply_to:
-            payload["message_reference"] = {"message_id": msg.reply_to}
-            payload["allowed_mentions"] = {"replied_user": False}
-
+        url = f"{DISCORD_API_BASE}/channels/{chat_id}/messages"
+        payload: dict[str, Any] = {"content": content}
         headers = {"Authorization": f"Bot {self.config.token}"}
 
         try:
@@ -105,7 +92,7 @@ class DiscordChannel(BaseChannel):
                     else:
                         await asyncio.sleep(1)
         finally:
-            await self._stop_typing(msg.chat_id)
+            await self._stop_typing(chat_id)
 
     async def _gateway_loop(self) -> None:
         """Main gateway loop: identify, heartbeat, dispatch events."""
@@ -128,7 +115,6 @@ class DiscordChannel(BaseChannel):
                 self._seq = seq
 
             if op == 10:
-                # HELLO: start heartbeat and identify
                 interval_ms = payload.get("heartbeat_interval", 45000)
                 await self._start_heartbeat(interval_ms / 1000)
                 await self._identify()
@@ -137,11 +123,9 @@ class DiscordChannel(BaseChannel):
             elif op == 0 and event_type == "MESSAGE_CREATE":
                 await self._handle_message_create(payload)
             elif op == 7:
-                # RECONNECT: exit loop to reconnect
                 logger.info("Discord gateway requested reconnect")
                 break
             elif op == 9:
-                # INVALID_SESSION: reconnect
                 logger.warning("Discord gateway invalid session")
                 break
 
@@ -222,8 +206,6 @@ class DiscordChannel(BaseChannel):
                 logger.warning(f"Failed to download Discord attachment: {e}")
                 content_parts.append(f"[attachment: {filename} - download failed]")
 
-        reply_to = (payload.get("referenced_message") or {}).get("id")
-
         await self._start_typing(channel_id)
 
         await self._handle_message(
@@ -234,7 +216,7 @@ class DiscordChannel(BaseChannel):
             metadata={
                 "message_id": str(payload.get("id", "")),
                 "guild_id": payload.get("guild_id"),
-                "reply_to": reply_to,
+                "reply_to": (payload.get("referenced_message") or {}).get("id"),
             },
         )
 

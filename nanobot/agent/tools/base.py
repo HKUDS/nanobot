@@ -1,17 +1,35 @@
 """Base class for agent tools."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import Any
+
+
+@dataclass
+class ToolContext:
+    """
+    Execution context passed to every tool call.
+
+    Makes tools stateless -- no more set_context() calls.
+    All cross-actor communication uses Pulsing name resolution
+    (no local object references).
+    """
+
+    channel: str = ""
+    chat_id: str = ""
+    agent_name: str = "agent"
 
 
 class Tool(ABC):
     """
     Abstract base class for agent tools.
-    
+
     Tools are capabilities that the agent can use to interact with
     the environment, such as reading files, executing commands, etc.
+
+    Tools are stateless: execution context is provided via ToolContext.
     """
-    
+
     _TYPE_MAP = {
         "string": str,
         "integer": int,
@@ -20,33 +38,34 @@ class Tool(ABC):
         "array": list,
         "object": dict,
     }
-    
+
     @property
     @abstractmethod
     def name(self) -> str:
         """Tool name used in function calls."""
         pass
-    
+
     @property
     @abstractmethod
     def description(self) -> str:
         """Description of what the tool does."""
         pass
-    
+
     @property
     @abstractmethod
     def parameters(self) -> dict[str, Any]:
         """JSON Schema for tool parameters."""
         pass
-    
+
     @abstractmethod
-    async def execute(self, **kwargs: Any) -> str:
+    async def execute(self, ctx: ToolContext, **kwargs: Any) -> str:
         """
         Execute the tool with given parameters.
-        
+
         Args:
+            ctx: Execution context (channel, chat_id, etc.).
             **kwargs: Tool-specific parameters.
-        
+
         Returns:
             String result of the tool execution.
         """
@@ -63,7 +82,7 @@ class Tool(ABC):
         t, label = schema.get("type"), path or "parameter"
         if t in self._TYPE_MAP and not isinstance(val, self._TYPE_MAP[t]):
             return [f"{label} should be {t}"]
-        
+
         errors = []
         if "enum" in schema and val not in schema["enum"]:
             errors.append(f"{label} must be one of {schema['enum']}")
@@ -89,7 +108,7 @@ class Tool(ABC):
             for i, item in enumerate(val):
                 errors.extend(self._validate(item, schema["items"], f"{path}[{i}]" if path else f"[{i}]"))
         return errors
-    
+
     def to_schema(self) -> dict[str, Any]:
         """Convert tool to OpenAI function schema format."""
         return {
@@ -98,5 +117,5 @@ class Tool(ABC):
                 "name": self.name,
                 "description": self.description,
                 "parameters": self.parameters,
-            }
+            },
         }

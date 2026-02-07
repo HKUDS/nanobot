@@ -6,7 +6,9 @@ from typing import Any
 import litellm
 from litellm import acompletion
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from collections.abc import AsyncIterator
+
+from nanobot.providers.base import LLMProvider, LLMResponse, StreamChunk, ToolCallRequest
 
 
 class LiteLLMProvider(LLMProvider):
@@ -76,31 +78,11 @@ class LiteLLMProvider(LLMProvider):
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
     
-    async def chat(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        model: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
-    ) -> LLMResponse:
-        """
-        Send a chat completion request via LiteLLM.
-        
-        Args:
-            messages: List of message dicts with 'role' and 'content'.
-            tools: Optional list of tool definitions in OpenAI format.
-            model: Model identifier (e.g., 'anthropic/claude-sonnet-4-5').
-            max_tokens: Maximum tokens in response.
-            temperature: Sampling temperature.
-        
-        Returns:
-            LLMResponse with content and/or tool calls.
-        """
+    def _prepare_model(self, model: str | None, temperature: float = 0.7) -> tuple[str, float]:
+        """Resolve and prefix the model name; adjust temperature if needed."""
         model = model or self.default_model
-        
+
         # Auto-prefix model names for known providers
-        # (keywords, target_prefix, skip_if_starts_with)
         _prefix_rules = [
             (("glm", "zhipu"), "zai", ("zhipu/", "zai/", "openrouter/", "hosted_vllm/")),
             (("qwen", "dashscope"), "dashscope", ("dashscope/", "openrouter/")),
@@ -113,46 +95,81 @@ class LiteLLMProvider(LLMProvider):
                 model = f"{prefix}/{model}"
                 break
 
-        # Gateway/endpoint-specific prefixes (detected by api_base/api_key, not model name)
+        # Gateway/endpoint-specific prefixes
         if self.is_openrouter and not model.startswith("openrouter/"):
             model = f"openrouter/{model}"
         elif self.is_aihubmix:
             model = f"openai/{model.split('/')[-1]}"
         elif self.is_vllm:
             model = f"hosted_vllm/{model}"
-        
-        # kimi-k2.5 only supports temperature=1.0
+
         if "kimi-k2.5" in model.lower():
             temperature = 1.0
 
+        return model, temperature
+
+    def _base_kwargs(self, model: str, messages: list[dict[str, Any]],
+                     max_tokens: int, temperature: float) -> dict[str, Any]:
+        """Build base kwargs common to chat and chat_stream."""
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        
-        # Pass api_base directly for custom endpoints (vLLM, etc.)
         if self.api_base:
             kwargs["api_base"] = self.api_base
-        
-        # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
-        
+        return kwargs
+
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> LLMResponse:
+        """Send a chat completion request via LiteLLM."""
+        model, temperature = self._prepare_model(model, temperature)
+        kwargs = self._base_kwargs(model, messages, max_tokens, temperature)
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
-        
+
         try:
             response = await acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
-            # Return error as content for graceful handling
             return LLMResponse(
                 content=f"Error calling LLM: {str(e)}",
                 finish_reason="error",
             )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> AsyncIterator[StreamChunk]:
+        """Stream a chat completion response token by token via LiteLLM."""
+        model, temperature = self._prepare_model(model, temperature)
+        kwargs = self._base_kwargs(model, messages, max_tokens, temperature)
+        kwargs["stream"] = True
+
+        try:
+            response = await acompletion(**kwargs)
+            async for chunk in response:
+                delta = chunk.choices[0].delta
+                text = getattr(delta, "content", None) or ""
+                finish = chunk.choices[0].finish_reason
+                if text or finish:
+                    yield StreamChunk(delta=text, finish_reason=finish)
+        except Exception as e:
+            yield StreamChunk(delta=f"Error calling LLM: {str(e)}", finish_reason="error")
     
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""

@@ -1,5 +1,5 @@
-"""Session management module."""
+"""Session management module (re-exports from agent.session)."""
 
-from nanobot.session.manager import SessionManager, Session
+from nanobot.agent.session import SessionManager, Session
 
 __all__ = ["SessionManager", "Session"]
