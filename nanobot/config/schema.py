@@ -1,7 +1,8 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from pydantic import BaseModel, Field
+from typing import Any
+from pydantic import BaseModel, Field, ConfigDict
 from pydantic_settings import BaseSettings
 
 
@@ -69,6 +70,7 @@ class ProviderConfig(BaseModel):
 
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
+    model_config = ConfigDict(extra='allow')
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -149,6 +151,48 @@ class Config(BaseSettings):
             if keyword in model and provider.api_key:
                 return provider
         return None
+
+    def _get_custom_provider(self, model: str) -> tuple[ProviderConfig, str] | None:
+        """Check if model uses a custom provider prefix (provider_id/model)."""
+        if "/" not in model:
+            return None
+        
+        prefix, model_name = model.split("/", 1)
+        
+        # Check standard providers
+        provider = getattr(self.providers, prefix, None)
+        if isinstance(provider, ProviderConfig) and provider.api_key:
+            return provider, model_name
+        
+        # Check dynamic providers (extra fields)
+        if self.providers.model_extra and prefix in self.providers.model_extra:
+            data = self.providers.model_extra[prefix]
+            if isinstance(data, dict):
+                return ProviderConfig(**data), model_name
+            if isinstance(data, ProviderConfig):
+                return data, model_name
+        return None
+
+    def get_llm_config(self, model: str | None = None) -> dict[str, Any]:
+        """Get LLM configuration (api_key, api_base, resolved_model)."""
+        model = model or self.agents.defaults.model
+        custom = self._get_custom_provider(model)
+        
+        if custom:
+            provider, model_name = custom
+            return {
+                "api_key": provider.api_key,
+                "api_base": provider.api_base,
+                "model": model_name,
+                "pass_through": True
+            }
+        
+        return {
+            "api_key": self.get_api_key(model),
+            "api_base": self.get_api_base(model),
+            "model": model,
+            "pass_through": False
+        }
 
     def get_api_key(self, model: str | None = None) -> str | None:
         """Get API key for the given model (or default model). Falls back to first available key."""

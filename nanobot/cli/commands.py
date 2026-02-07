@@ -179,9 +179,10 @@ def gateway(
     bus = MessageBus()
     
     # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock)
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
-    model = config.agents.defaults.model
+    llm_cfg = config.get_llm_config()
+    model = llm_cfg["model"]
+    api_key = llm_cfg["api_key"]
+    api_base = llm_cfg["api_base"]
     is_bedrock = model.startswith("bedrock/")
 
     if not api_key and not is_bedrock:
@@ -192,7 +193,8 @@ def gateway(
     provider = LiteLLMProvider(
         api_key=api_key,
         api_base=api_base,
-        default_model=config.agents.defaults.model
+        default_model=model,
+        pass_through=llm_cfg.get("pass_through", False)
     )
     
     # Create cron service first (callback set after agent creation)
@@ -204,7 +206,7 @@ def gateway(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
+        model=model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
@@ -295,9 +297,10 @@ def agent(
     
     config = load_config()
     
-    api_key = config.get_api_key()
-    api_base = config.get_api_base()
-    model = config.agents.defaults.model
+    llm_cfg = config.get_llm_config()
+    model = llm_cfg["model"]
+    api_key = llm_cfg["api_key"]
+    api_base = llm_cfg["api_base"]
     is_bedrock = model.startswith("bedrock/")
 
     if not api_key and not is_bedrock:
@@ -308,7 +311,8 @@ def agent(
     provider = LiteLLMProvider(
         api_key=api_key,
         api_base=api_base,
-        default_model=config.agents.defaults.model
+        default_model=model,
+        pass_through=llm_cfg.get("pass_through", False)
     )
     
     agent_loop = AgentLoop(
