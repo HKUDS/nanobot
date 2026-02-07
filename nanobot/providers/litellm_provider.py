@@ -21,10 +21,12 @@ class LiteLLMProvider(LLMProvider):
         self, 
         api_key: str | None = None, 
         api_base: str | None = None,
-        default_model: str = "anthropic/claude-opus-4-5"
+        default_model: str = "anthropic/claude-opus-4-5",
+        pass_through: bool = False
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
+        self.pass_through = pass_through
         
         # Detect OpenRouter by api_key prefix or explicit api_base
         self.is_openrouter = (
@@ -91,42 +93,47 @@ class LiteLLMProvider(LLMProvider):
         """
         model = model or self.default_model
         
-        # For OpenRouter, prefix model name if not already prefixed
-        if self.is_openrouter and not model.startswith("openrouter/"):
-            model = f"openrouter/{model}"
-        
-        # For Zhipu/Z.ai, ensure prefix is present
-        # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
-        if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
-            model.startswith("zhipu/") or 
-            model.startswith("zai/") or 
-            model.startswith("openrouter/") or
-            model.startswith("hosted_vllm/")
-        ):
-            model = f"zai/{model}"
+        if self.pass_through:
+            # Skip complex logic and just ensure openai/ prefix
+            if not model.startswith("openai/"):
+                model = f"openai/{model}"
+        else:
+            # For OpenRouter, prefix model name if not already prefixed
+            if self.is_openrouter and not model.startswith("openrouter/"):
+                model = f"openrouter/{model}"
+            
+            # For Zhipu/Z.ai, ensure prefix is present
+            # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
+            if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
+                model.startswith("zhipu/") or 
+                model.startswith("zai/") or 
+                model.startswith("openrouter/") or
+                model.startswith("hosted_vllm/")
+            ):
+                model = f"zai/{model}"
 
-        # For DashScope/Qwen, ensure dashscope/ prefix
-        if ("qwen" in model.lower() or "dashscope" in model.lower()) and not (
-            model.startswith("dashscope/") or
-            model.startswith("openrouter/")
-        ):
-            model = f"dashscope/{model}"
+            # For DashScope/Qwen, ensure dashscope/ prefix
+            if ("qwen" in model.lower() or "dashscope" in model.lower()) and not (
+                model.startswith("dashscope/") or
+                model.startswith("openrouter/")
+            ):
+                model = f"dashscope/{model}"
 
-        # For Moonshot/Kimi, ensure moonshot/ prefix (before vLLM check)
-        if ("moonshot" in model.lower() or "kimi" in model.lower()) and not (
-            model.startswith("moonshot/") or model.startswith("openrouter/")
-        ):
-            model = f"moonshot/{model}"
+            # For Moonshot/Kimi, ensure moonshot/ prefix (before vLLM check)
+            if ("moonshot" in model.lower() or "kimi" in model.lower()) and not (
+                model.startswith("moonshot/") or model.startswith("openrouter/")
+            ):
+                model = f"moonshot/{model}"
 
-        # For Gemini, ensure gemini/ prefix if not already present
-        if "gemini" in model.lower() and not model.startswith("gemini/"):
-            model = f"gemini/{model}"
+            # For Gemini, ensure gemini/ prefix if not already present
+            if "gemini" in model.lower() and not model.startswith("gemini/"):
+                model = f"gemini/{model}"
 
 
-        # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
-        # Convert openai/ prefix to hosted_vllm/ if user specified it
-        if self.is_vllm:
-            model = f"hosted_vllm/{model}"
+            # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
+            # Convert openai/ prefix to hosted_vllm/ if user specified it
+            if self.is_vllm:
+                model = f"hosted_vllm/{model}"
         
         # kimi-k2.5 only supports temperature=1.0
         if "kimi-k2.5" in model.lower():
@@ -143,6 +150,9 @@ class LiteLLMProvider(LLMProvider):
         if self.api_base:
             kwargs["api_base"] = self.api_base
         
+        if self.pass_through and self.api_key:
+            kwargs["api_key"] = self.api_key
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
