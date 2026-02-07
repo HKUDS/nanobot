@@ -105,7 +105,7 @@ class LiteLLMProvider(LLMProvider):
             (("glm", "zhipu"), "zai", ("zhipu/", "zai/", "openrouter/", "hosted_vllm/")),
             (("qwen", "dashscope"), "dashscope", ("dashscope/", "openrouter/")),
             (("moonshot", "kimi"), "moonshot", ("moonshot/", "openrouter/")),
-            (("gemini",), "gemini", ("gemini/",)),
+            (("gemini",), "gemini", ("gemini/", "openrouter/")),
         ]
         model_lower = model.lower()
         for keywords, prefix, skip in _prefix_rules:
