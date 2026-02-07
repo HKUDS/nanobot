@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any
 
-from loguru import logger
+from nanobot import logger
 
 
 class MemoryUpdater:

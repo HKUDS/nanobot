@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from loguru import logger
+from nanobot import logger
 
 from nanobot.agent.tools.filesystem import ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry

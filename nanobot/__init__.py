@@ -8,20 +8,12 @@ import sys
 __version__ = "0.1.0"
 __logo__ = "🐈"
 
-# 配置 loguru 日志级别（在模块导入时立即配置）
+# 配置 loguru 日志级别
 from loguru import _logger
 
 level = os.environ.get("LOG_LEVEL", "INFO").upper()
 
-_logger.remove()
-_logger.add(
-    sys.stderr,
-    format="<level>{time:YYYY-MM-DD HH:mm:ss} | {name}:{function}:{line} | {message}",
-    level=level,
-    colorize=True,
-    backtrace=True,
-    diagnose=True,
-)
-
-# 导出配置好的 logger
+# 配置 loguru（使用默认配置，不再添加自定义 handler）
 logger = _logger
+
+# 导出配置好的 logger供其他模块使用
