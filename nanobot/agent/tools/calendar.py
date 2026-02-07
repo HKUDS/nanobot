@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+
 from googleapiclient.discovery import build
 
 from nanobot.agent.tools.base import Tool
@@ -65,15 +65,18 @@ class GoogleCalendarTool(Tool):
             "required": ["action"]
         }
 
-    async def execute(self, action: str, **kwargs: Any) -> str:
+    async def execute(self, **kwargs: Any) -> str:
         if not self.config.enabled:
             return "Google Calendar tool is disabled in configuration."
 
+        action = kwargs.get("action")
+        if not action:
+            return "Missing required parameter: 'action'."
         creds = self._get_credentials()
         if not creds:
             return (
                 f"Authentication required. Please:\n"
-                f"1. Place 'credentials.json' (from Google Cloud Console) in {self.config.credentials_path}\n"
+                f"1. Place the OAuth client secrets JSON (downloaded from Google Cloud Console) at {self.config.credentials_path}\n"
                 f"2. Run the setup script to generate the token (or ensure 'token.json' exists at {self.config.token_path})."
             )
 
