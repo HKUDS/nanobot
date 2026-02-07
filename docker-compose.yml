@@ -1,0 +1,19 @@
+services:
+  nanobot:
+    build: .
+    image: nanobot:latest
+    container_name: nanobot_portable
+    # Run the gateway (server/agent loop) instead of just checking status
+    command: ["gateway"]
+    volumes:
+      # THE SOUL: Persistent Data
+      # Maps local ./data folder to the container's storage area.
+      # This captures memory, sessions, config, and skills.
+      - ./data:/root/.nanobot
+      # MOUNT SOURCE CODE FOR DEV
+      - ./nanobot:/app/nanobot
+    ports:
+      - "18790:18790"
+    restart: unless-stopped
+    stdin_open: true
+    tty: true

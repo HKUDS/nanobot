@@ -1,0 +1,14 @@
+services:
+  nanobot:
+    container_name: nanobot_dev
+    volumes:
+      # THE BRAIN: Live Code Injection
+      # Maps the local source code into the container.
+      # Changes in VS Code are instantly reflected inside the container.
+      - ./nanobot:/app/nanobot
+      - ./bridge:/app/bridge
+    environment:
+      # Optional flag if code needs to know it's in dev mode
+      - NANOBOT_DEV_MODE=true
+      # Prevent Python bytecode caching so restart.bat picks up changes
+      - PYTHONDONTWRITEBYTECODE=1
