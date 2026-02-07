@@ -89,7 +89,6 @@ class ProvidersConfig(BaseModel):
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
-    aixtb: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -149,14 +148,13 @@ class Config(BaseSettings):
             "zhipu": p.zhipu, "glm": p.zhipu, "zai": p.zhipu,
             "dashscope": p.dashscope, "qwen": p.dashscope,
             "groq": p.groq, "moonshot": p.moonshot, "kimi": p.moonshot, "vllm": p.vllm,
-            "aixtb": p.aixtb,
         }
         for kw, provider in keyword_map.items():
             if kw in model and provider.api_key:
                 return provider
         # Fallback: gateways first (can serve any model), then specific providers
         all_providers = [p.openrouter, p.aihubmix, p.anthropic, p.openai, p.deepseek,
-                         p.gemini, p.zhipu, p.dashscope, p.moonshot, p.vllm, p.groq, p.aixtb]
+                         p.gemini, p.zhipu, p.dashscope, p.moonshot, p.vllm, p.groq]
         return next((pr for pr in all_providers if pr.api_key), None)
 
     def get_api_key(self, model: str | None = None) -> str | None:
