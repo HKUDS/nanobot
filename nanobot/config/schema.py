@@ -50,6 +50,7 @@ class ChannelsConfig(BaseModel):
 class AgentDefaults(BaseModel):
     """Default agent configuration."""
     workspace: str = "~/.nanobot/workspace"
+    provider: str = ""  # Explicit provider, takes precedence over model name detection
     model: str = "anthropic/claude-opus-4-5"
     max_tokens: int = 8192
     temperature: float = 0.7
@@ -65,7 +66,6 @@ class ProviderConfig(BaseModel):
     """LLM provider configuration."""
     api_key: str = ""
     api_base: str | None = None
-    extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
 class ProvidersConfig(BaseModel):
@@ -80,7 +80,6 @@ class ProvidersConfig(BaseModel):
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
-    aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
 
 
 class GatewayConfig(BaseModel):
@@ -119,52 +118,84 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
-    
+
     @property
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
-    
-    # Default base URLs for API gateways
-    _GATEWAY_DEFAULTS = {"openrouter": "https://openrouter.ai/api/v1", "aihubmix": "https://aihubmix.com/v1"}
 
-    def get_provider(self, model: str | None = None) -> ProviderConfig | None:
-        """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
-        model = (model or self.agents.defaults.model).lower()
-        p = self.providers
-        # Keyword → provider mapping (order matters: gateways first)
-        keyword_map = {
-            "aihubmix": p.aihubmix, "openrouter": p.openrouter,
-            "deepseek": p.deepseek, "anthropic": p.anthropic, "claude": p.anthropic,
-            "openai": p.openai, "gpt": p.openai, "gemini": p.gemini,
-            "zhipu": p.zhipu, "glm": p.zhipu, "zai": p.zhipu,
-            "dashscope": p.dashscope, "qwen": p.dashscope,
-            "groq": p.groq, "moonshot": p.moonshot, "kimi": p.moonshot, "vllm": p.vllm,
-        }
-        for kw, provider in keyword_map.items():
-            if kw in model and provider.api_key:
+    def _match_provider(self, model: str | None = None) -> ProviderConfig | None:
+        """Match a provider based on explicit config or model name."""
+        # 1. Prefer explicit provider from agents.defaults.provider
+        explicit_provider = self.agents.defaults.provider
+        if explicit_provider:
+            provider = getattr(self.providers, explicit_provider, None)
+            if provider and provider.api_key:
                 return provider
-        # Fallback: gateways first (can serve any model), then specific providers
-        all_providers = [p.openrouter, p.aihubmix, p.anthropic, p.openai, p.deepseek,
-                         p.gemini, p.zhipu, p.dashscope, p.moonshot, p.vllm, p.groq]
-        return next((pr for pr in all_providers if pr.api_key), None)
+
+        # 2. Fallback to model name detection
+        model = (model or self.agents.defaults.model).lower()
+        # Map of keywords to provider configs
+        providers = {
+            "openrouter": self.providers.openrouter,
+            "deepseek": self.providers.deepseek,
+            "anthropic": self.providers.anthropic,
+            "claude": self.providers.anthropic,
+            "openai": self.providers.openai,
+            "gpt": self.providers.openai,
+            "gemini": self.providers.gemini,
+            "zhipu": self.providers.zhipu,
+            "glm": self.providers.zhipu,
+            "zai": self.providers.zhipu,
+            "dashscope": self.providers.dashscope,
+            "qwen": self.providers.dashscope,
+            "groq": self.providers.groq,
+            "moonshot": self.providers.moonshot,
+            "kimi": self.providers.moonshot,
+            "vllm": self.providers.vllm,
+        }
+        for keyword, provider in providers.items():
+            if keyword in model and provider.api_key:
+                return provider
+        return None
 
     def get_api_key(self, model: str | None = None) -> str | None:
-        """Get API key for the given model. Falls back to first available key."""
-        p = self.get_provider(model)
-        return p.api_key if p else None
-    
-    def get_api_base(self, model: str | None = None) -> str | None:
-        """Get API base URL for the given model. Applies default URLs for known gateways."""
-        p = self.get_provider(model)
-        if p and p.api_base:
-            return p.api_base
-        # Default URLs for known gateways (openrouter, aihubmix)
-        for name, url in self._GATEWAY_DEFAULTS.items():
-            if p == getattr(self.providers, name):
-                return url
+        """Get API key for the given model (or default model). Falls back to first available key."""
+        # Try matching by model name first
+        matched = self._match_provider(model)
+        if matched:
+            return matched.api_key
+        # Fallback: return first available key
+        for provider in [
+            self.providers.openrouter, self.providers.deepseek,
+            self.providers.anthropic, self.providers.openai,
+            self.providers.gemini, self.providers.zhipu,
+            self.providers.dashscope, self.providers.moonshot,
+            self.providers.vllm, self.providers.groq,
+        ]:
+            if provider.api_key:
+                return provider.api_key
         return None
-    
+
+    def get_api_base(self, model: str | None = None) -> str | None:
+        """Get API base URL based on explicit config or model name."""
+        # 1. Prefer explicit provider from agents.defaults.provider
+        explicit_provider = self.agents.defaults.provider
+        if explicit_provider:
+            provider = getattr(self.providers, explicit_provider, None)
+            if provider and provider.api_base:
+                return provider.api_base
+
+        # 2. Fallback to model name detection
+        model = (model or self.agents.defaults.model).lower()
+        if "openrouter" in model:
+            return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
+        if any(k in model for k in ("zhipu", "glm", "zai")):
+            return self.providers.zhipu.api_base
+        if "vllm" in model:
+            return self.providers.vllm.api_base
+        return None
+
     class Config:
         env_prefix = "NANOBOT_"
         env_nested_delimiter = "__"
