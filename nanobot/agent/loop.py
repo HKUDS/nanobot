@@ -239,7 +239,7 @@ class AgentLoop:
         enabled = os.environ.get("NANOBOT_AUTO_SUMMARY", "true").lower() == "true"
 
         if enabled and session.message_count > 0 and session.message_count % interval == 0:
-            logger.info(f"Auto-summary triggered at message count {session.message_count}")
+            logger.debug(f"Auto-summary triggered at message count {session.message_count}")
             session.reset_message_count()
             self.sessions.save(session)
             # 异步触发总结，不阻塞主流程
@@ -341,12 +341,12 @@ class AgentLoop:
     async def _trigger_summary(self, session_key: str) -> None:
         """触发对话总结（只生成每日概要，不更新长期记忆）。"""
         try:
-            logger.info(f"Triggering auto-summary for session: {session_key}")
+            logger.debug(f"Triggering auto-summary for session: {session_key}")
 
             # 只生成每日概要，不更新长期记忆（保留原有的手动记忆机制）
             summary = await self.summarizer.summarize_today()
             if summary:
-                logger.info(f"Auto-summary completed for {session_key}")
+                logger.debug(f"Auto-summary completed for {session_key}")
             else:
                 logger.warning(f"Auto-summary returned None for {session_key}")
         except Exception as e:

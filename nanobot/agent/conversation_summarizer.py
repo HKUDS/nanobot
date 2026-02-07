@@ -72,7 +72,7 @@ class ConversationSummarizer:
 
     async def summarize_today(self) -> DailySummary:
         """生成今日对话概要"""
-        logger.info(f"Starting daily summarization for {datetime.now().strftime('%Y-%m-%d')}")
+        logger.debug(f"Starting daily summarization for {datetime.now().strftime('%Y-%m-%d')}")
 
         # 1. 读取今天的所有会话文件
         today_messages = self._get_today_messages()
@@ -112,7 +112,7 @@ class ConversationSummarizer:
         summary_markdown = self._format_daily_summary(summary)
         self._save_daily_summary(summary_markdown)
 
-        logger.info("Daily summary generated successfully")
+        logger.debug("Daily summary generated successfully")
         return summary
 
     def _get_today_messages(self) -> list[dict[str, Any]]:
@@ -424,6 +424,6 @@ class ConversationSummarizer:
                 content = content
 
             summary_file.write_text(content, encoding="utf-8")
-            logger.info(f"Daily summary saved to {summary_file}")
+            logger.debug(f"Daily summary saved to {summary_file}")
         except Exception as e:
             logger.error(f"Failed to save daily summary: {e}")
