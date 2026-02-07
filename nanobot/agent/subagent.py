@@ -20,6 +20,8 @@ from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 # Subagent context limits (tighter than main agent)
 _MAX_TOOL_RESULT_CHARS = 2000
 _MAX_CONTEXT_MESSAGES = 25
+_EMPTY_RESPONSE_RETRIES = 1       # Bounded retry when LLM returns empty
+_MAX_ANNOUNCE_CHARS = 3000        # Cap result injected back into main agent
 
 
 class SubagentManager:
@@ -68,13 +70,47 @@ class SubagentManager:
 
     @staticmethod
     def _compact(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Compact subagent messages — keep system + goal + recent tail."""
+        """Compact subagent messages using block-aware grouping.
+
+        Groups an assistant message with tool_calls + its subsequent tool
+        results as a single atomic block.  Never splits these pairs — doing
+        so causes HTTP 400 from every major LLM API.
+        """
         if len(messages) <= _MAX_CONTEXT_MESSAGES:
             return messages
-        protected = messages[:2]
-        tail = messages[2:][-(_MAX_CONTEXT_MESSAGES - 2):]
-        while tail and tail[0].get("role") == "tool":
-            tail = tail[1:]
+
+        protected = messages[:2]  # system prompt + user goal
+        remaining = messages[2:]
+
+        # Build atomic blocks
+        blocks: list[list[dict[str, Any]]] = []
+        i = 0
+        while i < len(remaining):
+            msg = remaining[i]
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                block = [msg]
+                j = i + 1
+                while j < len(remaining) and remaining[j].get("role") == "tool":
+                    block.append(remaining[j])
+                    j += 1
+                blocks.append(block)
+                i = j
+            else:
+                blocks.append([msg])
+                i += 1
+
+        # Take blocks from the end within budget
+        budget = _MAX_CONTEXT_MESSAGES - len(protected)
+        kept: list[list[dict[str, Any]]] = []
+        total = 0
+        for block in reversed(blocks):
+            if total + len(block) > budget:
+                break
+            kept.append(block)
+            total += len(block)
+
+        kept.reverse()
+        tail = [m for block in kept for m in block]
         return protected + tail
     
     async def spawn(
@@ -110,8 +146,15 @@ class SubagentManager:
         )
         self._running_tasks[task_id] = bg_task
         
-        # Cleanup when done
-        bg_task.add_done_callback(lambda _: self._running_tasks.pop(task_id, None))
+        # Cleanup when done — also log any unhandled exceptions
+        def _on_done(t: asyncio.Task[None]) -> None:
+            self._running_tasks.pop(task_id, None)
+            if t.cancelled():
+                logger.warning(f"Subagent [{task_id}] was cancelled")
+            elif t.exception() is not None:
+                logger.error(f"Subagent [{task_id}] raised unhandled exception: {t.exception()!r}")
+
+        bg_task.add_done_callback(_on_done)
         
         logger.info(f"Spawned subagent [{task_id}]: {display_label}")
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
@@ -151,6 +194,7 @@ class SubagentManager:
             # Run agent loop (limited iterations)
             max_iterations = 15
             iteration = 0
+            empty_retries_left = _EMPTY_RESPONSE_RETRIES
             final_result: str | None = None
             
             while iteration < max_iterations:
@@ -164,6 +208,13 @@ class SubagentManager:
                     tools=tools.get_definitions(),
                     model=self.model,
                 )
+                
+                # Detect LLM errors returned as content
+                if (response.finish_reason == "error"
+                        or (response.content and response.content.startswith("Error calling LLM:"))):
+                    logger.error(f"Subagent [{task_id}] LLM error: {response.content}")
+                    final_result = "Task failed due to an LLM error."
+                    break
                 
                 if response.has_tool_calls:
                     # Add assistant message with tool calls
@@ -199,10 +250,12 @@ class SubagentManager:
                     if response.content:
                         final_result = response.content
                         break
-                    # Retry once on empty response
-                    if iteration < max_iterations:
-                        logger.warning(f"Subagent [{task_id}] got empty response, retrying")
+                    # Bounded retry on empty response
+                    if empty_retries_left > 0:
+                        empty_retries_left -= 1
+                        logger.warning(f"Subagent [{task_id}] got empty response, retries left: {empty_retries_left}")
                         continue
+                    logger.warning(f"Subagent [{task_id}] empty response, no retries left — giving up")
                     break
             
             if final_result is None:
@@ -227,6 +280,16 @@ class SubagentManager:
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = "completed successfully" if status == "ok" else "failed"
+        
+        # Cap result size to prevent re-triggering context explosion
+        # in the main agent when this gets injected as a message.
+        if len(result) > _MAX_ANNOUNCE_CHARS:
+            half = _MAX_ANNOUNCE_CHARS // 2
+            result = (
+                result[:half]
+                + f"\n\n... [truncated {len(result) - _MAX_ANNOUNCE_CHARS} chars] ...\n\n"
+                + result[-half:]
+            )
         
         announce_content = f"""[Subagent '{label}' {status_text}]
 
