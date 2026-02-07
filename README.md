@@ -20,6 +20,7 @@
 
 ## 📢 News
 
+- **2026-02-07** ✨ Added iMessage channel support (macOS only)!
 - **2026-02-06** ✨ Added Moonshot/Kimi provider, Discord integration, and enhanced security hardening!
 - **2026-02-05** ✨ Added Feishu channel, DeepSeek provider, and enhanced scheduled tasks support!
 - **2026-02-04** 🚀 Released v0.1.3.post4 with multi-provider & Docker support! Check [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post4) for details.
@@ -170,6 +171,7 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime,
 |---------|-------|
 | **Telegram** | Easy (just a token) |
 | **Discord** | Easy (bot token + intents) |
+| **iMessage** | Easy (macOS only) |
 | **WhatsApp** | Medium (scan QR) |
 | **Feishu** | Medium (app credentials) |
 
@@ -246,6 +248,44 @@ nanobot gateway
 ```bash
 nanobot gateway
 ```
+
+</details>
+
+<details>
+<summary><b>iMessage</b> (macOS)</summary>
+
+Requires **macOS** with `imsg` CLI installed.
+
+**1. Install imsg CLI**
+
+```bash
+brew install imsg
+# or build from source if not in brew
+```
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "imsg": {
+      "enabled": true,
+      "allowFrom": ["+1234567890", "user@icloud.com"]
+    }
+  }
+}
+```
+
+> `allowFrom`: List of phone numbers or email addresses allowed to interact with the bot.
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+> [!NOTE]
+> This channel only works on macOS devices where your iMessage account is logged in.
 
 </details>
 
