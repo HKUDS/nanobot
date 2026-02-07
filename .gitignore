@@ -17,3 +17,6 @@ docs/
 __pycache__/
 poetry.lock
 .pytest_cache/
+**/memory_box/**
+nanobot_data/
+docker-compose.yml
