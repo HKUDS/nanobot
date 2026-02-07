@@ -114,7 +114,7 @@ class LiteLLMProvider(LLMProvider):
         # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
         # Convert openai/ prefix to hosted_vllm/ if user specified it
         if self.is_vllm:
-            model = f"hosted_/{model}"
+            model = f"hosted_{model}"
         
         # kimi-k2.5 only supports temperature=1.0
         if "kimi-k2.5" in model.lower():
