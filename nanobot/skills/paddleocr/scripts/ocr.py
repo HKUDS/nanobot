@@ -129,8 +129,6 @@ def process_file(file_path: str, output_dir: Path, config: dict) -> int:
 
     result = call_paddleocr(file_data, file_type, config["apiUrl"], config["token"])
 
-    print(f"DEBUG: API返回原始result: {result}")
-
     doc_count = len(result.get("layoutParsingResults", []))
     save_results(result, output_dir, doc_count)
 
