@@ -26,7 +26,8 @@ def load_config():
     config = {}
     if CONFIG_PATH.exists():
         try:
-            config = json.loads(CONFIG_PATH.read_text()).get("paddleocr", {})
+            full_config = json.loads(CONFIG_PATH.read_text())
+            config = full_config.get("tools", {}).get("paddleocr", {})
         except (json.JSONDecodeError, IOError) as e:
             print(f"Warning: Failed to read config: {e}", file=sys.stderr)
 
@@ -73,7 +74,7 @@ def call_paddleocr(file_data: str, file_type: int, api_url: str, token: str) -> 
     }
 
     try:
-        response = requests.post(api_url, json=payload, headers=headers, timeout=60)
+        response = requests.post(api_url, json=payload, headers=headers, timeout=120)
 
         if response.status_code != 200:
             print(f"ERROR: API request failed with status {response.status_code}", file=sys.stderr)
