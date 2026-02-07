@@ -230,10 +230,20 @@ class FeishuChannel(BaseChannel):
             chat_id = message.chat_id
             chat_type = message.chat_type  # "p2p" or "group"
             msg_type = message.message_type
-            
-            # Add reaction to indicate "seen"
+
+            # Group filter: skip early if not @mentioned (before reaction)
+            bot_mentioned = False
+            mentions = getattr(message, "mentions", None)
+            if chat_type == "group":
+                if mentions:
+                    bot_mentioned = True
+                elif not self.config.group_reply_all:
+                    logger.debug(f"Skipping group message (not mentioned): {message_id}")
+                    return
+
+            # Add reaction to indicate "seen" (only for messages we'll respond to)
             await self._add_reaction(message_id, "THUMBSUP")
-            
+
             # Parse message content
             if msg_type == "text":
                 try:
@@ -246,12 +256,8 @@ class FeishuChannel(BaseChannel):
             if not content:
                 return
 
-            # Detect @mention in group chat
-            bot_mentioned = False
-            mentions = getattr(message, "mentions", None)
-            if chat_type == "group" and mentions:
-                bot_mentioned = True
-                # Strip @mention placeholders (e.g. @_user_1) from content
+            # Strip @mention placeholders (e.g. @_user_1) from content
+            if bot_mentioned and mentions:
                 for mention in mentions:
                     key = getattr(mention, "key", None)
                     if key:
