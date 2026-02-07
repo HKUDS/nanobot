@@ -20,3 +20,7 @@ test_alarm.py
 test_nvidia.py
 bandit_results.json
 alarme_telegram.py
+.venv/
+__pycache__/
+poetry.lock
+.pytest_cache/

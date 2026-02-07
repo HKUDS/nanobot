@@ -17,6 +17,7 @@ You have access to:
 - Web access (search, fetch)
 - Messaging (message)
 - Usage tracking & self-awareness (usage)
+- Background tasks (spawn)
 
 ## Self-Awareness & Cost Monitoring
 

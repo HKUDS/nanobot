@@ -70,6 +70,24 @@ class ExecTool(Tool):
         self.allowed_commands = allowed_commands
         self.allowed_dirs = [Path(d).resolve() for d in allowed_dirs] if allowed_dirs else None
         self.enable_blocklist = enable_blocklist
+        deny_patterns: list[str] | None = None,
+        allow_patterns: list[str] | None = None,
+        restrict_to_workspace: bool = False,
+    ):
+        self.timeout = timeout
+        self.working_dir = working_dir
+        self.deny_patterns = deny_patterns or [
+            r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
+            r"\bdel\s+/[fq]\b",              # del /f, del /q
+            r"\brmdir\s+/s\b",               # rmdir /s
+            r"\b(format|mkfs|diskpart)\b",   # disk operations
+            r"\bdd\s+if=",                   # dd
+            r">\s*/dev/sd",                  # write to disk
+            r"\b(shutdown|reboot|poweroff)\b",  # system power
+            r":\(\)\s*\{.*\};\s*:",          # fork bomb
+        ]
+        self.allow_patterns = allow_patterns or []
+        self.restrict_to_workspace = restrict_to_workspace
     
     @property
     def name(self) -> str:
@@ -138,6 +156,11 @@ class ExecTool(Tool):
         """
         if not self.allowed_dirs:
             return True, None  # No fence = all directories allowed
+    async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
+        cwd = working_dir or self.working_dir or os.getcwd()
+        guard_error = self._guard_command(command, cwd)
+        if guard_error:
+            return guard_error
         
         try:
             target_path = Path(directory).resolve()
@@ -275,3 +298,34 @@ class ExecTool(Tool):
             result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
 
         return result
+    def _guard_command(self, command: str, cwd: str) -> str | None:
+        """Best-effort safety guard for potentially destructive commands."""
+        cmd = command.strip()
+        lower = cmd.lower()
+
+        for pattern in self.deny_patterns:
+            if re.search(pattern, lower):
+                return "Error: Command blocked by safety guard (dangerous pattern detected)"
+
+        if self.allow_patterns:
+            if not any(re.search(p, lower) for p in self.allow_patterns):
+                return "Error: Command blocked by safety guard (not in allowlist)"
+
+        if self.restrict_to_workspace:
+            if "..\\" in cmd or "../" in cmd:
+                return "Error: Command blocked by safety guard (path traversal detected)"
+
+            cwd_path = Path(cwd).resolve()
+
+            win_paths = re.findall(r"[A-Za-z]:\\[^\\\"']+", cmd)
+            posix_paths = re.findall(r"/[^\s\"']+", cmd)
+
+            for raw in win_paths + posix_paths:
+                try:
+                    p = Path(raw).resolve()
+                except Exception:
+                    continue
+                if cwd_path not in p.parents and p != cwd_path:
+                    return "Error: Command blocked by safety guard (path outside working dir)"
+
+        return None
