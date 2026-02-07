@@ -9,11 +9,6 @@ from rich.console import Console
 from rich.table import Table
 
 from nanobot import __version__, __logo__
-from nanobot.actor.names import (
-    DEFAULT_AGENT_NAME,
-    DEFAULT_PROVIDER_NAME,
-    DEFAULT_SCHEDULER_NAME,
-)
 
 app = typer.Typer(
     name="nanobot",
@@ -64,8 +59,8 @@ async def _boot_agent(config):
     await pul.init()
 
     _validate_api_key(config)
-    await ProviderActor.spawn(config=config, name=DEFAULT_PROVIDER_NAME)
-    return await AgentActor.spawn(config=config, name=DEFAULT_AGENT_NAME)
+    await ProviderActor.spawn(config=config, name="provider")
+    return await AgentActor.spawn(config=config, name="agent")
 
 
 async def _print_stream(agent_actor, channel: str, chat_id: str, content: str):
@@ -220,7 +215,7 @@ def gateway(
     from nanobot.actor.agent import AgentActor
     from nanobot.actor.scheduler import SchedulerActor
     from nanobot.actor.provider import ProviderActor
-    from nanobot.channels.manager import create_channels, spawn_channel_actors
+    from nanobot.channels.manager import spawn_channels
 
     if verbose:
         import logging
@@ -232,11 +227,13 @@ def gateway(
     config = load_config()
     _validate_api_key(config)
 
-    # Create channel instances (not yet actors)
-    channels = create_channels(config, agent_name=DEFAULT_AGENT_NAME)
-
-    if channels:
-        console.print(f"[green]✓[/green] Channels: {', '.join(channels.keys())}")
+    enabled_channels = [
+        n
+        for n in ("telegram", "whatsapp", "discord", "feishu")
+        if getattr(getattr(config.channels, n, None), "enabled", False)
+    ]
+    if enabled_channels:
+        console.print(f"[green]✓[/green] Channels: {', '.join(enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
 
@@ -252,21 +249,21 @@ def gateway(
             cron_store_path = get_data_dir() / "cron" / "jobs.json"
 
             # 1) Spawn ProviderActor (takes config directly)
-            await ProviderActor.spawn(config=config, name=DEFAULT_PROVIDER_NAME)
+            await ProviderActor.spawn(config=config, name="provider")
 
             # 2) Spawn SchedulerActor -- auto-starts via on_start()
             await SchedulerActor.spawn(
                 cron_store_path=cron_store_path,
                 workspace=config.workspace_path,
-                agent_name=DEFAULT_AGENT_NAME,
-                name=DEFAULT_SCHEDULER_NAME,
+                agent_name="agent",
+                name="scheduler",
             )
 
             # 3) Spawn AgentActor -- resolves provider + scheduler by name
-            await AgentActor.spawn(config=config, name=DEFAULT_AGENT_NAME)
+            await AgentActor.spawn(config=config, name="agent")
 
-            # 4) Spawn each channel as ChannelActor
-            channel_tasks = await spawn_channel_actors(channels)
+            # 4) Spawn each channel as its own actor (channel.{name})
+            channel_tasks = await spawn_channels(config)
 
             # Wait for all channel tasks (they run forever)
             if channel_tasks:
@@ -620,7 +617,7 @@ def cron_run(
 
         try:
             await pul.init()
-            scheduler = await SchedulerActor.resolve(DEFAULT_SCHEDULER_NAME)
+            scheduler = await SchedulerActor.resolve("scheduler")
             return await scheduler.run_job(job_id, force=force)
         finally:
             await pul.shutdown()

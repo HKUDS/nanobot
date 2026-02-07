@@ -18,8 +18,6 @@ import litellm
 import pulsing as pul
 from litellm import acompletion
 
-from nanobot.errors import ProviderCallError
-
 # ── Data types ──────────────────────────────────────────────────────
 
 
@@ -155,10 +153,7 @@ class ProviderActor:
         if tools:
             kw["tools"] = tools
             kw["tool_choice"] = "auto"
-        try:
-            return self._parse(await acompletion(**kw))
-        except Exception as e:
-            raise ProviderCallError(str(e)) from e
+        return self._parse(await acompletion(**kw))
 
     async def chat_stream(
         self,
@@ -171,15 +166,12 @@ class ProviderActor:
         model = self._resolve_model(model)
         kw = self._kwargs(model, messages, max_tokens, temperature)
         kw["stream"] = True
-        try:
-            async for chunk in await acompletion(**kw):
-                delta = chunk.choices[0].delta
-                text = getattr(delta, "content", None) or ""
-                finish = chunk.choices[0].finish_reason
-                if text or finish:
-                    yield StreamChunk(delta=text, finish_reason=finish)
-        except Exception as e:
-            raise ProviderCallError(str(e)) from e
+        async for chunk in await acompletion(**kw):
+            delta = chunk.choices[0].delta
+            text = getattr(delta, "content", None) or ""
+            finish = chunk.choices[0].finish_reason
+            if text or finish:
+                yield StreamChunk(delta=text, finish_reason=finish)
 
     def get_default_model(self) -> str:
         return self.default_model

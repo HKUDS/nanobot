@@ -7,7 +7,6 @@ from typing import Any
 import pulsing as pul
 from loguru import logger
 
-from nanobot.actor.names import DEFAULT_AGENT_NAME, channel_actor_name
 from nanobot.cron.service import CronStoreService, now_ms
 from nanobot.cron.types import CronJob, CronSchedule
 
@@ -18,7 +17,7 @@ class SchedulerActor:
     Cron scheduler actor.
 
     Manages periodic and one-shot jobs, resolving AgentActor via Pulsing
-    for execution and ChannelActor for delivery -- pure point-to-point.
+    for execution and channel actors for delivery (p2p by name).
 
     Heartbeat is NOT built in; if you need periodic HEARTBEAT.md checking,
     register it as a normal cron job via CronTool or ``add_job()``.
@@ -28,7 +27,7 @@ class SchedulerActor:
         self,
         cron_store_path: Path,
         workspace: Path,
-        agent_name: str = DEFAULT_AGENT_NAME,
+        agent_name: str = "agent",
     ):
         self.cron_store_path = cron_store_path
         self.workspace = workspace
@@ -124,9 +123,9 @@ class SchedulerActor:
             # Point-to-point delivery: resolve channel actor by name
             if job.payload.deliver and job.payload.to and job.payload.channel:
                 try:
-                    from nanobot.actor.channel import ChannelActor
+                    from nanobot.channels.manager import get_channel_actor
 
-                    ch = await ChannelActor.resolve(channel_actor_name(job.payload.channel))
+                    ch = await get_channel_actor(job.payload.channel)
                     await ch.send_text(job.payload.to, response or "")
                 except Exception as e:
                     logger.warning(

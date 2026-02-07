@@ -8,6 +8,8 @@ from typing import Any
 
 from loguru import logger
 
+import pulsing as pul
+
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import FeishuConfig
 
@@ -36,6 +38,9 @@ MSG_TYPE_MAP = {
 }
 
 
+@pul.remote(
+    restart_policy="on-failure", max_restarts=10, min_backoff=1.0, max_backoff=60.0
+)
 class FeishuChannel(BaseChannel):
     """
     Feishu/Lark channel using WebSocket long connection.

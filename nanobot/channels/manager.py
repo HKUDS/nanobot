@@ -1,111 +1,112 @@
-"""Channel spawner: creates channel instances and spawns them as Pulsing actors.
+"""Channel spawner: spawns each channel as a Pulsing actor by name.
 
-Each channel is registered as ``channel.{name}`` and can be resolved by any
-actor for point-to-point message delivery.  Supervision is handled by
-Pulsing's built-in ``restart_policy`` on ChannelActor.
+Each channel implementation (TelegramChannel, DiscordChannel, etc.) is an actor
+registered as ``channel.{name}``. Resolve via get_channel_actor(name) for p2p send_text.
 """
 
+import asyncio
 from typing import Any
 
 from loguru import logger
 
-from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
-from nanobot.actor.names import DEFAULT_AGENT_NAME
 
 
-def create_channels(
-    config: Config, agent_name: str = DEFAULT_AGENT_NAME
-) -> dict[str, BaseChannel]:
+def _channel_classes() -> dict[str, Any]:
+    """Lazy mapping name -> channel class (avoids importing all at once)."""
+    classes: dict[str, Any] = {}
+    try:
+        from nanobot.channels.telegram import TelegramChannel
+        classes["telegram"] = TelegramChannel
+    except ImportError:
+        pass
+    try:
+        from nanobot.channels.whatsapp import WhatsAppChannel
+        classes["whatsapp"] = WhatsAppChannel
+    except ImportError:
+        pass
+    try:
+        from nanobot.channels.discord import DiscordChannel
+        classes["discord"] = DiscordChannel
+    except ImportError:
+        pass
+    try:
+        from nanobot.channels.feishu import FeishuChannel
+        classes["feishu"] = FeishuChannel
+    except ImportError:
+        pass
+    return classes
+
+
+async def get_channel_actor(name: str):
+    """Resolve channel actor by name (e.g. 'discord' -> channel.discord)."""
+    classes = _channel_classes()
+    if name not in classes:
+        raise ValueError(f"Unknown or unavailable channel: {name}")
+    return await classes[name].resolve(f"channel.{name}")
+
+
+async def spawn_channels(
+    config: Config, agent_name: str = "agent"
+) -> list[asyncio.Task[Any]]:
     """
-    Instantiate all enabled channels from config.
+    Spawn each enabled channel as its own Pulsing actor (channel.{name}).
 
-    Returns a ``{name: channel_instance}`` dict.  Does NOT start or spawn them.
+    Returns a list of asyncio tasks running each channel's start() loop.
     """
-    channels: dict[str, BaseChannel] = {}
+    tasks: list[asyncio.Task[Any]] = []
 
-    # Telegram
     if config.channels.telegram.enabled:
         try:
             from nanobot.channels.telegram import TelegramChannel
-
-            channels["telegram"] = TelegramChannel(
-                config.channels.telegram,
+            actor = await TelegramChannel.spawn(
+                config=config.channels.telegram,
                 agent_name=agent_name,
-                groq_api_key=config.providers.groq.api_key,
+                groq_api_key=config.providers.groq.api_key or "",
+                name="channel.telegram",
             )
-            logger.info("Telegram channel created")
+            tasks.append(asyncio.create_task(actor.start()))
+            logger.info("Spawned channel.telegram")
         except ImportError as e:
             logger.warning(f"Telegram channel not available: {e}")
 
-    # WhatsApp
     if config.channels.whatsapp.enabled:
         try:
             from nanobot.channels.whatsapp import WhatsAppChannel
-
-            channels["whatsapp"] = WhatsAppChannel(
-                config.channels.whatsapp,
+            actor = await WhatsAppChannel.spawn(
+                config=config.channels.whatsapp,
                 agent_name=agent_name,
+                name="channel.whatsapp",
             )
-            logger.info("WhatsApp channel created")
+            tasks.append(asyncio.create_task(actor.start()))
+            logger.info("Spawned channel.whatsapp")
         except ImportError as e:
             logger.warning(f"WhatsApp channel not available: {e}")
 
-    # Discord
     if config.channels.discord.enabled:
         try:
             from nanobot.channels.discord import DiscordChannel
-
-            channels["discord"] = DiscordChannel(
-                config.channels.discord,
+            actor = await DiscordChannel.spawn(
+                config=config.channels.discord,
                 agent_name=agent_name,
+                name="channel.discord",
             )
-            logger.info("Discord channel created")
+            tasks.append(asyncio.create_task(actor.start()))
+            logger.info("Spawned channel.discord")
         except ImportError as e:
             logger.warning(f"Discord channel not available: {e}")
 
-    # Feishu
     if config.channels.feishu.enabled:
         try:
             from nanobot.channels.feishu import FeishuChannel
-
-            channels["feishu"] = FeishuChannel(
-                config.channels.feishu,
+            actor = await FeishuChannel.spawn(
+                config=config.channels.feishu,
                 agent_name=agent_name,
+                name="channel.feishu",
             )
-            logger.info("Feishu channel created")
+            tasks.append(asyncio.create_task(actor.start()))
+            logger.info("Spawned channel.feishu")
         except ImportError as e:
             logger.warning(f"Feishu channel not available: {e}")
-
-    return channels
-
-
-async def spawn_channel_actors(
-    channels: dict[str, BaseChannel],
-) -> list[Any]:
-    """
-    Spawn each channel as a ``ChannelActor`` Pulsing actor.
-
-    Each actor is named ``channel.{name}`` (e.g. ``channel.discord``) so
-    that any other actor can resolve it for point-to-point messaging.
-
-    Supervision (auto-restart on failure) is built into ChannelActor via
-    Pulsing's ``restart_policy="on-failure"``.
-
-    Returns a list of running asyncio tasks (one per channel).
-    """
-    import asyncio
-    from nanobot.actor.channel import ChannelActor
-    from nanobot.actor.names import channel_actor_name
-
-    tasks = []
-    for name, channel in channels.items():
-        actor = await ChannelActor.spawn(
-            channel=channel,
-            name=channel_actor_name(name),
-        )
-        task = asyncio.create_task(actor.run())
-        logger.info(f"Spawned channel.{name}")
-        tasks.append(task)
 
     return tasks

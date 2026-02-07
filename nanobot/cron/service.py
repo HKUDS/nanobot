@@ -5,7 +5,7 @@ This module owns:
 - Next-run calculations
 - CRUD operations for cron jobs
 
-Execution (calling AgentActor, delivering to ChannelActor) is intentionally
+Execution (calling AgentActor, delivering to channel actors) is intentionally
 NOT handled here; that's SchedulerActor's job.
 """
 

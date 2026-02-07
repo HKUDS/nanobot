@@ -9,6 +9,8 @@ import httpx
 import websockets
 from loguru import logger
 
+import pulsing as pul
+
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import DiscordConfig
 
@@ -17,6 +19,9 @@ DISCORD_API_BASE = "https://discord.com/api/v10"
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 
 
+@pul.remote(
+    restart_policy="on-failure", max_restarts=10, min_backoff=1.0, max_backoff=60.0
+)
 class DiscordChannel(BaseChannel):
     """Discord channel using Gateway websocket."""
 

@@ -13,7 +13,6 @@ import pulsing as pul
 from loguru import logger
 
 from nanobot.actor.tool_loop import run_tool_loop
-from nanobot.actor.names import DEFAULT_AGENT_NAME, DEFAULT_PROVIDER_NAME
 from nanobot.agent.tools.base import ToolContext
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, ListDirTool
@@ -38,8 +37,8 @@ class SubagentActor:
         label: str,
         origin_channel: str,
         origin_chat_id: str,
-        agent_name: str = DEFAULT_AGENT_NAME,
-        provider_name: str = DEFAULT_PROVIDER_NAME,
+        agent_name: str = "agent",
+        provider_name: str = "provider",
     ):
         self.workspace = config.workspace_path
         self.task = task

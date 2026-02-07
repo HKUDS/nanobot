@@ -7,6 +7,8 @@ from loguru import logger
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
+import pulsing as pul
+
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
 
@@ -52,6 +54,9 @@ def _markdown_to_telegram_html(text: str) -> str:
     return text
 
 
+@pul.remote(
+    restart_policy="on-failure", max_restarts=10, min_backoff=1.0, max_backoff=60.0
+)
 class TelegramChannel(BaseChannel):
     """Telegram channel using long polling."""
 

@@ -3,14 +3,13 @@
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolContext
-from nanobot.actor.names import channel_actor_name
+from nanobot.channels.manager import get_channel_actor
 
 
 class MessageTool(Tool):
     """Tool to send messages to users on chat channels.
 
-    Resolves the target ChannelActor by Pulsing name (``channel.{name}``)
-    and calls ``send_text`` directly -- no local object references needed.
+    Resolves the channel actor by name (channel.{name}) and calls send_text.
     """
 
     @property
@@ -56,11 +55,8 @@ class MessageTool(Tool):
         if not channel or not chat_id:
             return "Error: No target channel/chat specified"
 
-        # Point-to-point: resolve the channel actor by Pulsing name
         try:
-            from nanobot.actor.channel import ChannelActor
-
-            ch = await ChannelActor.resolve(channel_actor_name(channel))
+            ch = await get_channel_actor(channel)
         except Exception:
             return f"Error: Channel '{channel}' not available"
 

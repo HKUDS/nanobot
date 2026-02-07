@@ -5,10 +5,15 @@ import json
 
 from loguru import logger
 
+import pulsing as pul
+
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import WhatsAppConfig
 
 
+@pul.remote(
+    restart_policy="on-failure", max_restarts=10, min_backoff=1.0, max_backoff=60.0
+)
 class WhatsAppChannel(BaseChannel):
     """
     WhatsApp channel that connects to a Node.js bridge.

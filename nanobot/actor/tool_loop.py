@@ -13,12 +13,6 @@ from loguru import logger
 
 from nanobot.agent.tools.base import ToolContext
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.errors import (
-    ProviderCallError,
-    ToolExecutionError,
-    ToolNotFoundError,
-    ToolValidationError,
-)
 
 
 @dataclass
@@ -44,16 +38,11 @@ async def run_tool_loop(
     communication pattern (ask/tell) already covers sync vs async semantics.
     """
     for _ in range(max_iterations):
-        try:
-            response = await provider.chat(
-                messages=messages,
-                tools=tools.get_definitions(),
-                model=model,
-            )
-        except ProviderCallError:
-            raise
-        except Exception as e:
-            raise ProviderCallError(str(e)) from e
+        response = await provider.chat(
+            messages=messages,
+            tools=tools.get_definitions(),
+            model=model,
+        )
 
         if not response.has_tool_calls:
             return (
@@ -84,9 +73,7 @@ async def run_tool_loop(
             )
             try:
                 result = await tools.execute(tc.name, tc.arguments, ctx)
-            except (ToolNotFoundError, ToolValidationError, ToolExecutionError) as e:
-                # Tool errors should be visible to the LLM as a tool result,
-                # not masquerading as assistant content.
+            except Exception as e:
                 result = f"Error: {e}"
             messages.append(
                 {
@@ -119,29 +106,19 @@ async def run_tool_loop_stream(
         # After tool calls, try streaming for the final text response
         if had_tool_calls and iteration > 0:
             streamed = False
-            try:
-                async for chunk in provider.chat_stream(messages=messages, model=model):
-                    if chunk.delta:
-                        streamed = True
-                        yield AgentChunk(kind="token", text=chunk.delta)
-            except ProviderCallError:
-                raise
-            except Exception as e:
-                raise ProviderCallError(str(e)) from e
+            async for chunk in provider.chat_stream(messages=messages, model=model):
+                if chunk.delta:
+                    streamed = True
+                    yield AgentChunk(kind="token", text=chunk.delta)
             if streamed:
                 yield AgentChunk(kind="done")
                 return
 
-        try:
-            response = await provider.chat(
-                messages=messages,
-                tools=tools.get_definitions(),
-                model=model,
-            )
-        except ProviderCallError:
-            raise
-        except Exception as e:
-            raise ProviderCallError(str(e)) from e
+        response = await provider.chat(
+            messages=messages,
+            tools=tools.get_definitions(),
+            model=model,
+        )
 
         if not response.has_tool_calls:
             content = response.content or ""
@@ -176,7 +153,7 @@ async def run_tool_loop_stream(
 
             try:
                 result = await tools.execute(tc.name, tc.arguments, ctx)
-            except (ToolNotFoundError, ToolValidationError, ToolExecutionError) as e:
+            except Exception as e:
                 result = f"Error: {e}"
             messages.append(
                 {
