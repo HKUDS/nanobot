@@ -74,7 +74,7 @@ def call_paddleocr(file_data: str, file_type: int, api_url: str, token: str) -> 
     }
 
     try:
-        response = requests.post(api_url, json=payload, headers=headers, timeout=120)
+        response = requests.post(api_url, json=payload, headers=headers, timeout=180)
 
         if response.status_code != 200:
             print(f"ERROR: API request failed with status {response.status_code}", file=sys.stderr)
@@ -88,24 +88,60 @@ def call_paddleocr(file_data: str, file_type: int, api_url: str, token: str) -> 
         sys.exit(1)
 
 
-def save_results(result: dict, output_dir: Path, doc_index: int) -> None:
+def save_results(result: dict, output_dir: Path, filename: str) -> None:
     """保存结果：Markdown + 图片下载"""
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # API响应结构: { "result": {...}, "errorCode": ..., "errorMsg": ... }
+    error_code = result.get("errorCode", "")
+    error_msg = result.get("errorMsg", "")
+
+    if error_code:
+        print(f"WARNING: API returned error: {error_code} - {error_msg}", file=sys.stderr)
+
+    actual_result = result.get("result", {})
+
     # 获取markdown文本
-    layout_results = result.get("layoutParsingResults", [])
-    markdown_text = result.get("markdown", {}).get("text", "")
+    layout_results = actual_result.get("layoutParsingResults", [])
+
+    # 文本提取逻辑
+    markdown_text = ""
+    output_images = {}
+
+    # 优先从 layoutParsingResults 中提取
+    if layout_results and isinstance(layout_results[0], dict):
+        first_result = layout_results[0]
+        markdown_text = first_result.get("markdown", "").get("text", "")
+        output_images = first_result.get("outputImages", {})
+
+    # 如果第一层没有，尝试直接从 result 中提取
+    if not markdown_text:
+        markdown_text = actual_result.get("markdown", {}).get("text", "")
+
+    # 调试信息
+    if os.environ.get("DEBUG"):
+        print(f"DEBUG: API response keys: {list(result.keys())}")
+        print(f"DEBUG: actual_result keys: {list(actual_result.keys())}")
+        print(f"DEBUG: layoutParsingResults count: {len(layout_results)}")
+        print(f"DEBUG: markdown.text length: {len(markdown_text)}")
+        if layout_results and isinstance(layout_results[0], dict):
+            print(f"DEBUG: First layout result keys: {list(layout_results[0].keys())}")
+        print(f"DEBUG: outputImages count: {len(output_images)}")
+        print(f"DEBUG: errorCode: {error_code}, errorMsg: {error_msg}")
 
     # 直接保存markdown文本（从结果中提取）
-    md_filename = output_dir / f"doc_{doc_index}.md"
+    md_filename = output_dir / f"{filename}.md"
     try:
         md_filename.write_text(markdown_text, encoding="utf-8")
         print(f"✓ 保存: {md_filename}")
+        if markdown_text:
+            print(f"  └─ 文本长度: {len(markdown_text)} 字符")
+        else:
+            print(f"  └─ WARNING: 文本为空", file=sys.stderr)
     except IOError as e:
         print(f"ERROR: Failed to save {md_filename}: {e}", file=sys.stderr)
 
     # 处理关联图片（如果存在）
-    output_images = result.get("markdown", {}).get("images", {})
     for img_name, img_url in output_images.items():
         img_path = output_dir / img_name
         try:
@@ -130,8 +166,13 @@ def process_file(file_path: str, output_dir: Path, config: dict) -> int:
 
     result = call_paddleocr(file_data, file_type, config["apiUrl"], config["token"])
 
-    doc_count = len(result.get("layoutParsingResults", []))
-    save_results(result, output_dir, doc_count)
+    # 提取文件名（不含扩展名）
+    filename = Path(file_path).stem
+
+    # API响应结构: { "result": {...}, "errorCode": ..., "errorMsg": ... }
+    actual_result = result.get("result", {})
+    doc_count = len(actual_result.get("layoutParsingResults", []))
+    save_results(result, output_dir, filename)
 
     print(f"  └─ 生成 {doc_count} 个文档")
     print()
