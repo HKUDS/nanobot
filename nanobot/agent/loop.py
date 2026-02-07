@@ -156,7 +156,7 @@ class AgentLoop:
         if msg.channel == "system":
             return await self._process_system_message(msg)
 
-        logger.info(f"Processing message from {msg.channel}:{msg.sender_id}")
+        logger.debug(f"Processing message from {msg.channel}:{msg.sender_id}")
 
         # Get or create session
         session = self.sessions.get_or_create(msg.session_key)
@@ -254,7 +254,7 @@ class AgentLoop:
         The chat_id field contains "original_channel:original_chat_id" to route
         the response back to the correct destination.
         """
-        logger.info(f"Processing system message from {msg.sender_id}")
+        logger.debug(f"Processing system message from {msg.sender_id}")
 
         # Parse origin from chat_id (format: "channel:chat_id")
         if ":" in msg.chat_id:
