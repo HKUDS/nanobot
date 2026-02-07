@@ -5,6 +5,7 @@ from typing import Any
 
 from loguru import logger
 
+
 class BaseChannel(ABC):
     """
     Abstract base class for chat channel implementations.

@@ -1,159 +1,119 @@
-"""SchedulerActor: Pulsing actor for cron job scheduling."""
+"""SchedulerActor: cron jobs via Pulsing delayed call per job."""
 
-import asyncio
+import time
 from pathlib import Path
 from typing import Any
 
 import pulsing as pul
 from loguru import logger
 
-from nanobot.cron.service import CronStoreService, now_ms
-from nanobot.cron.types import CronJob, CronSchedule
+from nanobot.cron.service import CronStoreService, compute_next_run, now_ms
 
 
 @pul.remote
 class SchedulerActor:
-    """
-    Cron scheduler actor.
-
-    Manages periodic and one-shot jobs, resolving AgentActor via Pulsing
-    for execution and channel actors for delivery (p2p by name).
-
-    Heartbeat is NOT built in; if you need periodic HEARTBEAT.md checking,
-    register it as a normal cron job via CronTool or ``add_job()``.
-    """
-
     def __init__(
         self,
         cron_store_path: Path,
         workspace: Path,
         agent_name: str = "agent",
+        scheduler_name: str = "scheduler",
     ):
         self.cron_store_path = cron_store_path
         self.workspace = workspace
         self.agent_name = agent_name
+        self._name = scheduler_name
 
         self._service = CronStoreService(cron_store_path)
-        self._timer_task: asyncio.Task | None = None
+        self._job_tasks: dict[str, Any] = {}
         self._running = False
-
-    # ========== Lifecycle (Pulsing hooks) ==========
 
     async def on_start(self, actor_id: Any = None) -> None:
-        """Pulsing lifecycle hook: called automatically after spawn."""
         self._running = True
-        self._service.load()
-        self._service.recompute_next_runs()
+        store = self._service.load()
+        base = now_ms()
+        for job in store["jobs"]:
+            if not job.get("enabled", True):
+                continue
+            state = job.setdefault("state", {})
+            n = state.get("next_run_at_ms")
+            if not n or n < base:
+                state["next_run_at_ms"] = compute_next_run(job.get("schedule", {}), base)
+            if state.get("next_run_at_ms"):
+                self._schedule_job(job)
         self._service.save()
-        self._arm_timer()
-
-        job_count = len(self._service.load().jobs)
-        logger.info(f"SchedulerActor started: {job_count} cron jobs")
+        logger.info(f"SchedulerActor started: {len(store['jobs'])} cron jobs")
 
     async def on_stop(self) -> None:
-        """Pulsing lifecycle hook: called before actor shutdown."""
         self._running = False
-        if self._timer_task:
-            self._timer_task.cancel()
-            self._timer_task = None
+        for task in self._job_tasks.values():
+            task.cancel()
+        self._job_tasks.clear()
 
-    # ========== Agent resolution ==========
-
-    async def _call_agent(
-        self, channel: str, sender_id: str, chat_id: str, content: str
-    ) -> str:
-        """Resolve AgentActor and process a message."""
-        from nanobot.actor.agent import AgentActor
-
-        agent = await AgentActor.resolve(self.agent_name)
-        return await agent.process(
-            channel=channel,
-            sender_id=sender_id,
-            chat_id=chat_id,
-            content=content,
-        )
-
-    # ========== Cron internals ==========
-
-    def _get_next_wake_ms(self) -> int | None:
-        return self._service.next_wake_at_ms()
-
-    def _arm_timer(self) -> None:
-        if self._timer_task:
-            self._timer_task.cancel()
-
-        next_wake = self._get_next_wake_ms()
-        if not next_wake or not self._running:
+    def _schedule_job(self, job: dict) -> None:
+        jid = job.get("id")
+        n = (job.get("state") or {}).get("next_run_at_ms")
+        if not self._running or not job.get("enabled", True) or not n:
             return
+        if jid in self._job_tasks:
+            self._job_tasks[jid].cancel()
+            del self._job_tasks[jid]
+        delay = max(0.0, n / 1000.0 - time.time())
+        self._job_tasks[jid] = self.delayed(delay).run_scheduled_job(jid)
 
-        delay_ms = max(0, next_wake - now_ms())
-        delay_s = delay_ms / 1000
-
-        async def tick():
-            await asyncio.sleep(delay_s)
-            if self._running:
-                await self._on_timer()
-
-        self._timer_task = asyncio.create_task(tick())
-
-    async def _on_timer(self) -> None:
-        due_jobs = self._service.due_jobs()
-
-        for job in due_jobs:
-            await self._execute_job(job)
-
+    async def run_scheduled_job(self, job_id: str) -> None:
+        self._job_tasks.pop(job_id, None)
+        job = self._service.get_job(job_id)
+        if not job or not job.get("enabled", True):
+            return
+        await self._execute_job(job)
         self._service.save()
-        self._arm_timer()
+        job = self._service.get_job(job_id)
+        if job and (job.get("state") or {}).get("next_run_at_ms"):
+            self._schedule_job(job)
 
-    async def _execute_job(self, job: CronJob) -> None:
+    async def _execute_job(self, job: dict) -> None:
         start_ms = now_ms()
-        logger.info(f"Cron: executing job '{job.name}' ({job.id})")
-
+        name, jid = job.get("name", ""), job.get("id", "")
+        payload = job.get("payload", {})
+        logger.info(f"Cron: executing job '{name}' ({jid})")
         try:
-            channel = job.payload.channel or "cli"
-            chat_id = job.payload.to or "direct"
+            from nanobot.actor.agent import AgentActor
 
-            response = await self._call_agent(
-                channel=channel,
+            agent = await AgentActor.resolve(self.agent_name)
+            response = await agent.process(
+                channel=payload.get("channel") or "cli",
                 sender_id="cron",
-                chat_id=chat_id,
-                content=job.payload.message,
+                chat_id=payload.get("to") or "direct",
+                content=payload.get("message", ""),
             )
-
-            # Point-to-point delivery: resolve channel actor by name
-            if job.payload.deliver and job.payload.to and job.payload.channel:
+            if payload.get("deliver") and payload.get("to") and payload.get("channel"):
                 try:
-                    from nanobot.channels.manager import get_channel_actor
-
-                    ch = await get_channel_actor(job.payload.channel)
-                    await ch.send_text(job.payload.to, response or "")
+                    ch = (await pul.resolve(f"channel.{payload['channel']}")).as_any()
+                    await ch.send_text(payload["to"], response or "")
                 except Exception as e:
-                    logger.warning(
-                        f"Cron: could not deliver to channel.{job.payload.channel}: {e}"
-                    )
+                    logger.warning(f"Cron: could not deliver to channel.{payload['channel']}: {e}")
 
-            logger.info(f"Cron: job '{job.name}' completed")
+            logger.info(f"Cron: job '{name}' completed")
             self._service.mark_job_finished(job, ok=True, started_at_ms=start_ms)
 
         except Exception as e:
-            logger.error(f"Cron: job '{job.name}' failed: {e}")
+            logger.error(f"Cron: job '{name}' failed: {e}")
             self._service.mark_job_finished(job, ok=False, error=str(e), started_at_ms=start_ms)
 
-    # ========== Public API (cron management) ==========
-
-    def list_jobs(self, include_disabled: bool = False) -> list[CronJob]:
+    def list_jobs(self, include_disabled: bool = False) -> list[dict]:
         return self._service.list_jobs(include_disabled=include_disabled)
 
     def add_job(
         self,
         name: str,
-        schedule: CronSchedule,
+        schedule: dict,
         message: str,
         deliver: bool = False,
         channel: str | None = None,
         to: str | None = None,
         delete_after_run: bool = False,
-    ) -> CronJob:
+    ) -> dict:
         job = self._service.add_job(
             name=name,
             schedule=schedule,
@@ -163,38 +123,51 @@ class SchedulerActor:
             to=to,
             delete_after_run=delete_after_run,
         )
-        self._arm_timer()
-
-        logger.info(f"Cron: added job '{name}' ({job.id})")
+        self._schedule_job(job)
+        logger.info(f"Cron: added job '{name}' ({job['id']})")
         return job
 
     def remove_job(self, job_id: str) -> bool:
+        if job_id in self._job_tasks:
+            self._job_tasks[job_id].cancel()
+            del self._job_tasks[job_id]
         removed = self._service.remove_job(job_id)
         if removed:
-            self._arm_timer()
             logger.info(f"Cron: removed job {job_id}")
         return removed
 
-    def enable_job(self, job_id: str, enabled: bool = True) -> CronJob | None:
+    def enable_job(self, job_id: str, enabled: bool = True) -> dict | None:
         job = self._service.enable_job(job_id, enabled=enabled)
         if job:
-            self._arm_timer()
+            if enabled:
+                self._schedule_job(job)
+            elif job_id in self._job_tasks:
+                self._job_tasks[job_id].cancel()
+                del self._job_tasks[job_id]
         return job
 
     async def run_job(self, job_id: str, force: bool = False) -> bool:
         job = self._service.get_job(job_id)
         if not job:
             return False
-        if not force and not job.enabled:
+        if not force and not job.get("enabled", True):
             return False
         await self._execute_job(job)
         self._service.save()
-        self._arm_timer()
+        job = self._service.get_job(job_id)
+        if job and (job.get("state") or {}).get("next_run_at_ms"):
+            self._schedule_job(job)
         return True
 
     def status(self) -> dict:
+        store = self._service.load()
+        next_runs = [
+            (j.get("state") or {}).get("next_run_at_ms")
+            for j in store["jobs"]
+            if j.get("enabled", True) and (j.get("state") or {}).get("next_run_at_ms")
+        ]
         return {
             "enabled": self._running,
-            "jobs": len(self._service.load().jobs),
-            "next_wake_at_ms": self._get_next_wake_ms(),
+            "jobs": len(store["jobs"]),
+            "next_wake_at_ms": min(next_runs) if next_runs else None,
         }

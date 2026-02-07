@@ -1,18 +1,54 @@
 """Shared tool loop: the LLM ↔ tool execution cycle used by all agents.
 
 Both AgentActor and SubagentActor call ``run_tool_loop()`` instead of
-duplicating the same iteration logic.
+duplicating the same iteration logic. Supports native tool_calls and
+DSML-style function_calls in content (e.g. <|DSML|invoke name="...">).
 """
 
 import json
+import re
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 from loguru import logger
 
 from nanobot.agent.tools.base import ToolContext
 from nanobot.agent.tools.registry import ToolRegistry
+
+
+def _parse_dsml_calls(content: str) -> list[tuple[str, str, dict]] | None:
+    """If content contains DSML function_calls, return [(id, name, arguments), ...]; else None.
+    Handles <|DSML|invoke name="..."> and <|DSML|parameter name="..." ...>value</|DSML|parameter>.
+    """
+    if not content or "invoke" not in content or "DSML" not in content:
+        return None
+    # Match pipe or fullwidth pipe
+    pipe = r"[\|\uFF5C]"
+    invoke_re = re.compile(
+        rf"<{pipe}DSML{pipe}\s*invoke\s+name=[\"']([^\"']+)[\"']\s*>",
+        re.IGNORECASE,
+    )
+    param_re = re.compile(
+        rf"<{pipe}DSML{pipe}\s*parameter\s+name=[\"']([^\"']+)[\"'][^>]*>([^<]*)</{pipe}DSML{pipe}\s*parameter\s*>",
+        re.IGNORECASE,
+    )
+    calls = []
+    for m in invoke_re.finditer(content):
+        name = m.group(1).strip()
+        start = m.end()
+        # Find next invoke or end of content to bound parameter search
+        next_invoke = invoke_re.search(content, start)
+        end = next_invoke.start() if next_invoke else len(content)
+        block = content[start:end]
+        args = {}
+        for pm in param_re.finditer(block):
+            args[pm.group(1).strip()] = pm.group(2).strip()
+        call_id = f"dsml_{uuid.uuid4().hex[:8]}"
+        calls.append((call_id, name, args))
+    return calls if calls else None
 
 
 @dataclass
@@ -32,59 +68,16 @@ async def run_tool_loop(
     model: str | None = None,
     max_iterations: int = 20,
 ) -> str:
-    """Run the LLM ↔ tool execution loop, return the final text response.
-
-    Messages list is mutated in place.  No callbacks needed — the actor
-    communication pattern (ask/tell) already covers sync vs async semantics.
-    """
-    for _ in range(max_iterations):
-        response = await provider.chat(
-            messages=messages,
-            tools=tools.get_definitions(),
-            model=model,
-        )
-
-        if not response.has_tool_calls:
-            return (
-                response.content
-                or "I've completed processing but have no response to give."
-            )
-
-        tc_dicts = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
-            }
-            for tc in response.tool_calls
-        ]
-
-        messages.append(
-            {
-                "role": "assistant",
-                "content": response.content or "",
-                "tool_calls": tc_dicts,
-            }
-        )
-
-        for tc in response.tool_calls:
-            logger.info(
-                f"Tool call: {tc.name}({json.dumps(tc.arguments, ensure_ascii=False)[:200]})"
-            )
-            try:
-                result = await tools.execute(tc.name, tc.arguments, ctx)
-            except Exception as e:
-                result = f"Error: {e}"
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "name": tc.name,
-                    "content": result,
-                }
-            )
-
-    return "I've completed processing but have no response to give."
+    """Run the tool loop, return the final text (consumes stream internally)."""
+    parts = []
+    async for chunk in run_tool_loop_stream(
+        provider, tools, messages, ctx, model=model, max_iterations=max_iterations
+    ):
+        if chunk.kind == "token":
+            parts.append(chunk.text)
+        elif chunk.kind == "done":
+            break
+    return "".join(parts) or "I've completed processing but have no response to give."
 
 
 async def run_tool_loop_stream(
@@ -120,12 +113,20 @@ async def run_tool_loop_stream(
             model=model,
         )
 
-        if not response.has_tool_calls:
-            content = response.content or ""
-            if content:
-                yield AgentChunk(kind="token", text=content)
-            yield AgentChunk(kind="done")
-            return
+        tool_calls = list(response.tool_calls) if response.has_tool_calls else []
+        content = response.content or ""
+
+        if not tool_calls:
+            dsml = _parse_dsml_calls(content)
+            if dsml:
+                tool_calls = [
+                    SimpleNamespace(id=i, name=n, arguments=a) for i, n, a in dsml
+                ]
+            else:
+                if content:
+                    yield AgentChunk(kind="token", text=content)
+                yield AgentChunk(kind="done")
+                return
 
         had_tool_calls = True
         tc_dicts = [
@@ -134,18 +135,18 @@ async def run_tool_loop_stream(
                 "type": "function",
                 "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
             }
-            for tc in response.tool_calls
+            for tc in tool_calls
         ]
 
         messages.append(
             {
                 "role": "assistant",
-                "content": response.content or "",
+                "content": content,
                 "tool_calls": tc_dicts,
             }
         )
 
-        for tc in response.tool_calls:
+        for tc in tool_calls:
             logger.info(
                 f"Tool call: {tc.name}({json.dumps(tc.arguments, ensure_ascii=False)[:200]})"
             )

@@ -237,9 +237,9 @@ class AgentActor:
         # Point-to-point delivery
         if origin_channel != "cli":
             try:
-                from nanobot.channels.manager import get_channel_actor
+                import pulsing as pul
 
-                ch = await get_channel_actor(origin_channel)
+                ch = (await pul.resolve(f"channel.{origin_channel}")).as_any()
                 await ch.send_text(origin_chat_id, result)
             except Exception as e:
                 logger.error(f"Error sending announce to {origin_channel}: {e}")

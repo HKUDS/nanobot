@@ -256,6 +256,7 @@ def gateway(
                 cron_store_path=cron_store_path,
                 workspace=config.workspace_path,
                 agent_name="agent",
+                scheduler_name="scheduler",
                 name="scheduler",
             )
 
@@ -508,25 +509,21 @@ def cron_list(
     import time
 
     for job in jobs:
-        # Format schedule
-        if job.schedule.kind == "every":
-            sched = f"every {(job.schedule.every_ms or 0) // 1000}s"
-        elif job.schedule.kind == "cron":
-            sched = job.schedule.expr or ""
+        sch = job.get("schedule", {})
+        if sch.get("kind") == "every":
+            sched = f"every {(sch.get("every_ms") or 0) // 1000}s"
+        elif sch.get("kind") == "cron":
+            sched = sch.get("expr") or ""
         else:
             sched = "one-time"
 
-        # Format next run
+        state = job.get("state", {})
         next_run = ""
-        if job.state.next_run_at_ms:
-            next_time = time.strftime(
-                "%Y-%m-%d %H:%M", time.localtime(job.state.next_run_at_ms / 1000)
-            )
-            next_run = next_time
+        if state.get("next_run_at_ms"):
+            next_run = time.strftime("%Y-%m-%d %H:%M", time.localtime(state["next_run_at_ms"] / 1000))
 
-        status = "[green]enabled[/green]" if job.enabled else "[dim]disabled[/dim]"
-
-        table.add_row(job.id, job.name, sched, status, next_run)
+        status = "[green]enabled[/green]" if job.get("enabled", True) else "[dim]disabled[/dim]"
+        table.add_row(job.get("id", ""), job.get("name", ""), sched, status, next_run)
 
     console.print(table)
 
@@ -549,18 +546,14 @@ def cron_add(
     ),
 ):
     """Add a scheduled job."""
-    from nanobot.cron.types import CronSchedule
-
-    # Determine schedule type
     if every:
-        schedule = CronSchedule(kind="every", every_ms=every * 1000)
+        schedule = {"kind": "every", "every_ms": every * 1000}
     elif cron_expr:
-        schedule = CronSchedule(kind="cron", expr=cron_expr)
+        schedule = {"kind": "cron", "expr": cron_expr}
     elif at:
         import datetime
-
         dt = datetime.datetime.fromisoformat(at)
-        schedule = CronSchedule(kind="at", at_ms=int(dt.timestamp() * 1000))
+        schedule = {"kind": "at", "at_ms": int(dt.timestamp() * 1000)}
     else:
         console.print("[red]Error: Must specify --every, --cron, or --at[/red]")
         raise typer.Exit(1)
@@ -574,8 +567,7 @@ def cron_add(
         to=to,
         channel=channel,
     )
-
-    console.print(f"[green]✓[/green] Added job '{job.name}' ({job.id})")
+    console.print(f"[green]✓[/green] Added job '{job['name']}' ({job['id']})")
 
 
 @cron_app.command("remove")
@@ -600,7 +592,7 @@ def cron_enable(
     job = service.enable_job(job_id, enabled=not disable)
     if job:
         status = "disabled" if disable else "enabled"
-        console.print(f"[green]✓[/green] Job '{job.name}' {status}")
+        console.print(f"[green]✓[/green] Job '{job['name']}' {status}")
     else:
         console.print(f"[red]Job {job_id} not found[/red]")
 
@@ -611,6 +603,7 @@ def cron_run(
     force: bool = typer.Option(False, "--force", "-f", help="Run even if disabled"),
 ):
     """Manually run a job."""
+
     async def run():
         import pulsing as pul
         from nanobot.actor.scheduler import SchedulerActor

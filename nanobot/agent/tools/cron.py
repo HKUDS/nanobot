@@ -6,7 +6,6 @@ Resolves SchedulerActor via Pulsing name -- no object reference needed.
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolContext
-from nanobot.cron.types import CronSchedule
 
 
 class CronTool(Tool):
@@ -94,9 +93,9 @@ class CronTool(Tool):
             return "Error: no session context (channel/chat_id)"
 
         if every_seconds:
-            schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
+            schedule = {"kind": "every", "every_ms": every_seconds * 1000}
         elif cron_expr:
-            schedule = CronSchedule(kind="cron", expr=cron_expr)
+            schedule = {"kind": "cron", "expr": cron_expr}
         else:
             return "Error: either every_seconds or cron_expr is required"
 
@@ -109,7 +108,7 @@ class CronTool(Tool):
             channel=ctx.channel,
             to=ctx.chat_id,
         )
-        return f"Created job '{job.name}' (id: {job.id})"
+        return f"Created job '{job['name']}' (id: {job['id']})"
 
     async def _list_jobs(self) -> str:
         scheduler = await self._get_scheduler()

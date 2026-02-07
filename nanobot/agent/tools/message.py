@@ -2,8 +2,9 @@
 
 from typing import Any
 
+import pulsing as pul
+
 from nanobot.agent.tools.base import Tool, ToolContext
-from nanobot.channels.manager import get_channel_actor
 
 
 class MessageTool(Tool):
@@ -56,7 +57,7 @@ class MessageTool(Tool):
             return "Error: No target channel/chat specified"
 
         try:
-            ch = await get_channel_actor(channel)
+            ch = (await pul.resolve(f"channel.{channel}")).as_any()
         except Exception:
             return f"Error: Channel '{channel}' not available"
 
