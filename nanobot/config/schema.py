@@ -175,6 +175,8 @@ class Config(BaseSettings):
             return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
         if any(k in model for k in ("zhipu", "glm", "zai")):
             return self.providers.zhipu.api_base
+        if any(k in model for k in ("openai", "gpt")):
+            return self.providers.openai.api_base
         if "vllm" in model:
             return self.providers.vllm.api_base
         return None
