@@ -39,13 +39,13 @@ Examples:
 ## Quick benchmark
 Run a local benchmark (writes, promotes, retrieval quality, neg controls, forget/restore invariants).
 
-> Run from the repo root (do **not** run from inside `nanobot/agent/tools/memory_box/` to avoid stdlib `types` shadowing).
-And `memory_box` should be in `/docker/nanobot/nanobot/agent/tools/`
+> Run from the repo root (do **not** run from inside `nanobot/agent/tools/smriti/` to avoid stdlib `types` shadowing).
+And `smriti` should be in `/docker/nanobot/nanobot/agent/tools/`
 
 ```bash
 cd <PATH TO NANOBOT> # i.e. from repo root
-python -m nanobot.agent.tools.memory_box.bench \
-  --workspace /tmp/memory_box_bench \
+python -m nanobot.agent.tools.smriti.bench \
+  --workspace /tmp/smriti_bench \
   --items 2000 --queries 400 --seed 0 \
   --k 5 --neg_frac 0.40 --promote_frac 0.05 \
   --clean
