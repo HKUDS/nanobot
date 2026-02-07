@@ -27,7 +27,9 @@ class TelegramConfig(Base):
     enabled: bool = False
     token: str = ""  # Bot token from @BotFather
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
-    proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
+    proxy: str | None = (
+        None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
+    )
 
 
 class FeishuConfig(Base):
@@ -84,7 +86,9 @@ class EmailConfig(Base):
     from_address: str = ""
 
     # Behavior
-    auto_reply_enabled: bool = True  # If false, inbound email is read but no automatic reply is sent
+    auto_reply_enabled: bool = (
+        True  # If false, inbound email is read but no automatic reply is sent
+    )
     poll_interval_seconds: int = 30
     mark_seen: bool = True
     max_body_chars: int = 12000
@@ -159,7 +163,18 @@ class QQConfig(Base):
     enabled: bool = False
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
+    allow_from: list[str] = Field(
+        default_factory=list
+    )  # Allowed user openids (empty = public access)
+
+
+class SignalConfig(BaseModel):
+    """Signal channel configuration using signal-cli."""
+
+    enabled: bool = False
+    phone_number: str = ""  # Bot's phone number (E.164 format, e.g. +1234567890)
+    cli_binary: str = "signal-cli"  # Path to signal-cli binary
+    allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
 
 
 class ChannelsConfig(Base):
@@ -174,6 +189,7 @@ class ChannelsConfig(Base):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    signal: SignalConfig = Field(default_factory=SignalConfig)
 
 
 class AgentDefaults(Base):
