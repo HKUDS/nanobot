@@ -104,6 +104,8 @@ class TelegramChannel(BaseChannel):
         self._app = (
             Application.builder()
             .token(self.config.token)
+            .proxy(self.config.proxy)
+            .get_updates_proxy(self.config.proxy)
             .build()
         )
         
