@@ -65,6 +65,8 @@
   </tr>
 </table>
 
+💰 **Token Usage Tracking & Budget Monitoring**: Track LLM API consumption, set budget limits, receive alerts when approaching or exceeding thresholds.
+
 ## 📦 Install
 
 **Install from source** (latest features, recommended for development)
@@ -87,10 +89,28 @@ uv tool install nanobot-ai
 pip install nanobot-ai
 ```
 
+**Install with Docker**
+
+```bash
+# Build the Docker image
+docker build -t nanobot .
+
+# Or use docker-compose
+docker-compose build
+```
+
+> [!NOTE]
+> **For development/updates**: If you modify the nanobot code, rebuild the image to include changes:
+> ```bash
+> docker build --no-cache -t nanobot .
+> ```
+
 ## 🚀 Quick Start
 
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Brave Search](https://brave.com/search/api/) (optional, for web search) · [NVIDIA](https://integrate.api.nvidia.com/) (for Kimi AI tool)
+> You can also change the model to `minimax/minimax-m2` for lower cost.
 > Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [DashScope](https://dashscope.console.aliyun.com) (Qwen) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
 
 **1. Initialize**
@@ -107,6 +127,9 @@ For OpenRouter - recommended for global users:
   "providers": {
     "openrouter": {
       "apiKey": "sk-or-v1-xxx"
+    },
+    "nvidia": {
+      "apiKey": "nvapi-xxx"
     }
   },
   "agents": {
@@ -124,6 +147,91 @@ nanobot agent -m "What is 2+2?"
 ```
 
 That's it! You have a working AI assistant in 2 minutes.
+
+## 🦙 Local Models (Ollama)
+
+Run nanobot with local Ollama models for privacy and zero-cost inference.
+
+**1. Install Ollama**
+
+```bash
+# macOS/Linux
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Windows
+# Download from: https://ollama.ai/download
+```
+**2. Configure** (`~/.nanobot/config.json`)
+```json
+{
+  "ollama": {
+    "enabled": true,
+    "apiBase": "http://localhost:11434",
+    "model": "llama3.2",
+    "timeout": 120.0
+  }
+}
+**2. Configure nanobot**
+
+```bash
+# Regular installation
+nanobot onboard  # Edit ~/.nanobot/config.json to enable ollama
+
+# Docker
+docker run -it -v ~/.nanobot:/root/.nanobot nanobot onboard
+# Then edit ~/.nanobot/config.json to enable ollama
+```
+
+**3. Pull a model**
+
+```bash
+# Regular installation
+nanobot ollama pull llama3.2
+# Or manually: ollama pull llama3.2
+
+# Docker
+docker run -it nanobot ollama pull llama3.2
+```
+
+**4. Check status**
+
+```bash
+# Regular installation
+nanobot ollama status
+nanobot ollama list
+
+# Docker
+docker run -it nanobot ollama status
+docker run -it nanobot ollama list
+```
+
+**5. Chat**
+
+```bash
+nanobot agent -m "Hello from local LLM!"
+```
+
+### 🐳 Docker Usage
+
+For Docker users, use these commands instead:
+
+```bash
+# Check Ollama status
+docker-compose run --rm nanobot ollama status
+
+# List available models  
+docker-compose run --rm nanobot ollama list
+
+# Pull new models
+docker-compose run --rm nanobot ollama pull llama3.2
+
+# Chat with Ollama models
+docker-compose run --rm nanobot agent -m "Hello from local LLM!"
+```
+
+> [!TIP]
+> Popular models: `llama3.2`, `mistral`, `codellama`, `llama3.1:8b`
+> Ollama models run locally with zero API costs!
 
 ## 🖥️ Local Models (vLLM)
 
@@ -337,6 +445,8 @@ nanobot gateway
 
 ## ⚙️ Configuration
 
+> [!NOTE]
+> **Environment Variables**: Some providers may require additional environment variables. For NVIDIA, the apiKey is configured in config.json.
 Config file: `~/.nanobot/config.json`
 
 ### Providers
@@ -357,6 +467,52 @@ Config file: `~/.nanobot/config.json`
 
 ### Security
 
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-opus-4-5"
+    }
+  },
+  "providers": {
+    "openrouter": {
+      "apiKey": "sk-or-v1-xxx"
+    },
+    "nvidia": {
+      "apiKey": "nvapi-xxx"
+    "groq": {
+      "apiKey": "gsk_xxx"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "123456:ABC...",
+      "allowFrom": ["123456789"]
+    },
+    "whatsapp": {
+      "enabled": false
+    }
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "apiKey": "BSA..."
+      }
+    }
+  },
+  "usage": {
+    "monthlyBudgetUsd": 20.0,
+    "alertThresholds": [0.5, 0.8, 1.0]
+  },
+  "ollama": {
+    "enabled": true,
+    "apiBase": "http://localhost:11434",
+    "model": "llama3.2",
+    "timeout": 120.0
+  }
+}
+```
 > [!TIP]
 > For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
 
@@ -373,10 +529,14 @@ Config file: `~/.nanobot/config.json`
 | `nanobot onboard` | Initialize config & workspace |
 | `nanobot agent -m "..."` | Chat with the agent |
 | `nanobot agent` | Interactive chat mode |
+| `nanobot usage` | Show token usage & budget stats |
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
+| `nanobot ollama status` | Check Ollama service status |
+| `nanobot ollama list` | List installed Ollama models |
+| `nanobot ollama pull <model>` | Download an Ollama model |
 
 <details>
 <summary><b>Scheduled Tasks (Cron)</b></summary>

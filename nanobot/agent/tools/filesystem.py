@@ -3,9 +3,39 @@
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from nanobot.agent.tools.base import Tool
 
 
+def _validate_path(path: str, base_dir: Path | None = None) -> tuple[bool, str]:
+    """Validate file path is within allowed directory.
+    
+    Args:
+        path: The file path to validate
+        base_dir: Base directory to restrict access to. If None, allows all paths.
+    
+    Returns:
+        Tuple of (is_valid, error_message_or_valid_path)
+    """
+    if not base_dir:
+        return True, path  # No restriction
+    
+    try:
+        resolved_path = Path(path).expanduser().resolve()
+        base_resolved = base_dir.resolve()
+        
+        # Check if path is within base directory
+        resolved_path.relative_to(base_resolved)
+        return True, str(resolved_path)
+    except ValueError:
+        return False, f"Access denied: {path} is outside allowed directory {base_dir}"
+    except Exception as e:
+        return False, f"Invalid path: {str(e)}"
+
+
+class ReadFileTool(Tool):
+    """Tool to read file contents."""
 def _resolve_path(path: str, allowed_dir: Path | None = None) -> Path:
     """Resolve path and optionally enforce directory restriction."""
     resolved = Path(path).expanduser().resolve()
@@ -42,7 +72,21 @@ class ReadFileTool(Tool):
         }
     
     async def execute(self, path: str, **kwargs: Any) -> str:
+        # Input validation
+        if len(path) > 500:
+            return "Error: Path too long"
+        
+        # Security: Validate path is within workspace
+        WORKSPACE_DIR = Path.home() / ".nanobot" / "workspace"
+        is_valid, result = _validate_path(path, base_dir=WORKSPACE_DIR)
+        if not is_valid:
+            return result  # error message
+        
+        # Audit logging
+        logger.warning(f"File read operation: {path[:50]}{'...' if len(path) > 50 else ''}")
+        
         try:
+            file_path = Path(result)
             file_path = _resolve_path(path, self._allowed_dir)
             if not file_path.exists():
                 return f"Error: File not found: {path}"
@@ -51,10 +95,12 @@ class ReadFileTool(Tool):
             
             content = file_path.read_text(encoding="utf-8")
             return content
+        except PermissionError:
+            return f"Error: Permission denied"
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
-            return f"Error reading file: {str(e)}"
+            return f"Error reading file"
 
 
 class WriteFileTool(Tool):
@@ -89,7 +135,19 @@ class WriteFileTool(Tool):
         }
     
     async def execute(self, path: str, content: str, **kwargs: Any) -> str:
+        # Security: Validate path is within workspace
+        WORKSPACE_DIR = Path.home() / ".nanobot" / "workspace"
+        is_valid, result = _validate_path(path, base_dir=WORKSPACE_DIR)
+        if not is_valid:
+            return result  # error message
+        
         try:
+            file_path = Path(result)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8")
+            return f"Successfully wrote {len(content)} bytes to {path}"
+        except PermissionError:
+            return f"Error: Permission denied"
             file_path = _resolve_path(path, self._allowed_dir)
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
@@ -97,7 +155,7 @@ class WriteFileTool(Tool):
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
-            return f"Error writing file: {str(e)}"
+            return f"Error writing file"
 
 
 class EditFileTool(Tool):
@@ -136,7 +194,14 @@ class EditFileTool(Tool):
         }
     
     async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
+        # Security: Validate path is within workspace
+        WORKSPACE_DIR = Path.home() / ".nanobot" / "workspace"
+        is_valid, result = _validate_path(path, base_dir=WORKSPACE_DIR)
+        if not is_valid:
+            return result  # error message
+        
         try:
+            file_path = Path(result)
             file_path = _resolve_path(path, self._allowed_dir)
             if not file_path.exists():
                 return f"Error: File not found: {path}"
@@ -155,10 +220,12 @@ class EditFileTool(Tool):
             file_path.write_text(new_content, encoding="utf-8")
             
             return f"Successfully edited {path}"
+        except PermissionError:
+            return f"Error: Permission denied"
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
-            return f"Error editing file: {str(e)}"
+            return f"Error editing file"
 
 
 class ListDirTool(Tool):
@@ -189,7 +256,14 @@ class ListDirTool(Tool):
         }
     
     async def execute(self, path: str, **kwargs: Any) -> str:
+        # Security: Validate path is within workspace
+        WORKSPACE_DIR = Path.home() / ".nanobot" / "workspace"
+        is_valid, result = _validate_path(path, base_dir=WORKSPACE_DIR)
+        if not is_valid:
+            return result  # error message
+        
         try:
+            dir_path = Path(result)
             dir_path = _resolve_path(path, self._allowed_dir)
             if not dir_path.exists():
                 return f"Error: Directory not found: {path}"
@@ -205,7 +279,9 @@ class ListDirTool(Tool):
                 return f"Directory {path} is empty"
             
             return "\n".join(items)
+        except PermissionError:
+            return f"Error: Permission denied"
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
-            return f"Error listing directory: {str(e)}"
+            return f"Error listing directory"

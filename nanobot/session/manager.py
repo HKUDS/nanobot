@@ -196,7 +196,14 @@ class SessionManager:
                                 "updated_at": data.get("updated_at"),
                                 "path": str(path)
                             })
-            except Exception:
+            except json.JSONDecodeError as e:
+                logger.warning(f"Erro ao decodificar JSON da sessão {path.name}: {e}")
+                continue
+            except IOError as e:
+                logger.warning(f"Erro de I/O ao ler sessão {path.name}: {e}")
+                continue
+            except Exception as e:
+                logger.error(f"Erro inesperado ao listar sessão {path.name}: {e}")
                 continue
         
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)

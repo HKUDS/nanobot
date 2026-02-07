@@ -17,10 +17,12 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.alarm import AlarmTool, ListAlarmsTool, CancelAlarmTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
-
+from nanobot.agent.subagent import SubagentManager
+from nanobot.usage import UsageTracker, UsageMonitor, UsageTool, UsageConfig
 
 class AgentLoop:
     """
@@ -71,6 +73,17 @@ class AgentLoop:
             restrict_to_workspace=restrict_to_workspace,
         )
         
+        # Initialize usage tracking
+        from nanobot.usage import UsageTracker, UsageMonitor, UsageConfig
+        from nanobot.config.loader import load_config
+        config = load_config()
+        self.usage_config = config.usage
+        self.usage_tracker = UsageTracker()
+        self.usage_monitor = UsageMonitor(self.usage_tracker, self.usage_config)
+        
+        # Store shell security config
+        self.shell_security_config = config.tools.shell_security
+        
         self._running = False
         self._register_default_tools()
     
@@ -83,6 +96,12 @@ class AgentLoop:
         self.tools.register(EditFileTool(allowed_dir=allowed_dir))
         self.tools.register(ListDirTool(allowed_dir=allowed_dir))
         
+        # Shell tool with security config
+        self.tools.register(ExecTool(
+            working_dir=str(self.workspace),
+            allowed_commands=self.shell_security_config.allowed_commands or None,
+            allowed_dirs=self.shell_security_config.allowed_dirs or None,
+            enable_blocklist=self.shell_security_config.enable_blocklist,
         # Shell tool
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
@@ -102,6 +121,15 @@ class AgentLoop:
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
         
+        # Alarm tools
+        alarm_tool = AlarmTool()
+        self.tools.register(alarm_tool)
+        self.tools.register(ListAlarmsTool())
+        self.tools.register(CancelAlarmTool())
+        
+        # Usage tool (for self-awareness)
+        usage_tool = UsageTool(self.usage_tracker, self.usage_monitor)
+        self.tools.register(usage_tool)
         # Cron tool (for scheduling)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
@@ -143,31 +171,50 @@ class AgentLoop:
     async def _process_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
         Process a single inbound message.
-        
+
         Args:
             msg: The inbound message to process.
-        
+
         Returns:
             The response message, or None if no response needed.
         """
-        # Handle system messages (subagent announces)
-        # The chat_id contains the original "channel:chat_id" to route back to
+        # Handle system messages
         if msg.channel == "system":
             return await self._process_system_message(msg)
-        
+
+        # Setup session and tools
+        session = self._setup_session_and_tools(msg)
+
+        # Build initial messages
+        messages = self._build_initial_messages(session, msg)
+
+        # Run agent loop
+        final_content = await self._run_agent_loop(messages, msg, session)
+
+        # Save to session and return response
+        return self._finalize_response(msg, session, final_content)
+
+    def _setup_session_and_tools(self, msg: InboundMessage):
+        """Setup session and update tool contexts."""
         logger.info(f"Processing message from {msg.channel}:{msg.sender_id}")
-        
+
         # Get or create session
         session = self.sessions.get_or_create(msg.session_key)
-        
+
         # Update tool contexts
         message_tool = self.tools.get("message")
         if isinstance(message_tool, MessageTool):
             message_tool.set_context(msg.channel, msg.chat_id)
-        
+
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(msg.channel, msg.chat_id)
+
+        return session
+
+    def _build_initial_messages(self, session, msg: InboundMessage):
+        """Build initial messages for the agent loop."""
+        return self.context.build_messages(
         
         cron_tool = self.tools.get("cron")
         if isinstance(cron_tool, CronTool):
@@ -181,60 +228,99 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
         )
-        
-        # Agent loop
+
+    async def _run_agent_loop(self, messages, msg: InboundMessage, session):
+        """Run the main agent loop to process the message."""
         iteration = 0
         final_content = None
-        
+
         while iteration < self.max_iterations:
             iteration += 1
-            
+
             # Call LLM
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
-            
-            # Handle tool calls
+
+            # Record usage
+            await self._record_usage(response, msg, session)
+
+            # Handle response
             if response.has_tool_calls:
-                # Add assistant message with tool calls
-                tool_call_dicts = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments)  # Must be JSON string
-                        }
-                    }
-                    for tc in response.tool_calls
-                ]
-                messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts
-                )
-                
-                # Execute tools
-                for tool_call in response.tool_calls:
-                    args_str = json.dumps(tool_call.arguments)
-                    logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
-                    )
+                messages = await self._handle_tool_calls(response, messages)
             else:
                 # No tool calls, we're done
                 final_content = response.content
                 break
-        
+
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
-        
+
+        return final_content
+
+    async def _record_usage(self, response, msg: InboundMessage, session):
+        """Record usage statistics if available."""
+        if response.usage:
+            from nanobot.usage.models import TokenUsage
+            token_usage = TokenUsage(
+                prompt_tokens=response.usage.get('prompt_tokens', 0),
+                completion_tokens=response.usage.get('completion_tokens', 0),
+                total_tokens=response.usage.get('total_tokens', 0)
+            )
+
+            # Extract provider from model
+            provider = self._extract_provider_from_model(self.model)
+
+            # Calculate actual cost
+            cost_usd = token_usage.cost_usd(provider=provider, model=self.model)
+
+            self.usage_tracker.record_usage(
+                model=self.model,
+                channel=msg.channel,
+                session_key=session.key,
+                token_usage=token_usage,
+                cost_usd=cost_usd,
+                provider=provider
+            )
+
+    async def _handle_tool_calls(self, response, messages):
+        """Handle tool calls in the response."""
+        # Add assistant message with tool calls
+        tool_call_dicts = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.name,
+                    "arguments": json.dumps(tc.arguments)  # Must be JSON string
+                }
+            }
+            for tc in response.tool_calls
+        ]
+        messages = self.context.add_assistant_message(
+            messages, response.content, tool_call_dicts
+        )
+
+        # Execute tools
+        for tool_call in response.tool_calls:
+            args_str = json.dumps(tool_call.arguments)
+            logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
+            result = await self.tools.execute(tool_call.name, tool_call.arguments)
+            messages = self.context.add_tool_result(
+                messages, tool_call.id, tool_call.name, result
+            )
+
+        return messages
+
+    def _finalize_response(self, msg: InboundMessage, session, final_content: str) -> OutboundMessage:
+        """Save session and create final response."""
         # Save to session
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
-        
+
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
@@ -297,6 +383,30 @@ class AgentLoop:
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
+            
+            # Record usage if available
+            if response.usage:
+                from nanobot.usage.models import TokenUsage
+                token_usage = TokenUsage(
+                    prompt_tokens=response.usage.get('prompt_tokens', 0),
+                    completion_tokens=response.usage.get('completion_tokens', 0),
+                    total_tokens=response.usage.get('total_tokens', 0)
+                )
+                
+                # Extract provider from model
+                provider = self._extract_provider_from_model(self.model)
+                
+                # Calculate actual cost
+                cost_usd = token_usage.cost_usd(provider=provider, model=self.model)
+                
+                self.usage_tracker.record_usage(
+                    model=self.model,
+                    channel=origin_channel,
+                    session_key=session_key,
+                    token_usage=token_usage,
+                    cost_usd=cost_usd,
+                    provider=provider
+                )
             
             if response.has_tool_calls:
                 tool_call_dicts = [
@@ -367,3 +477,29 @@ class AgentLoop:
         
         response = await self._process_message(msg)
         return response.content if response else ""
+    
+    def _extract_provider_from_model(self, model: str) -> str:
+        """Extract provider name from model string for usage tracking."""
+        if "/" in model:
+            provider = model.split("/")[0]
+            # Map common prefixes to provider names
+            provider_map = {
+                "openrouter": "openrouter",
+                "anthropic": "anthropic", 
+                "openai": "openai",
+                "gemini": "gemini",
+                "zhipu": "zhipu",
+                "zai": "zhipu",
+                "hosted_vllm": "vllm"
+            }
+            return provider_map.get(provider, provider)
+        else:
+            # Fallback for models without prefix
+            if "claude" in model.lower():
+                return "anthropic"
+            elif "gpt" in model.lower() or model.startswith("openai/"):
+                return "openai"
+            elif "gemini" in model.lower():
+                return "gemini"
+            else:
+                return "unknown"

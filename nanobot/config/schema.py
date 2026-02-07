@@ -9,6 +9,7 @@ class WhatsAppConfig(BaseModel):
     """WhatsApp channel configuration."""
     enabled: bool = False
     bridge_url: str = "ws://localhost:3001"
+    bridge_token: str = ""  # Authentication token for the bridge
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
 
 
@@ -78,12 +79,13 @@ class ProvidersConfig(BaseModel):
     dashscope: ProviderConfig = Field(default_factory=ProviderConfig)  # 阿里云通义千问
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    nvidia: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
 class GatewayConfig(BaseModel):
     """Gateway/server configuration."""
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 18790
 
 
@@ -98,6 +100,11 @@ class WebToolsConfig(BaseModel):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
+class ShellSecurityConfig(BaseModel):
+    """Shell execution security configuration."""
+    enable_blocklist: bool = True  # Block dangerous command patterns
+    allowed_commands: list[str] = Field(default_factory=list)  # Allowlist mode (empty = all allowed)
+    allowed_dirs: list[str] = Field(default_factory=list)  # Directory fence (empty = no fence)
 class ExecToolConfig(BaseModel):
     """Shell exec tool configuration."""
     timeout: int = 60
@@ -106,6 +113,21 @@ class ExecToolConfig(BaseModel):
 class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
+    shell_security: ShellSecurityConfig = Field(default_factory=ShellSecurityConfig)
+
+
+class UsageConfig(BaseModel):
+    """Usage tracking and budget configuration."""
+    monthly_budget_usd: float = 20.0
+    alert_thresholds: list[float] = Field(default_factory=lambda: [0.5, 0.8, 1.0])
+
+
+class OllamaConfig(BaseModel):
+    """Ollama local model configuration."""
+    enabled: bool = False
+    api_base: str = "http://localhost:11434"
+    model: str = "llama3.2"
+    timeout: float = 120.0
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
 
@@ -117,12 +139,32 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    usage: UsageConfig = Field(default_factory=UsageConfig)
+    ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     
     @property
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
     
+    def get_api_key(self) -> str | None:
+        """Get API key in priority order: Ollama > OpenRouter > Anthropic > OpenAI > Gemini > Zhipu > vLLM."""
+        # Ollama doesn't use API keys, but we check if it's enabled
+        if self.ollama.enabled:
+            return "ollama"  # Special marker for Ollama
+        
+        """Get API key in priority order: OpenRouter > Anthropic > OpenAI > Gemini > Zhipu > Groq > vLLM."""
+        return (
+            self.providers.openrouter.api_key or
+            self.providers.anthropic.api_key or
+            self.providers.openai.api_key or
+            self.providers.gemini.api_key or
+            self.providers.zhipu.api_key or
+            self.providers.groq.api_key or
+            self.providers.nvidia.api_key or
+            self.providers.vllm.api_key or
+            None
+        )
     def _match_provider(self, model: str | None = None) -> ProviderConfig | None:
         """Match a provider based on model name."""
         model = (model or self.agents.defaults.model).lower()

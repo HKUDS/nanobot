@@ -34,6 +34,46 @@ def main(
     pass
 
 
+def _create_provider(config):
+    """Create the appropriate provider based on configuration."""
+    api_key = config.get_api_key()
+    
+    # Check if Ollama is enabled and should be used
+    if api_key == "ollama" and config.ollama.enabled:
+        from nanobot.providers.ollama_provider import OllamaProvider
+        from nanobot.usage import UsageTracker
+        
+        tracker = UsageTracker()
+        provider = OllamaProvider(
+            api_base=config.ollama.api_base,
+            default_model=config.ollama.model,
+            timeout=config.ollama.timeout,
+            usage_tracker=tracker
+        )
+        return provider
+    
+    # Default to LiteLLM for cloud providers
+    if not api_key or api_key == "ollama":
+        console.print("[red]Error: No API key configured and Ollama not enabled.[/red]")
+        console.print("Set an API key in ~/.nanobot/config.json under providers.*.apiKey")
+        console.print("Or enable Ollama: set ollama.enabled to true")
+        raise typer.Exit(1)
+    
+    from nanobot.providers.litellm_provider import LiteLLMProvider
+    from nanobot.usage import UsageTracker
+    
+    api_base = config.get_api_base()
+    tracker = UsageTracker()
+    
+    provider = LiteLLMProvider(
+        api_key=api_key,
+        api_base=api_base,
+        default_model=config.agents.defaults.model,
+        usage_tracker=tracker
+    )
+    return provider
+
+
 # ============================================================================
 # Onboard / Setup
 # ============================================================================
@@ -178,6 +218,8 @@ def gateway(
     # Create components
     bus = MessageBus()
     
+    # Create provider (supports Ollama, OpenRouter, Anthropic, OpenAI)
+    provider = _create_provider(config)
     # Create provider (supports OpenRouter, Anthropic, OpenAI, Bedrock)
     api_key = config.get_api_key()
     api_base = config.get_api_base()
@@ -295,21 +337,35 @@ def agent(
     
     config = load_config()
     
+    # Create provider (supports Ollama, OpenRouter, Anthropic, OpenAI)
+    provider = _create_provider(config)
+    
     api_key = config.get_api_key()
     api_base = config.get_api_base()
     model = config.agents.defaults.model
     is_bedrock = model.startswith("bedrock/")
 
-    if not api_key and not is_bedrock:
+    # Check if NVIDIA provider should be used
+    is_nvidia = model.startswith("moonshotai/") or config.providers.nvidia.api_key
+
+    if not api_key and not is_bedrock and not is_nvidia:
         console.print("[red]Error: No API key configured.[/red]")
         raise typer.Exit(1)
 
+    if is_nvidia and config.providers.nvidia.api_key:
+        from nanobot.providers.nvidia_provider import NvidiaProvider
+        provider = NvidiaProvider(
+            api_key=config.providers.nvidia.api_key,
+            default_model=config.agents.defaults.model
+        )
+    else:
+        provider = LiteLLMProvider(
+            api_key=api_key,
+            api_base=api_base,
+            default_model=config.agents.defaults.model
+        )
+    
     bus = MessageBus()
-    provider = LiteLLMProvider(
-        api_key=api_key,
-        api_base=api_base,
-        default_model=config.agents.defaults.model
-    )
     
     agent_loop = AgentLoop(
         bus=bus,
@@ -367,6 +423,8 @@ def channels_status():
     table.add_column("Channel", style="cyan")
     table.add_column("Enabled", style="green")
     table.add_column("Configuration", style="yellow")
+    
+    # WhatsApp channel
 
     # WhatsApp
     wa = config.channels.whatsapp
@@ -375,6 +433,16 @@ def channels_status():
         "✓" if wa.enabled else "✗",
         wa.bridge_url
     )
+    
+    # Telegram channel
+    tg = config.channels.telegram
+    token_display = f"{tg.token[:10]}..." if tg.token else "not configured"
+    table.add_row(
+        "Telegram",
+        "✓" if tg.enabled else "✗",
+        token_display
+    )
+    
 
     dc = config.channels.discord
     table.add_row(
@@ -398,7 +466,7 @@ def channels_status():
 def _get_bridge_dir() -> Path:
     """Get the bridge directory, setting it up if needed."""
     import shutil
-    import subprocess
+    import subprocess  # nosec B404 - subprocess necessário para build do bridge
     
     # User's bridge location
     user_bridge = Path.home() / ".nanobot" / "bridge"
@@ -407,8 +475,9 @@ def _get_bridge_dir() -> Path:
     if (user_bridge / "dist" / "index.js").exists():
         return user_bridge
     
-    # Check for npm
-    if not shutil.which("npm"):
+    # Obter caminho completo do npm para segurança (B607)
+    npm_path = shutil.which("npm")
+    if not npm_path:
         console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
         raise typer.Exit(1)
     
@@ -435,13 +504,13 @@ def _get_bridge_dir() -> Path:
         shutil.rmtree(user_bridge)
     shutil.copytree(source, user_bridge, ignore=shutil.ignore_patterns("node_modules", "dist"))
     
-    # Install and build
+    # Install and build usando caminho completo do npm
     try:
         console.print("  Installing dependencies...")
-        subprocess.run(["npm", "install"], cwd=user_bridge, check=True, capture_output=True)
+        subprocess.run([npm_path, "install"], cwd=user_bridge, check=True, capture_output=True)  # nosec B603
         
         console.print("  Building...")
-        subprocess.run(["npm", "run", "build"], cwd=user_bridge, check=True, capture_output=True)
+        subprocess.run([npm_path, "run", "build"], cwd=user_bridge, check=True, capture_output=True)  # nosec B603
         
         console.print("[green]✓[/green] Bridge ready\n")
     except subprocess.CalledProcessError as e:
@@ -456,19 +525,24 @@ def _get_bridge_dir() -> Path:
 @channels_app.command("login")
 def channels_login():
     """Link device via QR code."""
-    import subprocess
+    import shutil
+    import subprocess  # nosec B404
     
     bridge_dir = _get_bridge_dir()
+    
+    # Obter caminho completo do npm para segurança (B607)
+    npm_path = shutil.which("npm")
+    if not npm_path:
+        console.print("[red]npm not found. Please install Node.js.[/red]")
+        raise typer.Exit(1)
     
     console.print(f"{__logo__} Starting bridge...")
     console.print("Scan the QR code to connect.\n")
     
     try:
-        subprocess.run(["npm", "start"], cwd=bridge_dir, check=True)
+        subprocess.run([npm_path, "start"], cwd=bridge_dir, check=True)  # nosec B603
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Bridge failed: {e}[/red]")
-    except FileNotFoundError:
-        console.print("[red]npm not found. Please install Node.js.[/red]")
 
 
 # ============================================================================
@@ -629,6 +703,299 @@ def cron_run(
 
 
 # ============================================================================
+# Usage Commands
+# ============================================================================
+
+
+@app.command()
+def usage(
+    period: str = typer.Option("month", "--period", "-p", help="Time period: today, week, month"),
+    model: str = typer.Option(None, "--model", "-m", help="Filter by specific model"),
+    channel: str = typer.Option(None, "--channel", "-c", help="Filter by specific channel"),
+    budget: bool = typer.Option(False, "--budget", "-b", help="Show budget status only"),
+    alerts: bool = typer.Option(False, "--alerts", "-a", help="Show budget alerts only"),
+):
+    """Show token usage statistics and budget information."""
+    from nanobot.usage import UsageTracker, UsageMonitor, UsageConfig
+    from nanobot.config.loader import load_config
+
+    config = load_config()
+    usage_config = config.usage
+    tracker = UsageTracker()
+    monitor = UsageMonitor(tracker, usage_config)
+
+    # Handle special modes
+    if budget:
+        self._display_budget_status(monitor)
+        return
+
+    if alerts:
+        self._display_alerts(monitor)
+        return
+
+    # Validate period and get summary
+    days, period_name = self._validate_period_and_get_days(period)
+    summary = tracker.get_usage_summary(
+        days=days,
+        model_filter=model,
+        channel_filter=channel
+    )
+
+    # Display usage information
+    self._display_usage_summary(summary, period_name, model, channel)
+    self._display_model_breakdown(summary)
+    self._display_channel_breakdown(summary)
+    self._display_budget_and_alerts(monitor)
+
+
+def _validate_period_and_get_days(self, period):
+    # Determine days based on period
+    if period == "today":
+        days = 1
+        period_name = "today"
+    elif period == "week":
+        days = 7
+        period_name = "this week"
+    elif period == "month":
+        days = 30
+        period_name = "this month"
+    else:
+        console.print(f"[red]Error: Invalid period '{period}'. Use: today, week, month[/red]")
+        raise typer.Exit(1)
+    return days, period_name
+
+
+def _display_usage_summary(self, summary, period_name, model, channel):
+    console.print(f"[bold]Usage Summary ({period_name})[/bold]\n")
+
+    if model or channel:
+        filters = []
+        if model:
+            filters.append(f"model: {model}")
+        if channel:
+            filters.append(f"channel: {channel}")
+        console.print(f"[dim]Filtered by: {', '.join(filters)}[/dim]\n")
+
+    console.print(f"Total Tokens: [green]{summary['total_tokens']:,}[/green]")
+    console.print(f"Total Cost: [yellow]${summary['total_cost_usd']:.4f}[/yellow]")
+    console.print(f"API Calls: [cyan]{summary['record_count']}[/cyan]\n")
+
+
+def _display_model_breakdown(self, summary):
+    # Model breakdown
+    if summary['model_breakdown']:
+        table = Table(title="Model Usage")
+        table.add_column("Model", style="cyan")
+        table.add_column("Tokens", style="green", justify="right")
+        table.add_column("Percentage", style="yellow", justify="right")
+
+        for model_name, tokens in sorted(summary['model_breakdown'].items(), key=lambda x: x[1], reverse=True):
+            percentage = (tokens / summary['total_tokens'] * 100) if summary['total_tokens'] > 0 else 0
+            table.add_row(model_name, f"{tokens:,}", f"{percentage:.1f}%")
+
+        console.print(table)
+        console.print()
+
+
+def _display_channel_breakdown(self, summary):
+    # Channel breakdown
+    if summary['channel_breakdown']:
+        table = Table(title="Channel Usage")
+        table.add_column("Channel", style="cyan")
+        table.add_column("Tokens", style="green", justify="right")
+        table.add_column("Percentage", style="yellow", justify="right")
+
+        for channel_name, tokens in sorted(summary['channel_breakdown'].items(), key=lambda x: x[1], reverse=True):
+            percentage = (tokens / summary['total_tokens'] * 100) if summary['total_tokens'] > 0 else 0
+            table.add_row(channel_name, f"{tokens:,}", f"{percentage:.1f}%")
+
+        console.print(table)
+        console.print()
+
+
+def _display_budget_status(self, monitor):
+    # Show budget status only
+    status = monitor.get_budget_status()
+    console.print(f"[bold]Monthly Budget Status[/bold]\n")
+    console.print(f"Budget: [green]${status.monthly_budget_usd:.2f}[/green]")
+    console.print(f"Current Spend: [yellow]${status.current_spend_usd:.2f}[/yellow]")
+    console.print(f"Remaining: [cyan]${status.remaining_budget_usd:.2f}[/cyan]")
+    console.print(f"Utilization: [magenta]{status.utilization_percentage:.1f}%[/magenta]")
+
+
+def _display_alerts(self, monitor):
+    # Show alerts only
+    alerts_list = monitor.get_budget_alerts()
+    if not alerts_list:
+        console.print("[green] No budget alerts at this time[/green]")
+    else:
+        console.print("[bold red]Budget Alerts:[/bold red]")
+        for alert in alerts_list:
+            console.print(f"  {alert}")
+
+
+def _display_budget_and_alerts(self, monitor):
+    # Budget status
+    status = monitor.get_budget_status()
+    console.print(f"[bold]Budget Status[/bold]")
+    console.print(f"Monthly Budget: [green]${status.monthly_budget_usd:.2f}[/green]")
+    console.print(f"Current Spend: [yellow]${status.current_spend_usd:.2f}[/yellow]")
+    console.print(f"Remaining: [cyan]${status.remaining_budget_usd:.2f}[/cyan]")
+    console.print(f"Utilization: [magenta]{status.utilization_percentage:.1f}%[/magenta]")
+
+    # Show alerts if any
+    if status.alerts:
+        console.print("\n[bold red]Alerts:[/bold red]")
+        for alert in status.alerts:
+            console.print(f"  {alert}")
+
+
+ollama_app = typer.Typer(help="Manage Ollama local models")
+app.add_typer(ollama_app, name="ollama")
+
+
+@ollama_app.command("status")
+def ollama_status():
+    """Check Ollama service status and available models."""
+    from nanobot.config.loader import load_config
+    from nanobot.providers.ollama_provider import OllamaProvider
+    
+    config = load_config()
+    
+    if not config.ollama.enabled:
+        console.print("[yellow]Ollama is not enabled in config.[/yellow]")
+        console.print("Enable it by setting 'ollama.enabled: true' in ~/.nanobot/config.json")
+        return
+    
+    console.print(f"{__logo__} Checking Ollama status...")
+    
+    provider = OllamaProvider(
+        api_base=config.ollama.api_base,
+        default_model=config.ollama.model,
+        timeout=config.ollama.timeout
+    )
+    
+    async def check_status():
+        status = await provider.check_status()
+        await provider.close()
+        return status
+    
+    import asyncio
+    status = asyncio.run(check_status())
+    
+    if status["available"]:
+        console.print("[green]✓[/green] Ollama service is running")
+        console.print(f"  Version: {status['version']}")
+        console.print(f"  Endpoint: {status['endpoint']}")
+        
+        if status["models"]:
+            console.print(f"  Available models: {len(status['models'])}")
+            for model in status["models"][:5]:  # Show first 5
+                console.print(f"    • {model}")
+            if len(status["models"]) > 5:
+                console.print(f"    ... and {len(status['models']) - 5} more")
+        else:
+            console.print("  [yellow]No models installed[/yellow]")
+            console.print("  Install models with: ollama pull <model_name>")
+    else:
+        console.print("[red]✗[/red] Ollama service is not available")
+        console.print(f"  Error: {status['error']}")
+        console.print("\nTroubleshooting:")
+        console.print("  1. Install Ollama: https://ollama.ai/download")
+        console.print("  2. Start Ollama: ollama serve")
+        console.print("  3. Pull a model: ollama pull llama3.2")
+
+
+@ollama_app.command("list")
+def ollama_list():
+    """List installed Ollama models."""
+    from nanobot.config.loader import load_config
+    from nanobot.providers.ollama_provider import OllamaProvider
+    
+    config = load_config()
+    
+    if not config.ollama.enabled:
+        console.print("[yellow]Ollama is not enabled in config.[/yellow]")
+        return
+    
+    console.print(f"{__logo__} Listing Ollama models...")
+    
+    provider = OllamaProvider(
+        api_base=config.ollama.api_base,
+        timeout=config.ollama.timeout
+    )
+    
+    async def list_models():
+        models = await provider.list_models()
+        await provider.close()
+        return models
+    
+    import asyncio
+    models = asyncio.run(list_models())
+    
+    if models:
+        table = Table(title="Installed Ollama Models")
+        table.add_column("Model Name", style="cyan")
+        table.add_column("Status", style="green")
+        
+        for model in sorted(models):
+            status = "[green]installed[/green]"
+            if model == config.ollama.model:
+                status = "[blue]default[/blue]"
+            table.add_row(model, status)
+        
+        console.print(table)
+    else:
+        console.print("[yellow]No models found.[/yellow]")
+        console.print("Install models with: ollama pull <model_name>")
+
+
+@ollama_app.command("pull")
+def ollama_pull(
+    model: str = typer.Argument(..., help="Model name to pull (e.g., 'llama3.2', 'mistral')"),
+):
+    """Pull (download) an Ollama model."""
+    import re
+    import shutil
+    import subprocess  # nosec B404
+    
+    # Validação de entrada: nome do modelo deve conter apenas caracteres seguros
+    if not re.match(r'^[a-zA-Z0-9._:-]+$', model):
+        console.print("[red]Nome de modelo inválido. Use apenas letras, números, '.', '_', ':' e '-'[/red]")
+        raise typer.Exit(1)
+    
+    # Obter caminho completo do ollama para segurança (B607)
+    ollama_path = shutil.which("ollama")
+    if not ollama_path:
+        console.print("[red]ollama command not found.[/red]")
+        console.print("Install Ollama from: https://ollama.ai/download")
+        raise typer.Exit(1)
+    
+    console.print(f"{__logo__} Pulling Ollama model: {model}")
+    console.print("This may take several minutes depending on model size...\n")
+    
+    try:
+        # Run ollama pull command com caminho completo e entrada validada
+        result = subprocess.run(
+            [ollama_path, "pull", model],
+            capture_output=True,
+            text=True,
+            check=True
+        )  # nosec B603
+        
+        console.print(f"[green]✓[/green] Successfully pulled model: {model}")
+        
+        if result.stdout:
+            console.print(f"[dim]{result.stdout.strip()}[/dim]")
+            
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Failed to pull model: {model}[/red]")
+        if e.stderr:
+            console.print(f"[dim]{e.stderr.strip()}[/dim]")
+        console.print("\nMake sure Ollama is installed and running.")
+
+
+# ============================================================================
 # Status Commands
 # ============================================================================
 
@@ -655,14 +1022,183 @@ def status():
         has_anthropic = bool(config.providers.anthropic.api_key)
         has_openai = bool(config.providers.openai.api_key)
         has_gemini = bool(config.providers.gemini.api_key)
+        has_nvidia = bool(config.providers.nvidia.api_key)
         has_vllm = bool(config.providers.vllm.api_base)
         
         console.print(f"OpenRouter API: {'[green]✓[/green]' if has_openrouter else '[dim]not set[/dim]'}")
         console.print(f"Anthropic API: {'[green]✓[/green]' if has_anthropic else '[dim]not set[/dim]'}")
         console.print(f"OpenAI API: {'[green]✓[/green]' if has_openai else '[dim]not set[/dim]'}")
         console.print(f"Gemini API: {'[green]✓[/green]' if has_gemini else '[dim]not set[/dim]'}")
+        console.print(f"NVIDIA API: {'[green]✓[/green]' if has_nvidia else '[dim]not set[/dim]'}")
         vllm_status = f"[green]✓ {config.providers.vllm.api_base}[/green]" if has_vllm else "[dim]not set[/dim]"
         console.print(f"vLLM/Local: {vllm_status}")
+        
+        # Ollama status
+        if config.ollama.enabled:
+            console.print(f"Ollama: [green]✓ enabled[/green] ({config.ollama.model})")
+        else:
+            console.print("Ollama: [dim]disabled[/dim]")
+
+# ============================================================================
+# Alarm Commands
+# ============================================================================
+
+alarm_app = typer.Typer(help="Manage alarms and reminders")
+app.add_typer(alarm_app, name="alarm")
+
+
+@alarm_app.command("set")
+def alarm_set(
+    message: str = typer.Argument(..., help="Alarm message"),
+    in_time: str = typer.Option(None, "--in", help="Time from now (e.g., '2m', '1h30m', '30s')"),
+    at_time: str = typer.Option(None, "--at", help="Specific time (HH:MM)"),
+    channel: str = typer.Option("telegram", "--channel", help="Notification channel: telegram, console, all"),
+):
+    """Set a new alarm."""
+    from nanobot.alarm import AlarmService, AlarmStorage, parse_time_string, AlarmChannel
+    from datetime import datetime, timedelta
+    import re
+    
+    storage = AlarmStorage()
+    service = AlarmService(storage)
+    
+    # Validate channel
+    if channel not in [c.value for c in AlarmChannel]:
+        console.print(f"[red]Invalid channel: {channel}. Use: telegram, console, all[/red]")
+        raise typer.Exit(1)
+    
+    # Parse time
+    if in_time:
+        try:
+            delay_seconds = parse_time_string(in_time)
+            trigger_at = datetime.now() + timedelta(seconds=delay_seconds)
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    elif at_time:
+        # Parse HH:MM format
+        try:
+            match = re.match(r'^(\d{1,2}):(\d{2})$', at_time)
+            if not match:
+                raise ValueError("Invalid time format. Use HH:MM")
+            hour, minute = int(match.group(1)), int(match.group(2))
+            trigger_at = datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if trigger_at < datetime.now():
+                trigger_at += timedelta(days=1)  # Next day
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    else:
+        console.print("[red]Specify time with --in or --at[/red]")
+        raise typer.Exit(1)
+    
+    # Create alarm
+    alarm = asyncio.run(service.create_alarm_at(
+        user_id="cli_user",  # Will be enhanced when integrated with user system
+        message=message,
+        trigger_at=trigger_at,
+        channel=channel,
+    ))
+    
+    time_str = trigger_at.strftime("%H:%M:%S")
+    console.print(f"[green]✓[/green] Alarm set: {message}")
+    console.print(f"   ID: {alarm.id}")
+    console.print(f"   Triggers at: {time_str}")
+    console.print(f"   Channel: {channel}")
+
+
+@alarm_app.command("list")
+def alarm_list(
+    all_status: bool = typer.Option(False, "--all", "-a", help="Show all alarms including triggered/cancelled"),
+):
+    """List active alarms."""
+    from nanobot.alarm import AlarmService, AlarmStorage, AlarmStatus
+    
+    storage = AlarmStorage()
+    service = AlarmService(storage)
+    
+    if all_status:
+        alarms = service.list_alarms()
+    else:
+        alarms = service.list_alarms(status=AlarmStatus.PENDING)
+    
+    if not alarms:
+        console.print("No alarms found.")
+        return
+    
+    table = Table(title="Alarms")
+    table.add_column("ID", style="cyan")
+    table.add_column("Message", style="green")
+    table.add_column("Time", style="yellow")
+    table.add_column("Status", style="magenta")
+    table.add_column("Channel", style="blue")
+    
+    for alarm in alarms:
+        time_str = alarm.trigger_at.strftime("%Y-%m-%d %H:%M")
+        status_icon = {
+            AlarmStatus.PENDING.value: "⏳",
+            AlarmStatus.TRIGGERED.value: "✅",
+            AlarmStatus.CANCELLED.value: "❌",
+        }.get(alarm.status.value, "?")
+        
+        table.add_row(
+            alarm.id,
+            alarm.message[:30] + "..." if len(alarm.message) > 30 else alarm.message,
+            time_str,
+            f"{status_icon} {alarm.status.value}",
+            alarm.channel,
+        )
+    
+    console.print(table)
+
+
+@alarm_app.command("cancel")
+def alarm_cancel(
+    alarm_id: str = typer.Argument(..., help="Alarm ID to cancel"),
+):
+    """Cancel an alarm."""
+    from nanobot.alarm import AlarmService, AlarmStorage
+    
+    storage = AlarmStorage()
+    service = AlarmService(storage)
+    
+    success = service.cancel_alarm(alarm_id)
+    
+    if success:
+        console.print(f"[green]✓[/green] Alarm {alarm_id} cancelled")
+    else:
+        console.print(f"[red]✗[/red] Alarm {alarm_id} not found or already triggered")
+        raise typer.Exit(1)
+
+
+@alarm_app.command("test")
+def alarm_test(
+    message: str = typer.Argument("Test alarm!", help="Test message"),
+    delay: int = typer.Option(3, "--delay", help="Seconds to wait"),
+):
+    """Test alarm system - sends notification after delay."""
+    from nanobot.alarm import AlarmService, AlarmStorage
+    
+    storage = AlarmStorage()
+    service = AlarmService(storage)
+    
+    console.print(f"Setting test alarm for {delay} seconds...")
+    
+    alarm = asyncio.run(service.create_alarm(
+        user_id="cli_user",
+        message=message,
+        delay_seconds=delay,
+        channel="console",
+    ))
+    
+    console.print(f"Alarm {alarm.id} created. Waiting...")
+    
+    # Simple wait and trigger for testing
+    import time
+    time.sleep(delay)
+    
+    asyncio.run(service.trigger_alarm(alarm))
+    console.print("[green]Test alarm triggered![/green]")
 
 
 if __name__ == "__main__":

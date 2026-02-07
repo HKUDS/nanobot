@@ -4,8 +4,7 @@ import asyncio
 import re
 
 from loguru import logger
-from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram import InputMediaPhoto, InputMediaDocument
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -152,33 +151,130 @@ class TelegramChannel(BaseChannel):
             self._app = None
     
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Telegram."""
+        """Send a message through Telegram with support for media attachments."""
         if not self._app:
             logger.warning("Telegram bot not running")
             return
         
         try:
-            # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
-            # Convert markdown to Telegram HTML
+            
+            # Convert markdown to Telegram HTML and truncate caption
             html_content = _markdown_to_telegram_html(msg.content)
-            await self._app.bot.send_message(
-                chat_id=chat_id,
-                text=html_content,
-                parse_mode="HTML"
-            )
+            if len(html_content) > 1024:
+                html_content = html_content[:1021] + "..."
+                logger.warning(f"Caption truncated to 1024 chars for chat {chat_id}")
+            
+            # Handle media attachments
+            if msg.media:
+                await self._send_with_media(chat_id, html_content, msg.media)
+            else:
+                # Send text-only message
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=html_content,
+                    parse_mode="HTML"
+                )
+                
         except ValueError:
             logger.error(f"Invalid chat_id: {msg.chat_id}")
         except Exception as e:
             # Fallback to plain text if HTML parsing fails
             logger.warning(f"HTML parse failed, falling back to plain text: {e}")
             try:
-                await self._app.bot.send_message(
-                    chat_id=int(msg.chat_id),
-                    text=msg.content
-                )
+                if msg.media:
+                    await self._send_with_media(chat_id, msg.content[:1024], msg.media)
+                else:
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=msg.content[:4096]  # Telegram text limit
+                    )
             except Exception as e2:
                 logger.error(f"Error sending Telegram message: {e2}")
+    
+    async def _send_with_media(self, chat_id: int, caption: str, media_paths: list[str]) -> None:
+        """Send message with media attachments."""
+        if not media_paths:
+            return
+        
+        # Categorize media files
+        image_paths = []
+        document_paths = []
+        
+        for path in media_paths:
+            if self._is_image_file(path):
+                image_paths.append(path)
+            else:
+                document_paths.append(path)
+        
+        # Send images
+        if image_paths:
+            if len(image_paths) == 1:
+                # Single photo
+                await self._send_photo(chat_id, image_paths[0], caption)
+            else:
+                # Media group for multiple images
+                await self._send_media_group(chat_id, image_paths, caption)
+        
+        # Send documents (if no images were sent, or as additional messages)
+        if document_paths:
+            for doc_path in document_paths:
+                await self._send_document(chat_id, doc_path, caption if not image_paths else "")
+    
+    def _is_image_file(self, file_path: str) -> bool:
+        """Check if file is an image based on extension."""
+        import os
+        ext = os.path.splitext(file_path)[1].lower()
+        return ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
+    
+    async def _send_photo(self, chat_id: int, photo_path: str, caption: str) -> None:
+        """Send a single photo with caption."""
+        try:
+            with open(photo_path, 'rb') as photo_file:
+                await self._app.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo_file,
+                    caption=caption,
+                    parse_mode="HTML"
+                )
+            logger.debug(f"Sent photo to {chat_id}: {photo_path}")
+        except Exception as e:
+            logger.error(f"Failed to send photo {photo_path}: {e}")
+    
+    async def _send_media_group(self, chat_id: int, image_paths: list[str], caption: str) -> None:
+        """Send multiple images as a media group."""
+        try:
+            media_group = []
+            
+            for i, img_path in enumerate(image_paths):
+                with open(img_path, 'rb') as img_file:
+                    if i == 0 and caption:
+                        # Add caption to first image
+                        media_group.append(InputMediaPhoto(img_file, caption=caption, parse_mode="HTML"))
+                    else:
+                        media_group.append(InputMediaPhoto(img_file))
+            
+            await self._app.bot.send_media_group(
+                chat_id=chat_id,
+                media=media_group
+            )
+            logger.debug(f"Sent media group to {chat_id}: {len(image_paths)} images")
+        except Exception as e:
+            logger.error(f"Failed to send media group: {e}")
+    
+    async def _send_document(self, chat_id: int, document_path: str, caption: str) -> None:
+        """Send a document with optional caption."""
+        try:
+            with open(document_path, 'rb') as doc_file:
+                await self._app.bot.send_document(
+                    chat_id=chat_id,
+                    document=doc_file,
+                    caption=caption,
+                    parse_mode="HTML" if caption else None
+                )
+            logger.debug(f"Sent document to {chat_id}: {document_path}")
+        except Exception as e:
+            logger.error(f"Failed to send document {document_path}: {e}")
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -195,88 +291,124 @@ class TelegramChannel(BaseChannel):
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:
             return
-        
+
         message = update.message
         user = update.effective_user
         chat_id = message.chat_id
-        
-        # Use stable numeric ID, but keep username for allowlist compatibility
+
+        # Build sender ID
+        sender_id = self._build_sender_id(user)
+
+        # Store chat_id for replies
+        self._chat_ids[sender_id] = chat_id
+
+        # Extract content and media
+        content, media_paths = await self._process_message_content(message)
+
+        # Forward to message bus
+        await self._forward_message(sender_id, str(chat_id), content, media_paths, message, user)
+
+    def _build_sender_id(self, user) -> str:
+        """Build sender ID with username for compatibility."""
         sender_id = str(user.id)
         if user.username:
             sender_id = f"{sender_id}|{user.username}"
-        
-        # Store chat_id for replies
-        self._chat_ids[sender_id] = chat_id
-        
-        # Build content from text and/or media
+        return sender_id
+
+    async def _process_message_content(self, message) -> tuple[str, list[str]]:
+        """Extract text content and process media from message."""
         content_parts = []
         media_paths = []
-        
-        # Text content
+
+        # Extract text content
+        self._extract_text_content(message, content_parts)
+
+        # Process media if present
+        await self._handle_media_processing(message, content_parts, media_paths)
+
+        content = "\n".join(content_parts) if content_parts else "[empty message]"
+        return content, media_paths
+
+    def _extract_text_content(self, message, content_parts: list[str]) -> None:
+        """Extract text and caption content from message."""
         if message.text:
             content_parts.append(message.text)
         if message.caption:
             content_parts.append(message.caption)
-        
-        # Handle media files
-        media_file = None
-        media_type = None
-        
-        if message.photo:
-            media_file = message.photo[-1]  # Largest photo
-            media_type = "image"
-        elif message.voice:
-            media_file = message.voice
-            media_type = "voice"
-        elif message.audio:
-            media_file = message.audio
-            media_type = "audio"
-        elif message.document:
-            media_file = message.document
-            media_type = "file"
-        
-        # Download media if present
+
+    async def _handle_media_processing(self, message, content_parts: list[str], media_paths: list[str]) -> None:
+        """Detect, download and process media files."""
+        media_file, media_type = self._detect_media_type(message)
+
         if media_file and self._app:
-            try:
-                file = await self._app.bot.get_file(media_file.file_id)
-                ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
-                
-                # Save to workspace/media/
-                from pathlib import Path
-                media_dir = Path.home() / ".nanobot" / "media"
-                media_dir.mkdir(parents=True, exist_ok=True)
-                
-                file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
-                await file.download_to_drive(str(file_path))
-                
-                media_paths.append(str(file_path))
-                
-                # Handle voice transcription
-                if media_type == "voice" or media_type == "audio":
-                    from nanobot.providers.transcription import GroqTranscriptionProvider
-                    transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
-                    transcription = await transcriber.transcribe(file_path)
-                    if transcription:
-                        logger.info(f"Transcribed {media_type}: {transcription[:50]}...")
-                        content_parts.append(f"[transcription: {transcription}]")
-                    else:
-                        content_parts.append(f"[{media_type}: {file_path}]")
-                else:
-                    content_parts.append(f"[{media_type}: {file_path}]")
-                    
-                logger.debug(f"Downloaded {media_type} to {file_path}")
-            except Exception as e:
-                logger.error(f"Failed to download media: {e}")
-                content_parts.append(f"[{media_type}: download failed]")
-        
-        content = "\n".join(content_parts) if content_parts else "[empty message]"
-        
+            await self._download_and_process_media(media_file, media_type, content_parts, media_paths)
+
+    def _detect_media_type(self, message) -> tuple[Any, str | None]:
+        """Detect the type of media in the message."""
+        if message.photo:
+            return message.photo[-1], "image"  # Largest photo
+        elif message.voice:
+            return message.voice, "voice"
+        elif message.audio:
+            return message.audio, "audio"
+        elif message.document:
+            return message.document, "file"
+        return None, None
+
+    async def _download_and_process_media(self, media_file, media_type: str, content_parts: list[str], media_paths: list[str]) -> None:
+        """Download media file and process it (transcription for audio/voice)."""
+        try:
+            file = await self._app.bot.get_file(media_file.file_id)
+            ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
+
+            # Create media directory
+            from pathlib import Path
+            media_dir = Path.home() / ".nanobot" / "media"
+            media_dir.mkdir(parents=True, exist_ok=True)
+
+            file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
+            await file.download_to_drive(str(file_path))
+
+            media_paths.append(str(file_path))
+
+            # Process audio transcription or add media reference
+            await self._process_media_content(media_type, str(file_path), content_parts)
+
+            logger.debug(f"Downloaded {media_type} to {file_path}")
+
+        except Exception as e:
+            logger.error(f"Failed to download media: {e}")
+            content_parts.append(f"[{media_type}: download failed]")
+
+    async def _process_media_content(self, media_type: str, file_path: str, content_parts: list[str]) -> None:
+        """Process media content, including transcription for audio."""
+        if media_type in ("voice", "audio"):
+            transcription = await self._transcribe_audio(file_path)
+            if transcription:
+                logger.info(f"Transcribed {media_type}: {transcription[:50]}...")
+                content_parts.append(f"[transcription: {transcription}]")
+            else:
+                content_parts.append(f"[{media_type}: {file_path}]")
+        else:
+            content_parts.append(f"[{media_type}: {file_path}]")
+
+    async def _transcribe_audio(self, file_path: str) -> str | None:
+        """Transcribe audio file using Groq provider."""
+        try:
+            from nanobot.providers.transcription import GroqTranscriptionProvider
+            transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
+            return await transcriber.transcribe(file_path)
+        except Exception as e:
+            logger.error(f"Transcription failed: {e}")
+            return None
+
+    async def _forward_message(self, sender_id: str, chat_id: str, content: str, media_paths: list[str], message, user) -> None:
+        """Forward processed message to the message bus."""
         logger.debug(f"Telegram message from {sender_id}: {content[:50]}...")
-        
-        # Forward to the message bus
+
         await self._handle_message(
             sender_id=sender_id,
-            chat_id=str(chat_id),
+            chat_id=chat_id,
             content=content,
             media=media_paths,
             metadata={
@@ -287,7 +419,7 @@ class TelegramChannel(BaseChannel):
                 "is_group": message.chat.type != "private"
             }
         )
-    
+
     def _get_extension(self, media_type: str, mime_type: str | None) -> str:
         """Get file extension based on media type."""
         if mime_type:
