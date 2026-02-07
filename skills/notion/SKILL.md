@@ -1,19 +1,14 @@
 # Notion Skill
 
-This skill will provide commands to interact with the Notion API.
-
-## Requirements
-- Python 3.11
-- `notion-client` library
-- A Notion integration token and database ID.
+## Description
+Interact with the Notion API. Currently supports listing databases in your workspace.
 
 ## Commands
-1. `notion list [database_id]` – List items in a database.
-2. `notion add [database_id] "title"` – Add a new page.
-3. `notion update [page_id] "property"="value"` – Update a property.
-4. `notion delete [page_id]` – Delete a page.
+- **list-db**: List all databases and their titles.
 
 ## Usage
 ```bash
-nanobot agent -m "notion list my_database_id"
+nanobot agent -m "notion list-db"
 ```
+
+The skill reads `config.json` for the `api_key`. You can also set the environment variable `NOTION_API_KEY`.
