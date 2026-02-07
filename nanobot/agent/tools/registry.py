@@ -1,16 +1,16 @@
 """Tool registry for dynamic tool management."""
 
-from typing import Any
+import time
+from typing import Any, TYPE_CHECKING
 
 from nanobot.agent.tools.base import Tool
 
+if TYPE_CHECKING:
+    from nanobot.agent.tools.tool_logger import ToolLogger
+
 
 class ToolRegistry:
-    """
-    Registry for agent tools.
-    
-    Allows dynamic registration and execution of tools.
-    """
+    """Registry for agent tools with optional execution logging."""
     
     def __init__(self):
         self._tools: dict[str, Tool] = {}
@@ -35,31 +35,39 @@ class ToolRegistry:
         """Get all tool definitions in OpenAI format."""
         return [tool.to_schema() for tool in self._tools.values()]
     
-    async def execute(self, name: str, params: dict[str, Any]) -> str:
-        """
-        Execute a tool by name with given parameters.
-        
-        Args:
-            name: Tool name.
-            params: Tool parameters.
-        
-        Returns:
-            Tool execution result as string.
-        
-        Raises:
-            KeyError: If tool not found.
-        """
+    async def execute(
+        self,
+        name: str,
+        params: dict[str, Any],
+        session_key: str | None = None,
+        logger: "ToolLogger | None" = None
+    ) -> str:
+        """Execute a tool by name with given parameters."""
         tool = self._tools.get(name)
         if not tool:
             return f"Error: Tool '{name}' not found"
 
+        start = time.perf_counter()
         try:
             errors = tool.validate_params(params)
             if errors:
-                return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
-            return await tool.execute(**params)
+                return f"Error: Invalid parameters: {'; '.join(errors)}"
+            result = await tool.execute(**params)
         except Exception as e:
-            return f"Error executing {name}: {str(e)}"
+            result = f"Error executing {name}: {e}"
+        
+        duration_ms = (time.perf_counter() - start) * 1000
+        
+        if logger and session_key:
+            await logger.log_tool_call(
+                session_key=session_key,
+                tool_name=name,
+                params=params,
+                result=result,
+                duration_ms=duration_ms,
+            )
+        
+        return result
     
     @property
     def tool_names(self) -> list[str]:
