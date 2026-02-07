@@ -21,10 +21,12 @@ class LiteLLMProvider(LLMProvider):
         self, 
         api_key: str | None = None, 
         api_base: str | None = None,
-        default_model: str = "anthropic/claude-opus-4-5"
+        default_model: str = "anthropic/claude-opus-4-5",
+        extra_headers: dict[str, str] | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
+        self.extra_headers = extra_headers or {}
         
         # Detect OpenRouter by api_key prefix or explicit api_base
         self.is_openrouter = (
@@ -32,14 +34,20 @@ class LiteLLMProvider(LLMProvider):
             (api_base and "openrouter" in api_base)
         )
         
+        # Detect AiHubMix by api_base
+        self.is_aihubmix = bool(api_base and "aihubmix" in api_base)
+        
         # Track if using custom endpoint (vLLM, etc.)
-        self.is_vllm = bool(api_base) and not self.is_openrouter
+        self.is_vllm = bool(api_base) and not self.is_openrouter and not self.is_aihubmix
         
         # Configure LiteLLM based on provider
         if api_key:
             if self.is_openrouter:
                 # OpenRouter mode - set key
                 os.environ["OPENROUTER_API_KEY"] = api_key
+            elif self.is_aihubmix:
+                # AiHubMix gateway - OpenAI-compatible
+                os.environ["OPENAI_API_KEY"] = api_key
             elif self.is_vllm:
                 # vLLM/custom endpoint - uses OpenAI-compatible API
                 os.environ["OPENAI_API_KEY"] = api_key
@@ -90,30 +98,26 @@ class LiteLLMProvider(LLMProvider):
         """
         model = model or self.default_model
         
-        # For OpenRouter, prefix model name if not already prefixed
+        # Auto-prefix model names for known providers
+        # (keywords, target_prefix, skip_if_starts_with)
+        _prefix_rules = [
+            (("glm", "zhipu"), "zai", ("zhipu/", "zai/", "openrouter/", "hosted_vllm/")),
+            (("qwen", "dashscope"), "dashscope", ("dashscope/", "openrouter/")),
+            (("moonshot", "kimi"), "moonshot", ("moonshot/", "openrouter/")),
+            (("gemini",), "gemini", ("gemini/",)),
+        ]
+        model_lower = model.lower()
+        for keywords, prefix, skip in _prefix_rules:
+            if any(kw in model_lower for kw in keywords) and not any(model.startswith(s) for s in skip):
+                model = f"{prefix}/{model}"
+                break
+
+        # Gateway/endpoint-specific prefixes (detected by api_base/api_key, not model name)
         if self.is_openrouter and not model.startswith("openrouter/"):
             model = f"openrouter/{model}"
-        
-        # For Zhipu/Z.ai, ensure prefix is present
-        # Handle cases like "glm-4.7-flash" -> "zai/glm-4.7-flash"
-        if ("glm" in model.lower() or "zhipu" in model.lower()) and not (
-            model.startswith("zhipu/") or 
-            model.startswith("zai/") or 
-            model.startswith("openrouter/") or
-            model.startswith("hosted_vllm/")
-        ):
-            model = f"zhipu/{model}"
-
-        # For DashScope/Qwen, ensure prefix is present
-        if ("qwen" in model.lower() or "dashscope" in model.lower()) and not (
-            model.startswith("dashscope/") or
-            model.startswith("openrouter/")
-        ):
-            model = f"dashscope/{model}"
-        
-        # For vLLM, use hosted_vllm/ prefix per LiteLLM docs
-        # Convert openai/ prefix to hosted_vllm/ if user specified it
-        if self.is_vllm:
+        elif self.is_aihubmix:
+            model = f"openai/{model.split('/')[-1]}"
+        elif self.is_vllm:
             model = f"hosted_vllm/{model}"
         
         # kimi-k2.5 only supports temperature=1.0
@@ -130,6 +134,10 @@ class LiteLLMProvider(LLMProvider):
         # Pass api_base directly for custom endpoints (vLLM, etc.)
         if self.api_base:
             kwargs["api_base"] = self.api_base
+        
+        # Pass extra headers (e.g. APP-Code for AiHubMix)
+        if self.extra_headers:
+            kwargs["extra_headers"] = self.extra_headers
         
         if tools:
             kwargs["tools"] = tools

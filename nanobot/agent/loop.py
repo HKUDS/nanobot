@@ -165,7 +165,8 @@ class AgentLoop:
         if msg.channel == "system":
             return await self._process_system_message(msg)
         
-        logger.info(f"Processing message from {msg.channel}:{msg.sender_id}")
+        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
+        logger.info(f"Processing message from {msg.channel}:{msg.sender_id}: {preview}")
         
         # Get or create session
         session = self.sessions.get_or_create(msg.session_key)
@@ -226,8 +227,8 @@ class AgentLoop:
                 
                 # Execute tools
                 for tool_call in response.tool_calls:
-                    args_str = json.dumps(tool_call.arguments)
-                    logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
+                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                    logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
@@ -239,6 +240,10 @@ class AgentLoop:
         
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
+        
+        # Log response preview
+        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+        logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
         
         # Save to session
         session.add_message("user", msg.content)
@@ -325,8 +330,8 @@ class AgentLoop:
                 )
                 
                 for tool_call in response.tool_calls:
-                    args_str = json.dumps(tool_call.arguments)
-                    logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
+                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                    logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
