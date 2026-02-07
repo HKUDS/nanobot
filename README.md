@@ -86,7 +86,7 @@ pip install nanobot-ai
 ## 🚀 Quick Start
 
 > [!TIP]
-> Set your API key in `~/.nanobot/config.json`.
+> Set your API key in `~/.nanobot/config.toml` (recommended) or `~/.nanobot/config.json`.
 > Get API keys: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
 > You can also change the model to `minimax/minimax-m2` for lower cost.
 
@@ -96,61 +96,49 @@ pip install nanobot-ai
 nanobot onboard
 ```
 
-**2. Configure** (`~/.nanobot/config.json`)
+**2. Configure** (`~/.nanobot/config.toml`)
 
-```json
-{
-  "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": "anthropic/claude-opus-4-5"
-    }
-  },
-  "tools": {
-    "web": {
-      "search": {
-        "apiKey": "BSA-xxx"
-      }
-    }
-  }
-}
+```toml
+# LLM Providers
+[providers.openrouter]
+apiKey = "sk-or-v1-xxx"
+
+# Agent Defaults  
+[agents.defaults]
+model = "anthropic/claude-opus-4-5"
+
+# Web Search Tools
+[tools.web.search]
+apiKey = "BSA-xxx"
 ```
-
 
 To support OpenAI compatible custom providers:
 
-```json
-{
-  "providers": {
-    "openrouter": {
-      "apiKey": ""
-    }
-  },
-  "llm_providers": {
-    "my_provider": {
-      "type": "openai-compatible",
-      "apiKey":"your key",
-      "apiBase": "https://api.deepseek.com/v1"
-    }
-  }
-  "agents": {
-    "defaults": {
-      "model": "my_provider:deepseek/deepseek-chat"
-    }
-  },
-  "tools": {
-    "web": {
-      "search": {
-        "apiKey": "BSA-xxx"
-      }
-    }
-  }
-}
+```toml
+# Main providers (can be empty if using custom providers)
+[providers.openrouter]
+apiKey = ""
+
+# Custom OpenAI-compatible providers
+[llm_providers.my_provider]
+type = "openai-compatible"
+apiKey = "your key"
+apiBase = "https://api.deepseek.com/v1"
+
+# Agent configuration
+[agents.defaults]
+model = "my_provider:deepseek/deepseek-chat"
+
+# Web search
+[tools.web.search]
+apiKey = "BSA-xxx"
 ```
+
+> [!NOTE]
+> **TOML vs JSON**: nanobot now supports both `.toml` and `.json` configuration files.
+> - **TOML is recommended** because it supports comments and is more human-readable
+> - The system looks for `config.toml` first, then falls back to `config.json`
+> - Both formats are fully supported and interchangeable
 
 **3. Chat**
 
@@ -327,7 +315,19 @@ nanobot gateway
 
 ## ⚙️ Configuration
 
-Config file: `~/.nanobot/config.json`
+Config files: `~/.nanobot/config.toml` (preferred) or `~/.nanobot/config.json`
+
+> [!TIP]
+> **TOML is now the preferred configuration format!** It supports comments, making it easier to document your settings and understand what each option does.
+
+### TOML vs JSON
+
+| Feature | TOML | JSON |
+|---------|------|------|
+| **Comments** | ✅ Supported | ❌ Not supported |
+| **Readability** | ✅ Clean, human-friendly | ⚠️ Verbose, harder to read |
+| **Error-prone** | ❌ Less error-prone | ✅ More error-prone (commas, quotes) |
+| **Backward compatibility** | ✅ Falls back to JSON | ✅ Native support |
 
 ### Providers
 
@@ -342,10 +342,59 @@ Config file: `~/.nanobot/config.json`
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
+| `moonshot` | LLM (Kimi/Moonshot AI) | [platform.moonshot.ai](https://platform.moonshot.ai) |
 
 
 <details>
-<summary><b>Full config example</b></summary>
+<summary><b>Full TOML config example</b></summary>
+
+```toml
+# Agent configuration
+[agents.defaults]
+model = "anthropic/claude-opus-4-5"
+workspace = "~/.nanobot/workspace"
+max_tokens = 8192
+temperature = 0.7
+max_tool_iterations = 20
+
+# LLM providers - set your API keys here
+[providers.openrouter]
+api_key = "sk-or-v1-xxx"
+
+[providers.groq]
+api_key = "gsk_xxx"
+
+# Chat channels configuration
+[channels.telegram]
+enabled = true
+token = "123456:ABC..."
+allow_from = ["123456789"]  # Your Telegram user ID
+
+[channels.whatsapp]
+enabled = false
+
+[channels.feishu]
+enabled = false
+app_id = "cli_xxx"
+app_secret = "xxx"
+encrypt_key = ""
+verification_token = ""
+allow_from = []
+
+# Tools configuration
+[tools.web.search]
+api_key = "BSA..."  # Brave Search API key
+max_results = 5
+
+[tools.exec]
+timeout = 60
+restrict_to_workspace = false
+```
+
+</details>
+
+<details>
+<summary><b>Full JSON config example (legacy)</b></summary>
 
 ```json
 {

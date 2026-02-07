@@ -1,6 +1,7 @@
 """Configuration loading utilities."""
 
 import json
+import tomli
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,11 @@ from nanobot.config.schema import Config
 def get_config_path() -> Path:
     """Get the default configuration file path."""
     return Path.home() / ".nanobot" / "config.json"
+
+
+def get_config_toml_path() -> Path:
+    """Get the TOML configuration file path."""
+    return Path.home() / ".nanobot" / "config.toml"
 
 
 def get_data_dir() -> Path:
@@ -28,15 +34,25 @@ def load_config(config_path: Path | None = None) -> Config:
     Returns:
         Loaded configuration object.
     """
-    path = config_path or get_config_path()
-    
-    if path.exists():
+    # Check for TOML config first (preferred)
+    toml_path = get_config_toml_path()
+    if toml_path.exists():
         try:
-            with open(path) as f:
+            with open(toml_path, "rb") as f:
+                data = tomli.load(f)
+            return Config.model_validate(convert_keys(data))
+        except (tomli.TOMLDecodeError, ValueError) as e:
+            print(f"Warning: Failed to load TOML config from {toml_path}: {e}")
+    
+    # Fall back to JSON config
+    json_path = config_path or get_config_path()
+    if json_path.exists():
+        try:
+            with open(json_path) as f:
                 data = json.load(f)
             return Config.model_validate(convert_keys(data))
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"Warning: Failed to load config from {path}: {e}")
+            print(f"Warning: Failed to load JSON config from {json_path}: {e}")
             print("Using default configuration.")
     
     return Config()
@@ -50,6 +66,7 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         config: Configuration to save.
         config_path: Optional path to save to. Uses default if not provided.
     """
+    # By default, save as JSON for backward compatibility
     path = config_path or get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     
