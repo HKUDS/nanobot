@@ -66,6 +66,16 @@ class ProviderConfig(BaseModel):
     """LLM provider configuration."""
     api_key: str = ""
     api_base: str | None = None
+    extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+
+
+class LazyLLMConfig(BaseModel):
+    """LazyLLM provider configuration."""
+    api_key: str = ""
+    api_base: str | None = None
+    model_source: str = "siliconflow"
+    model_id: str = "Pro/moonshotai/Kimi-K2.5"
+    model_type: Literal["LLM", "VLM"] = "LLM"
 
 
 class LazyLLMConfig(BaseModel):
@@ -86,9 +96,11 @@ class ProvidersConfig(BaseModel):
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
+    dashscope: ProviderConfig = Field(default_factory=ProviderConfig)  # 阿里云通义千问
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
+    aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
     lazyllm: LazyLLMConfig = Field(default_factory=LazyLLMConfig)
 
 
@@ -134,58 +146,41 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
     
-    def _match_provider(self, model: str | None = None) -> ProviderConfig | None:
-        """Match a provider based on model name."""
-        model = (model or self.agents.defaults.model).lower()
-        # Map of keywords to provider configs
-        providers = {
-            "openrouter": self.providers.openrouter,
-            "deepseek": self.providers.deepseek,
-            "anthropic": self.providers.anthropic,
-            "claude": self.providers.anthropic,
-            "openai": self.providers.openai,
-            "gpt": self.providers.openai,
-            "gemini": self.providers.gemini,
-            "zhipu": self.providers.zhipu,
-            "glm": self.providers.zhipu,
-            "zai": self.providers.zhipu,
-            "groq": self.providers.groq,
-            "moonshot": self.providers.moonshot,
-            "kimi": self.providers.moonshot,
-            "vllm": self.providers.vllm,
-        }
-        for keyword, provider in providers.items():
-            if keyword in model and provider.api_key:
-                return provider
+    def get_provider(self, model: str | None = None) -> ProviderConfig | None:
+        """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
+        from nanobot.providers.registry import PROVIDERS
+        model_lower = (model or self.agents.defaults.model).lower()
+
+        # Match by keyword (order follows PROVIDERS registry)
+        for spec in PROVIDERS:
+            p = getattr(self.providers, spec.name, None)
+            if p and any(kw in model_lower for kw in spec.keywords) and p.api_key:
+                return p
+
+        # Fallback: gateways first, then others (follows registry order)
+        for spec in PROVIDERS:
+            p = getattr(self.providers, spec.name, None)
+            if p and p.api_key:
+                return p
         return None
 
     def get_api_key(self, model: str | None = None) -> str | None:
-        """Get API key for the given model (or default model). Falls back to first available key."""
-        # Try matching by model name first
-        matched = self._match_provider(model)
-        if matched:
-            return matched.api_key
-        # Fallback: return first available key
-        for provider in [
-            self.providers.openrouter, self.providers.deepseek,
-            self.providers.anthropic, self.providers.openai,
-            self.providers.gemini, self.providers.zhipu,
-            self.providers.moonshot, self.providers.vllm,
-            self.providers.groq,
-        ]:
-            if provider.api_key:
-                return provider.api_key
-        return None
+        """Get API key for the given model. Falls back to first available key."""
+        p = self.get_provider(model)
+        return p.api_key if p else None
     
     def get_api_base(self, model: str | None = None) -> str | None:
-        """Get API base URL based on model name."""
-        model = (model or self.agents.defaults.model).lower()
-        if "openrouter" in model:
-            return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
-        if any(k in model for k in ("zhipu", "glm", "zai")):
-            return self.providers.zhipu.api_base
-        if "vllm" in model:
-            return self.providers.vllm.api_base
+        """Get API base URL for the given model. Applies default URLs for known gateways."""
+        from nanobot.providers.registry import PROVIDERS
+        p = self.get_provider(model)
+        if p and p.api_base:
+            return p.api_base
+        # Only gateways get a default URL here. Standard providers (like Moonshot)
+        # handle their base URL via env vars in _setup_env, NOT via api_base —
+        # otherwise find_gateway() would misdetect them as local/vLLM.
+        for spec in PROVIDERS:
+            if spec.is_gateway and spec.default_api_base and p == getattr(self.providers, spec.name, None):
+                return spec.default_api_base
         return None
 
     def get_provider_type(self) -> Literal["litellm", "lazyllm"]:

@@ -16,18 +16,21 @@
 
 ⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
 
-📏 Real-time line count: **3,428 lines** (run `bash core_agent_lines.sh` to verify anytime)
+📏 Real-time line count: **3,423 lines** (run `bash core_agent_lines.sh` to verify anytime)
 
 ## 📢 News
 
+- **2026-02-08** 🔧 Refactored Providers—adding a new LLM provider now takes just 2 simple steps! Check [here](#providers).
+- **2026-02-07** 🚀 Released v0.1.3.post5 with Qwen support & several key improvements! Check [here](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post5) for details.
+- **2026-02-06** ✨ Added Moonshot/Kimi provider, Discord integration, and enhanced security hardening!
 - **2026-02-05** ✨ Added Feishu channel, DeepSeek provider, and enhanced scheduled tasks support!
-- **2026-02-04** 🚀 Released v0.1.3.post4 with multi-provider & Docker support! Check [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post4) for details.
+- **2026-02-04** 🚀 Released v0.1.3.post4 with multi-provider & Docker support! Check [here](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post4) for details.
 - **2026-02-03** ⚡ Integrated vLLM for local LLM support and improved natural language task scheduling!
 - **2026-02-02** 🎉 nanobot officially launched! Welcome to try 🐈 nanobot!
 
 ## Key Features of nanobot:
 
-🪶 **Ultra-Lightweight**: Just ~3,400 lines of core agent code — 99% smaller than Clawdbot.
+🪶 **Ultra-Lightweight**: Just ~4,000 lines of core agent code — 99% smaller than Clawdbot.
 
 🔬 **Research-Ready**: Clean, readable code that's easy to understand, modify, and extend for research.
 
@@ -90,8 +93,7 @@ pip install nanobot-ai
 
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
-> You can also change the model to `minimax/minimax-m2` for lower cost.
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [DashScope](https://dashscope.console.aliyun.com) (Qwen) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
 > You can also switch provider to LazyLLM by setting `providers.provider` to `lazyllm`, then configuring `providers.lazyllm` to access more model vendors.
 > Common LazyLLM `modelSource` values include: `qwen`, `deepseek`, `siliconflow`, `doubao`, `openai`, `glm`, `kimi`, `minimax`.
 
@@ -103,6 +105,7 @@ nanobot onboard
 
 **2. Configure** (`~/.nanobot/config.json`)
 
+For OpenRouter - recommended for global users:
 ```json
 {
   "providers": {
@@ -114,20 +117,12 @@ nanobot onboard
     "defaults": {
       "model": "anthropic/claude-opus-4-5"
     }
-  },
-  "tools": {
-    "web": {
-      "search": {
-        "apiKey": "BSA-xxx"
-      }
-    }
   }
 }
 ```
 
 If you want LazyLLM instead, set `providers.provider` to `lazyllm` and fill `providers.lazyllm.modelSource` / `modelId` / `apiKey`.
 `modelSource` can be one of the common providers listed above.
-
 
 **3. Chat**
 
@@ -364,6 +359,55 @@ Config file: `~/.nanobot/config.json`
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
+| `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
+| `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
+| `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
+| `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
+| `vllm` | LLM (local, any OpenAI-compatible server) | — |
+
+<details>
+<summary><b>Adding a New Provider (Developer Guide)</b></summary>
+
+nanobot uses a **Provider Registry** (`nanobot/providers/registry.py`) as the single source of truth.
+Adding a new provider only takes **2 steps** — no if-elif chains to touch.
+
+**Step 1.** Add a `ProviderSpec` entry to `PROVIDERS` in `nanobot/providers/registry.py`:
+
+```python
+ProviderSpec(
+    name="myprovider",                   # config field name
+    keywords=("myprovider", "mymodel"),  # model-name keywords for auto-matching
+    env_key="MYPROVIDER_API_KEY",        # env var for LiteLLM
+    display_name="My Provider",          # shown in `nanobot status`
+    litellm_prefix="myprovider",         # auto-prefix: model → myprovider/model
+    skip_prefixes=("myprovider/",),      # don't double-prefix
+)
+```
+
+**Step 2.** Add a field to `ProvidersConfig` in `nanobot/config/schema.py`:
+
+```python
+class ProvidersConfig(BaseModel):
+    ...
+    myprovider: ProviderConfig = ProviderConfig()
+```
+
+That's it! Environment variables, model prefixing, config matching, and `nanobot status` display will all work automatically.
+
+**Common `ProviderSpec` options:**
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| `litellm_prefix` | Auto-prefix model names for LiteLLM | `"dashscope"` → `dashscope/qwen-max` |
+| `skip_prefixes` | Don't prefix if model already starts with these | `("dashscope/", "openrouter/")` |
+| `env_extras` | Additional env vars to set | `(("ZHIPUAI_API_KEY", "{api_key}"),)` |
+| `model_overrides` | Per-model parameter overrides | `(("kimi-k2.5", {"temperature": 1.0}),)` |
+| `is_gateway` | Can route any model (like OpenRouter) | `True` |
+| `detect_by_key_prefix` | Detect gateway by API key prefix | `"sk-or-"` |
+| `detect_by_base_keyword` | Detect gateway by API base URL | `"openrouter"` |
+| `strip_model_prefix` | Strip existing prefix before re-prefixing | `True` (for AiHubMix) |
+
+</details>
 
 
 ### Security
