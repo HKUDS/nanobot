@@ -1,7 +1,12 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import atexit
+import os
 from pathlib import Path
+import select
+import sys
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -16,6 +21,492 @@ app = typer.Typer(
 )
 
 console = Console()
+
+_READLINE: Any | None = None
+_HISTORY_FILE: Path | None = None
+_HISTORY_HOOK_REGISTERED = False
+_USING_LIBEDIT = False
+_PROMPT_SESSION: Any | None = None
+_PROMPT_SESSION_LABEL: Any = None
+_PROMPT_TEXT = "You: "
+_DEFAULT_TERMINAL_COLUMNS = 80
+
+try:
+    from wcwidth import wcwidth as _wcwidth
+except Exception:
+    def _wcwidth(_char: str) -> int:  # type: ignore[no-redef]
+        return 1
+
+
+def _save_history() -> None:
+    """Persist interactive input history on process exit."""
+    if _READLINE is None or _HISTORY_FILE is None:
+        return
+    try:
+        _READLINE.write_history_file(str(_HISTORY_FILE))
+    except Exception:
+        return
+
+
+def _remember_input_history(text: str) -> None:
+    """Append input text to readline history (dedupe adjacent entries)."""
+    if _READLINE is None:
+        return
+    try:
+        history_len = _READLINE.get_current_history_length()
+        last = _READLINE.get_history_item(history_len) if history_len > 0 else None
+        if last != text:
+            _READLINE.add_history(text)
+    except Exception:
+        return
+
+
+def _enable_line_editing() -> None:
+    """Best-effort enable prompt_toolkit/readline support for interactive input."""
+    global _READLINE, _HISTORY_FILE, _HISTORY_HOOK_REGISTERED, _USING_LIBEDIT
+    global _PROMPT_SESSION, _PROMPT_SESSION_LABEL
+
+    history_file = Path.home() / ".nanobot" / "history" / "cli_history"
+    history_file.parent.mkdir(parents=True, exist_ok=True)
+    _HISTORY_FILE = history_file
+
+    # Prefer prompt_toolkit for robust wide-character rendering and line editing.
+    try:
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.formatted_text import ANSI
+        from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.key_binding import KeyBindings
+
+        key_bindings = KeyBindings()
+
+        @key_bindings.add("enter")
+        def _accept_input(event) -> None:
+            _clear_visual_nav_state(event.current_buffer)
+            event.current_buffer.validate_and_handle()
+
+        @key_bindings.add("up")
+        def _handle_up(event) -> None:
+            count = event.arg if event.arg and event.arg > 0 else 1
+            moved = _move_buffer_cursor_visual_from_render(
+                event.current_buffer,
+                event=event,
+                delta=-1,
+                count=count,
+            )
+            if not moved:
+                moved = _move_buffer_cursor_visual(
+                    event.current_buffer,
+                    delta=-1,
+                    count=count,
+                    columns=_get_terminal_columns(event),
+                    prompt_columns=len(_PROMPT_TEXT),
+                )
+            if not moved:
+                event.current_buffer.history_backward(count=count)
+                event.current_buffer.preferred_column = None
+                _clear_visual_nav_state(event.current_buffer)
+
+        @key_bindings.add("down")
+        def _handle_down(event) -> None:
+            count = event.arg if event.arg and event.arg > 0 else 1
+            moved = _move_buffer_cursor_visual_from_render(
+                event.current_buffer,
+                event=event,
+                delta=1,
+                count=count,
+            )
+            if not moved:
+                moved = _move_buffer_cursor_visual(
+                    event.current_buffer,
+                    delta=1,
+                    count=count,
+                    columns=_get_terminal_columns(event),
+                    prompt_columns=len(_PROMPT_TEXT),
+                )
+            if not moved:
+                event.current_buffer.history_forward(count=count)
+                event.current_buffer.preferred_column = None
+                _clear_visual_nav_state(event.current_buffer)
+
+        _PROMPT_SESSION = PromptSession(
+            history=FileHistory(str(history_file)),
+            multiline=True,
+            wrap_lines=True,
+            key_bindings=key_bindings,
+            complete_while_typing=False,
+        )
+        _PROMPT_SESSION.default_buffer.on_text_changed += (
+            lambda _event: _clear_visual_nav_state(_PROMPT_SESSION.default_buffer)
+        )
+        _PROMPT_SESSION_LABEL = ANSI(f"\x1b[1;34m{_PROMPT_TEXT.strip()}\x1b[0m ")
+        _READLINE = None
+        _USING_LIBEDIT = False
+        return
+    except Exception:
+        _PROMPT_SESSION = None
+        _PROMPT_SESSION_LABEL = None
+
+    try:
+        import readline
+    except Exception:
+        # Not available on all platforms; plain input still works.
+        return
+
+    _READLINE = readline
+    _USING_LIBEDIT = "libedit" in (readline.__doc__ or "").lower()
+    try:
+        if _USING_LIBEDIT:
+            readline.parse_and_bind("bind ^I rl_complete")
+        else:
+            readline.parse_and_bind("tab: complete")
+        readline.parse_and_bind("set editing-mode emacs")
+    except Exception:
+        pass
+
+    try:
+        readline.read_history_file(str(history_file))
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+    try:
+        readline.set_history_length(1000)
+    except Exception:
+        pass
+
+    if not _HISTORY_HOOK_REGISTERED:
+        atexit.register(_save_history)
+        _HISTORY_HOOK_REGISTERED = True
+
+
+def _read_interactive_input() -> str:
+    """
+    Read a single interactive input line.
+
+    Keep a colored prompt while preserving correct cursor math in readline
+    by marking non-printing ANSI escape sequences.
+    """
+    if _PROMPT_SESSION is not None:
+        try:
+            return _PROMPT_SESSION.prompt(_PROMPT_SESSION_LABEL)
+        except EOFError as exc:
+            raise KeyboardInterrupt from exc
+
+    if _READLINE is None:
+        return input(_PROMPT_TEXT)
+
+    # libedit (macOS default) does not reliably honor GNU readline's \\001/\\002
+    # prompt markers for ANSI sequences, so use a plain ANSI prompt there.
+    if _USING_LIBEDIT:
+        return input(f"\033[1;34m{_PROMPT_TEXT.strip()}\033[0m ")
+
+    # GNU readline: mark non-printing ANSI bytes for correct cursor math.
+    return input(f"\001\033[1;34m\002{_PROMPT_TEXT.strip()}\001\033[0m\002 ")
+
+
+async def _read_interactive_input_async() -> str:
+    """Async-safe variant for interactive loop."""
+    if _PROMPT_SESSION is not None:
+        try:
+            default_buffer = getattr(_PROMPT_SESSION, "default_buffer", None)
+            if default_buffer is not None:
+                _clear_visual_nav_state(default_buffer)
+            return await _PROMPT_SESSION.prompt_async(_PROMPT_SESSION_LABEL)
+        except EOFError as exc:
+            raise KeyboardInterrupt from exc
+    return _read_interactive_input()
+
+
+def _get_terminal_columns(event: Any) -> int:
+    """Best-effort current terminal width."""
+    try:
+        columns = int(event.app.output.get_size().columns)
+        return columns if columns > 0 else _DEFAULT_TERMINAL_COLUMNS
+    except Exception:
+        return _DEFAULT_TERMINAL_COLUMNS
+
+
+def _flush_pending_tty_input() -> None:
+    """
+    Drop unread keypresses typed while the model was generating output.
+    This prevents escape sequences like '^[[A' from leaking into the next prompt.
+    """
+    try:
+        fd = sys.stdin.fileno()
+        if not os.isatty(fd):
+            return
+    except Exception:
+        return
+
+    try:
+        import termios
+
+        termios.tcflush(fd, termios.TCIFLUSH)
+        return
+    except Exception:
+        pass
+
+    try:
+        while True:
+            ready, _, _ = select.select([fd], [], [], 0)
+            if not ready:
+                break
+            if not os.read(fd, 4096):
+                break
+    except Exception:
+        return
+
+
+def _compute_visual_positions(
+    text: str,
+    columns: int,
+    prompt_columns: int,
+) -> list[tuple[int, int]]:
+    """Compute (row, col) for every cursor index, accounting for wrap/CJK width."""
+    width = max(1, columns)
+    row = 0
+    col = max(0, prompt_columns)
+    positions: list[tuple[int, int]] = [(row, col)]
+
+    for char in text:
+        if char == "\n":
+            row += 1
+            col = 0
+            positions.append((row, col))
+            continue
+
+        char_width = _wcwidth(char)
+        if char_width < 0:
+            char_width = 1
+
+        if char_width > 0 and col + char_width > width:
+            row += 1
+            col = 0
+
+        if char_width > 0:
+            col += char_width
+
+        positions.append((row, col))
+
+    return positions
+
+
+def _find_cursor_for_row_and_column(
+    positions: list[tuple[int, int]],
+    target_row: int,
+    preferred_column: int,
+) -> int | None:
+    """Find closest cursor index in a row by preferred display column."""
+    row_indices = [i for i, (row, _) in enumerate(positions) if row == target_row]
+    if not row_indices:
+        return None
+
+    return min(
+        row_indices,
+        key=lambda i: (
+            abs(positions[i][1] - preferred_column),
+            positions[i][1] < preferred_column,
+            positions[i][1],
+        ),
+    )
+
+
+def _choose_visual_rowcol(
+    rowcol_to_yx: dict[tuple[int, int], tuple[int, int]],
+    current_rowcol: tuple[int, int],
+    delta: int,
+    preferred_x: int | None = None,
+) -> tuple[tuple[int, int] | None, int | None]:
+    """Choose next row/col by rendered screen coordinates."""
+    if delta not in (-1, 1):
+        return None, preferred_x
+
+    current_yx = rowcol_to_yx.get(current_rowcol)
+    if current_yx is None:
+        same_row = [
+            (rowcol, yx)
+            for rowcol, yx in rowcol_to_yx.items()
+            if rowcol[0] == current_rowcol[0]
+        ]
+        if not same_row:
+            return None, preferred_x
+        _, current_yx = min(
+            same_row,
+            key=lambda item: abs(item[0][1] - current_rowcol[1]),
+        )
+
+    target_x = current_yx[1] if preferred_x is None else preferred_x
+    target_y = current_yx[0] + delta
+    candidates = [
+        (rowcol, yx)
+        for rowcol, yx in rowcol_to_yx.items()
+        if yx[0] == target_y
+    ]
+    if not candidates:
+        return None, preferred_x
+
+    best_rowcol, _ = min(
+        candidates,
+        key=lambda item: (
+            abs(item[1][1] - target_x),
+            item[1][1] < target_x,
+            item[1][1],
+        ),
+    )
+    return best_rowcol, target_x
+
+
+def _clear_visual_nav_state(buffer: Any) -> None:
+    """Reset cached vertical-navigation anchor state."""
+    setattr(buffer, "_nanobot_visual_pref_col", None)
+    setattr(buffer, "_nanobot_visual_pref_x", None)
+    setattr(buffer, "_nanobot_visual_last_dir", None)
+    setattr(buffer, "_nanobot_visual_last_cursor", None)
+    setattr(buffer, "_nanobot_visual_last_text", None)
+
+
+def _can_reuse_visual_anchor(buffer: Any, delta: int) -> bool:
+    """Reuse anchor only for uninterrupted vertical navigation."""
+    return (
+        getattr(buffer, "_nanobot_visual_last_dir", None) == delta
+        and getattr(buffer, "_nanobot_visual_last_cursor", None) == buffer.cursor_position
+        and getattr(buffer, "_nanobot_visual_last_text", None) == buffer.text
+    )
+
+
+def _remember_visual_anchor(buffer: Any, delta: int) -> None:
+    """Remember current position as anchor baseline for next up/down key."""
+    setattr(buffer, "_nanobot_visual_last_dir", delta)
+    setattr(buffer, "_nanobot_visual_last_cursor", buffer.cursor_position)
+    setattr(buffer, "_nanobot_visual_last_text", buffer.text)
+
+
+def _move_buffer_cursor_visual_from_render(
+    buffer: Any,
+    event: Any,
+    delta: int,
+    count: int,
+) -> bool:
+    """Move cursor by rendered screen rows using prompt_toolkit render map."""
+    try:
+        window = event.app.layout.current_window
+        render_info = getattr(window, "render_info", None)
+        rowcol_to_yx = getattr(render_info, "_rowcol_to_yx", None)
+        if not isinstance(rowcol_to_yx, dict) or not rowcol_to_yx:
+            return False
+    except Exception:
+        return False
+
+    moved_any = False
+    preferred_x = (
+        getattr(buffer, "_nanobot_visual_pref_x", None)
+        if _can_reuse_visual_anchor(buffer, delta)
+        else None
+    )
+    steps = max(1, count)
+
+    for _ in range(steps):
+        doc = buffer.document
+        current_rowcol = (doc.cursor_position_row, doc.cursor_position_col)
+        next_rowcol, preferred_x = _choose_visual_rowcol(
+            rowcol_to_yx=rowcol_to_yx,
+            current_rowcol=current_rowcol,
+            delta=delta,
+            preferred_x=preferred_x,
+        )
+        if next_rowcol is None:
+            break
+
+        try:
+            new_position = doc.translate_row_col_to_index(*next_rowcol)
+        except Exception:
+            break
+        if new_position == buffer.cursor_position:
+            break
+
+        buffer.cursor_position = new_position
+        moved_any = True
+
+    if moved_any:
+        setattr(buffer, "_nanobot_visual_pref_x", preferred_x)
+        _remember_visual_anchor(buffer, delta)
+    else:
+        _clear_visual_nav_state(buffer)
+
+    return moved_any
+
+
+def _move_cursor_visual(
+    text: str,
+    cursor_position: int,
+    delta: int,
+    columns: int,
+    prompt_columns: int,
+    preferred_column: int | None = None,
+) -> tuple[int, bool, int | None]:
+    """Move cursor by one visual line (soft-wrap aware)."""
+    if delta not in (-1, 1):
+        return cursor_position, False, preferred_column
+
+    positions = _compute_visual_positions(text, columns, prompt_columns)
+    if cursor_position < 0:
+        cursor_position = 0
+    if cursor_position >= len(positions):
+        cursor_position = len(positions) - 1
+
+    current_row, current_col = positions[cursor_position]
+    target_row = current_row + delta
+    max_row = positions[-1][0]
+    if target_row < 0 or target_row > max_row:
+        return cursor_position, False, preferred_column
+
+    target_col = current_col if preferred_column is None else preferred_column
+    new_position = _find_cursor_for_row_and_column(positions, target_row, target_col)
+    if new_position is None:
+        return cursor_position, False, preferred_column
+    if new_position == cursor_position:
+        return cursor_position, False, preferred_column
+    return new_position, True, target_col
+
+
+def _move_buffer_cursor_visual(
+    buffer: Any,
+    delta: int,
+    count: int,
+    columns: int,
+    prompt_columns: int,
+) -> bool:
+    """Move prompt_toolkit buffer by visual rows. Returns whether cursor moved."""
+    moved_any = False
+    preferred = (
+        getattr(buffer, "_nanobot_visual_pref_col", None)
+        if _can_reuse_visual_anchor(buffer, delta)
+        else None
+    )
+    steps = max(1, count)
+
+    for _ in range(steps):
+        new_pos, moved, preferred = _move_cursor_visual(
+            text=buffer.text,
+            cursor_position=buffer.cursor_position,
+            delta=delta,
+            columns=columns,
+            prompt_columns=prompt_columns,
+            preferred_column=preferred,
+        )
+        if not moved:
+            break
+        buffer.cursor_position = new_pos
+        moved_any = True
+
+    if moved_any:
+        setattr(buffer, "_nanobot_visual_pref_col", preferred)
+        _remember_visual_anchor(buffer, delta)
+    else:
+        _clear_visual_nav_state(buffer)
+
+    return moved_any
 
 
 def version_callback(value: bool):
@@ -313,14 +804,17 @@ def agent(
         asyncio.run(run_once())
     else:
         # Interactive mode
+        _enable_line_editing()
         console.print(f"{__logo__} Interactive mode (Ctrl+C to exit)\n")
         
         async def run_interactive():
             while True:
                 try:
-                    user_input = console.input("[bold blue]You:[/bold blue] ")
+                    _flush_pending_tty_input()
+                    user_input = await _read_interactive_input_async()
                     if not user_input.strip():
                         continue
+                    _remember_input_history(user_input)
                     
                     response = await agent_loop.process_direct(user_input, session_id)
                     console.print(f"\n{__logo__} {response}\n")
