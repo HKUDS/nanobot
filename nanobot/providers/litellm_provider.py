@@ -51,24 +51,59 @@ class LiteLLMProvider(LLMProvider):
             elif self.is_vllm:
                 # vLLM/custom endpoint - uses OpenAI-compatible API
                 os.environ["HOSTED_VLLM_API_KEY"] = api_key
-            elif "deepseek" in default_model:
-                os.environ.setdefault("DEEPSEEK_API_KEY", api_key)
-            elif "anthropic" in default_model:
-                os.environ.setdefault("ANTHROPIC_API_KEY", api_key)
-            elif "openai" in default_model or "gpt" in default_model:
-                os.environ.setdefault("OPENAI_API_KEY", api_key)
-            elif "gemini" in default_model.lower():
-                os.environ.setdefault("GEMINI_API_KEY", api_key)
-            elif "zhipu" in default_model or "glm" in default_model or "zai" in default_model:
-                os.environ.setdefault("ZAI_API_KEY", api_key)
-                os.environ.setdefault("ZHIPUAI_API_KEY", api_key)
-            elif "dashscope" in default_model or "qwen" in default_model.lower():
-                os.environ.setdefault("DASHSCOPE_API_KEY", api_key)
-            elif "groq" in default_model:
-                os.environ.setdefault("GROQ_API_KEY", api_key)
-            elif "moonshot" in default_model or "kimi" in default_model:
-                os.environ.setdefault("MOONSHOT_API_KEY", api_key)
-                os.environ.setdefault("MOONSHOT_API_BASE", api_base or "https://api.moonshot.cn/v1")
+            else:
+                model_lower = (default_model or "").lower()
+                model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
+
+                # Prefer explicit provider prefix (e.g. "dashscope/xxx") over substring matching.
+                if model_prefix == "dashscope":
+                    os.environ["DASHSCOPE_API_KEY"] = api_key
+                    try:
+                        import dashscope as _dashscope  # type: ignore
+                        _dashscope.api_key = api_key
+                    except Exception:
+                        pass
+                elif model_prefix == "deepseek":
+                    os.environ["DEEPSEEK_API_KEY"] = api_key
+                elif model_prefix == "anthropic":
+                    os.environ["ANTHROPIC_API_KEY"] = api_key
+                elif model_prefix == "openai":
+                    os.environ["OPENAI_API_KEY"] = api_key
+                elif model_prefix == "gemini":
+                    os.environ["GEMINI_API_KEY"] = api_key
+                elif model_prefix in {"zai", "zhipu"}:
+                    os.environ["ZAI_API_KEY"] = api_key
+                    os.environ["ZHIPUAI_API_KEY"] = api_key
+                elif model_prefix == "groq":
+                    os.environ["GROQ_API_KEY"] = api_key
+                elif model_prefix == "moonshot":
+                    os.environ["MOONSHOT_API_KEY"] = api_key
+                    os.environ.setdefault("MOONSHOT_API_BASE", api_base or "https://api.moonshot.cn/v1")
+                else:
+                    # Back-compat heuristics for unprefixed model names (e.g. "qwen-plus").
+                    if "deepseek" in model_lower:
+                        os.environ["DEEPSEEK_API_KEY"] = api_key
+                    elif "anthropic" in model_lower or "claude" in model_lower:
+                        os.environ["ANTHROPIC_API_KEY"] = api_key
+                    elif "openai" in model_lower or "gpt" in model_lower:
+                        os.environ["OPENAI_API_KEY"] = api_key
+                    elif "gemini" in model_lower:
+                        os.environ["GEMINI_API_KEY"] = api_key
+                    elif "zhipu" in model_lower or "glm" in model_lower or "zai" in model_lower:
+                        os.environ["ZAI_API_KEY"] = api_key
+                        os.environ["ZHIPUAI_API_KEY"] = api_key
+                    elif "dashscope" in model_lower or "qwen" in model_lower:
+                        os.environ["DASHSCOPE_API_KEY"] = api_key
+                        try:
+                            import dashscope as _dashscope  # type: ignore
+                            _dashscope.api_key = api_key
+                        except Exception:
+                            pass
+                    elif "groq" in model_lower:
+                        os.environ["GROQ_API_KEY"] = api_key
+                    elif "moonshot" in model_lower or "kimi" in model_lower:
+                        os.environ["MOONSHOT_API_KEY"] = api_key
+                        os.environ.setdefault("MOONSHOT_API_BASE", api_base or "https://api.moonshot.cn/v1")
         
         if api_base:
             litellm.api_base = api_base
@@ -131,6 +166,10 @@ class LiteLLMProvider(LLMProvider):
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
+
+        # Prefer passing api_key explicitly; avoids provider SDKs that only read env at import time.
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
         
         # Pass api_base directly for custom endpoints (vLLM, etc.)
         if self.api_base:
