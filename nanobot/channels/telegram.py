@@ -101,11 +101,10 @@ class TelegramChannel(BaseChannel):
         self._running = True
         
         # Build the application
-        self._app = (
-            Application.builder()
-            .token(self.config.token)
-            .build()
-        )
+        builder = Application.builder().token(self.config.token)
+        if self.config.proxy:
+            builder = builder.proxy(self.config.proxy).get_updates_proxy(self.config.proxy)
+        self._app = builder.build()
         
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
