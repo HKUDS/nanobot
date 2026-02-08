@@ -640,6 +640,7 @@ def status():
         has_openai = bool(config.providers.openai.api_key)
         has_gemini = bool(config.providers.gemini.api_key)
         has_zhipu = bool(config.providers.zhipu.api_key)
+        has_minimax = bool(config.providers.minimax.api_key)
         has_vllm = bool(config.providers.vllm.api_base)
         has_aihubmix = bool(config.providers.aihubmix.api_key)
         
@@ -648,6 +649,7 @@ def status():
         console.print(f"OpenAI API: {'[green]✓[/green]' if has_openai else '[dim]not set[/dim]'}")
         console.print(f"Gemini API: {'[green]✓[/green]' if has_gemini else '[dim]not set[/dim]'}")
         console.print(f"Zhipu AI API: {'[green]✓[/green]' if has_zhipu else '[dim]not set[/dim]'}")
+        console.print(f"MiniMax API: {'[green]✓[/green]' if has_minimax else '[dim]not set[/dim]'}")
         console.print(f"AiHubMix API: {'[green]✓[/green]' if has_aihubmix else '[dim]not set[/dim]'}")
         vllm_status = f"[green]✓ {config.providers.vllm.api_base}[/green]" if has_vllm else "[dim]not set[/dim]"
         console.print(f"vLLM/Local: {vllm_status}")

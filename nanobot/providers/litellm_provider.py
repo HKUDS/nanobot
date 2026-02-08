@@ -13,7 +13,7 @@ class LiteLLMProvider(LLMProvider):
     """
     LLM provider using LiteLLM for multi-provider support.
     
-    Supports OpenRouter, Anthropic, OpenAI, Gemini, and many other providers through
+    Supports OpenRouter, Anthropic, OpenAI, Gemini, MiniMax, and many other providers through
     a unified interface.
     """
     
@@ -69,6 +69,9 @@ class LiteLLMProvider(LLMProvider):
             elif "moonshot" in default_model or "kimi" in default_model:
                 os.environ.setdefault("MOONSHOT_API_KEY", api_key)
                 os.environ.setdefault("MOONSHOT_API_BASE", api_base or "https://api.moonshot.cn/v1")
+            elif "minimax" in default_model.lower():
+                os.environ.setdefault("MINIMAX_API_KEY", api_key)
+                os.environ.setdefault("MINIMAX_API_BASE", api_base or "https://api.minimax.io/v1")
         
         if api_base:
             litellm.api_base = api_base
@@ -105,6 +108,7 @@ class LiteLLMProvider(LLMProvider):
             (("glm", "zhipu"), "zai", ("zhipu/", "zai/", "openrouter/", "hosted_vllm/")),
             (("qwen", "dashscope"), "dashscope", ("dashscope/", "openrouter/")),
             (("moonshot", "kimi"), "moonshot", ("moonshot/", "openrouter/")),
+            (("minimax",), "minimax", ("minimax/", "openrouter/")),
             (("gemini",), "gemini", ("gemini/",)),
         ]
         if not (self.is_vllm or self.is_openrouter or self.is_aihubmix):
