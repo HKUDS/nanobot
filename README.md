@@ -440,6 +440,43 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 </details>
 
 
+### Rate Limiting
+
+> [!NOTE]
+> Free-tier API providers often have rate limits (e.g., NVIDIA NIM: 40 requests/min). Configure rate limiting to prevent 429 errors on complex tasks.
+
+Configure per-provider rate limits in your config file:
+
+```json
+{
+  "providers": {
+    "deepseek": {
+      "api_key": "your-key",
+      "api_base": "https://integrate.api.nvidia.com/v1",
+      "rate_limit": 30
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `rate_limit` | `int \| null` | Maximum requests per minute. `null` (default) = no limit. For NVIDIA NIM free tier, use 30 (75% of 40 req/min limit). |
+
+**How it works:**
+- Enforces minimum delay between API calls (e.g., 30 req/min = 2 second delay)
+- Applies to the provider, not per model
+- Trades speed for reliability (slower completion vs. task failure)
+
+**Example use case:**
+```bash
+# Without rate limiting: fails after ~8 calls with 429 error
+nanobot agent -m "Review this 2000-line codebase" --model deepseek/deepseek-v3
+
+# With rate limiting (30 req/min): completes in ~3 minutes
+# (configured in ~/.nanobot/config.json)
+```
+
 ### Security
 
 > [!TIP]
