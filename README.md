@@ -496,13 +496,6 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 3. If found under `providers.openrouter`, it adds the `openrouter/` prefix → `openrouter/anthropic/claude-haiku-3.5`
 4. If no alias matches, falls back to keyword matching (existing behavior)
 
-**Benefits:**
-
-- ✅ Zero breaking changes — opt-in feature
-- ✅ Simple O(1) dictionary lookup
-- ✅ Works with all providers (vLLM, OpenRouter, AiHubMix, etc.)
-- ✅ Flexible naming (business-friendly, environment-specific, etc.)
-
 
 ### Security
 
