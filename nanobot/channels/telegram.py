@@ -19,6 +19,42 @@ if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
 
 
+def _split_long_message(text: str, max_length: int = 4096) -> list[str]:
+    """
+    Split a long message into chunks that fit Telegram's limit.
+    Tries to split at paragraph breaks, then line breaks, then at max_length.
+    """
+    if len(text) <= max_length:
+        return [text]
+    
+    chunks = []
+    remaining = text
+    
+    while remaining:
+        if len(remaining) <= max_length:
+            chunks.append(remaining)
+            break
+        
+        # Find best split point: prefer paragraph, then line, then hard cut
+        chunk = remaining[:max_length]
+        split_pos = max_length
+        
+        # Try to split at paragraph break (double newline)
+        para_break = chunk.rfind('\n\n')
+        if para_break > max_length * 0.5:  # At least 50% of chunk
+            split_pos = para_break + 2
+        else:
+            # Try to split at line break
+            line_break = chunk.rfind('\n')
+            if line_break > max_length * 0.5:
+                split_pos = line_break + 1
+        
+        chunks.append(remaining[:split_pos].rstrip())
+        remaining = remaining[split_pos:].lstrip()
+    
+    return chunks
+
+
 def _markdown_to_telegram_html(text: str) -> str:
     """
     Convert markdown to Telegram-safe HTML.
@@ -183,7 +219,7 @@ class TelegramChannel(BaseChannel):
             self._app = None
     
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Telegram."""
+        """Send a message through Telegram with optional media."""
         if not self._app:
             logger.warning("Telegram bot not running")
             return
@@ -194,25 +230,101 @@ class TelegramChannel(BaseChannel):
         try:
             # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
-            # Convert markdown to Telegram HTML
-            html_content = _markdown_to_telegram_html(msg.content)
-            await self._app.bot.send_message(
-                chat_id=chat_id,
-                text=html_content,
-                parse_mode="HTML"
-            )
+            
+            # If media files are provided, send them
+            if msg.media:
+                await self._send_with_media(chat_id, msg.content, msg.media)
+            else:
+                # Text-only message - split if too long
+                html_content = _markdown_to_telegram_html(msg.content)
+                chunks = _split_long_message(html_content, max_length=4096)
+                
+                for i, chunk in enumerate(chunks):
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=chunk,
+                        parse_mode="HTML"
+                    )
+                    # Add small delay between chunks to avoid rate limits
+                    if i < len(chunks) - 1:
+                        await asyncio.sleep(0.1)
+                        
+                if len(chunks) > 1:
+                    logger.info(f"Sent long message in {len(chunks)} parts")
         except ValueError:
             logger.error(f"Invalid chat_id: {msg.chat_id}")
         except Exception as e:
             # Fallback to plain text if HTML parsing fails
-            logger.warning(f"HTML parse failed, falling back to plain text: {e}")
+            logger.warning(f"Send failed, falling back to plain text: {e}")
             try:
-                await self._app.bot.send_message(
-                    chat_id=int(msg.chat_id),
-                    text=msg.content
-                )
+                # Also split plain text if too long
+                chunks = _split_long_message(msg.content, max_length=4096)
+                for chunk in chunks:
+                    await self._app.bot.send_message(
+                        chat_id=int(msg.chat_id),
+                        text=chunk
+                    )
+                    await asyncio.sleep(0.1)
             except Exception as e2:
                 logger.error(f"Error sending Telegram message: {e2}")
+    
+    async def _send_with_media(self, chat_id: int, content: str, media_paths: list[str]) -> None:
+        """Send media files (images, documents) to Telegram."""
+        import mimetypes
+        from pathlib import Path
+        
+        # Telegram caption limit is 1024 characters
+        caption = content[:1024] if content else None
+        
+        for media_path in media_paths:
+            path = Path(media_path)
+            if not path.exists():
+                logger.warning(f"Media file not found: {media_path}")
+                continue
+            
+            # Detect MIME type
+            mime, _ = mimetypes.guess_type(str(path))
+            
+            try:
+                with open(path, 'rb') as f:
+                    if mime and mime.startswith('image/'):
+                        # Send as photo
+                        await self._app.bot.send_photo(
+                            chat_id=chat_id,
+                            photo=f,
+                            caption=caption
+                        )
+                        logger.debug(f"Sent image: {path.name}")
+                    elif mime and mime.startswith('video/'):
+                        # Send as video
+                        await self._app.bot.send_video(
+                            chat_id=chat_id,
+                            video=f,
+                            caption=caption
+                        )
+                        logger.debug(f"Sent video: {path.name}")
+                    elif mime and mime.startswith('audio/'):
+                        # Send as audio
+                        await self._app.bot.send_audio(
+                            chat_id=chat_id,
+                            audio=f,
+                            caption=caption
+                        )
+                        logger.debug(f"Sent audio: {path.name}")
+                    else:
+                        # Send as document (fallback for all other files)
+                        await self._app.bot.send_document(
+                            chat_id=chat_id,
+                            document=f,
+                            caption=caption
+                        )
+                        logger.debug(f"Sent document: {path.name}")
+                    
+                    # Only use caption for first file
+                    caption = None
+                    
+            except Exception as e:
+                logger.error(f"Failed to send media {path.name}: {e}")
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
