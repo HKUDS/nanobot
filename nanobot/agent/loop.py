@@ -18,6 +18,7 @@ from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.memory import MemorySearchTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
 
@@ -46,8 +47,9 @@ class AgentLoop:
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
+        memory_config: "MemoryConfig | None" = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, MemoryConfig
         from nanobot.cron.service import CronService
         self.bus = bus
         self.provider = provider
@@ -58,8 +60,9 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.memory_config = memory_config or MemoryConfig()
         
-        self.context = ContextBuilder(workspace)
+        self.context = ContextBuilder(workspace, memory_config=self.memory_config)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -106,6 +109,12 @@ class AgentLoop:
         # Cron tool (for scheduling)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        
+        # Memory search tool
+        self.tools.register(MemorySearchTool(
+            memory_store=self.context.memory,
+            max_results=self.memory_config.search_max_results,
+        ))
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -187,9 +196,17 @@ class AgentLoop:
         # Agent loop
         iteration = 0
         final_content = None
+        session_flushed = False
         
         while iteration < self.max_iterations:
             iteration += 1
+            
+            # Check if memory flush + compaction needed
+            if not session_flushed and self._should_flush(messages):
+                logger.info("Context approaching limit, triggering memory flush")
+                await self._memory_flush(messages)
+                messages = await self._compact_history(messages)
+                session_flushed = True
             
             # Call LLM
             response = await self.provider.chat(
@@ -345,6 +362,106 @@ class AgentLoop:
             content=final_content
         )
     
+    # -- Memory flush & compaction --
+
+    def _estimate_tokens(self, messages: list[dict[str, Any]]) -> int:
+        """Estimate token count from messages (chars / 4 approximation)."""
+        total_chars = 0
+        for msg in messages:
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                total_chars += len(content)
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and "text" in part:
+                        total_chars += len(part["text"])
+        return total_chars // 4
+
+    def _should_flush(self, messages: list[dict[str, Any]]) -> bool:
+        """Check if context is approaching the limit."""
+        estimated = self._estimate_tokens(messages)
+        threshold = int(
+            self.memory_config.max_context_tokens
+            * self.memory_config.flush_threshold_ratio
+        )
+        return estimated > threshold
+
+    async def _memory_flush(self, messages: list[dict[str, Any]]) -> None:
+        """Silent turn: ask agent to save important info before compaction."""
+        flush_messages = messages + [{
+            "role": "user",
+            "content": (
+                "[System] Conversation approaching context limit and will be compacted. "
+                "Review the conversation and save any important unsaved information now. "
+                "Write long-term facts to MEMORY.md (under the correct section). "
+                "Write session context to today's daily note. "
+                "Then respond with DONE."
+            ),
+        }]
+
+        # Give the agent up to 5 iterations to save memories
+        for _ in range(5):
+            response = await self.provider.chat(
+                messages=flush_messages,
+                tools=self.tools.get_definitions(),
+                model=self.model,
+            )
+            if response.has_tool_calls:
+                for tc in response.tool_calls:
+                    logger.info(f"Memory flush tool call: {tc.name}")
+                    result = await self.tools.execute(tc.name, tc.arguments)
+                    flush_messages.append({
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "tool_calls": [{
+                            "id": tc.id, "type": "function",
+                            "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
+                        }],
+                    })
+                    flush_messages.append({
+                        "role": "tool", "tool_call_id": tc.id,
+                        "name": tc.name, "content": result,
+                    })
+            else:
+                break
+        logger.info("Memory flush completed")
+
+    async def _compact_history(
+        self, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Compress old messages into a summary, keeping recent ones."""
+        keep = self.memory_config.compact_keep_recent
+        if len(messages) <= keep + 2:  # system + few messages, nothing to compact
+            return messages
+
+        system_prompt = messages[0]
+        old = messages[1:-keep]
+        recent = messages[-keep:]
+
+        if not old:
+            return messages
+
+        logger.info(f"Compacting {len(old)} old messages into summary")
+        summary_response = await self.provider.chat(
+            messages=[
+                {"role": "system", "content": (
+                    "Summarize this conversation concisely. "
+                    "Preserve: key facts, decisions, user requests, and outcomes. "
+                    "Omit: greetings, filler, tool call details."
+                )},
+                *old,
+            ],
+            model=self.model,
+            max_tokens=1024,
+        )
+
+        return [
+            system_prompt,
+            {"role": "assistant", "content":
+             f"[Previous conversation summary]\n{summary_response.content}"},
+            *recent,
+        ]
+
     async def process_direct(
         self,
         content: str,
