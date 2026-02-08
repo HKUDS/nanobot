@@ -90,17 +90,42 @@ pip install nanobot-ai
 
 ## 🚀 Quick Start
 
-> [!TIP]
-> Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [DashScope](https://dashscope.console.aliyun.com) (Qwen) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
-
 **1. Initialize**
 
 ```bash
 nanobot onboard
 ```
 
-**2. Configure** (`~/.nanobot/config.json`)
+**2. Configure** — pick one option:
+
+<details open>
+<summary><b>Option A: Claude Code CLI Login (no API key needed)</b></summary>
+
+If you have a Claude Max or Pro subscription, nanobot can reuse your Claude Code CLI login directly — no separate API key required.
+
+```bash
+# 1. Install Claude Code CLI (if not already)
+npm install -g @anthropic-ai/claude-code
+
+# 2. Login (opens browser for OAuth)
+claude
+
+# 3. That's it — nanobot auto-detects your login
+nanobot agent -m "Hello!"
+```
+
+nanobot automatically finds the Claude Code OAuth token from your system keychain and uses it to call the Anthropic API directly.
+
+> [!NOTE]
+> Claude Code CLI login is currently supported on **macOS**. The token auto-refreshes as long as your Claude subscription is active.
+
+</details>
+
+<details>
+<summary><b>Option B: API Key</b></summary>
+
+Set your API key in `~/.nanobot/config.json`.
+Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [DashScope](https://dashscope.console.aliyun.com) (Qwen) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
 
 For OpenRouter - recommended for global users:
 ```json
@@ -117,6 +142,8 @@ For OpenRouter - recommended for global users:
   }
 }
 ```
+
+</details>
 
 **3. Chat**
 
@@ -347,6 +374,7 @@ Config file: `~/.nanobot/config.json`
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
+| **Claude Code CLI** | **LLM (no API key needed, uses Claude Max/Pro subscription)** | `claude` CLI login |
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
@@ -355,6 +383,9 @@ Config file: `~/.nanobot/config.json`
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
+
+> [!TIP]
+> **Claude Code CLI** is the easiest way to get started — if you already have a Claude Max or Pro subscription, just run `claude` to login and nanobot will auto-detect it. No API key needed. To disable auto-detection, set `"providers": { "claudeCode": { "enabled": false } }` in config.
 
 
 ### Security
@@ -433,12 +464,13 @@ nanobot/
 │   ├── skills.py   #    Skills loader
 │   ├── subagent.py #    Background task execution
 │   └── tools/      #    Built-in tools (incl. spawn)
+├── api/            # 🌐 Anthropic Messages API proxy
 ├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
 ├── channels/       # 📱 WhatsApp integration
 ├── bus/            # 🚌 Message routing
 ├── cron/           # ⏰ Scheduled tasks
 ├── heartbeat/      # 💓 Proactive wake-up
-├── providers/      # 🤖 LLM providers (OpenRouter, etc.)
+├── providers/      # 🤖 LLM providers (Claude Code OAuth, OpenRouter, etc.)
 ├── session/        # 💬 Conversation sessions
 ├── config/         # ⚙️ Configuration
 └── cli/            # 🖥️ Commands

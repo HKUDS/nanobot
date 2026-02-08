@@ -1,13 +1,20 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import sys
 from pathlib import Path
 
 import typer
+from loguru import logger
 from rich.console import Console
 from rich.table import Table
 
 from nanobot import __version__, __logo__
+
+# Default loguru to WARNING so INFO/DEBUG noise is hidden from users.
+# --verbose on individual commands drops it to DEBUG.
+logger.remove()
+logger.add(sys.stderr, level="WARNING")
 
 app = typer.Typer(
     name="nanobot",
@@ -67,9 +74,13 @@ def onboard():
     
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
-    console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
-    console.print("     Get one at: https://openrouter.ai/keys")
-    console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
+    console.print("  Option A: Use Claude Code CLI login (no API key needed):")
+    console.print("    1. Install & login: [cyan]claude[/cyan]")
+    console.print("    2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
+    console.print("  Option B: Use an API key:")
+    console.print("    1. Add your key to [cyan]~/.nanobot/config.json[/cyan]")
+    console.print("       Get one at: https://openrouter.ai/keys")
+    console.print("    2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
 
 
@@ -148,20 +159,69 @@ This file stores important information that should persist across sessions.
 
 
 def _make_provider(config):
-    """Create LiteLLMProvider from config. Exits if no API key found."""
+    """Create an LLM provider from config.
+
+    Priority:
+    1. If an explicit API key is configured for the model's provider, use LiteLLMProvider.
+    2. If providers.claude_code.enabled (default), try to detect the Claude Code CLI
+       OAuth token and return a ClaudeCodeProvider (direct Anthropic API, no litellm).
+    3. Otherwise, error out with instructions.
+    """
     from nanobot.providers.litellm_provider import LiteLLMProvider
     p = config.get_provider()
     model = config.agents.defaults.model
-    if not (p and p.api_key) and not model.startswith("bedrock/"):
-        console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers section")
-        raise typer.Exit(1)
-    return LiteLLMProvider(
-        api_key=p.api_key if p else None,
-        api_base=config.get_api_base(),
-        default_model=model,
-        extra_headers=p.extra_headers if p else None,
-    )
+    api_key = p.api_key if p else None
+
+    # If an explicit API key exists, use the standard LiteLLM path
+    if api_key:
+        return LiteLLMProvider(
+            api_key=api_key,
+            api_base=config.get_api_base(),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+        )
+
+    # Try Claude Code CLI OAuth token (auto-detect)
+    cc_config = config.providers.claude_code
+    if cc_config.enabled and not model.startswith("bedrock/"):
+        from nanobot.providers.claude_code_auth import get_claude_code_token
+        oauth_token = get_claude_code_token()
+        if oauth_token:
+            from nanobot.providers.claude_code_provider import ClaudeCodeProvider
+            cc_model = cc_config.model or model
+            # Strip provider prefix for direct API (e.g. "anthropic/claude-..." -> "claude-...")
+            if "/" in cc_model:
+                cc_model = cc_model.split("/", 1)[1]
+            console.print("[green]✓[/green] Using Claude Code CLI login (no API key needed)")
+            return ClaudeCodeProvider(oauth_token=oauth_token, default_model=cc_model)
+
+    # No provider available
+    console.print("[red]Error: No API key configured.[/red]")
+    console.print("Either:")
+    console.print("  1. Login with Claude Code CLI first: [cyan]claude[/cyan]")
+    console.print("  2. Or set a key in ~/.nanobot/config.json under providers")
+    raise typer.Exit(1)
+
+
+def _build_litellm_kwargs(config, model_override=None):
+    """Build base litellm kwargs from nanobot provider config.
+
+    Instantiates LiteLLMProvider so that env vars (OPENROUTER_API_KEY, etc.)
+    are set as a side-effect, then extracts the relevant kwargs.
+    Works for both LiteLLMProvider and ClaudeCodeProvider (OAuth).
+    """
+    provider = _make_provider(config)
+    kwargs = {}
+    if hasattr(provider, "api_key") and provider.api_key:
+        kwargs["api_key"] = provider.api_key
+    if hasattr(provider, "api_base") and provider.api_base:
+        kwargs["api_base"] = provider.api_base
+    if hasattr(provider, "extra_headers") and provider.extra_headers:
+        kwargs["extra_headers"] = provider.extra_headers
+    # For ClaudeCodeProvider, pass the oauth_token as api_key so the proxy handler detects it
+    if hasattr(provider, "oauth_token"):
+        kwargs["api_key"] = provider.oauth_token
+    return kwargs
 
 
 # ============================================================================
@@ -184,8 +244,8 @@ def gateway(
     from nanobot.heartbeat.service import HeartbeatService
     
     if verbose:
-        import logging
-        logging.basicConfig(level=logging.DEBUG)
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
     
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     
@@ -254,9 +314,28 @@ def gateway(
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
     
     console.print(f"[green]✓[/green] Heartbeat: every 30m")
-    
+
+    # Proxy server setup
+    from nanobot.api.server import ProxyServer
+    from nanobot.api.handlers import MessagesHandler
+
+    litellm_kwargs = _build_litellm_kwargs(config)
+    handler = MessagesHandler(
+        proxy_config=config.gateway.proxy,
+        litellm_kwargs=litellm_kwargs,
+    )
+    proxy_server = ProxyServer(
+        host=config.gateway.host,
+        port=port,
+        handler=handler,
+    )
+
     async def run():
         try:
+            await proxy_server.start()
+            console.print(
+                f"[green]✓[/green] API proxy on http://{config.gateway.host}:{port}/v1/messages"
+            )
             await cron.start()
             await heartbeat.start()
             await asyncio.gather(
@@ -265,14 +344,66 @@ def gateway(
             )
         except KeyboardInterrupt:
             console.print("\nShutting down...")
+            await proxy_server.stop()
             heartbeat.stop()
             cron.stop()
             agent.stop()
             await channels.stop_all()
-    
+
     asyncio.run(run())
 
 
+
+
+# ============================================================================
+# Proxy Command (standalone Anthropic API proxy)
+# ============================================================================
+
+
+@app.command(hidden=True)
+def proxy(
+    port: int = typer.Option(18790, "--port", "-p", help="Proxy server port"),
+    host: str = typer.Option("0.0.0.0", "--host", "-H", help="Bind address"),
+    model: str = typer.Option(None, "--model", "-m", help="Override default backend model"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """Start standalone Anthropic Messages API proxy (internal)."""
+    from nanobot.config.loader import load_config
+    from nanobot.api.server import ProxyServer
+    from nanobot.api.handlers import MessagesHandler
+
+    if verbose:
+        logger.remove()
+        logger.add(sys.stderr, level="DEBUG")
+
+    config = load_config()
+    litellm_kwargs = _build_litellm_kwargs(config, model_override=model)
+
+    proxy_config = config.gateway.proxy
+    if model:
+        # Override default_model in proxy config for this session
+        proxy_config = proxy_config.model_copy(update={"default_model": model})
+
+    handler = MessagesHandler(
+        proxy_config=proxy_config,
+        litellm_kwargs=litellm_kwargs,
+    )
+    server = ProxyServer(host=host, port=port, handler=handler)
+
+    backend = model or config.agents.defaults.model
+    console.print(f"{__logo__} Starting Anthropic API proxy on http://{host}:{port}")
+    console.print(f"  Backend model: [cyan]{backend}[/cyan]")
+    console.print(f"\n  Connect Claude Code CLI:")
+    console.print(f"    [green]ANTHROPIC_BASE_URL=http://localhost:{port} claude[/green]\n")
+
+    async def run():
+        try:
+            await server.run_forever()
+        except KeyboardInterrupt:
+            console.print("\nShutting down...")
+            await server.stop()
+
+    asyncio.run(run())
 
 
 # ============================================================================
@@ -634,6 +765,14 @@ def status():
     if config_path.exists():
         console.print(f"Model: {config.agents.defaults.model}")
         
+        # Check Claude Code CLI auth
+        cc_status = "[dim]disabled[/dim]"
+        if config.providers.claude_code.enabled:
+            from nanobot.providers.claude_code_auth import get_claude_code_token
+            cc_token = get_claude_code_token()
+            cc_status = "[green]✓ logged in[/green]" if cc_token else "[yellow]not logged in[/yellow]"
+        console.print(f"Claude Code CLI: {cc_status}")
+
         # Check API keys
         has_openrouter = bool(config.providers.openrouter.api_key)
         has_anthropic = bool(config.providers.anthropic.api_key)
@@ -642,7 +781,7 @@ def status():
         has_zhipu = bool(config.providers.zhipu.api_key)
         has_vllm = bool(config.providers.vllm.api_base)
         has_aihubmix = bool(config.providers.aihubmix.api_key)
-        
+
         console.print(f"OpenRouter API: {'[green]✓[/green]' if has_openrouter else '[dim]not set[/dim]'}")
         console.print(f"Anthropic API: {'[green]✓[/green]' if has_anthropic else '[dim]not set[/dim]'}")
         console.print(f"OpenAI API: {'[green]✓[/green]' if has_openai else '[dim]not set[/dim]'}")
