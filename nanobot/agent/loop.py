@@ -42,8 +42,8 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 20,
         brave_api_key: str | None = None,
-        exec_config: "ExecToolConfig | None" = None,
-        cron_service: "CronService | None" = None,
+        exec_config: "ExecToolConfig" | None = None,
+        cron_service: "CronService" | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
     ):
