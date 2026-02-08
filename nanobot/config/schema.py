@@ -112,6 +112,18 @@ class ToolsConfig(BaseModel):
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
 
 
+class MemoryConfig(BaseModel):
+    """Long-term memory configuration."""
+    summary_max_lines: int = 20          # Max lines of MEMORY.md injected into prompt
+    search_max_results: int = 5          # Default results for memory_search
+    keyword_threshold: int = 100         # Chunk count above which embedding search is used
+    flush_threshold_ratio: float = 0.75  # Token ratio to trigger memory flush
+    compact_keep_recent: int = 10        # Messages to keep after compaction
+    max_context_tokens: int = 100000     # Estimated model context window
+    embedding_model: str = ""            # Embedding model, e.g. "text-embedding-3-small" (empty=disabled)
+    embedding_cache_max: int = 2000      # Max cached embeddings
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
@@ -119,6 +131,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     
     @property
     def workspace_path(self) -> Path:

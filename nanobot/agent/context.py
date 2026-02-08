@@ -20,9 +20,9 @@ class ContextBuilder:
     
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, memory_config: "MemoryConfig | None" = None):
         self.workspace = workspace
-        self.memory = MemoryStore(workspace)
+        self.memory = MemoryStore(workspace, memory_config=memory_config)
         self.skills = SkillsLoader(workspace)
     
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
@@ -84,6 +84,7 @@ You are nanobot, a helpful AI assistant. You have access to tools that allow you
 - Read, write, and edit files
 - Execute shell commands
 - Search the web and fetch web pages
+- Search your long-term memory and daily notes
 - Send messages to users on chat channels
 - Spawn subagents for complex background tasks
 
@@ -95,16 +96,27 @@ You are nanobot, a helpful AI assistant. You have access to tools that allow you
 
 ## Workspace
 Your workspace is at: {workspace_path}
-- Memory files: {workspace_path}/memory/MEMORY.md
+- Long-term memory: {workspace_path}/memory/MEMORY.md
 - Daily notes: {workspace_path}/memory/YYYY-MM-DD.md
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
+
+## Memory Guidelines
+- Use memory_search to find past memories before writing (avoid duplicates)
+- When writing to MEMORY.md, follow this format:
+  - Each memory is a single line under the appropriate section header
+  - Prefix with category tag: [preference], [fact], [project], [decision]
+  - Example: `- [preference] User prefers Python over JavaScript`
+  - Example: `- [fact] User is based in Shanghai, timezone UTC+8`
+  - Example: `- [project] Working on nanobot long-term memory feature`
+  - Do NOT rewrite the entire file; append under the correct section
+- Use daily notes ({workspace_path}/memory/YYYY-MM-DD.md) for session context and events
+- When you learn something important about the user, save it to memory
 
 IMPORTANT: When responding to direct questions or conversations, reply directly with your text response.
 Only use the 'message' tool when you need to send a message to a specific chat channel (like WhatsApp).
 For normal conversation, just respond with text - do not call the message tool.
 
-Always be helpful, accurate, and concise. When using tools, explain what you're doing.
-When remembering something, write to {workspace_path}/memory/MEMORY.md"""
+Always be helpful, accurate, and concise. When using tools, explain what you're doing."""
     
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
