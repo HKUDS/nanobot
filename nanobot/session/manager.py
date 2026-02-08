@@ -67,7 +67,8 @@ class SessionManager:
     
     def __init__(self, workspace: Path):
         self.workspace = workspace
-        self.sessions_dir = ensure_dir(Path.home() / ".nanobot" / "sessions")
+        from nanobot.utils.helpers import get_data_path
+        self.sessions_dir = ensure_dir(get_data_path() / "sessions")
         self._cache: dict[str, Session] = {}
     
     def _get_session_path(self, key: str) -> Path:

@@ -15,5 +15,8 @@ docs/
 *.pyzz
 .venv/
 __pycache__/
-poetry.lock
-.pytest_cache/
+
+# Claude Code
+.claude/
+tmpclaude-*/
+tmpclaude-*-cwd
