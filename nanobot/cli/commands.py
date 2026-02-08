@@ -247,6 +247,12 @@ def gateway(
     # Create channel manager
     channels = ChannelManager(config, bus, session_manager=session_manager)
     
+    # Wire Window channel emit callback into agent loop
+    window_channel = channels.get_channel("window")
+    if window_channel:
+        agent.set_window_emit(window_channel.emit_to_chat)
+        agent.set_window_context_callback(window_channel.update_context_remaining)
+
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
@@ -370,6 +376,15 @@ def channels_status():
         dc.gateway_url
     )
     
+    # Window
+    win = config.channels.window
+    win_config = f"{win.host}:{win.port}" if win.api_key else "[dim]api key not set[/dim]"
+    table.add_row(
+        "Window",
+        "✓" if win.enabled else "✗",
+        win_config
+    )
+
     # Telegram
     tg = config.channels.telegram
     tg_config = f"token: {tg.token[:10]}..." if tg.token else "[dim]not configured[/dim]"

@@ -18,6 +18,7 @@ from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.window_task import WindowTaskTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
 
@@ -73,6 +74,10 @@ class AgentLoop:
         )
         
         self._running = False
+        self._window_emit_callback = None
+        self._window_context_callback = None
+        self._max_context_tokens: int | None = None
+        self._window_task_tool = WindowTaskTool()
         self._register_default_tools()
     
     def _register_default_tools(self) -> None:
@@ -107,6 +112,51 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
     
+    def set_window_emit(self, callback):
+        self._window_emit_callback = callback
+
+    def set_window_context_callback(self, callback):
+        """Set callback to update Window channel's context_remaining."""
+        self._window_context_callback = callback
+
+    def _get_max_context_tokens(self) -> int:
+        """Get max input tokens for the current model (cached)."""
+        if self._max_context_tokens is not None:
+            return self._max_context_tokens
+
+        try:
+            import litellm as _litellm
+            # Strip provider prefixes that litellm doesn't recognize
+            model_name = self.model
+            for prefix in ("openrouter/", "hosted_vllm/", "openai/"):
+                if model_name.startswith(prefix):
+                    model_name = model_name[len(prefix):]
+                    break
+            info = _litellm.get_model_info(model_name)
+            self._max_context_tokens = info.get("max_input_tokens", 200_000)
+            logger.info(f"Model {model_name} max input tokens: {self._max_context_tokens}")
+        except Exception as e:
+            logger.warning(f"Could not get model info, defaulting to 200K: {e}")
+            self._max_context_tokens = 200_000
+
+        return self._max_context_tokens
+
+    def _update_context_remaining(self, usage: dict[str, int]) -> None:
+        """Calculate and push context_remaining from LLM response usage."""
+        if not usage or not self._window_context_callback:
+            return
+
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        if prompt_tokens <= 0:
+            return
+
+        max_tokens = self._get_max_context_tokens()
+        remaining = max(0.0, 1.0 - (prompt_tokens / max_tokens))
+        remaining = round(remaining, 4)
+
+        logger.debug(f"Context remaining: {remaining:.1%} ({prompt_tokens}/{max_tokens} tokens used)")
+        self._window_context_callback(remaining, prompt_tokens)
+
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
         self._running = True
@@ -174,6 +224,17 @@ class AgentLoop:
         cron_tool = self.tools.get("cron")
         if isinstance(cron_tool, CronTool):
             cron_tool.set_context(msg.channel, msg.chat_id)
+
+        # Configure window_task tool for Window channel
+        if msg.channel == "window" and self._window_emit_callback:
+            import functools
+            emit_to_chat = functools.partial(self._window_emit_callback, msg.chat_id)
+            self._window_task_tool.set_emit(emit_to_chat)
+            self._window_task_tool.reset()
+            if not self.tools.has("window_task"):
+                self.tools.register(self._window_task_tool)
+        elif self.tools.has("window_task"):
+            self.tools.unregister("window_task")
         
         # Build initial messages (use get_history for LLM-formatted messages)
         messages = self.context.build_messages(
@@ -197,6 +258,10 @@ class AgentLoop:
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
+            
+            # Update context remaining from token usage
+            if msg.channel == "window" and response.usage:
+                self._update_context_remaining(response.usage)
             
             # Handle tool calls
             if response.has_tool_calls:
@@ -241,6 +306,15 @@ class AgentLoop:
         session.add_message("assistant", final_content)
         self.sessions.save(session)
         
+        # Auto-complete any active window task card
+        if msg.channel == "window" and self._window_task_tool.get_active_task_id():
+            task_id = self._window_task_tool.get_active_task_id()
+            if self._window_emit_callback:
+                import functools
+                emit_fn = functools.partial(self._window_emit_callback, msg.chat_id)
+                await emit_fn({"type": "task.completed", "task_id": task_id, "progress": 1.0, "result": "Done"})
+            self._window_task_tool.reset()
+
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,

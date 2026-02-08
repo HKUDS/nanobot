@@ -84,6 +84,17 @@ class ChannelManager:
                 logger.info("Feishu channel enabled")
             except ImportError as e:
                 logger.warning(f"Feishu channel not available: {e}")
+
+        # Window iOS channel
+        if self.config.channels.window.enabled:
+            try:
+                from nanobot.channels.window import WindowChannel
+                self.channels["window"] = WindowChannel(
+                    self.config.channels.window, self.bus
+                )
+                logger.info("Window channel enabled")
+            except ImportError as e:
+                logger.warning(f"Window channel not available: {e}")
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""

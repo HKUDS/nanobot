@@ -39,12 +39,21 @@ class DiscordConfig(BaseModel):
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 
 
+class WindowConfig(BaseModel):
+    """Window iOS app channel configuration."""
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 8080
+    api_key: str = ""
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    window: WindowConfig = Field(default_factory=WindowConfig)
 
 
 class AgentDefaults(BaseModel):

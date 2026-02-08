@@ -24,6 +24,7 @@ dependencies = [
     "websockets>=12.0",
     "websocket-client>=1.6.0",
     "httpx[socks]>=0.25.0",
+    "aiohttp>=3.9.0",
     "loguru>=0.7.0",
     "readability-lxml>=0.8.0",
     "rich>=13.0.0",
