@@ -30,7 +30,7 @@ create:
 	ln -sf /home/om/nanobot/.venv/bin/nanobot /home/om/.local/bin/nanobot
 
 update:
-	git pull origin personal
+	git pull origin development
 	uv pip install -e .
 	ln -sf /home/om/nanobot/.venv/bin/nanobot /home/om/.local/bin/nanobot
 
