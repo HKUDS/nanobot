@@ -194,6 +194,33 @@ class TelegramChannel(BaseChannel):
         try:
             # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
+            # Send media files first if present
+            if msg.media:
+                from pathlib import Path
+                for media_path in msg.media:
+                    path = Path(media_path)
+                    if not path.exists():
+                        logger.warning(f"Media file not found: {media_path}")
+                        continue
+                    try:
+                        ext = path.suffix.lower()
+                        with open(path, "rb") as f:
+                            if ext == ".gif":
+                                await self._app.bot.send_animation(chat_id=chat_id, animation=f)
+                            elif ext in (".jpg", ".jpeg", ".png", ".webp"):
+                                await self._app.bot.send_photo(chat_id=chat_id, photo=f)
+                            elif ext in (".mp4", ".mov", ".avi", ".mkv"):
+                                await self._app.bot.send_video(chat_id=chat_id, video=f)
+                            elif ext in (".mp3", ".ogg", ".wav", ".m4a"):
+                                await self._app.bot.send_audio(chat_id=chat_id, audio=f)
+                            else:
+                                await self._app.bot.send_document(chat_id=chat_id, document=f)
+                        logger.debug(f"Sent media: {path.name}")
+                    except Exception as e:
+                        logger.error(f"Failed to send media {media_path}: {e}")
+            # Send text content if present
+            if not msg.content:
+                return
             # Convert markdown to Telegram HTML
             html_content = _markdown_to_telegram_html(msg.content)
             await self._app.bot.send_message(
