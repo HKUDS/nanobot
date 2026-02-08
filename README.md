@@ -38,6 +38,8 @@
 
 💎 **Easy-to-Use**: One-click to deploy and you're ready to go.
 
+🔍 **Web Search & Fetch**: Integrated support for Ollama Web Search & Fetch APIs to augment models with real-time information.
+
 ## 🏗️ Architecture
 
 <p align="center">
@@ -163,6 +165,86 @@ nanobot agent -m "Hello from my local LLM!"
 
 > [!TIP]
 > The `apiKey` can be any non-empty string for local servers that don't require authentication.
+
+## 🦙 Ollama (Local & Cloud)
+
+nanobot provides seamless integration with the Ollama ecosystem, allowing you to run models locally or offload them to the cloud.
+
+### Local Ollama
+Run privacy-focused models locally on your own hardware.
+
+**1. Start Ollama server**
+Ensure Ollama is installed and running:
+```bash
+ollama serve
+```
+
+**2. Configure** (`~/.nanobot/config.json`)
+```json
+{
+  "providers": {
+    "ollama": {
+      "apiBase": "http://localhost:11434"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "llama3.2"
+    }
+  }
+}
+```
+
+### ☁️ Ollama Cloud
+Run massive models (up to 120B+) without a powerful GPU by offloading to [Ollama Cloud](https://ollama.com/cloud).
+
+**1. API Key**
+Create an [API key](https://ollama.com/settings/keys) on your Ollama account.
+
+**2. Configure** (`~/.nanobot/config.json`)
+```json
+{
+  "providers": {
+    "ollama_cloud": {
+      "apiKey": "your_api_key"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "gpt-oss:120b"
+    }
+  }
+}
+```
+
+**3. Chat**
+```bash
+nanobot agent -m "Explain the theory of relativity using a 120B model."
+```
+
+### 🌐 Web Search & Fetch
+Ollama Cloud also provides world-class web search and page fetching APIs.
+
+**Configure** (`~/.nanobot/config.json`)
+```json
+{
+  "tools": {
+    "web": {
+      "ollama": {
+        "apiKey": "your_api_key"
+      }
+    }
+  }
+}
+```
+
+> [!NOTE]
+> By default, nanobot uses your `ollama_cloud.apiKey` for web search if configured.
+
+**Try it out**
+```bash
+nanobot agent -m "Search for the latest news about Ollama"
+```
 
 ## 💬 Chat Apps
 
@@ -354,11 +436,14 @@ Config file: `~/.nanobot/config.json`
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
+| `ollama` | LLM (Local Ollama) | [ollama.com](https://ollama.com) |
+| `ollama_cloud` | LLM + **Web Search & Fetch** | [ollama.com/cloud](https://ollama.com/cloud) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
+
 
 <details>
 <summary><b>Adding a New Provider (Developer Guide)</b></summary>
