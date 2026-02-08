@@ -1,0 +1,65 @@
+services:
+  nanobot-gateway:
+    build: .
+    image: nanobot:latest
+    container_name: nanobot-gateway
+    env_file:
+      - .env
+    environment:
+      NANOBOT_CONFIG: /root/.nanobot/config.json
+    volumes:
+      - ~/.nanobot:/root/.nanobot
+    ports:
+      - "18790:18790"
+    command: ["gateway"]
+    restart: unless-stopped
+
+  nanobot-onboard:
+    image: nanobot:latest
+    container_name: nanobot-onboard
+    env_file:
+      - .env
+    environment:
+      NANOBOT_CONFIG: /root/.nanobot/config.json
+    volumes:
+      - ~/.nanobot:/root/.nanobot
+    command: ["onboard"]
+    restart: "no"
+
+  nanobot-whatsapp-login:
+    image: nanobot:latest
+    container_name: nanobot-whatsapp-login
+    env_file:
+      - .env
+    environment:
+      NANOBOT_CONFIG: /root/.nanobot/config.json
+    volumes:
+      - ~/.nanobot:/root/.nanobot
+    command: ["channels", "login"]
+    restart: "no"
+
+  nanobot-agent:
+    image: nanobot:latest
+    container_name: nanobot-agent
+    env_file:
+      - .env
+    environment:
+      NANOBOT_CONFIG: /root/.nanobot/config.json
+    volumes:
+      - ~/.nanobot:/root/.nanobot
+    command: ["agent"]
+    stdin_open: true
+    tty: true
+    restart: "no"
+
+  nanobot-status:
+    image: nanobot:latest
+    container_name: nanobot-status
+    env_file:
+      - .env
+    environment:
+      NANOBOT_CONFIG: /root/.nanobot/config.json
+    volumes:
+      - ~/.nanobot:/root/.nanobot
+    command: ["status"]
+    restart: "no"
