@@ -158,24 +158,53 @@ This file stores important information that should persist across sessions.
         console.print("  [dim]Created memory/MEMORY.md[/dim]")
 
 
+def _get_matched_provider(config):
+    """Get a provider that actually matches the default model (keyword match only, no fallback).
+
+    Returns (ProviderConfig, is_gateway) or (None, False) if no keyword match found.
+    Gateways (openrouter, aihubmix) can serve any model so they always count as a match.
+    """
+    model = config.agents.defaults.model.lower()
+    p = config.providers
+    # Gateways that can route any model
+    gateways = {"aihubmix": p.aihubmix, "openrouter": p.openrouter}
+    for kw, provider in gateways.items():
+        if kw in model and provider.api_key:
+            return provider, True
+    # Direct provider match
+    direct = {
+        "deepseek": p.deepseek, "anthropic": p.anthropic, "claude": p.anthropic,
+        "openai": p.openai, "gpt": p.openai, "gemini": p.gemini,
+        "zhipu": p.zhipu, "glm": p.zhipu, "zai": p.zhipu,
+        "dashscope": p.dashscope, "qwen": p.dashscope,
+        "groq": p.groq, "moonshot": p.moonshot, "kimi": p.moonshot, "vllm": p.vllm,
+    }
+    for kw, provider in direct.items():
+        if kw in model and provider.api_key:
+            return provider, False
+    # No keyword match — check if a gateway has a key (can serve any model)
+    for provider in gateways.values():
+        if provider.api_key:
+            return provider, True
+    return None, False
+
+
 def _make_provider(config):
     """Create an LLM provider from config.
 
     Priority:
-    1. If an explicit API key is configured for the model's provider, use LiteLLMProvider.
-    2. If providers.claude_code.enabled (default), try to detect the Claude Code CLI
-       OAuth token and return a ClaudeCodeProvider (direct Anthropic API, no litellm).
+    1. If a matching provider has an API key (keyword match or gateway), use LiteLLMProvider.
+    2. If providers.claude_code.enabled (default), try Claude Code CLI OAuth → ClaudeCodeProvider.
     3. Otherwise, error out with instructions.
     """
     from nanobot.providers.litellm_provider import LiteLLMProvider
-    p = config.get_provider()
     model = config.agents.defaults.model
-    api_key = p.api_key if p else None
 
-    # If an explicit API key exists, use the standard LiteLLM path
-    if api_key:
+    # Only use LiteLLM if the provider actually matches the model
+    p, _is_gw = _get_matched_provider(config)
+    if p and p.api_key:
         return LiteLLMProvider(
-            api_key=api_key,
+            api_key=p.api_key,
             api_base=config.get_api_base(),
             default_model=model,
             extra_headers=p.extra_headers if p else None,
@@ -452,12 +481,15 @@ def agent(
                     user_input = console.input("[bold blue]You:[/bold blue] ")
                     if not user_input.strip():
                         continue
-                    
+
                     response = await agent_loop.process_direct(user_input, session_id)
                     console.print(f"\n{__logo__} {response}\n")
                 except KeyboardInterrupt:
                     console.print("\nGoodbye!")
                     break
+                except Exception as e:
+                    logger.debug(f"Agent error: {e}")
+                    console.print(f"\n[red]Error: {e}[/red]\n")
         
         asyncio.run(run_interactive())
 

@@ -44,6 +44,30 @@ class ClaudeCodeProvider(LLMProvider):
         if "/" in self.default_model:
             self.default_model = self.default_model.split("/", 1)[1]
 
+    def _refresh_token(self) -> bool:
+        """Re-read OAuth token from keychain (Claude Code CLI may have refreshed it)."""
+        from nanobot.providers.claude_code_auth import get_claude_code_token
+        new_token = get_claude_code_token()
+        if new_token and new_token != self.oauth_token:
+            self.oauth_token = new_token
+            self.api_key = new_token
+            logger.debug("OAuth token refreshed from keychain")
+            return True
+        return False
+
+    async def _send_request(self, body: dict[str, Any]) -> httpx.Response:
+        """Send request to Anthropic API with current OAuth token."""
+        async with httpx.AsyncClient(timeout=300) as client:
+            return await client.post(
+                ANTHROPIC_API_URL,
+                headers={
+                    **CLAUDE_CODE_HEADERS,
+                    "Authorization": f"Bearer {self.oauth_token}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -60,16 +84,11 @@ class ClaudeCodeProvider(LLMProvider):
         body = self._build_body(messages, tools, model, max_tokens, temperature)
 
         try:
-            async with httpx.AsyncClient(timeout=300) as client:
-                resp = await client.post(
-                    ANTHROPIC_API_URL,
-                    headers={
-                        **CLAUDE_CODE_HEADERS,
-                        "Authorization": f"Bearer {self.oauth_token}",
-                        "Content-Type": "application/json",
-                    },
-                    json=body,
-                )
+            resp = await self._send_request(body)
+
+            # Auto-refresh on 401: re-read token from keychain and retry once
+            if resp.status_code == 401 and self._refresh_token():
+                resp = await self._send_request(body)
 
             if resp.status_code != 200:
                 error_text = resp.text
