@@ -166,7 +166,7 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime, anywhere.
+Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, or DingTalk — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
@@ -174,6 +174,7 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime,
 | **Discord** | Easy (bot token + intents) |
 | **WhatsApp** | Medium (scan QR) |
 | **Feishu** | Medium (app credentials) |
+| **DingTalk** | Medium (app credentials) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -334,6 +335,95 @@ nanobot gateway
 
 > [!TIP]
 > Feishu uses WebSocket to receive messages — no webhook or public IP needed!
+
+</details>
+
+<details>
+<summary><b>DingTalk (钉钉)</b></summary>
+
+Uses **WebSocket** Stream mode — no public IP required.
+
+```bash
+pip install dingtalk-stream
+```
+
+**1. Create a DingTalk bot**
+- Visit [DingTalk Open Platform](https://open-dev.dingtalk.com/)
+- Create an enterprise internal app
+- Enable **Bot** capability
+- Configure message receiving mode to **Stream mode**
+- Get **Client ID** (App Key) and **Client Secret** (App Secret) from app credentials
+- Get **Robot Code** (optional, defaults to Client ID)
+- Publish the app
+
+**2. Configure permissions (for AI Card mode)**
+
+If you want to use AI interactive cards (`messageType: "card"`), enable these permissions:
+- `Card.Instance.Write` — Create and deliver card instances
+- `Card.Streaming.Write` — Stream updates to cards
+
+**3. Create AI Card template (optional)**
+
+For AI Card mode, create a template at [DingTalk Card Platform](https://open-dev.dingtalk.com/fe/card):
+1. Go to "My Templates" → "Create Template"
+2. Select **"AI Card"** scenario
+3. Save without selecting a preset template
+4. Copy the template ID (format: `xxxxx-xxxxx-xxxxx.schema`)
+
+**4. Configure**
+
+```json
+{
+  "channels": {
+    "dingtalk": {
+      "enabled": true,
+      "clientId": "dingxxxxxx",
+      "clientSecret": "your_app_secret",      
+      "messageType": "markdown",
+      "allowFrom": []
+    }
+  }
+}
+```
+
+**For AI Card mode:**
+```json
+{
+  "channels": {
+    "dingtalk": {
+      "enabled": true,
+      "clientId": "dingxxxxxx",
+      "clientSecret": "your_app_secret",
+      "messageType": "card",
+      "cardTemplateId": "your-template-id.schema"      
+    }
+  }
+}
+```
+
+**Configuration options:**
+- `clientId` (required) — App Key from DingTalk Open Platform
+- `clientSecret` (required) — App Secret from DingTalk Open Platform
+- `robotCode` (optional) — Robot code, defaults to `clientId`
+- `messageType` (optional) — Message format: `"markdown"` (default), `"text"`, or `"card"`
+- `cardTemplateId` (required for card mode) — AI Card template ID
+- `cardContentKey` (optional) — Field name in card template for content, defaults to `"content"`
+- `allowFrom` (optional) — User ID allowlist, empty = allow all
+- `debug` (optional) — Enable debug logging
+
+**5. Run**
+
+```bash
+nanobot gateway
+```
+
+> [!TIP]
+> DingTalk uses WebSocket Stream mode to receive messages — no webhook or public IP needed!
+
+**Message types:**
+- **markdown** (default) — Rich text with Markdown formatting
+- **text** — Plain text messages
+- **card** — AI interactive cards with streaming updates (best for AI conversations)
 
 </details>
 

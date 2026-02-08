@@ -30,6 +30,21 @@ class FeishuConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
 
 
+class DingTalkConfig(BaseModel):
+    """DingTalk channel configuration using Stream mode (WebSocket long connection)."""
+    enabled: bool = False
+    client_id: str = ""  # App Key (Client ID) from DingTalk Open Platform
+    client_secret: str = ""  # App Secret (Client Secret) from DingTalk Open Platform
+    robot_code: str = ""  # Robot Code for media download (optional, defaults to client_id)
+    corp_id: str = ""  # Corporation ID (optional)
+    agent_id: str = ""  # Application ID (Agent ID) (optional)
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
+    message_type: str = "markdown"  # Message type: "markdown", "text", or "card"
+    card_template_id: str = ""  # AI Card template ID (required for card mode)
+    card_content_key: str = "content"  # Field name in card template for message content
+    debug: bool = False  # Enable debug logging
+
+
 class DiscordConfig(BaseModel):
     """Discord channel configuration."""
     enabled: bool = False
@@ -45,6 +60,7 @@ class ChannelsConfig(BaseModel):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
 
 
 class AgentDefaults(BaseModel):
