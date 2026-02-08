@@ -107,11 +107,12 @@ class LiteLLMProvider(LLMProvider):
             (("moonshot", "kimi"), "moonshot", ("moonshot/", "openrouter/")),
             (("gemini",), "gemini", ("gemini/",)),
         ]
-        model_lower = model.lower()
-        for keywords, prefix, skip in _prefix_rules:
-            if any(kw in model_lower for kw in keywords) and not any(model.startswith(s) for s in skip):
-                model = f"{prefix}/{model}"
-                break
+        if not (self.is_vllm or self.is_openrouter or self.is_aihubmix):
+            model_lower = model.lower()
+            for keywords, prefix, skip in _prefix_rules:
+                if any(kw in model_lower for kw in keywords) and not any(model.startswith(s) for s in skip):
+                    model = f"{prefix}/{model}"
+                    break
 
         # Gateway/endpoint-specific prefixes (detected by api_base/api_key, not model name)
         if self.is_openrouter and not model.startswith("openrouter/"):
