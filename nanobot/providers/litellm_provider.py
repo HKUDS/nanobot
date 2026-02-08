@@ -12,21 +12,23 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 class LiteLLMProvider(LLMProvider):
     """
     LLM provider using LiteLLM for multi-provider support.
-    
+
     Supports OpenRouter, Anthropic, OpenAI, Gemini, and many other providers through
     a unified interface.
     """
-    
+
     def __init__(
-        self, 
-        api_key: str | None = None, 
+        self,
+        api_key: str | None = None,
         api_base: str | None = None,
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
+        is_resolved: bool = False,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self.is_resolved = is_resolved
         
         # Detect OpenRouter by api_key prefix or explicit api_base
         self.is_openrouter = (
@@ -98,29 +100,31 @@ class LiteLLMProvider(LLMProvider):
             LLMResponse with content and/or tool calls.
         """
         model = model or self.default_model
-        
-        # Auto-prefix model names for known providers
-        # (keywords, target_prefix, skip_if_starts_with)
-        _prefix_rules = [
-            (("glm", "zhipu"), "zai", ("zhipu/", "zai/", "openrouter/", "hosted_vllm/")),
-            (("qwen", "dashscope"), "dashscope", ("dashscope/", "openrouter/")),
-            (("moonshot", "kimi"), "moonshot", ("moonshot/", "openrouter/")),
-            (("gemini",), "gemini", ("gemini/",)),
-        ]
-        model_lower = model.lower()
-        for keywords, prefix, skip in _prefix_rules:
-            if any(kw in model_lower for kw in keywords) and not any(model.startswith(s) for s in skip):
-                model = f"{prefix}/{model}"
-                break
 
-        # Gateway/endpoint-specific prefixes (detected by api_base/api_key, not model name)
-        if self.is_openrouter and not model.startswith("openrouter/"):
-            model = f"openrouter/{model}"
-        elif self.is_aihubmix:
-            model = f"openai/{model.split('/')[-1]}"
-        elif self.is_vllm:
-            model = f"hosted_vllm/{model}"
-        
+        # Auto-prefix model names for known providers
+        # Skip for model aliases (is_resolved=True) - model already has prefix in config
+        if not self.is_resolved:
+            # (keywords, target_prefix, skip_if_starts_with)
+            _prefix_rules = [
+                (("glm", "zhipu"), "zai", ("zhipu/", "zai/", "openrouter/", "hosted_vllm/")),
+                (("qwen", "dashscope"), "dashscope", ("dashscope/", "openrouter/")),
+                (("moonshot", "kimi"), "moonshot", ("moonshot/", "openrouter/")),
+                (("gemini",), "gemini", ("gemini/",)),
+            ]
+            model_lower = model.lower()
+            for keywords, prefix, skip in _prefix_rules:
+                if any(kw in model_lower for kw in keywords) and not any(model.startswith(s) for s in skip):
+                    model = f"{prefix}/{model}"
+                    break
+
+            # Gateway/endpoint-specific prefixes (detection-based)
+            if self.is_openrouter and not model.startswith("openrouter/"):
+                model = f"openrouter/{model}"
+            elif self.is_aihubmix:
+                model = f"openai/{model.split('/')[-1]}"
+            elif self.is_vllm:
+                model = f"hosted_vllm/{model}"
+
         # kimi-k2.5 only supports temperature=1.0
         if "kimi-k2.5" in model.lower():
             temperature = 1.0

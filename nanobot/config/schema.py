@@ -66,6 +66,7 @@ class ProviderConfig(BaseModel):
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    models: dict[str, str] = Field(default_factory=dict)  # Model aliases: alias -> actual model name
 
 
 class ProvidersConfig(BaseModel):
@@ -119,18 +120,61 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
-    
+
     @property
     def workspace_path(self) -> Path:
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
-    
+
     # Default base URLs for API gateways
     _GATEWAY_DEFAULTS = {"openrouter": "https://openrouter.ai/api/v1", "aihubmix": "https://aihubmix.com/v1"}
 
+    def resolve_model(self, model: str) -> tuple[str, ProviderConfig | None]:
+        """Resolve model alias to actual model with provider prefix.
+
+        Args:
+            model: Model name or alias
+
+        Returns:
+            (resolved_model, provider_config) tuple.
+            If alias found, returns (model_with_prefix, provider_config).
+            If alias not found, returns (model, None).
+
+        Note:
+            The alias config should NOT include the provider prefix.
+            This function adds the prefix based on which provider the alias came from.
+        """
+        p = self.providers
+        # Provider map: (provider_name, provider_config, prefix)
+        provider_map = [
+            ("vllm", p.vllm, "hosted_vllm"),
+            ("openrouter", p.openrouter, "openrouter"),
+            ("aihubmix", p.aihubmix, "openai"),
+            ("anthropic", p.anthropic, "anthropic"),
+            ("openai", p.openai, "openai"),
+            ("deepseek", p.deepseek, "deepseek"),
+            ("gemini", p.gemini, "gemini"),
+            ("zhipu", p.zhipu, "zhipu"),
+            ("dashscope", p.dashscope, "dashscope"),
+            ("moonshot", p.moonshot, "moonshot"),
+            ("groq", p.groq, "groq"),
+        ]
+        for provider_name, provider_config, prefix in provider_map:
+            if model in provider_config.models:
+                actual_model = provider_config.models[model]
+                # Add provider prefix if not already present
+                if not actual_model.startswith(f"{prefix}/"):
+                    actual_model = f"{prefix}/{actual_model}"
+                return actual_model, provider_config
+        return model, None
+
     def get_provider(self, model: str | None = None) -> ProviderConfig | None:
         """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
-        model = (model or self.agents.defaults.model).lower()
+        model = model or self.agents.defaults.model
+        actual_model, actual_provider = self.resolve_model(model)
+        if actual_provider:
+            return actual_provider
+        model = actual_model.lower()
         p = self.providers
         # Keyword → provider mapping (order matters: gateways first)
         keyword_map = {
@@ -153,7 +197,7 @@ class Config(BaseSettings):
         """Get API key for the given model. Falls back to first available key."""
         p = self.get_provider(model)
         return p.api_key if p else None
-    
+
     def get_api_base(self, model: str | None = None) -> str | None:
         """Get API base URL for the given model. Applies default URLs for known gateways."""
         p = self.get_provider(model)
@@ -164,7 +208,7 @@ class Config(BaseSettings):
             if p == getattr(self.providers, name):
                 return url
         return None
-    
+
     class Config:
         env_prefix = "NANOBOT_"
         env_nested_delimiter = "__"

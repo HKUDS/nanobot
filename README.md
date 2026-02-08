@@ -12,7 +12,7 @@
   </p>
 </div>
 
-🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [Clawdbot](https://github.com/openclaw/openclaw) 
+🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [Clawdbot](https://github.com/openclaw/openclaw)
 
 ⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
 
@@ -355,6 +355,65 @@ Config file: `~/.nanobot/config.json`
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
+| `moonshot` | LLM (Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
+| `vllm` | LLM (Local/NVIDIA NIM) | [nvidia.com](https://www.nvidia.com) |
+
+### Model Aliases
+
+> [!TIP]
+> Model aliases let you define short, memorable names for complex model identifiers. The provider prefix is added automatically based on which provider you configure the alias under.
+
+**Example: NVIDIA NIM with aliases**
+
+```json
+{
+  "providers": {
+    "vllm": {
+      "apiKey": "nvapi-xxx",
+      "apiBase": "https://integrate.api.nvidia.com/v1",
+      "models": {
+        "glm4": "z-ai/glm4.7",
+        "llama": "meta-llama/Llama-3.1-8B-Instruct",
+        "mistral": "mistralai/Mistral-7B-Instruct-v0.3"
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "glm4"
+    }
+  }
+}
+```
+
+**Example: Business-friendly aliases**
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "apiKey": "sk-or-xxx",
+      "models": {
+        "fast": "anthropic/claude-haiku-3.5",
+        "smart": "anthropic/claude-opus-4-5",
+        "code": "openai/gpt-4-turbo"
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "smart"
+    }
+  }
+}
+```
+
+**How it works:**
+
+1. When you specify a model (e.g., `"glm4"`), nanobot checks all provider `models` dictionaries
+2. If found as an alias under `providers.vllm`, it adds the `hosted_vllm/` prefix → `hosted_vllm/z-ai/glm4.7`
+3. If found under `providers.openrouter`, it adds the `openrouter/` prefix → `openrouter/anthropic/claude-haiku-3.5`
+4. If no alias matches, falls back to keyword matching (existing behavior)
 
 
 ### Security
