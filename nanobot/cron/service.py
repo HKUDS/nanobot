@@ -52,15 +52,23 @@ class CronService:
         self._store: CronStore | None = None
         self._timer_task: asyncio.Task | None = None
         self._running = False
+        self._store_load_failed = False  # True when the on-disk file could not be parsed
     
-    def _load_store(self) -> CronStore:
-        """Load jobs from disk."""
-        if self._store:
+    def _load_store(self, *, force_reload: bool = False) -> CronStore:
+        """Load jobs from disk.
+
+        Args:
+            force_reload: When ``True``, ignore the in-memory cache and re-read
+                the store file from disk.  Used during ``start()`` so that jobs
+                added while the service was stopped are picked up.
+        """
+        if self._store and not force_reload:
             return self._store
         
         if self.store_path.exists():
             try:
-                data = json.loads(self.store_path.read_text())
+                raw = self.store_path.read_text()
+                data = json.loads(raw)
                 jobs = []
                 for j in data.get("jobs", []):
                     jobs.append(CronJob(
@@ -92,17 +100,39 @@ class CronService:
                         delete_after_run=j.get("deleteAfterRun", False),
                     ))
                 self._store = CronStore(jobs=jobs)
+                self._store_load_failed = False
+                logger.debug(f"Loaded {len(jobs)} cron jobs from {self.store_path}")
             except Exception as e:
-                logger.warning(f"Failed to load cron store: {e}")
+                logger.error(
+                    f"Failed to parse cron store at {self.store_path}: {e}. "
+                    "Existing file will NOT be overwritten; starting with empty job list."
+                )
+                # Keep the broken file on disk so the user can inspect / fix it.
+                # Only set an in-memory empty store; _save_store() will be
+                # skipped so the original file is preserved.
                 self._store = CronStore()
+                self._store_load_failed = True
         else:
+            logger.debug(f"No cron store found at {self.store_path}, starting fresh")
             self._store = CronStore()
+            self._store_load_failed = False
         
         return self._store
     
     def _save_store(self) -> None:
-        """Save jobs to disk."""
+        """Save jobs to disk.
+
+        Skips writing when the last load attempt failed (e.g. corrupt JSON) so
+        that the original file is preserved for manual inspection.
+        """
         if not self._store:
+            return
+        
+        if self._store_load_failed:
+            logger.warning(
+                "Skipping save — the store file could not be parsed on load. "
+                "Fix the file manually or delete it to start fresh."
+            )
             return
         
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
@@ -145,9 +175,16 @@ class CronService:
         self.store_path.write_text(json.dumps(data, indent=2))
     
     async def start(self) -> None:
-        """Start the cron service."""
+        """Start the cron service.
+
+        Always re-reads the store file from disk so that jobs added or edited
+        while the service was stopped (e.g. during a container restart) are
+        preserved.  The store is only written back after recomputing next-run
+        times — never with a blank slate.
+        """
         self._running = True
-        self._load_store()
+        # Force reload from disk to pick up any changes made while stopped
+        self._load_store(force_reload=True)
         self._recompute_next_runs()
         self._save_store()
         self._arm_timer()
