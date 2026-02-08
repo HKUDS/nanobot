@@ -63,6 +63,41 @@ web_fetch(url: str, extractMode: str = "markdown", maxChars: int = 50000) -> str
 - Supports markdown or plain text extraction
 - Output is truncated at 50,000 characters by default
 
+## System Information
+
+### system_info
+Get system information including OS, CPU, memory, and disk usage.
+```
+system_info(info_type: str = "all") -> str
+```
+
+**Parameters:**
+- `info_type` (optional): Type of information to retrieve. Options:
+  - `"all"` (default): Returns all system information
+  - `"os"`: Operating system information only
+  - `"cpu"`: CPU information only
+  - `"memory"`: Memory usage information only
+  - `"disk"`: Disk space information only
+
+**Returns:**
+- System information formatted as text, including:
+  - OS: System type, release, version, machine architecture
+  - CPU: CPU count and model information
+  - Memory: Total, used, available memory and usage percentage
+  - Disk: Disk space for current directory and system drives
+
+**Example:**
+```python
+# Get all system information
+system_info()
+
+# Get only memory information
+system_info(info_type="memory")
+
+# Get only disk information
+system_info(info_type="disk")
+```
+
 ## Communication
 
 ### message
