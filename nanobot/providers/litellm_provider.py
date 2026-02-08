@@ -101,10 +101,11 @@ class LiteLLMProvider(LLMProvider):
         
         # Auto-prefix model names for known providers
         # (keywords, target_prefix, skip_if_starts_with)
+        # (keywords, target_prefix, skip_if_starts_with)
         _prefix_rules = [
-            (("glm", "zhipu"), "zai", ("zhipu/", "zai/", "openrouter/", "hosted_vllm/")),
-            (("qwen", "dashscope"), "dashscope", ("dashscope/", "openrouter/")),
-            (("moonshot", "kimi"), "moonshot", ("moonshot/", "openrouter/")),
+            (("glm", "zhipu"), "zai", ("zhipu/", "zai/", "openrouter/", "hosted_vllm/", "vllm/")),
+            (("qwen", "dashscope"), "dashscope", ("dashscope/", "openrouter/", "hosted_vllm/", "vllm/")),
+            (("moonshot", "kimi"), "moonshot", ("moonshot/", "openrouter/", "hosted_vllm/", "vllm/")),
             (("gemini",), "gemini", ("gemini/",)),
         ]
         model_lower = model.lower()

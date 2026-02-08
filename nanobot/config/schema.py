@@ -134,12 +134,13 @@ class Config(BaseSettings):
         p = self.providers
         # Keyword → provider mapping (order matters: gateways first)
         keyword_map = {
+            "vllm": p.vllm,
             "aihubmix": p.aihubmix, "openrouter": p.openrouter,
             "deepseek": p.deepseek, "anthropic": p.anthropic, "claude": p.anthropic,
             "openai": p.openai, "gpt": p.openai, "gemini": p.gemini,
             "zhipu": p.zhipu, "glm": p.zhipu, "zai": p.zhipu,
             "dashscope": p.dashscope, "qwen": p.dashscope,
-            "groq": p.groq, "moonshot": p.moonshot, "kimi": p.moonshot, "vllm": p.vllm,
+            "groq": p.groq, "moonshot": p.moonshot, "kimi": p.moonshot,
         }
         for kw, provider in keyword_map.items():
             if kw in model and provider.api_key:
