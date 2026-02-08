@@ -3,7 +3,7 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from loguru import logger
 
@@ -20,6 +20,11 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import ExecToolConfig
+    from nanobot.cron.service import CronService
+
 
 
 class AgentLoop:
@@ -213,7 +218,10 @@ class AgentLoop:
                     for tc in response.tool_calls
                 ]
                 messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts
+                    messages, 
+                    response.content, 
+                    tool_call_dicts,
+                    reasoning_content=response.reasoning_content
                 )
                 
                 # Execute tools
@@ -244,7 +252,8 @@ class AgentLoop:
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
-            content=final_content
+            content=final_content,
+            reasoning_content=response.reasoning_content if response else None,
         )
     
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
@@ -317,7 +326,10 @@ class AgentLoop:
                     for tc in response.tool_calls
                 ]
                 messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts
+                    messages, 
+                    response.content, 
+                    tool_call_dicts,
+                    reasoning_content=response.reasoning_content
                 )
                 
                 for tool_call in response.tool_calls:
@@ -351,7 +363,7 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
-    ) -> str:
+    ) -> OutboundMessage | None:
         """
         Process a message directly (for CLI or cron usage).
         
@@ -362,7 +374,7 @@ class AgentLoop:
             chat_id: Source chat ID (for context).
         
         Returns:
-            The agent's response.
+            The agent's response message.
         """
         msg = InboundMessage(
             channel=channel,
@@ -371,5 +383,4 @@ class AgentLoop:
             content=content
         )
         
-        response = await self._process_message(msg)
-        return response.content if response else ""
+        return await self._process_message(msg)

@@ -216,20 +216,24 @@ def gateway(
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
-        response = await agent.process_direct(
+        response_msg = await agent.process_direct(
             job.payload.message,
             session_key=f"cron:{job.id}",
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
         )
+        
+        content = response_msg.content if response_msg else ""
+        
         if job.payload.deliver and job.payload.to:
             from nanobot.bus.events import OutboundMessage
+            # Re-wrap or use the response message directly (updating chat_id/channel if needed)
             await bus.publish_outbound(OutboundMessage(
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to,
-                content=response or ""
+                content=content
             ))
-        return response
+        return content
     cron.on_job = on_cron_job
     
     # Create heartbeat service
@@ -311,7 +315,10 @@ def agent(
         # Single message mode
         async def run_once():
             response = await agent_loop.process_direct(message, session_id)
-            console.print(f"\n{__logo__} {response}")
+            if response:
+                if response.reasoning_content:
+                    console.print(f"\n[dim italic]{response.reasoning_content}[/dim italic]")
+                console.print(f"\n{__logo__} {response.content}")
         
         asyncio.run(run_once())
     else:
@@ -326,7 +333,10 @@ def agent(
                         continue
                     
                     response = await agent_loop.process_direct(user_input, session_id)
-                    console.print(f"\n{__logo__} {response}\n")
+                    if response:
+                        if response.reasoning_content:
+                            console.print(f"\n[dim italic]{response.reasoning_content}[/dim italic]")
+                        console.print(f"\n{__logo__} {response.content}\n")
                 except KeyboardInterrupt:
                     console.print("\nGoodbye!")
                     break

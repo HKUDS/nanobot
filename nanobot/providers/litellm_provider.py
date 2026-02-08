@@ -183,11 +183,17 @@ class LiteLLMProvider(LLMProvider):
                 "total_tokens": response.usage.total_tokens,
             }
         
+        # Extract reasoning content for DeepSeek models
+        reasoning_content = None
+        if hasattr(message, "reasoning_content"):
+            reasoning_content = message.reasoning_content
+        
         return LLMResponse(
             content=message.content,
             tool_calls=tool_calls,
             finish_reason=choice.finish_reason or "stop",
             usage=usage,
+            reasoning_content=reasoning_content,
         )
     
     def get_default_model(self) -> str:

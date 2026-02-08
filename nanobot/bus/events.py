@@ -31,6 +31,7 @@ class OutboundMessage:
     chat_id: str
     content: str
     reply_to: str | None = None
+    reasoning_content: str | None = None
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
