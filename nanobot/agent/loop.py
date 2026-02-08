@@ -46,6 +46,8 @@ class AgentLoop:
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
+        tool_call_transparency: bool = False,
+        tool_call_max_length: int = 500,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
@@ -74,6 +76,10 @@ class AgentLoop:
         
         self._running = False
         self._register_default_tools()
+        
+        # Tool call transparency settings
+        self.tool_call_transparency = tool_call_transparency
+        self.tool_call_max_length = tool_call_max_length
     
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -220,6 +226,16 @@ class AgentLoop:
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
+                    
+                    # Tool call transparency: notify user about tool execution
+                    if self.tool_call_transparency:
+                        tool_notice = self._format_tool_call_notice(tool_call.name, tool_call.arguments)
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content=tool_notice
+                        ))
+                    
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
@@ -247,6 +263,25 @@ class AgentLoop:
             content=final_content
         )
     
+    def _format_tool_call_notice(self, tool_name: str, arguments: dict) -> str:
+        """Format a user-friendly notice about a tool call.
+        
+        Args:
+            tool_name: Name of the tool being called
+            arguments: Tool arguments
+            
+        Returns:
+            Formatted notice string (truncated if configured)
+        """
+        # Format arguments
+        args_str = json.dumps(arguments, ensure_ascii=False, indent=2)
+        
+        # Truncate if max_length is set and exceeded
+        if self.tool_call_max_length > 0 and len(args_str) > self.tool_call_max_length:
+            args_str = args_str[:self.tool_call_max_length] + "... (truncated)"
+        
+        return f"🔧 **Using tool**: `{tool_name}`\n📋 **Parameters**: ```json\n{args_str}\n```"
+
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
         Process a system message (e.g., subagent announce).

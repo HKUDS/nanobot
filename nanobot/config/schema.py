@@ -54,6 +54,8 @@ class AgentDefaults(BaseModel):
     max_tokens: int = 8192
     temperature: float = 0.7
     max_tool_iterations: int = 20
+    tool_call_transparency: bool = False  # Enable to show tool calls to users
+    tool_call_max_length: int = 500  # Max length of tool call display (0 = no limit)
 
 
 class AgentsConfig(BaseModel):

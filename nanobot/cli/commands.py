@@ -211,6 +211,8 @@ def gateway(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
+        tool_call_transparency=config.agents.defaults.tool_call_transparency,
+        tool_call_max_length=config.agents.defaults.tool_call_max_length,
     )
     
     # Set cron callback (needs agent)
@@ -305,6 +307,8 @@ def agent(
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        tool_call_transparency=config.agents.defaults.tool_call_transparency,
+        tool_call_max_length=config.agents.defaults.tool_call_max_length,
     )
     
     if message:
