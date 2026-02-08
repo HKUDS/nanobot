@@ -18,7 +18,6 @@ from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.calendar import GoogleCalendarTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
 
@@ -111,7 +110,11 @@ class AgentLoop:
             
         # Google Calendar tool
         if self.calendar_config.enabled:
-            self.tools.register(GoogleCalendarTool(self.calendar_config))
+            from nanobot.providers.calendar import GoogleCalendarProvider
+            from nanobot.agent.tools.calendar import CalendarTool
+            
+            provider = GoogleCalendarProvider(self.calendar_config)
+            self.tools.register(CalendarTool(provider))
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
