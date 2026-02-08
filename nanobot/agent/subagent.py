@@ -169,7 +169,11 @@ class SubagentManager:
             
             logger.info(f"Subagent [{task_id}] completed successfully")
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
-            
+        
+        except asyncio.CancelledError:
+            logger.info(f"Subagent [{task_id}] cancelled by user")
+            await self._announce_result(task_id,label,task,"Task was cancelled by the user.",origin,"cancelled")
+    
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             logger.error(f"Subagent [{task_id}] failed: {e}")
@@ -241,3 +245,16 @@ When you have completed the task, provide a clear summary of your findings or ac
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""
         return len(self._running_tasks)
+    
+    def cancel(self, task_id: str) -> bool:
+        """Cancel a running subagent by ID."""
+        task = self._running_tasks.get(task_id)
+        if not task:
+            return False
+        task.cancel()
+        return True
+
+
+    def list_running(self) -> dict[str, str]:
+        """List running subagents (id -> status)."""
+        return {task_id: "running" for task_id in self._running_tasks.keys()}
