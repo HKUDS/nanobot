@@ -12,6 +12,9 @@
   </p>
 </div>
 
+## ============================================================================
+太棒了，非常适合个人学习!,token花的人心疼，100万几下就没有了，这个项目给我带来了希望嘿嘿！
+## ==================================================================================
 🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [Clawdbot](https://github.com/openclaw/openclaw) 
 
 ⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
