@@ -379,6 +379,24 @@ def channels_status():
         tg_config
     )
 
+    # Feishu
+    fs = config.channels.feishu
+    fs_config = f"app_id: {fs.app_id}" if fs.app_id else "[dim]not configured[/dim]"
+    table.add_row(
+        "Feishu",
+        "✓" if fs.enabled else "✗",
+        fs_config
+    )
+
+    # DingTalk
+    dt = config.channels.dingtalk
+    dt_config = f"app_key: {dt.app_key}" if dt.app_key else "[dim]not configured[/dim]"
+    table.add_row(
+        "DingTalk",
+        "✓" if dt.enabled else "✗",
+        dt_config
+    )
+
     console.print(table)
 
 
