@@ -359,7 +359,7 @@ Uses **Stream Mode** (WebSocket) — no public IP or webhook required.
   "channels": {
     "dingtalk": {
       "enabled": true,
-      "appKey": "dingv0shwinssgixzy5p",
+      "appKey": "your_app_key_here",
       "appSecret": "your_app_secret_here",
       "allowFrom": []
     }
