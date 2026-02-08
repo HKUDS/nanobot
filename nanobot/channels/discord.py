@@ -32,6 +32,7 @@ class DiscordChannel(BaseChannel):
         self._heartbeat_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
+        self._bot_user_id: str | None = None
 
     async def start(self) -> None:
         """Start the Discord gateway connection."""
@@ -134,6 +135,9 @@ class DiscordChannel(BaseChannel):
                 await self._identify()
             elif op == 0 and event_type == "READY":
                 logger.info("Discord gateway READY")
+                # Store bot user ID for mention detection
+                user = payload.get("user") or {}
+                self._bot_user_id = str(user.get("id", ""))
             elif op == 0 and event_type == "MESSAGE_CREATE":
                 await self._handle_message_create(payload)
             elif op == 7:
@@ -190,12 +194,20 @@ class DiscordChannel(BaseChannel):
         sender_id = str(author.get("id", ""))
         channel_id = str(payload.get("channel_id", ""))
         content = payload.get("content") or ""
+        guild_id = payload.get("guild_id")
 
         if not sender_id or not channel_id:
             return
 
         if not self.is_allowed(sender_id):
             return
+
+        if self.config.require_mention and guild_id:
+            # Check if bot was mentioned
+            mentions = payload.get("mentions") or []
+            bot_mentioned = any(str(m.get("id", "")) == self._bot_user_id for m in mentions)
+            if not bot_mentioned:
+                return
 
         content_parts = [content] if content else []
         media_paths: list[str] = []
@@ -233,7 +245,7 @@ class DiscordChannel(BaseChannel):
             media=media_paths,
             metadata={
                 "message_id": str(payload.get("id", "")),
-                "guild_id": payload.get("guild_id"),
+                "guild_id": guild_id,
                 "reply_to": reply_to,
             },
         )

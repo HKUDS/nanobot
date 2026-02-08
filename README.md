@@ -231,11 +231,14 @@ nanobot gateway
     "discord": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
+      "allowFrom": ["YOUR_USER_ID"],
+      "requireMention": true
     }
   }
 }
 ```
+
+> **Tip:** Set `requireMention: true` to make the bot only respond when mentioned (`@bot`) in server channels.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator
