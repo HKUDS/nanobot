@@ -31,6 +31,7 @@ dependencies = [
     "python-telegram-bot[socks]>=21.0",
     "lark-oapi>=1.0.0",
     "socksio>=1.0.0",
+    "prompt-toolkit>=3.0.47",
 ]
 
 [project.optional-dependencies]
