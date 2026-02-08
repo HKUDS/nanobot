@@ -95,8 +95,7 @@ pip install nanobot-ai
 
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
-> You can also change the model to `minimax/minimax-m2` for lower cost.
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [DashScope](https://dashscope.console.aliyun.com) (Qwen) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
 
 **1. Initialize**
 
@@ -106,6 +105,7 @@ nanobot onboard
 
 **2. Configure** (`~/.nanobot/config.json`)
 
+For OpenRouter - recommended for global users:
 ```json
 {
   "providers": {
@@ -117,17 +117,9 @@ nanobot onboard
     "defaults": {
       "model": "anthropic/claude-opus-4-5"
     }
-  },
-  "tools": {
-    "web": {
-      "search": {
-        "apiKey": "BSA-xxx"
-      }
-    }
   }
 }
 ```
-
 
 **3. Chat**
 
