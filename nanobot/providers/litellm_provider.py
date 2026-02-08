@@ -1,5 +1,6 @@
 """LiteLLM provider implementation for multi-provider support."""
-
+from loguru import logger
+from math import log
 import os
 from typing import Any
 
@@ -33,6 +34,11 @@ class LiteLLMProvider(LLMProvider):
             (api_key and api_key.startswith("sk-or-")) or
             (api_base and "openrouter" in api_base)
         )
+
+  
+        # 增加对本地部署ollama的支持
+        # 条件是：api_base存在且default_model包含"ollama"
+        self.is_ollama = bool(api_base) and bool(default_model) and "ollama" in default_model.lower()
         
         # Detect AiHubMix by api_base
         self.is_aihubmix = bool(api_base and "aihubmix" in api_base)
@@ -97,6 +103,7 @@ class LiteLLMProvider(LLMProvider):
         Returns:
             LLMResponse with content and/or tool calls.
         """
+        # Use default model if not specified
         model = model or self.default_model
         
         # Auto-prefix model names for known providers
@@ -144,6 +151,9 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
         
+        # 打印debug log日志,除message外的信息
+        logger.debug(f"LiteLLM param in  =======>>>>>> model: {model} max_tokens: {max_tokens} temperature: {temperature} api_base: {self.api_base} ")
+
         try:
             response = await acompletion(**kwargs)
             return self._parse_response(response)
