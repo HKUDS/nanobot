@@ -103,6 +103,13 @@ class WebToolsConfig(BaseModel):
 class ExecToolConfig(BaseModel):
     """Shell exec tool configuration."""
     timeout: int = 60
+    # Command whitelist: if set, only these commands are allowed
+    # Example: ["ls", "cat", "echo", "pwd", "grep"]
+    # Set to null to allow all safe commands (blacklist mode)
+    allowed_commands: list[str] | None = None
+    # Additional deny patterns (regex)
+    # These are added to the built-in dangerous patterns
+    deny_patterns: list[str] | None = None
 
 
 class ToolsConfig(BaseModel):

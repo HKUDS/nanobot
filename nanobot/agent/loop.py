@@ -89,6 +89,8 @@ class AgentLoop:
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
+            allowed_commands=set(self.exec_config.allowed_commands) if self.exec_config.allowed_commands else None,
+            deny_patterns=self.exec_config.deny_patterns,
         ))
         
         # Web tools
