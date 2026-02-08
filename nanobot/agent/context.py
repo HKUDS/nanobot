@@ -225,7 +225,8 @@ Always be helpful, accurate, and concise. When using tools, explain what you're 
         self,
         messages: list[dict[str, Any]],
         content: str | None,
-        tool_calls: list[dict[str, Any]] | None = None
+        tool_calls: list[dict[str, Any]] | None = None,
+        reasoning_content: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Add an assistant message to the message list.
@@ -234,6 +235,7 @@ Always be helpful, accurate, and concise. When using tools, explain what you're 
             messages: Current message list.
             content: Message content.
             tool_calls: Optional tool calls.
+            reasoning_content: Thinking output (Kimi, DeepSeek-R1, etc.).
         
         Returns:
             Updated message list.
@@ -242,6 +244,10 @@ Always be helpful, accurate, and concise. When using tools, explain what you're 
         
         if tool_calls:
             msg["tool_calls"] = tool_calls
+        
+        # Thinking models reject history without this
+        if reasoning_content:
+            msg["reasoning_content"] = reasoning_content
         
         messages.append(msg)
         return messages
