@@ -1,5 +1,6 @@
 .assets
 .env
+config.json
 *.pyc
 dist/
 build/
