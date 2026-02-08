@@ -3,7 +3,7 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from loguru import logger
 
@@ -20,6 +20,11 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import ExecToolConfig
+    from nanobot.cron.service import CronService
+
 
 
 class AgentLoop:
@@ -213,7 +218,10 @@ class AgentLoop:
                     for tc in response.tool_calls
                 ]
                 messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts
+                    messages, 
+                    response.content, 
+                    tool_call_dicts,
+                    reasoning_content=response.reasoning_content
                 )
                 
                 # Execute tools
@@ -317,7 +325,10 @@ class AgentLoop:
                     for tc in response.tool_calls
                 ]
                 messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts
+                    messages, 
+                    response.content, 
+                    tool_call_dicts,
+                    reasoning_content=response.reasoning_content
                 )
                 
                 for tool_call in response.tool_calls:
