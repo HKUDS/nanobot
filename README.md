@@ -174,6 +174,7 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime,
 | **Discord** | Easy (bot token + intents) |
 | **WhatsApp** | Medium (scan QR) |
 | **Feishu** | Medium (app credentials) |
+| **DingTalk** | Easy (app credentials) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -334,6 +335,48 @@ nanobot gateway
 
 > [!TIP]
 > Feishu uses WebSocket to receive messages — no webhook or public IP needed!
+
+</details>
+
+<details>
+<summary><b>DingTalk (钉钉)</b></summary>
+
+Uses **Stream Mode** (WebSocket) — no public IP or webhook required.
+
+**1. Create a DingTalk bot**
+- Visit [DingTalk Open Platform](https://open-dev.dingtalk.com/)
+- Create an app → Enable **Robot** capability
+- Get **App Key** and **App Secret** from "App Information"
+- **Permissions**: Add `im:chat` (send and receive messages)
+- **Events**: Add `1.0` version message events
+- Enable **Stream Mode** in event subscription
+- Publish the app
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "dingtalk": {
+      "enabled": true,
+      "appKey": "dingv0shwinssgixzy5p",
+      "appSecret": "your_app_secret_here",
+      "allowFrom": []
+    }
+  }
+}
+```
+
+> `allowFrom`: Leave empty to allow all users, or add `["user_id_1", "user_id_2"]` to restrict access.
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+> [!TIP]
+> DingTalk uses Stream Mode WebSocket — no webhook or public IP needed!
 
 </details>
 

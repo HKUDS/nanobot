@@ -39,12 +39,21 @@ class DiscordConfig(BaseModel):
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 
 
+class DingTalkConfig(BaseModel):
+    """DingTalk (钉钉) channel configuration using Stream Mode (WebSocket)."""
+    enabled: bool = False
+    app_key: str = ""  # App Key from DingTalk Open Platform
+    app_secret: str = ""  # App Secret from DingTalk Open Platform
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
 
 
 class AgentDefaults(BaseModel):
