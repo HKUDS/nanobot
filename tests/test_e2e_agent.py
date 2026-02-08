@@ -10,6 +10,7 @@ from nanobot.providers.lazyllm_provider import LazyLLMProvider
 SOURCE = "doubao"
 API_KEY = os.getenv("NANOBOT_TEST_DOUBAO_API_KEY", "")
 MODEL = "doubao-seed-1-8-251228"
+MODEL_WITH_SOURCE = f"{SOURCE}/{MODEL}"
 
 
 def test_agent_loop_minimal_e2e(tmp_path):
@@ -22,8 +23,7 @@ def test_agent_loop_minimal_e2e(tmp_path):
 
     provider = LazyLLMProvider(
         api_key=API_KEY,
-        source=SOURCE,
-        default_model=MODEL,
+        default_model=MODEL_WITH_SOURCE,
         type="LLM",
     )
     bus = MessageBus()
@@ -31,7 +31,7 @@ def test_agent_loop_minimal_e2e(tmp_path):
         bus=bus,
         provider=provider,
         workspace=workspace,
-        model=MODEL,
+        model=MODEL_WITH_SOURCE,
         max_iterations=4,
         brave_api_key=None,
     )
