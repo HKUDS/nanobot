@@ -95,7 +95,6 @@ pip install nanobot-ai
 > Set your API key in `~/.nanobot/config.json`.
 > Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [DashScope](https://dashscope.console.aliyun.com) (Qwen) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
 > You can also switch provider to LazyLLM by setting `providers.provider` to `lazyllm`, then configuring `providers.lazyllm` to access more model vendors.
-> Common LazyLLM `modelSource` values include: `qwen`, `deepseek`, `siliconflow`, `doubao`, `openai`, `glm`, `kimi`, `minimax`.
 
 **1. Initialize**
 
@@ -121,8 +120,8 @@ For OpenRouter - recommended for global users:
 }
 ```
 
-If you want LazyLLM instead, set `providers.provider` to `lazyllm` and fill `providers.lazyllm.modelSource` / `modelId` / `apiKey`.
-`modelSource` can be one of the common providers listed above.
+If you want LazyLLM instead, set `providers.provider` to `lazyllm`.
+Set `agents.defaults.model` as `source/model`, for example `doubao/doubao-seed-1-8-251228`.
 
 **3. Chat**
 
@@ -370,6 +369,7 @@ Config file: `~/.nanobot/config.json`
 
 nanobot uses a **Provider Registry** (`nanobot/providers/registry.py`) as the single source of truth.
 Adding a new provider only takes **2 steps** — no if-elif chains to touch.
+This guide applies to **LiteLLM-backed providers**; `lazyllm` is a separate backend selected via `providers.provider = "lazyllm"`.
 
 **Step 1.** Add a `ProviderSpec` entry to `PROVIDERS` in `nanobot/providers/registry.py`:
 

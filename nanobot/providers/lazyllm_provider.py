@@ -3,7 +3,7 @@
 import asyncio
 import copy
 import json
-import os
+import re
 import uuid
 import warnings
 from typing import Any
@@ -37,6 +37,8 @@ class LazyLLMProvider(LLMProvider):
         "sensenova",
         "siliconflow",
     )
+    _KNOWN_SOURCES_SET = {s.lower() for s in KNOWN_SOURCES}
+    _THINK_RE = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
 
     def __init__(
         self,
@@ -47,8 +49,7 @@ class LazyLLMProvider(LLMProvider):
         type: str = "LLM",
     ):
         super().__init__(api_key, api_base)
-        self.default_model = default_model
-        self.source = source
+        self.default_model, self.source = self._split_source_and_model(default_model, source)
         if self.source and self.source not in self.KNOWN_SOURCES:
             warnings.warn(
                 f"Unknown lazyllm source '{self.source}'. "
@@ -61,6 +62,25 @@ class LazyLLMProvider(LLMProvider):
             source=self.source,
             model_type=self.model_type,
         )
+
+    @classmethod
+    def _split_source_and_model(
+        cls, model: str, fallback_source: str | None
+    ) -> tuple[str, str | None]:
+        """Parse `source/model` style model string for LazyLLM.
+
+        If the first segment is a known LazyLLM source, treat it as source.
+        Otherwise keep the model unchanged and use fallback_source.
+        """
+        raw_model = (model or "").strip()
+        source = fallback_source.strip().lower() if fallback_source else None
+        if not raw_model:
+            return raw_model, source
+
+        first, sep, rest = raw_model.partition("/")
+        if sep and rest and first.lower() in cls._KNOWN_SOURCES_SET:
+            return rest, first.lower()
+        return raw_model, source
 
     def _normalize_type(self, model_type: str) -> str:
         normalized = model_type.upper()
@@ -89,11 +109,16 @@ class LazyLLMProvider(LLMProvider):
         return OnlineModule(**kwargs)
 
     def _get_client_for_model(self, model: str) -> tuple[Any, str]:
-        if model == self.default_model:
-            return self.client, model
+        resolved_model, resolved_source = self._split_source_and_model(model, self.source)
+        if resolved_model == self.default_model and resolved_source == self.source:
+            return self.client, resolved_model
         return (
-            self._create_client(model=model, source=self.source, model_type=self.model_type),
-            model,
+            self._create_client(
+                model=resolved_model,
+                source=resolved_source,
+                model_type=self.model_type,
+            ),
+            resolved_model,
         )
 
     def _messages_to_lazyllm_payload(
@@ -143,6 +168,8 @@ class LazyLLMProvider(LLMProvider):
             content = json.dumps(content, ensure_ascii=False)
         elif content is not None and not isinstance(content, str):
             content = str(content)
+        elif isinstance(content, str):
+            content = self._strip_think_block(content)
 
         tool_calls: list[ToolCallRequest] = []
         for idx, tc in enumerate(response.get("tool_calls") or []):
@@ -185,6 +212,15 @@ class LazyLLMProvider(LLMProvider):
             finish_reason=finish_reason,
             usage={},
         )
+
+    @classmethod
+    def _strip_think_block(cls, text: str) -> str:
+        """Drop reasoning blocks like <think>...</think> from model output."""
+        if "<think" not in text.lower():
+            return text.strip()
+        cleaned = cls._THINK_RE.sub("", text).strip()
+        # Keep original text if stripping would produce empty output.
+        return cleaned or text.strip()
 
     async def chat(
         self,

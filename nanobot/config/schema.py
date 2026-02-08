@@ -73,23 +73,12 @@ class LazyLLMConfig(BaseModel):
     """LazyLLM provider configuration."""
     api_key: str = ""
     api_base: str | None = None
-    model_source: str = "siliconflow"
-    model_id: str = "Pro/moonshotai/Kimi-K2.5"
-    model_type: Literal["LLM", "VLM"] = "LLM"
-
-
-class LazyLLMConfig(BaseModel):
-    """LazyLLM provider configuration."""
-    api_key: str = ""
-    api_base: str | None = None
-    model_source: str = "siliconflow"
-    model_id: str = "Pro/moonshotai/Kimi-K2.5"
     model_type: Literal["LLM", "VLM"] = "LLM"
 
 
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
-    provider: Literal["litellm", "lazyllm"] = "lazyllm"
+    provider: Literal["litellm", "lazyllm"] = "litellm"
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
