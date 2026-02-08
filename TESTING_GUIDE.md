@@ -101,79 +101,8 @@ class TestIsOllama:
             default_model="ollama/llama3.2"
         )
         assert provider.is_ollama is True
-
-    # 作用：测试模型名包含大写 'OLLAMA' 时也能正确识别
-    # 设计目的：验证大小写不敏感的检测逻辑
-    # 好处：确保用户输入不同大小写格式都能被正确处理
-    def test_is_ollama_true_with_uppercase(self):
-        """Test is_ollama is True when model contains 'OLLAMA' (case insensitive)."""
-        provider = LiteLLMProvider(
-            api_key="dummy",
-            api_base="http://localhost:11434",
-            default_model="OLLAMA/llama3.2"
-        )
-        assert provider.is_ollama is True
-
-    # 作用：测试模型名包含混合大小写 'Ollama' 时的识别
-    # 设计目的：验证首字母大写等常见输入格式
-    # 好处：提高用户体验，兼容多种输入习惯
-    def test_is_ollama_true_with_mixed_case(self):
-        """Test is_ollama is True when model contains 'Ollama' (mixed case)."""
-        provider = LiteLLMProvider(
-            api_key="dummy",
-            api_base="http://localhost:11434",
-            default_model="Ollama/llama3.2"
-        )
-        assert provider.is_ollama is True
-
-    # 作用：测试 api_base 为 None 时不应识别为 Ollama
-    # 设计目的：验证 api_base 是必要条件的检测逻辑
-    # 好处：防止在没有配置端点的情况下误判为本地 Ollama
-    def test_is_ollama_false_without_api_base(self):
-        """Test is_ollama is False when api_base is None."""
-        provider = LiteLLMProvider(
-            api_key="dummy",
-            api_base=None,
-            default_model="ollama/llama3.2"
-        )
-        assert provider.is_ollama is False
-
-    # 作用：测试 api_base 为空字符串时不应识别为 Ollama
-    # 设计目的：验证空字符串被视为无效配置
-    # 好处：确保空配置不会导致误判，提高健壮性
-    def test_is_ollama_false_with_empty_api_base(self):
-        """Test is_ollama is False when api_base is empty string."""
-        provider = LiteLLMProvider(
-            api_key="dummy",
-            api_base="",
-            default_model="ollama/llama3.2"
-        )
-        assert provider.is_ollama is False
-
-    # 作用：测试模型名不包含 'ollama' 时不应识别为 Ollama
-    # 设计目的：验证负向检测，确保其他模型不被误判
-    # 好处：防止将 GPT、Claude 等云模型误判为本地 Ollama
-    def test_is_ollama_false_without_ollama_in_model(self):
-        """Test is_ollama is False when model doesn't contain 'ollama'."""
-        provider = LiteLLMProvider(
-            api_key="dummy",
-            api_base="http://localhost:11434",
-            default_model="gpt-4"
-        )
-        assert provider.is_ollama is False
-
-    # 作用：测试使用默认 anthropic 模型时不应识别为 Ollama
-    # 设计目的：验证默认配置下不会误判
-    # 好处：确保默认行为正确，不影响现有用户
-    def test_is_ollama_false_with_default_model(self):
-        """Test is_ollama is False with default anthropic model."""
-        provider = LiteLLMProvider(
-            api_key="dummy",
-            api_base="http://localhost:11434",
-            default_model="anthropic/claude-opus-4-5"
-        )
-        assert provider.is_ollama is False
-
+ 
+    
     # 作用：测试使用 127.0.0.1 地址的典型 Ollama 设置
     # 设计目的：验证本地地址配置的正确识别
     # 好处：覆盖常见的本地部署场景，包括带 /v1 路径的端点
@@ -211,51 +140,7 @@ class TestIsOllama:
             )
             assert provider.is_ollama == expected, f"Failed for model: {model}"
 
-
-# 作用：测试其他提供商标志的检测，作为对比参考
-# 设计目的：确保 is_ollama 与其他提供商标志互斥
-# 好处：验证不同提供商之间的正确区分，防止重叠检测
-class TestOtherProviderFlags:
-    """Test other provider detection flags for comparison."""
-
-    # 作用：测试 OpenRouter API 密钥被正确识别
-    # 设计目的：验证 sk-or- 前缀的检测逻辑
-    # 好处：确保云服务和本地部署的正确区分
-    def test_is_openrouter_detection(self):
-        """Test is_openrouter flag."""
-        provider = LiteLLMProvider(
-            api_key="sk-or-v1-test",
-            api_base=None,
-            default_model="anthropic/claude-3.5-sonnet"
-        )
-        assert provider.is_openrouter is True
-        assert provider.is_ollama is False
-
-    # 作用：测试 vLLM 自定义端点的检测
-    # 设计目的：验证 api_base 存在但非特定提供商时的检测
-    # 好处：确保本地 vLLM 部署与 Ollama 正确区分
-    def test_is_vllm_detection(self):
-        """Test is_vllm flag with custom endpoint."""
-        provider = LiteLLMProvider(
-            api_key="dummy",
-            api_base="http://localhost:8000/v1",
-            default_model="meta-llama/Llama-3.1-8B-Instruct"
-        )
-        assert provider.is_vllm is True
-        assert provider.is_ollama is False
-
-    # 作用：测试 AiHubMix 网关的检测
-    # 设计目的：验证特定 API 网关域名的检测
-    # 好处：确保第三方网关服务与本地 Ollama 正确区分
-    def test_is_aihubmix_detection(self):
-        """Test is_aihubmix flag."""
-        provider = LiteLLMProvider(
-            api_key="dummy",
-            api_base="https://aihubmix.com/v1",
-            default_model="gpt-4"
-        )
-        assert provider.is_aihubmix is True
-        assert provider.is_ollama is False
+ 
 ```
 
 ### 测试结构解析
