@@ -38,6 +38,8 @@
 
 💎 **Easy-to-Use**: One-click to deploy and you're ready to go.
 
+🧠 **Persistent Memory (Smriti)**: A built-in, auditable memory engine that allows nanobot to remember facts, user preferences, and tasks across sessions.
+
 ## 🏗️ Architecture
 
 <p align="center">
