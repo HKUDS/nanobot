@@ -336,6 +336,49 @@ nanobot gateway
 
 </details>
 
+<details>
+<summary><b>DingTalk (钉钉)</b></summary>
+
+Uses **Stream Mode** — no public IP required.
+
+```bash
+pip install nanobot-ai[dingtalk]
+```
+
+**1. Create a DingTalk bot**
+- Visit [DingTalk Open Platform](https://open-dev.dingtalk.com/)
+- Create a new app -> Add **Robot** capability
+- **Configuration**:
+  - Toggle **Stream Mode** ON
+- **Permissions**: Add necessary permissions for sending messages
+- Get **AppKey** (Client ID) and **AppSecret** (Client Secret) from "Credentials"
+- Publish the app
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "dingtalk": {
+      "enabled": true,
+      "clientId": "YOUR_APP_KEY",
+      "clientSecret": "YOUR_APP_SECRET",
+      "allowFrom": []
+    }
+  }
+}
+```
+
+> `allowFrom`: Leave empty to allow all users, or add `["staffId"]` to restrict access.
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+</details>
+
 ## ⚙️ Configuration
 
 Config file: `~/.nanobot/config.json`
