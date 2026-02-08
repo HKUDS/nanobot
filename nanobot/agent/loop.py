@@ -1,5 +1,8 @@
 """Agent loop: the core processing engine."""
 
+# 模块作用：智能体循环核心引擎，协调消息处理、LLM调用和工具执行
+# 设计目的：实现可扩展、模块化的AI代理循环，支持多轮工具调用
+# 好处：关注点分离清晰，易于调试和扩展，支持异步并发处理
 import asyncio
 import json
 from pathlib import Path
@@ -33,7 +36,13 @@ class AgentLoop:
     4. Executes tool calls
     5. Sends responses back
     """
+    # 作用：核心处理引擎，协调消息处理、LLM调用和工具执行
+    # 设计目的：提供可扩展、模块化的AI代理循环，支持多轮工具调用
+    # 好处：关注点分离清晰，易于调试和扩展，支持异步并发处理
     
+    # 作用：初始化智能体循环，设置核心组件和配置
+    # 设计目的：通过依赖注入实现高度可配置和可测试的架构
+    # 好处：解耦各组件，便于单独测试和替换，支持不同的LLM提供商和工具集
     def __init__(
         self,
         bus: MessageBus,
@@ -74,52 +83,58 @@ class AgentLoop:
         self._running = False
         self._register_default_tools()
     
+    # 作用：注册智能体可用的所有内置工具
+    # 设计目的：通过统一的注册中心管理工具，支持条件注册（如安全限制）
+    # 好处：工具集中管理，易于扩展新工具，支持动态启用/禁用工具
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        # File tools (restrict to workspace if configured)
+        # 文件工具（如果配置了工作限制到工作空间）
         allowed_dir = self.workspace if self.restrict_to_workspace else None
         self.tools.register(ReadFileTool(allowed_dir=allowed_dir))
         self.tools.register(WriteFileTool(allowed_dir=allowed_dir))
         self.tools.register(EditFileTool(allowed_dir=allowed_dir))
         self.tools.register(ListDirTool(allowed_dir=allowed_dir))
         
-        # Shell tool
+        # Shell工具
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
         ))
         
-        # Web tools
+        # Web工具
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
         
-        # Message tool
+        # 消息工具
         message_tool = MessageTool(send_callback=self.bus.publish_outbound)
         self.tools.register(message_tool)
         
-        # Spawn tool (for subagents)
+        # 生成工具（用于子代理）
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
         
-        # Cron tool (for scheduling)
+        # Cron工具（用于定时任务）
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
     
+    # 作用：启动异步事件循环，持续监听和处理消息总线上的消息
+    # 设计目的：实现非阻塞的消息处理，支持高并发请求
+    # 好处：异步架构提高系统吞吐量，超时机制防止阻塞，错误处理保证系统稳定性
     async def run(self) -> None:
-        """Run the agent loop, processing messages from the bus."""
+        """运行智能体循环，处理来自消息总线的消息。"""
         self._running = True
         logger.info("Agent loop started")
         
         while self._running:
             try:
-                # Wait for next message
+                # 等待下一条消息
                 msg = await asyncio.wait_for(
                     self.bus.consume_inbound(),
                     timeout=1.0
                 )
                 
-                # Process it
+                # 处理消息
                 try:
                     response = await self._process_message(msg)
                     if response:
@@ -134,12 +149,18 @@ class AgentLoop:
                     ))
             except asyncio.TimeoutError:
                 continue
-    
+
+    # 作用：停止智能体循环，设置运行标志为False
+    # 设计目的：提供优雅的停止机制，允许异步循环自然退出
+    # 好处：避免强制终止导致的资源泄漏，确保日志记录停止状态
     def stop(self) -> None:
-        """Stop the agent loop."""
+        """停止智能体循环。"""
         self._running = False
         logger.info("Agent loop stopping")
     
+    # 作用：将用户消息转换为智能体响应，支持多轮工具调用和会话管理
+    # 设计目的：实现完整的LLM交互流程，包括上下文构建、工具执行、会话持久化
+    # 好处：模块化设计便于调试，支持最大迭代次数防止无限循环，错误处理保证用户体验
     async def _process_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
         Process a single inbound message.
@@ -246,6 +267,9 @@ class AgentLoop:
             content=final_content
         )
     
+    # 作用：处理后台任务完成通知，将结果路由回原始会话
+    # 设计目的：支持异步任务与主代理的无缝集成，实现任务结果传递
+    # 好处：解耦后台任务与实时交互，支持长时间运行的任务，保持会话连续性
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
         Process a system message (e.g., subagent announce).
@@ -344,6 +368,9 @@ class AgentLoop:
             content=final_content
         )
     
+    # 作用：提供程序化接口，绕过消息总线直接与智能体交互
+    # 设计目的：支持命令行工具、定时任务等非交互式场景
+    # 好处：简化调用流程，提高执行效率，便于集成到自动化工作流
     async def process_direct(
         self,
         content: str,
