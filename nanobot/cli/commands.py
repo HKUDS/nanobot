@@ -1,6 +1,7 @@
-"""CLI commands for nanobot."""
+﻿"""CLI commands for nanobot."""
 
 import asyncio
+import sys
 from pathlib import Path
 
 import typer
@@ -16,6 +17,12 @@ app = typer.Typer(
 )
 
 console = Console()
+
+
+def _safe_print(text: str) -> None:
+    encoding = sys.stdout.encoding or "utf-8"
+    safe_text = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+    console.print(safe_text)
 
 
 def version_callback(value: bool):
@@ -72,6 +79,24 @@ def onboard():
     console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
 
+
+@app.command("login")
+def login(
+    provider: str = typer.Option("openai-codex", "--provider", "-p", help="Auth provider"),
+):
+    """Login to an auth provider (e.g. openai-codex)."""
+    if provider != "openai-codex":
+        console.print(f"[red]Unsupported provider: {provider}[/red]")
+        raise typer.Exit(1)
+
+    from oauth_cli_kit import login_oauth_interactive as login_codex_oauth_interactive
+
+    console.print("[green]Starting OpenAI Codex OAuth login...[/green]")
+    login_codex_oauth_interactive(
+        print_fn=console.print,
+        prompt_fn=typer.prompt,
+    )
+    console.print("[green]Login successful. Credentials saved.[/green]")
 
 
 
@@ -148,10 +173,33 @@ This file stores important information that should persist across sessions.
 
 
 def _make_provider(config):
-    """Create LiteLLMProvider from config. Exits if no API key found."""
+    """Create provider from config. Exits if no credentials found."""
     from nanobot.providers.litellm_provider import LiteLLMProvider
-    p = config.get_provider()
+    from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+    from nanobot.providers.registry import PROVIDERS
+    from oauth_cli_kit import get_token as get_oauth_token
+
     model = config.agents.defaults.model
+    model_lower = model.lower()
+
+    # Check for OAuth-based providers first (registry-driven)
+    for spec in PROVIDERS:
+        if spec.is_oauth and any(kw in model_lower for kw in spec.keywords):
+            # OAuth provider matched
+            try:
+                _ = get_oauth_token(spec.oauth_provider or spec.name)
+            except Exception:
+                console.print(f"Please run: [cyan]nanobot login --provider {spec.name}[/cyan]")
+                raise typer.Exit(1)
+            # Return appropriate OAuth provider class
+            if spec.name == "openai_codex":
+                return OpenAICodexProvider(default_model=model)
+            # Future OAuth providers can be added here
+            console.print(f"[red]Error: OAuth provider '{spec.name}' not fully implemented.[/red]")
+            raise typer.Exit(1)
+
+    # Standard API key-based providers
+    p = config.get_provider()
     if not (p and p.api_key) and not model.startswith("bedrock/"):
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers section")
@@ -311,7 +359,7 @@ def agent(
         # Single message mode
         async def run_once():
             response = await agent_loop.process_direct(message, session_id)
-            console.print(f"\n{__logo__} {response}")
+            _safe_print(f"\n{__logo__} {response}")
         
         asyncio.run(run_once())
     else:
@@ -326,7 +374,7 @@ def agent(
                         continue
                     
                     response = await agent_loop.process_direct(user_input, session_id)
-                    console.print(f"\n{__logo__} {response}\n")
+                    _safe_print(f"\n{__logo__} {response}\n")
                 except KeyboardInterrupt:
                     console.print("\nGoodbye!")
                     break
@@ -624,6 +672,7 @@ def cron_run(
 def status():
     """Show nanobot status."""
     from nanobot.config.loader import load_config, get_config_path
+    from oauth_cli_kit import get_token as get_codex_token
 
     config_path = get_config_path()
     config = load_config()
@@ -654,6 +703,12 @@ def status():
                 has_key = bool(p.api_key)
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
 
+        try:
+            _ = get_codex_token()
+            codex_status = "[green]logged in[/green]"
+        except Exception:
+            codex_status = "[dim]not logged in[/dim]"
+        console.print(f"Codex Login: {codex_status}")
 
 if __name__ == "__main__":
     app()
