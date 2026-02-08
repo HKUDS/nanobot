@@ -30,6 +30,14 @@ class FeishuConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
 
 
+class DingTalkConfig(BaseModel):
+    """DingTalk channel configuration using Stream mode."""
+    enabled: bool = False
+    client_id: str = ""  # AppKey
+    client_secret: str = ""  # AppSecret
+    allow_from: list[str] = Field(default_factory=list)  # Allowed staff_ids
+
+
 class DiscordConfig(BaseModel):
     """Discord channel configuration."""
     enabled: bool = False
@@ -45,6 +53,7 @@ class ChannelsConfig(BaseModel):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
 
 
 class AgentDefaults(BaseModel):
