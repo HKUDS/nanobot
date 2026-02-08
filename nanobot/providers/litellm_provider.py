@@ -75,6 +75,8 @@ class LiteLLMProvider(LLMProvider):
         
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
+        # Drop unsupported parameters for providers (e.g., gpt-5 rejects some params)
+        litellm.drop_params = True
     
     async def chat(
         self,
