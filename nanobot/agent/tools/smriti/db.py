@@ -1,5 +1,5 @@
 """
-smriti.store
+memory_box.store
 
 High-level memory store.
 

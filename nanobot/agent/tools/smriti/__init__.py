@@ -1,6 +1,6 @@
-# /smriti/__init__.py
+# /memory_box/__init__.py
 """
-smriti
+memory_box
 
 Minimal, durable, queryable memory for Nanobot.
 

@@ -1,6 +1,6 @@
-# nanobot/agent/tools/smriti/bench.py
+# nanobot/agent/tools/memory_box/bench.py
 """
-smriti.bench
+memory_box.bench
 
 Production benchmark + correctness harness for `MemoryStore`.
 
@@ -71,14 +71,14 @@ To make the benchmark non-trivial, enable:
 Recommended runs
 ----------------
 Quick sanity (small, fast):
-  python -m nanobot.agent.tools.smriti.bench --clean --items 2000 --queries 400 --seed 0
+  python -m nanobot.agent.tools.memory_box.bench --clean --items 2000 --queries 400 --seed 0
 
 Non-trivial quality (ambiguity + typos):
-  python -m nanobot.agent.tools.smriti.bench --clean --hard --typo_rate 0.10
+  python -m nanobot.agent.tools.memory_box.bench --clean --hard --typo_rate 0.10
 
 Stress (bigger):
-  python -m nanobot.agent.tools.smriti.bench \\
-    --workspace ./tmp/smriti_bench --clean \\
+  python -m nanobot.agent.tools.memory_box.bench \\
+    --workspace ./tmp/memory_box_bench --clean \\
     --items 20000 --queries 2000 --k 5 --neg_frac 0.50 --promote_frac 0.05 \\
     --hard --hard_shared_frac 0.60 --typo_rate 0.10
 
@@ -381,7 +381,7 @@ def run_bench(
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--workspace", default="./tmp/smriti_bench", help="workspace folder (default: ./tmp/smriti_bench)")
+    ap.add_argument("--workspace", default="./tmp/memory_box_bench", help="workspace folder (default: ./tmp/memory_box_bench)")
     ap.add_argument("--items", type=int, default=2000)
     ap.add_argument("--queries", type=int, default=400)
     ap.add_argument("--seed", type=int, default=0)

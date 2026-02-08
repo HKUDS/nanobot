@@ -1,6 +1,6 @@
-# nanobot/agent/tools/smriti/models.py
+# nanobot/agent/tools/memory_box/models.py
 """
-smriti.models
+memory_box.models
 
 IMPORTANT: do NOT name this file `types.py`.
 If you ever run python with CWD inside this folder, `types.py` shadows stdlib

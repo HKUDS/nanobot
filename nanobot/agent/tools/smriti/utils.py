@@ -1,7 +1,7 @@
-# nanobot/agent/tools/smriti/utils.py
+# nanobot/agent/tools/memory_box/utils.py
 
 """
-smriti.utils:
+memory_box.utils:
 
 Utility functions for memory box.
  - credits: File contains codes from Nanobot
