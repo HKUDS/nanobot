@@ -34,8 +34,8 @@ class MessageTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Send a message to the user. Use this when you want to communicate something."
-    
+        return "Send a message to the user. Supports text and media attachments (images, videos, audio, files)."
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -43,7 +43,12 @@ class MessageTool(Tool):
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "The message content to send"
+                    "description": "The message content to send (can be empty if only sending media)"
+                },
+                "media": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional: list of file paths to attach (images, videos, audio, documents)"
                 },
                 "channel": {
                     "type": "string",
@@ -54,33 +59,41 @@ class MessageTool(Tool):
                     "description": "Optional: target chat/user ID"
                 }
             },
-            "required": ["content"]
+            "required": []
         }
     
     async def execute(
-        self, 
-        content: str, 
-        channel: str | None = None, 
+        self,
+        content: str = "",
+        media: list[str] | None = None,
+        channel: str | None = None,
         chat_id: str | None = None,
         **kwargs: Any
     ) -> str:
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
-        
+
         if not channel or not chat_id:
             return "Error: No target channel/chat specified"
-        
         if not self._send_callback:
             return "Error: Message sending not configured"
-        
+        if not content and not media:
+            return "Error: No content or media to send"
+
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
-            content=content
+            content=content,
+            media=media or []
         )
-        
+
         try:
             await self._send_callback(msg)
-            return f"Message sent to {channel}:{chat_id}"
+            parts = []
+            if content:
+                parts.append("text")
+            if media:
+                parts.append(f"{len(media)} file(s)")
+            return f"Sent {' + '.join(parts)} to {channel}:{chat_id}"
         except Exception as e:
             return f"Error sending message: {str(e)}"
