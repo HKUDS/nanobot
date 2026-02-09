@@ -16,12 +16,12 @@
 
 ⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
 
-📏 Real-time line count: **3,423 lines** (run `bash core_agent_lines.sh` to verify anytime)
+📏 Real-time line count: **3,448 lines** (run `bash core_agent_lines.sh` to verify anytime)
 
 ## 📢 News
 
-- **2026-02-08** 🔧 Refactored Providers — adding a new LLM provider now takes just 2 simple steps! Check [here](#providers).
-- **2026-02-07** 🚀 🚀 Released v0.1.3.post5 with Qwen support & several key improvements! Check [here](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post5) for details.
+- **2026-02-08** 🔧 Refactored Providers—adding a new LLM provider now takes just 2 simple steps! Check [here](#providers).
+- **2026-02-07** 🚀 Released v0.1.3.post5 with Qwen support & several key improvements! Check [here](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post5) for details.
 - **2026-02-06** ✨ Added Moonshot/Kimi provider, Discord integration, and enhanced security hardening!
 - **2026-02-05** ✨ Added Feishu channel, DeepSeek provider, and enhanced scheduled tasks support!
 - **2026-02-04** 🚀 Released v0.1.3.post4 with multi-provider & Docker support! Check [here](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post4) for details.
@@ -293,10 +293,6 @@ nanobot gateway
 
 Uses **WebSocket** long connection — no public IP required.
 
-```bash
-pip install nanobot-ai[feishu]
-```
-
 **1. Create a Feishu bot**
 - Visit [Feishu Open Platform](https://open.feishu.cn/app)
 - Create a new app → Enable **Bot** capability
@@ -337,14 +333,54 @@ nanobot gateway
 
 </details>
 
+<details>
+<summary><b>DingTalk (钉钉)</b></summary>
+
+Uses **Stream Mode** — no public IP required.
+
+**1. Create a DingTalk bot**
+- Visit [DingTalk Open Platform](https://open-dev.dingtalk.com/)
+- Create a new app -> Add **Robot** capability
+- **Configuration**:
+  - Toggle **Stream Mode** ON
+- **Permissions**: Add necessary permissions for sending messages
+- Get **AppKey** (Client ID) and **AppSecret** (Client Secret) from "Credentials"
+- Publish the app
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "dingtalk": {
+      "enabled": true,
+      "clientId": "YOUR_APP_KEY",
+      "clientSecret": "YOUR_APP_SECRET",
+      "allowFrom": []
+    }
+  }
+}
+```
+
+> `allowFrom`: Leave empty to allow all users, or add `["staffId"]` to restrict access.
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+</details>
+
 ## ⚙️ Configuration
 
 Config file: `~/.nanobot/config.json`
 
 ### Providers
 
-> [!NOTE]
-> Groq provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
+> [!TIP]
+> - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
+> - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -423,10 +459,14 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 | `nanobot onboard` | Initialize config & workspace |
 | `nanobot agent -m "..."` | Chat with the agent |
 | `nanobot agent` | Interactive chat mode |
+| `nanobot agent --no-markdown` | Show plain-text replies |
+| `nanobot agent --logs` | Show runtime logs during chat |
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
+
+Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 <details>
 <summary><b>Scheduled Tasks (Cron)</b></summary>

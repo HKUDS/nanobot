@@ -28,6 +28,7 @@ dependencies = [
     "readability-lxml>=0.8.0",
     "rich>=13.0.0",
     "croniter>=2.0.0",
+    "dingtalk-stream>=0.4.0",
     "python-telegram-bot[socks]>=21.0",
     "lark-oapi>=1.0.0",
     "socksio>=1.0.0",
