@@ -231,7 +231,7 @@ Uses **Socket.IO WebSocket** by default, with HTTP polling fallback.
       "socketUrl": "https://mochat.io",
       "socketPath": "/socket.io",
       "clawToken": "claw_xxx",
-      "agentUserId": "69820107a785110aea8b1069",
+      "agentUserId": "6982abcdef",
       "sessions": ["*"],
       "panels": ["*"],
       "replyDelayMode": "non-mention",

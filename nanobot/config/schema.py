@@ -90,7 +90,7 @@ class MochatGroupRule(BaseModel):
 class MochatConfig(BaseModel):
     """Mochat channel configuration."""
     enabled: bool = False
-    base_url: str = "http://localhost:11000"
+    base_url: str = "https://mochat.io"
     socket_url: str = ""
     socket_path: str = "/socket.io"
     socket_disable_msgpack: bool = False
