@@ -11,6 +11,7 @@ from loguru import logger
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
+from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
@@ -35,6 +36,7 @@ class SubagentManager:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        enabled_tools: list[str] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.provider = provider
@@ -44,7 +46,19 @@ class SubagentManager:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.enabled_tools = set(enabled_tools or [])
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+
+    def _should_register(self, name: str) -> bool:
+        """Return True when a tool should be registered based on enabled_tools."""
+        if not self.enabled_tools:
+            return True
+        return name in self.enabled_tools
+
+    def _register_if_enabled(self, tools: ToolRegistry, tool: Tool) -> None:
+        """Register a tool if it is enabled by configuration."""
+        if self._should_register(tool.name):
+            tools.register(tool)
     
     async def spawn(
         self,
@@ -99,16 +113,16 @@ class SubagentManager:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
             allowed_dir = self.workspace if self.restrict_to_workspace else None
-            tools.register(ReadFileTool(allowed_dir=allowed_dir))
-            tools.register(WriteFileTool(allowed_dir=allowed_dir))
-            tools.register(ListDirTool(allowed_dir=allowed_dir))
-            tools.register(ExecTool(
+            self._register_if_enabled(tools, ReadFileTool(allowed_dir=allowed_dir))
+            self._register_if_enabled(tools, WriteFileTool(allowed_dir=allowed_dir))
+            self._register_if_enabled(tools, ListDirTool(allowed_dir=allowed_dir))
+            self._register_if_enabled(tools, ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
             ))
-            tools.register(WebSearchTool(api_key=self.brave_api_key))
-            tools.register(WebFetchTool())
+            self._register_if_enabled(tools, WebSearchTool(api_key=self.brave_api_key))
+            self._register_if_enabled(tools, WebFetchTool())
             
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)

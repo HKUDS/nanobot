@@ -177,6 +177,7 @@ class ExecToolConfig(BaseModel):
 
 class ToolsConfig(BaseModel):
     """Tools configuration."""
+    enabled: list[str] = Field(default_factory=list)  # Empty = all tools enabled
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
