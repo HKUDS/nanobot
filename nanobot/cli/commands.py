@@ -334,6 +334,7 @@ def gateway(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
+        enable_reasoning=config.agents.defaults.enable_reasoning,
     )
     
     # Set cron callback (needs agent)
