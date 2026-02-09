@@ -3,13 +3,13 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
@@ -141,7 +141,7 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
     
-    async def _process_message(self, msg: InboundMessage) -> OutboundMessage | None:
+    async def _process_message(self, msg: InboundMessage, stream_callback: Callable[[str], Any] | None = None) -> OutboundMessage | None:
         """
         Process a single inbound message.
         
@@ -156,8 +156,7 @@ class AgentLoop:
         if msg.channel == "system":
             return await self._process_system_message(msg)
         
-        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        logger.info(f"Processing message from {msg.channel}:{msg.sender_id}: {preview}")
+        logger.debug(f"Processing message from {msg.channel}:{msg.sender_id}")
         
         # Get or create session
         session = self.sessions.get_or_create(msg.session_key)
@@ -191,12 +190,40 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
             
-            # Call LLM
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model
-            )
+            if stream_callback:
+                # Use streaming provider
+                full_content = ""
+                full_reasoning = ""
+                tool_calls = []
+                
+                async for chunk in self.provider.stream(
+                    messages=messages,
+                    tools=self.tools.get_definitions(),
+                    model=self.model
+                ):
+                    if chunk.content:
+                        full_content += chunk.content
+                        res = stream_callback(chunk.content)
+                        if asyncio.iscoroutine(res):
+                            await res
+                    if chunk.reasoning_content:
+                        full_reasoning += chunk.reasoning_content
+                        # We could also stream reasoning if needed, but for now we focus on content
+                    if chunk.tool_calls:
+                        tool_calls.extend(chunk.tool_calls)
+                
+                response = LLMResponse(
+                    content=full_content if full_content else None,
+                    reasoning_content=full_reasoning if full_reasoning else None,
+                    tool_calls=tool_calls
+                )
+            else:
+                # Call LLM normally
+                response = await self.provider.chat(
+                    messages=messages,
+                    tools=self.tools.get_definitions(),
+                    model=self.model
+                )
             
             # Handle tool calls
             if response.has_tool_calls:
@@ -232,10 +259,15 @@ class AgentLoop:
         
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
-        
-        # Log response preview
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
+            
+        if stream_callback:
+            # Ensure a newline after the streamed response
+            res = stream_callback("\n")
+            if asyncio.iscoroutine(res):
+                await res
+
+        # Log completion (debug level to avoid cluttering CLI)
+        logger.debug(f"Response to {msg.channel}:{msg.sender_id} completed")
         
         # Save to session
         session.add_message("user", msg.content)
@@ -353,6 +385,7 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        stream_callback: Callable[[str], Any] | None = None,
     ) -> str:
         """
         Process a message directly (for CLI or cron usage).
@@ -373,5 +406,5 @@ class AgentLoop:
             content=content
         )
         
-        response = await self._process_message(msg)
+        response = await self._process_message(msg, stream_callback=stream_callback)
         return response.content if response else ""
