@@ -283,6 +283,9 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # === Volcengine ============================
+
+    # Needs "volcengine/" prefix for LiteLLM routing. 
     ProviderSpec(
         name="volcengine",
         keywords=("volcengine",),
