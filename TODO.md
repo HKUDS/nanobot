@@ -124,8 +124,8 @@ for msg in test_messages:
 
 ## Next Steps
 
-### Priority 2: CLI Commands 🖥️
-- [ ] **Add `nanobot routing` commands**
+### Priority 2: CLI Commands 🖥️ ✅ COMPLETED
+- [x] **Add `nanobot routing` commands**
   ```bash
   nanobot routing status       # Show current routing config and stats
   nanobot routing calibrate    # Manually trigger calibration
@@ -134,7 +134,15 @@ for msg in test_messages:
   nanobot routing analytics    # Show cost savings and routing stats
   ```
 
-- [ ] **Update CLI help and documentation**
+- [x] **Update CLI help and documentation**
+
+**Implemented Commands:**
+- ✅ `routing status` - Display configuration and current status
+- ✅ `routing calibrate [--dry-run]` - Manual calibration with dry-run support
+- ✅ `routing patterns [--limit] [--tier]` - Show learned patterns with filtering
+- ✅ `routing test <message> [--verbose]` - Test classification with detailed scores
+- ✅ `routing analytics` - Cost analysis and savings calculation
+- ✅ Updated main `status` command to show routing status
 
 ### Priority 3: Testing 🧪
 - [ ] **Unit tests for classifier**
