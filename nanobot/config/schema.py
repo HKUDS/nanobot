@@ -30,6 +30,14 @@ class FeishuConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
 
 
+class DingTalkConfig(BaseModel):
+    """DingTalk channel configuration using Stream mode."""
+    enabled: bool = False
+    client_id: str = ""  # AppKey
+    client_secret: str = ""  # AppSecret
+    allow_from: list[str] = Field(default_factory=list)  # Allowed staff_ids
+
+
 class DiscordConfig(BaseModel):
     """Discord channel configuration."""
     enabled: bool = False
@@ -45,6 +53,7 @@ class ChannelsConfig(BaseModel):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
 
 
 class AgentDefaults(BaseModel):
@@ -125,29 +134,33 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
     
-    # Default base URLs for API gateways
-    _GATEWAY_DEFAULTS = {"openrouter": "https://openrouter.ai/api/v1", "aihubmix": "https://aihubmix.com/v1"}
+    def _match_provider(self, model: str | None = None) -> tuple["ProviderConfig | None", str | None]:
+        """Match provider config and its registry name. Returns (config, spec_name)."""
+        from nanobot.providers.registry import PROVIDERS
+        model_lower = (model or self.agents.defaults.model).lower()
+
+        # Match by keyword (order follows PROVIDERS registry)
+        for spec in PROVIDERS:
+            p = getattr(self.providers, spec.name, None)
+            if p and any(kw in model_lower for kw in spec.keywords) and p.api_key:
+                return p, spec.name
+
+        # Fallback: gateways first, then others (follows registry order)
+        for spec in PROVIDERS:
+            p = getattr(self.providers, spec.name, None)
+            if p and p.api_key:
+                return p, spec.name
+        return None, None
 
     def get_provider(self, model: str | None = None) -> ProviderConfig | None:
         """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
-        model = (model or self.agents.defaults.model).lower()
-        p = self.providers
-        # Keyword → provider mapping (order matters: gateways first)
-        keyword_map = {
-            "aihubmix": p.aihubmix, "openrouter": p.openrouter,
-            "deepseek": p.deepseek, "anthropic": p.anthropic, "claude": p.anthropic,
-            "openai": p.openai, "gpt": p.openai, "gemini": p.gemini,
-            "zhipu": p.zhipu, "glm": p.zhipu, "zai": p.zhipu,
-            "dashscope": p.dashscope, "qwen": p.dashscope,
-            "groq": p.groq, "moonshot": p.moonshot, "kimi": p.moonshot, "vllm": p.vllm,
-        }
-        for kw, provider in keyword_map.items():
-            if kw in model and provider.api_key:
-                return provider
-        # Fallback: gateways first (can serve any model), then specific providers
-        all_providers = [p.openrouter, p.aihubmix, p.anthropic, p.openai, p.deepseek,
-                         p.gemini, p.zhipu, p.dashscope, p.moonshot, p.vllm, p.groq]
-        return next((pr for pr in all_providers if pr.api_key), None)
+        p, _ = self._match_provider(model)
+        return p
+
+    def get_provider_name(self, model: str | None = None) -> str | None:
+        """Get the registry name of the matched provider (e.g. "deepseek", "openrouter")."""
+        _, name = self._match_provider(model)
+        return name
 
     def get_api_key(self, model: str | None = None) -> str | None:
         """Get API key for the given model. Falls back to first available key."""
@@ -156,13 +169,17 @@ class Config(BaseSettings):
     
     def get_api_base(self, model: str | None = None) -> str | None:
         """Get API base URL for the given model. Applies default URLs for known gateways."""
-        p = self.get_provider(model)
+        from nanobot.providers.registry import find_by_name
+        p, name = self._match_provider(model)
         if p and p.api_base:
             return p.api_base
-        # Default URLs for known gateways (openrouter, aihubmix)
-        for name, url in self._GATEWAY_DEFAULTS.items():
-            if p == getattr(self.providers, name):
-                return url
+        # Only gateways get a default api_base here. Standard providers
+        # (like Moonshot) set their base URL via env vars in _setup_env
+        # to avoid polluting the global litellm.api_base.
+        if name:
+            spec = find_by_name(name)
+            if spec and spec.is_gateway and spec.default_api_base:
+                return spec.default_api_base
         return None
     
     class Config:
