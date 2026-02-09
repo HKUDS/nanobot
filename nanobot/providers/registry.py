@@ -282,6 +282,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+
+    # xAI
+    ProviderSpec(
+    name="xai",                   # config field name
+    keywords=("xai", "grok"),  # model-name keywords for auto-matching
+    env_key="XAI_API_KEY",        # env var for LiteLLM
+    display_name="xAI",          # shown in `nanobot status`
+    litellm_prefix="xai",         # auto-prefix: model → myprovider/model
+    skip_prefixes=("xai/",),      # don't double-prefix
+)
 )
 
 
