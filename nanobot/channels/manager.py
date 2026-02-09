@@ -84,6 +84,28 @@ class ChannelManager:
                 logger.info("Feishu channel enabled")
             except ImportError as e:
                 logger.warning(f"Feishu channel not available: {e}")
+
+        # DingTalk channel
+        if self.config.channels.dingtalk.enabled:
+            try:
+                from nanobot.channels.dingtalk import DingTalkChannel
+                self.channels["dingtalk"] = DingTalkChannel(
+                    self.config.channels.dingtalk, self.bus
+                )
+                logger.info("DingTalk channel enabled")
+            except ImportError as e:
+                logger.warning(f"DingTalk channel not available: {e}")
+
+        # Email channel
+        if self.config.channels.email.enabled:
+            try:
+                from nanobot.channels.email import EmailChannel
+                self.channels["email"] = EmailChannel(
+                    self.config.channels.email, self.bus
+                )
+                logger.info("Email channel enabled")
+            except ImportError as e:
+                logger.warning(f"Email channel not available: {e}")
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
