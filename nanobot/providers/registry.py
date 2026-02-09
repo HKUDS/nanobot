@@ -262,6 +262,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # Telnyx: OpenAI-compatible LLM inference API with voice AI capabilities.
+    # Uses "openai/" prefix for LiteLLM routing to custom api_base.
+    ProviderSpec(
+        name="telnyx",
+        keywords=("telnyx",),
+        env_key="OPENAI_API_KEY",           # OpenAI-compatible
+        display_name="Telnyx",
+        litellm_prefix="openai",            # → openai/{model}
+        skip_prefixes=("openai/",),         # avoid double-prefix
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="KEY",         # Telnyx API keys start with KEY
+        detect_by_base_keyword="telnyx",
+        default_api_base="https://api.telnyx.com/v2/ai",
+        strip_model_prefix=True,            # anthropic/claude-3 → claude-3 → openai/claude-3
+        model_overrides=(),
+    ),
+
     # === Auxiliary (not a primary LLM provider) ============================
 
     # Groq: mainly used for Whisper voice transcription, also usable for LLM.

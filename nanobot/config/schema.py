@@ -90,6 +90,7 @@ class ProvidersConfig(BaseModel):
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
+    telnyx: ProviderConfig = Field(default_factory=ProviderConfig)  # Telnyx LLM inference
 
 
 class GatewayConfig(BaseModel):

@@ -393,6 +393,7 @@ Config file: `~/.nanobot/config.json`
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
+| `telnyx` | LLM + **Voice AI** (TTS, SIP, call control) | [portal.telnyx.com](https://portal.telnyx.com) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 
 <details>
