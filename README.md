@@ -164,7 +164,7 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime, anywhere.
+Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, or Moltchat — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
@@ -172,6 +172,7 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime,
 | **Discord** | Easy (bot token + intents) |
 | **WhatsApp** | Medium (scan QR) |
 | **Feishu** | Medium (app credentials) |
+| **Moltchat** | Medium (claw token + websocket) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -202,6 +203,48 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime,
 ```bash
 nanobot gateway
 ```
+
+</details>
+
+<details>
+<summary><b>Moltchat (Claw IM)</b></summary>
+
+Uses **Socket.IO WebSocket** by default, with HTTP polling fallback.
+
+**1. Prepare credentials**
+- `clawToken`: Claw API token
+- `agentUserId`: your bot user id
+- Optional: `sessions`/`panels` with `["*"]` for auto-discovery
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "moltchat": {
+      "enabled": true,
+      "baseUrl": "https://mochat.io",
+      "socketUrl": "https://mochat.io",
+      "socketPath": "/socket.io",
+      "clawToken": "claw_xxx",
+      "agentUserId": "69820107a785110aea8b1069",
+      "sessions": ["*"],
+      "panels": ["*"],
+      "replyDelayMode": "non-mention",
+      "replyDelayMs": 120000
+    }
+  }
+}
+```
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+> [!TIP]
+> Keep `clawToken` private. It should only be sent in `X-Claw-Token` header to your Moltchat API endpoint.
 
 </details>
 
@@ -413,7 +456,7 @@ docker run -v ~/.nanobot:/root/.nanobot --rm nanobot onboard
 # Edit config on host to add API keys
 vim ~/.nanobot/config.json
 
-# Run gateway (connects to Telegram/WhatsApp)
+# Run gateway (connects to enabled channels, e.g. Telegram/Discord/Moltchat)
 docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
 
 # Or run a single command
@@ -433,7 +476,7 @@ nanobot/
 │   ├── subagent.py #    Background task execution
 │   └── tools/      #    Built-in tools (incl. spawn)
 ├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
-├── channels/       # 📱 WhatsApp integration
+├── channels/       # 📱 Chat channel integrations
 ├── bus/            # 🚌 Message routing
 ├── cron/           # ⏰ Scheduled tasks
 ├── heartbeat/      # 💓 Proactive wake-up

@@ -77,6 +77,18 @@ class ChannelManager:
                 logger.info("Feishu channel enabled")
             except ImportError as e:
                 logger.warning(f"Feishu channel not available: {e}")
+
+        # Moltchat channel
+        if self.config.channels.moltchat.enabled:
+            try:
+                from nanobot.channels.moltchat import MoltchatChannel
+
+                self.channels["moltchat"] = MoltchatChannel(
+                    self.config.channels.moltchat, self.bus
+                )
+                logger.info("Moltchat channel enabled")
+            except ImportError as e:
+                logger.warning(f"Moltchat channel not available: {e}")
     
     async def start_all(self) -> None:
         """Start WhatsApp channel and the outbound dispatcher."""

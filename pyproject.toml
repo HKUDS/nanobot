@@ -30,6 +30,8 @@ dependencies = [
     "croniter>=2.0.0",
     "python-telegram-bot>=21.0",
     "lark-oapi>=1.0.0",
+    "python-socketio>=5.11.0",
+    "msgpack>=1.0.8",
 ]
 
 [project.optional-dependencies]

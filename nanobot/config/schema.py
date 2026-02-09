@@ -39,12 +39,49 @@ class DiscordConfig(BaseModel):
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 
 
+class MoltchatMentionConfig(BaseModel):
+    """Moltchat mention behavior configuration."""
+    require_in_groups: bool = False
+
+
+class MoltchatGroupRule(BaseModel):
+    """Moltchat per-group mention requirement."""
+    require_mention: bool = False
+
+
+class MoltchatConfig(BaseModel):
+    """Moltchat channel configuration."""
+    enabled: bool = False
+    base_url: str = "http://localhost:11000"
+    socket_url: str = ""
+    socket_path: str = "/socket.io"
+    socket_disable_msgpack: bool = False
+    socket_reconnect_delay_ms: int = 1000
+    socket_max_reconnect_delay_ms: int = 10000
+    socket_connect_timeout_ms: int = 10000
+    refresh_interval_ms: int = 30000
+    watch_timeout_ms: int = 25000
+    watch_limit: int = 100
+    retry_delay_ms: int = 500
+    max_retry_attempts: int = 0  # 0 means unlimited retries
+    claw_token: str = ""
+    agent_user_id: str = ""
+    sessions: list[str] = Field(default_factory=list)
+    panels: list[str] = Field(default_factory=list)
+    allow_from: list[str] = Field(default_factory=list)
+    mention: MoltchatMentionConfig = Field(default_factory=MoltchatMentionConfig)
+    groups: dict[str, MoltchatGroupRule] = Field(default_factory=dict)
+    reply_delay_mode: str = "non-mention"  # off | non-mention
+    reply_delay_ms: int = 120000
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    moltchat: MoltchatConfig = Field(default_factory=MoltchatConfig)
 
 
 class AgentDefaults(BaseModel):
