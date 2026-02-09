@@ -234,6 +234,12 @@ class FeishuChannel(BaseChannel):
                 logger.warning("File content is empty")
                 return None
             
+            # Read bytes from BytesIO object
+            if hasattr(file_content, 'read'):
+                file_bytes = file_content.read()
+            else:
+                file_bytes = file_content
+            
             # Determine file extension
             mime_type = getattr(response, 'mime_type', None)
             ext = self._get_extension(msg_type, mime_type)
@@ -247,7 +253,7 @@ class FeishuChannel(BaseChannel):
             
             # Write file content
             with open(file_path, 'wb') as f:
-                f.write(file_content)
+                f.write(file_bytes)
             
             logger.info(f"Downloaded {msg_type} file to {file_path}")
             return str(file_path)
