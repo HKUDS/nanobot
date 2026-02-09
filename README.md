@@ -166,7 +166,7 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, DingTalk, Email, or QQ — anytime, anywhere.
+Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, DingTalk, Slack, Email, or QQ — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
@@ -175,6 +175,7 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, DingTalk, Emai
 | **WhatsApp** | Medium (scan QR) |
 | **Feishu** | Medium (app credentials) |
 | **DingTalk** | Medium (app credentials) |
+| **Slack** | Medium (bot + app tokens) |
 | **Email** | Medium (IMAP/SMTP credentials) |
 | **QQ** | Easy (app credentials) |
 
@@ -200,7 +201,9 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, DingTalk, Emai
 }
 ```
 
-> Get your user ID from `@userinfobot` on Telegram.
+> You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`.
+> Copy this value **without the `@` symbol** and paste it into the config file.
+
 
 **3. Run**
 
@@ -415,6 +418,44 @@ nanobot gateway
 </details>
 
 <details>
+<summary><b>Slack</b></summary>
+
+Uses **Socket Mode** — no public URL required.
+
+**1. Create a Slack app**
+- Go to [Slack API](https://api.slack.com/apps) → Create New App
+- **OAuth & Permissions**: Add bot scopes: `chat:write`, `reactions:write`, `app_mentions:read`
+- Install to your workspace and copy the **Bot Token** (`xoxb-...`)
+- **Socket Mode**: Enable it and generate an **App-Level Token** (`xapp-...`) with `connections:write` scope
+- **Event Subscriptions**: Subscribe to `message.im`, `message.channels`, `app_mention`
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "slack": {
+      "enabled": true,
+      "botToken": "xoxb-...",
+      "appToken": "xapp-...",
+      "groupPolicy": "mention"
+    }
+  }
+}
+```
+
+> `groupPolicy`: `"mention"` (respond only when @mentioned), `"open"` (respond to all messages), or `"allowlist"` (restrict to specific channels).
+> DM policy defaults to open. Set `"dm": {"enabled": false}` to disable DMs.
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+</details>
+
+<details>
 <summary><b>Email</b></summary>
 
 Uses **IMAP** polling for inbound + **SMTP** for outbound. Requires explicit consent before accessing mailbox data.
@@ -534,7 +575,6 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 
 ### Security
 
-> [!TIP]
 > For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
 
 | Option | Default | Description |
@@ -633,7 +673,7 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 - [ ] **Multi-modal** — See and hear (images, voice, video)
 - [ ] **Long-term memory** — Never forget important context
 - [ ] **Better reasoning** — Multi-step planning and reflection
-- [ ] **More integrations** — Slack, calendar, and more
+- [ ] **More integrations** — Calendar and more
 - [ ] **Self-improvement** — Learn from feedback and mistakes
 
 ### Contributors

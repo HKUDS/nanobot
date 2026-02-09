@@ -571,6 +571,15 @@ def channels_status():
         tg_config
     )
 
+    # Slack
+    slack = config.channels.slack
+    slack_config = "socket" if slack.app_token and slack.bot_token else "[dim]not configured[/dim]"
+    table.add_row(
+        "Slack",
+        "✓" if slack.enabled else "✗",
+        slack_config
+    )
+
     console.print(table)
 
 

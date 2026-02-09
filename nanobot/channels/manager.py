@@ -107,6 +107,17 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning(f"Email channel not available: {e}")
 
+        # Slack channel
+        if self.config.channels.slack.enabled:
+            try:
+                from nanobot.channels.slack import SlackChannel
+                self.channels["slack"] = SlackChannel(
+                    self.config.channels.slack, self.bus
+                )
+                logger.info("Slack channel enabled")
+            except ImportError as e:
+                logger.warning(f"Slack channel not available: {e}")
+
         # QQ channel
         if self.config.channels.qq.enabled:
             try:

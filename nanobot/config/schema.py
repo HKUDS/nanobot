@@ -77,6 +77,26 @@ class EmailConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed sender email addresses
 
 
+class SlackDMConfig(BaseModel):
+    """Slack DM policy configuration."""
+    enabled: bool = True
+    policy: str = "open"  # "open" or "allowlist"
+    allow_from: list[str] = Field(default_factory=list)  # Allowed Slack user IDs
+
+
+class SlackConfig(BaseModel):
+    """Slack channel configuration."""
+    enabled: bool = False
+    mode: str = "socket"  # "socket" supported
+    webhook_path: str = "/slack/events"
+    bot_token: str = ""  # xoxb-...
+    app_token: str = ""  # xapp-...
+    user_token_read_only: bool = True
+    group_policy: str = "open"  # "open", "mention", "allowlist"
+    group_allow_from: list[str] = Field(default_factory=list)  # Allowed channel IDs if allowlist
+    dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
+
+
 class QQConfig(BaseModel):
     """QQ channel configuration using botpy SDK."""
     enabled: bool = False
@@ -93,6 +113,7 @@ class ChannelsConfig(BaseModel):
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
     dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
     email: EmailConfig = Field(default_factory=EmailConfig)
+    slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
 
 
