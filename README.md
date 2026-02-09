@@ -459,17 +459,19 @@ nanobot gateway
 <details>
 <summary><b>Email</b></summary>
 
-Uses **IMAP** polling for inbound + **SMTP** for outbound. Requires explicit consent before accessing mailbox data.
+Give nanobot its own email account. It polls **IMAP** for incoming mail and replies via **SMTP** — like a personal email assistant.
 
 **1. Get credentials (Gmail example)**
-- Enable 2-Step Verification in Google account security
-- Create an [App Password](https://myaccount.google.com/apppasswords)
+- Create a dedicated Gmail account for your bot (e.g. `my-nanobot@gmail.com`)
+- Enable 2-Step Verification → Create an [App Password](https://myaccount.google.com/apppasswords)
 - Use this app password for both IMAP and SMTP
 
 **2. Configure**
 
-> [!TIP]
-> Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
+> - `consentGranted` must be `true` to allow mailbox access. This is a safety gate — set `false` to fully disable.
+> - `allowFrom`: Leave empty to accept emails from anyone, or restrict to specific senders.
+> - `smtpUseTls` and `smtpUseSsl` default to `true` / `false` respectively, which is correct for Gmail (port 587 + STARTTLS). No need to set them explicitly.
+> - Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
 
 ```json
 {
@@ -479,23 +481,19 @@ Uses **IMAP** polling for inbound + **SMTP** for outbound. Requires explicit con
       "consentGranted": true,
       "imapHost": "imap.gmail.com",
       "imapPort": 993,
-      "imapUsername": "you@gmail.com",
+      "imapUsername": "my-nanobot@gmail.com",
       "imapPassword": "your-app-password",
-      "imapUseSsl": true,
       "smtpHost": "smtp.gmail.com",
       "smtpPort": 587,
-      "smtpUsername": "you@gmail.com",
+      "smtpUsername": "my-nanobot@gmail.com",
       "smtpPassword": "your-app-password",
-      "smtpUseTls": true,
-      "fromAddress": "you@gmail.com",
-      "allowFrom": ["trusted@example.com"]
+      "fromAddress": "my-nanobot@gmail.com",
+      "allowFrom": ["your-real-email@gmail.com"]
     }
   }
 }
 ```
 
-> `consentGranted`: Must be `true` to allow mailbox access. Set to `false` to disable reading and sending entirely.
-> `allowFrom`: Leave empty to accept emails from anyone, or restrict to specific sender addresses.
 
 **3. Run**
 
