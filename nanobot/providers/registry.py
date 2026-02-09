@@ -177,6 +177,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # Z.ai (International): OpenAI-compatible endpoint
+    ProviderSpec(
+        name="zai",
+        keywords=("zai", "glm-4.7"),
+        env_key="ZAI_API_KEY",
+        display_name="Z.ai",
+        litellm_prefix="openai",            # Uses OpenAI protocol
+        skip_prefixes=("openai/",),
+        env_extras=(
+            ("OPENAI_API_KEY", "{api_key}"),
+        ),
+        is_gateway=False,
+        is_local=False,
+        default_api_base="https://api.z.ai/api/coding/paas/v4",
+        strip_model_prefix=True,            # glm-4.7 → openai/glm-4.7
+        model_overrides=(),
+    ),
+
     # Zhipu: LiteLLM uses "zai/" prefix.
     # Also mirrors key to ZHIPUAI_API_KEY (some LiteLLM paths check that).
     # skip_prefixes: don't add "zai/" when already routed via gateway.
