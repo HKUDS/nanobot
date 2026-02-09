@@ -17,3 +17,5 @@ docs/
 __pycache__/
 poetry.lock
 .pytest_cache/
+tests/
+botpy.log
