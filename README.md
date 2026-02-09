@@ -166,7 +166,7 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime, anywhere.
+Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu or Slack — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
@@ -174,6 +174,7 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime,
 | **Discord** | Easy (bot token + intents) |
 | **WhatsApp** | Medium (scan QR) |
 | **Feishu** | Medium (app credentials) |
+| **Slack** | Medium (app credentials) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -371,6 +372,56 @@ nanobot gateway
 ```
 
 </details>
+
+<details> <summary><b>Slack</b></summary>
+
+1. Create a Slack App
+- Go to [Slack App Management Dashboard](https://api.slack.com/apps)
+- Click Create New App -> From Scratch
+- Select your workspace
+
+2. Enable Socket Mode
+- App -> Socket Mode
+- Enable it
+- Generate App-Level-Token with scope ```connections:write```
+- Copy the token (xapp-...)
+
+3. Add Bot Permissions
+- App -> OAuth & Permissions
+- Add bot scopes:
+  - ```chat:write```
+  - ```app_mentions:read```
+  - ```channels:history```
+  - ```groups:history```
+  - ```im:history```
+  - ```mpim:history```
+- Click Install App to workspace
+- Copy Bot User OAuth Token (xoxb-...)
+
+4. Enable Messages
+- App -> App Home
+- Enable
+  - Messages Tab
+  - Allow users to send messages to this app
+
+5. Configure
+```bash
+{
+  "channels": {
+    "slack": {
+      "enabled": true,
+      "botToken": "xoxb-YOUR-BOT-TOKEN",
+      "appToken": "xapp-YOUR-APP-TOKEN",
+      "allowFrom": []
+    }
+  }
+}
+```
+
+6. Run
+```bash
+nanobot gateway
+```
 
 ## ⚙️ Configuration
 
