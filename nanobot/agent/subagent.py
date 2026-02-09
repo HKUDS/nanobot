@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import random
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,12 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
+
+# Subagent context limits (tighter than main agent)
+_MAX_TOOL_RESULT_CHARS = 2000
+_MAX_CONTEXT_MESSAGES = 25
+_EMPTY_RESPONSE_RETRIES = 1       # Bounded retry when LLM returns empty
+_MAX_ANNOUNCE_CHARS = 3000        # Cap result injected back into main agent
 
 
 class SubagentManager:
@@ -45,6 +53,89 @@ class SubagentManager:
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+
+    # ----- Context helpers (mirrors AgentLoop but tighter) -----
+
+    @staticmethod
+    def _truncate_result(result: str) -> str:
+        """Truncate tool result for subagent context.
+
+        Content-type-aware: JSON is prefix-truncated so the visible
+        portion remains valid syntax; plain text uses head truncation.
+        """
+        clean = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', result)
+        if len(clean) <= _MAX_TOOL_RESULT_CHARS:
+            return clean
+
+        # Detect JSON and handle it without breaking syntax
+        stripped = clean.lstrip()
+        if stripped and stripped[0] in ('{', '['):
+            try:
+                parsed = json.loads(clean)
+                pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
+                if len(pretty) <= _MAX_TOOL_RESULT_CHARS:
+                    return pretty
+                budget = _MAX_TOOL_RESULT_CHARS - 100  # room for sentinel
+                return (
+                    pretty[:budget]
+                    + f"\n\n... [JSON truncated — showed {budget} of {len(pretty)} chars. "
+                    + "Do NOT re-run this tool to see more.]"
+                )
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Plain text: head truncation with sentinel
+        budget = _MAX_TOOL_RESULT_CHARS - 80
+        return (
+            clean[:budget]
+            + f"\n\n... [truncated — showed {budget} of {len(clean)} chars. "
+            + "Do NOT re-run this tool to see more.]"
+        )
+
+    @staticmethod
+    def _compact(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Compact subagent messages using block-aware grouping.
+
+        Groups an assistant message with tool_calls + its subsequent tool
+        results as a single atomic block.  Never splits these pairs — doing
+        so causes HTTP 400 from every major LLM API.
+        """
+        if len(messages) <= _MAX_CONTEXT_MESSAGES:
+            return messages
+
+        protected = messages[:2]  # system prompt + user goal
+        remaining = messages[2:]
+
+        # Build atomic blocks
+        blocks: list[list[dict[str, Any]]] = []
+        i = 0
+        while i < len(remaining):
+            msg = remaining[i]
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                block = [msg]
+                j = i + 1
+                while j < len(remaining) and remaining[j].get("role") == "tool":
+                    block.append(remaining[j])
+                    j += 1
+                blocks.append(block)
+                i = j
+            else:
+                blocks.append([msg])
+                i += 1
+
+        # Take blocks from the end within budget
+        budget = _MAX_CONTEXT_MESSAGES - len(protected)
+        kept: list[list[dict[str, Any]]] = []
+        total = 0
+        for block in reversed(blocks):
+            if total + len(block) > budget:
+                break
+            kept.append(block)
+            total += len(block)
+
+        kept.reverse()
+        tail = [m for block in kept for m in block]
+        return protected + tail
     
     async def spawn(
         self,
@@ -79,8 +170,15 @@ class SubagentManager:
         )
         self._running_tasks[task_id] = bg_task
         
-        # Cleanup when done
-        bg_task.add_done_callback(lambda _: self._running_tasks.pop(task_id, None))
+        # Cleanup when done — also log any unhandled exceptions
+        def _on_done(t: asyncio.Task[None]) -> None:
+            self._running_tasks.pop(task_id, None)
+            if t.cancelled():
+                logger.warning(f"Subagent [{task_id}] was cancelled")
+            elif t.exception() is not None:
+                logger.error(f"Subagent [{task_id}] raised unhandled exception: {t.exception()!r}")
+
+        bg_task.add_done_callback(_on_done)
         
         logger.info(f"Spawned subagent [{task_id}]: {display_label}")
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
@@ -120,16 +218,27 @@ class SubagentManager:
             # Run agent loop (limited iterations)
             max_iterations = 15
             iteration = 0
+            empty_retries_left = _EMPTY_RESPONSE_RETRIES
             final_result: str | None = None
             
             while iteration < max_iterations:
                 iteration += 1
+
+                # Compact before each LLM call
+                messages = self._compact(messages)
                 
                 response = await self.provider.chat(
                     messages=messages,
                     tools=tools.get_definitions(),
                     model=self.model,
                 )
+                
+                # Detect LLM errors returned as content
+                if (response.finish_reason == "error"
+                        or (response.content and response.content.startswith("Error calling LLM:"))):
+                    logger.error(f"Subagent [{task_id}] LLM error: {response.content}")
+                    final_result = "Task failed due to an LLM error."
+                    break
                 
                 if response.has_tool_calls:
                     # Add assistant message with tool calls
@@ -150,19 +259,33 @@ class SubagentManager:
                         "tool_calls": tool_call_dicts,
                     })
                     
-                    # Execute tools
+                    # Execute tools — truncate results at source
                     for tool_call in response.tool_calls:
                         args_str = json.dumps(tool_call.arguments)
                         logger.debug(f"Subagent [{task_id}] executing: {tool_call.name} with arguments: {args_str}")
-                        result = await tools.execute(tool_call.name, tool_call.arguments)
+                        raw_result = await tools.execute(tool_call.name, tool_call.arguments)
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
                             "name": tool_call.name,
-                            "content": result,
+                            "content": self._truncate_result(raw_result),
                         })
                 else:
-                    final_result = response.content
+                    if response.content:
+                        final_result = response.content
+                        break
+                    # Bounded retry with exponential backoff + jitter
+                    if empty_retries_left > 0:
+                        empty_retries_left -= 1
+                        retry_num = _EMPTY_RESPONSE_RETRIES - empty_retries_left
+                        delay = min(2 ** retry_num + random.uniform(0, 1), 10.0)
+                        logger.warning(
+                            f"Subagent [{task_id}] got empty response, "
+                            f"retries left: {empty_retries_left}, backing off {delay:.1f}s"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    logger.warning(f"Subagent [{task_id}] empty response, no retries left — giving up")
                     break
             
             if final_result is None:
@@ -187,6 +310,16 @@ class SubagentManager:
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = "completed successfully" if status == "ok" else "failed"
+        
+        # Cap result size to prevent re-triggering context explosion
+        # in the main agent when this gets injected as a message.
+        if len(result) > _MAX_ANNOUNCE_CHARS:
+            half = _MAX_ANNOUNCE_CHARS // 2
+            result = (
+                result[:half]
+                + f"\n\n... [truncated {len(result) - _MAX_ANNOUNCE_CHARS} chars] ...\n\n"
+                + result[-half:]
+            )
         
         announce_content = f"""[Subagent '{label}' {status_text}]
 
