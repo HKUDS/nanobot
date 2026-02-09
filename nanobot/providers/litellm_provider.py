@@ -35,7 +35,18 @@ class LiteLLMProvider(LLMProvider):
         self.extra_headers = extra_headers or {}
         
         # Initialize rate limiter if rate_limit is specified
-        self.rate_limiter = RateLimiter(rate_limit) if rate_limit else None
+        # For NVIDIA free tier and similar providers with burst limits:
+        # Use burst-aware rate limiting (max 4 calls per 60s window)
+        if rate_limit:
+            # Interpret rate_limit as burst_size for burst-aware limiting
+            # Conservative default: 4 calls per 60s (NVIDIA free tier observed behavior)
+            self.rate_limiter = RateLimiter(
+                burst_size=min(rate_limit, 4),  # Cap at 4 for safety
+                window_seconds=60.0,
+                min_delay_seconds=2.0  # Still enforce 2s spacing within burst
+            )
+        else:
+            self.rate_limiter = None
         
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
