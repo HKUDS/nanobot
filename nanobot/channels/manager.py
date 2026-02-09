@@ -106,6 +106,18 @@ class ChannelManager:
                 logger.info("Email channel enabled")
             except ImportError as e:
                 logger.warning(f"Email channel not available: {e}")
+
+        # QQ channel
+        if self.config.channels.qq.enabled:
+            try:
+                from nanobot.channels.qq import QQChannel
+                self.channels["qq"] = QQChannel(
+                    self.config.channels.qq,
+                    self.bus,
+                )
+                logger.info("QQ channel enabled")
+            except ImportError as e:
+                logger.warning(f"QQ channel not available: {e}")
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""

@@ -166,7 +166,7 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, DingTalk, or Email — anytime, anywhere.
+Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, DingTalk, Email, or QQ — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
@@ -176,6 +176,7 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, DingTalk, or E
 | **Feishu** | Medium (app credentials) |
 | **DingTalk** | Medium (app credentials) |
 | **Email** | Medium (IMAP/SMTP credentials) |
+| **QQ** | Easy (app credentials) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -332,6 +333,45 @@ nanobot gateway
 
 > [!TIP]
 > Feishu uses WebSocket to receive messages — no webhook or public IP needed!
+
+</details>
+
+<details>
+<summary><b>QQ (QQ私聊)</b></summary>
+
+Uses **botpy SDK** with WebSocket — no public IP required.
+
+**1. Create a QQ bot**
+- Visit [QQ Open Platform](https://q.qq.com)
+- Create a new bot application
+- Get **AppID** and **Secret** from "Developer Settings"
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "qq": {
+      "enabled": true,
+      "appId": "YOUR_APP_ID",
+      "secret": "YOUR_APP_SECRET",
+      "allowFrom": []
+    }
+  }
+}
+```
+
+> `allowFrom`: Leave empty for public access, or add user openids to restrict access.
+> Example: `"allowFrom": ["user_openid_1", "user_openid_2"]`
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+> [!TIP]
+> QQ bot currently supports **private messages only**. Group chat support coming soon!
 
 </details>
 
