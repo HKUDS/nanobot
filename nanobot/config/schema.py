@@ -47,6 +47,16 @@ class DiscordConfig(BaseModel):
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 
 
+class TelnyxVoiceConfig(BaseModel):
+    """Telnyx Voice channel configuration."""
+    enabled: bool = False
+    api_key: str = ""  # Telnyx API key (starts with KEY)
+    webhook_port: int = 8088  # Port for receiving Telnyx webhooks
+    voice: str = "female"  # TTS voice: male, female, or a specific voice ID
+    language: str = "en-US"  # Language for TTS and speech recognition
+    allow_from: list[str] = Field(default_factory=list)  # Allowed caller phone numbers (E.164)
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
@@ -54,6 +64,7 @@ class ChannelsConfig(BaseModel):
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
     dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
+    telnyx_voice: TelnyxVoiceConfig = Field(default_factory=TelnyxVoiceConfig)
 
 
 class AgentDefaults(BaseModel):

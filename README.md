@@ -174,6 +174,7 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, or Feishu — anytime,
 | **Discord** | Easy (bot token + intents) |
 | **WhatsApp** | Medium (scan QR) |
 | **Feishu** | Medium (app credentials) |
+| **Telnyx Voice** | Medium (API key + phone number) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -369,6 +370,48 @@ Uses **Stream Mode** — no public IP required.
 ```bash
 nanobot gateway
 ```
+
+</details>
+
+<details>
+<summary><b>Telnyx Voice (Phone Calls)</b></summary>
+
+Give your nanobot a phone number. Receive calls, transcribe speech, and respond with TTS.
+
+**1. Get a Telnyx account and phone number**
+- Sign up at [portal.telnyx.com](https://portal.telnyx.com)
+- Buy a phone number with voice capability
+- Create a **Call Control Application** and set the webhook URL to `http://<your-host>:8088/telnyx/voice`
+- Assign the phone number to that application
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "telnyx_voice": {
+      "enabled": true,
+      "apiKey": "KEYxxxxxxxx",
+      "webhookPort": 8088,
+      "voice": "female",
+      "language": "en-US",
+      "allowFrom": ["+14155551234"]
+    }
+  }
+}
+```
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+Call your Telnyx number and start talking to your nanobot!
+
+> [!TIP]
+> Use a tunnel (ngrok, cloudflared) if running locally: `ngrok http 8088`
+> Then set your Telnyx webhook URL to the tunnel URL + `/telnyx/voice`
 
 </details>
 

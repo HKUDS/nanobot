@@ -85,6 +85,17 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning(f"Feishu channel not available: {e}")
 
+        # Telnyx Voice channel
+        if self.config.channels.telnyx_voice.enabled:
+            try:
+                from nanobot.channels.telnyx_voice import TelnyxVoiceChannel
+                self.channels["telnyx_voice"] = TelnyxVoiceChannel(
+                    self.config.channels.telnyx_voice, self.bus
+                )
+                logger.info("Telnyx Voice channel enabled")
+            except ImportError as e:
+                logger.warning(f"Telnyx Voice channel not available: {e}")
+
         # DingTalk channel
         if self.config.channels.dingtalk.enabled:
             try:
