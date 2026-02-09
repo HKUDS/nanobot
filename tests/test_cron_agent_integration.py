@@ -22,7 +22,7 @@ class TestCronAgentIntegration(unittest.IsolatedAsyncioTestCase):
         self.agent.process_direct = AsyncMock()
 
     # 1. Test Batch Add
-    def test_batch_add(self):
+    async def test_batch_add(self):
         print("\n[Test] Batch Add")
         jobs_data = [
             {
@@ -45,7 +45,7 @@ class TestCronAgentIntegration(unittest.IsolatedAsyncioTestCase):
             }
         ]
         
-        created = self.service.add_jobs_batch(jobs_data)
+        created = await self.service.add_jobs_batch(jobs_data)
         
         self.assertEqual(len(created), 2)
         self.assertEqual(created[0].name, "echo1")

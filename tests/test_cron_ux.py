@@ -32,6 +32,10 @@ class TestCronUX(unittest.IsolatedAsyncioTestCase):
         mock_load.return_value = self.config
         mock_confirm.return_value = True # User says YES to system timezone and YES to save
         
+        # Configure add_job to be async
+        mock_service.return_value.add_job = AsyncMock()
+        mock_service.return_value.add_job.return_value = MagicMock(name="test_job", id="123")
+        
         # Simulate cron add call
         try:
             # When patching locally in a function, we must patch where the name is IMPORTED.
@@ -99,6 +103,10 @@ class TestCronUX(unittest.IsolatedAsyncioTestCase):
         self.config.agents.defaults.timezone = "UTC"
         mock_load.return_value = self.config
         
+        # Configure add_job to be async
+        mock_service.return_value.add_job = AsyncMock()
+        mock_service.return_value.add_job.return_value = MagicMock(name="test_job", id="123")
+        
         # We don't need inner patches because the decorators already patch the imports globally
         # for the duration of the test.
         # However, mock_service passed as arg is the mock object.
@@ -129,6 +137,10 @@ class TestCronUX(unittest.IsolatedAsyncioTestCase):
         # Config says Berlin
         self.config.agents.defaults.timezone = "Europe/Berlin"
         mock_load.return_value = self.config
+        
+        # Configure add_job to be async
+        mock_service.return_value.add_job = AsyncMock()
+        mock_service.return_value.add_job.return_value = MagicMock(name="test_job", id="123")
         
         # CLI arg missing
         cron_add(

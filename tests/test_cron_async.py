@@ -30,14 +30,14 @@ async def test_async_cron():
     future_ms = now_ms + 200 # 200ms in future
     
     # Job 1: Slow
-    service.add_job(
+    await service.add_job(
         name="slow_job",
         schedule=CronSchedule(kind="at", at_ms=future_ms),
         message="slow"
     )
     
     # Job 2: Fast
-    service.add_job(
+    await service.add_job(
         name="fast_job",
         schedule=CronSchedule(kind="at", at_ms=future_ms),
         message="fast"

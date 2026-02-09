@@ -543,7 +543,7 @@ def cron_list(
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
     
-    jobs = service.list_jobs(include_disabled=all)
+    jobs = asyncio.run(service.list_jobs(include_disabled=all))
     
     if not jobs:
         console.print("No scheduled jobs.")
@@ -590,7 +590,7 @@ def cron_add(
     to: str = typer.Option(None, "--to", help="Recipient for delivery"),
     channel: str = typer.Option(None, "--channel", help="Channel for delivery (e.g. 'telegram', 'whatsapp')"),
     timezone: str = typer.Option(None, "--timezone", "-tz", help="Timezone for cron schedule (e.g. Europe/Moscow)"),
-    kind: str = typer.Option("agent_turn", "--kind", "-k", help="Job type: 'agent_turn' or 'echo'"),
+    kind: str = typer.Option("agent_turn", "--kind", "-k", "--type", "-t", help="Job type: 'agent_turn' or 'echo'"),
 ):
     """
     Add a scheduled job.
@@ -677,7 +677,7 @@ def cron_add(
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
     
-    job = service.add_job(
+    job = asyncio.run(service.add_job(
         name=name,
         schedule=schedule,
         message=message,
@@ -685,7 +685,7 @@ def cron_add(
         deliver=deliver,
         to=to,
         channel=channel,
-    )
+    ))
     
     console.print(f"[green]✓[/green] Added job '{job.name}' ({job.id})")
     if cron_expr:
@@ -705,7 +705,7 @@ def cron_remove(
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
     
-    if service.remove_job(job_id):
+    if asyncio.run(service.remove_job(job_id)):
         console.print(f"[green]✓[/green] Removed job {job_id}")
     else:
         console.print(f"[red]Job {job_id} not found[/red]")
@@ -723,7 +723,7 @@ def cron_enable(
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
     
-    job = service.enable_job(job_id, enabled=not disable)
+    job = asyncio.run(service.enable_job(job_id, enabled=not disable))
     if job:
         status = "disabled" if disable else "enabled"
         console.print(f"[green]✓[/green] Job '{job.name}' {status}")
