@@ -25,12 +25,17 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace, memory_config=memory_config)
         self.skills = SkillsLoader(workspace)
     
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    async def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        user_message: str = "",
+    ) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
         
         Args:
             skill_names: Optional list of skills to include.
+            user_message: Current user message for query-aware memory retrieval.
         
         Returns:
             Complete system prompt.
@@ -45,8 +50,19 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
         
-        # Memory context
+        # Memory context (static summary + today's notes)
         memory = self.memory.get_memory_context()
+
+        # Query-aware: search for relevant memories based on user's current message
+        if user_message:
+            try:
+                relevant = await self.memory.search(user_message, max_results=3)
+                if relevant:
+                    relevant_text = "\n".join(f"- {r.text}" for r in relevant)
+                    memory += f"\n\n## Relevant Memories\n{relevant_text}"
+            except Exception:
+                pass  # Don't block prompt building on search failure
+
         if memory:
             parts.append(f"# Memory\n\n{memory}")
         
@@ -101,14 +117,11 @@ Your workspace is at: {workspace_path}
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
 ## Memory Guidelines
-- Use memory_search to find past memories before writing (avoid duplicates)
-- When writing to MEMORY.md, follow this format:
-  - Each memory is a single line under the appropriate section header
-  - Prefix with category tag: [preference], [fact], [project], [decision]
-  - Example: `- [preference] User prefers Python over JavaScript`
-  - Example: `- [fact] User is based in Shanghai, timezone UTC+8`
-  - Example: `- [project] Working on nanobot long-term memory feature`
-  - Do NOT rewrite the entire file; append under the correct section
+- Use the memory_write tool to store new memories (with category tag)
+  - Categories: preference, fact, project, decision
+  - Example: memory_write(action="add", text="User prefers Python over JavaScript", category="preference")
+- The memory_write tool automatically checks for duplicates and conflicting entries
+- Use memory_search to find past memories when you need context
 - Use daily notes ({workspace_path}/memory/YYYY-MM-DD.md) for session context and events
 - When you learn something important about the user, save it to memory
 
@@ -130,7 +143,7 @@ Always be helpful, accurate, and concise. When using tools, explain what you're 
         
         return "\n\n".join(parts) if parts else ""
     
-    def build_messages(
+    async def build_messages(
         self,
         history: list[dict[str, Any]],
         current_message: str,
@@ -155,8 +168,10 @@ Always be helpful, accurate, and concise. When using tools, explain what you're 
         """
         messages = []
 
-        # System prompt
-        system_prompt = self.build_system_prompt(skill_names)
+        # System prompt (with query-aware memory retrieval)
+        system_prompt = await self.build_system_prompt(
+            skill_names, user_message=current_message,
+        )
         if channel and chat_id:
             system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
         messages.append({"role": "system", "content": system_prompt})

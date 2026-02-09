@@ -122,6 +122,9 @@ class MemoryConfig(BaseModel):
     max_context_tokens: int = 100000     # Estimated model context window
     embedding_model: str = ""            # Embedding model, e.g. "text-embedding-3-small" (empty=disabled)
     embedding_cache_max: int = 2000      # Max cached embeddings
+    max_entry_bytes: int = 1024          # Max size per memory entry (bytes)
+    max_memory_file_bytes: int = 102400  # Max total MEMORY.md size (bytes)
+    dedup_search_results: int = 3        # Candidates to check during dedup
 
 
 class Config(BaseSettings):

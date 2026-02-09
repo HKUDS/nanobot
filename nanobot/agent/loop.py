@@ -1,6 +1,7 @@
 """Agent loop: the core processing engine."""
 
 import asyncio
+import functools
 import json
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,7 @@ from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.memory import MemorySearchTool
+from nanobot.agent.tools.memory import MemorySearchTool, MemoryWriteTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
 
@@ -110,10 +111,15 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
         
-        # Memory search tool
+        # Memory tools (search + write)
         self.tools.register(MemorySearchTool(
             memory_store=self.context.memory,
             max_results=self.memory_config.search_max_results,
+        ))
+        self.tools.register(MemoryWriteTool(
+            memory_store=self.context.memory,
+            provider=self.provider,
+            model=self.model,
         ))
     
     async def run(self) -> None:
@@ -185,7 +191,7 @@ class AgentLoop:
             cron_tool.set_context(msg.channel, msg.chat_id)
         
         # Build initial messages (use get_history for LLM-formatted messages)
-        messages = self.context.build_messages(
+        messages = await self.context.build_messages(
             history=session.get_history(),
             current_message=msg.content,
             media=msg.media if msg.media else None,
@@ -301,7 +307,7 @@ class AgentLoop:
             cron_tool.set_context(origin_channel, origin_chat_id)
         
         # Build messages with the announce content
-        messages = self.context.build_messages(
+        messages = await self.context.build_messages(
             history=session.get_history(),
             current_message=msg.content,
             channel=origin_channel,
@@ -364,18 +370,35 @@ class AgentLoop:
     
     # -- Memory flush & compaction --
 
+    @staticmethod
+    @functools.lru_cache(maxsize=1)
+    def _get_tokenizer():
+        """Return a tiktoken encoder if available, else None."""
+        try:
+            import tiktoken
+            return tiktoken.encoding_for_model("gpt-4")
+        except (ImportError, Exception):
+            return None
+
+    def _count_tokens(self, text: str) -> int:
+        """Count tokens using tiktoken if available, else chars // 4."""
+        enc = self._get_tokenizer()
+        if enc is not None:
+            return len(enc.encode(text))
+        return len(text) // 4
+
     def _estimate_tokens(self, messages: list[dict[str, Any]]) -> int:
-        """Estimate token count from messages (chars / 4 approximation)."""
-        total_chars = 0
+        """Estimate token count from messages."""
+        parts: list[str] = []
         for msg in messages:
             content = msg.get("content", "")
             if isinstance(content, str):
-                total_chars += len(content)
+                parts.append(content)
             elif isinstance(content, list):
                 for part in content:
                     if isinstance(part, dict) and "text" in part:
-                        total_chars += len(part["text"])
-        return total_chars // 4
+                        parts.append(part["text"])
+        return self._count_tokens("".join(parts))
 
     def _should_flush(self, messages: list[dict[str, Any]]) -> bool:
         """Check if context is approaching the limit."""
@@ -407,17 +430,22 @@ class AgentLoop:
                 model=self.model,
             )
             if response.has_tool_calls:
+                # One assistant message with ALL tool calls
+                flush_messages.append({
+                    "role": "assistant",
+                    "content": response.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id, "type": "function",
+                            "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
+                        }
+                        for tc in response.tool_calls
+                    ],
+                })
+                # Execute each tool and append individual results
                 for tc in response.tool_calls:
                     logger.info(f"Memory flush tool call: {tc.name}")
                     result = await self.tools.execute(tc.name, tc.arguments)
-                    flush_messages.append({
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": [{
-                            "id": tc.id, "type": "function",
-                            "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
-                        }],
-                    })
                     flush_messages.append({
                         "role": "tool", "tool_call_id": tc.id,
                         "name": tc.name, "content": result,
@@ -441,6 +469,39 @@ class AgentLoop:
         if not old:
             return messages
 
+        # Ensure `recent` starts at a user message boundary, not a tool result
+        # that was orphaned by the split.
+        while recent and recent[0].get("role") == "tool":
+            old.append(recent.pop(0))
+        # Also pull in assistant messages with dangling tool_calls whose
+        # tool results were moved to `old`.
+        while recent and recent[0].get("role") == "assistant" and "tool_calls" in recent[0]:
+            old.append(recent.pop(0))
+            while recent and recent[0].get("role") == "tool":
+                old.append(recent.pop(0))
+
+        if not recent:
+            return messages
+
+        # Filter old messages: only send user and plain assistant messages to
+        # the summarizer so we don't need tool definitions.
+        filtered_old = []
+        for msg in old:
+            role = msg.get("role")
+            if role == "tool":
+                continue
+            if role == "assistant" and "tool_calls" in msg:
+                # Keep only the text content, drop tool_calls
+                text = msg.get("content", "") or ""
+                if text:
+                    filtered_old.append({"role": "assistant", "content": text})
+                continue
+            if role in ("user", "assistant"):
+                filtered_old.append({"role": role, "content": msg.get("content", "") or ""})
+
+        if not filtered_old:
+            return messages
+
         logger.info(f"Compacting {len(old)} old messages into summary")
         summary_response = await self.provider.chat(
             messages=[
@@ -449,16 +510,18 @@ class AgentLoop:
                     "Preserve: key facts, decisions, user requests, and outcomes. "
                     "Omit: greetings, filler, tool call details."
                 )},
-                *old,
+                *filtered_old,
             ],
             model=self.model,
             max_tokens=1024,
         )
 
+        summary_text = summary_response.content or "No summary available."
+
         return [
             system_prompt,
             {"role": "assistant", "content":
-             f"[Previous conversation summary]\n{summary_response.content}"},
+             f"[Previous conversation summary]\n{summary_text}"},
             *recent,
         ]
 

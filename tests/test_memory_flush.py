@@ -4,7 +4,7 @@ import json
 import pytest
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 from dataclasses import dataclass, field
 
 from nanobot.agent.loop import AgentLoop
@@ -63,14 +63,15 @@ def _make_agent(workspace, responses=None, memory_config=None):
 
 
 def test_estimate_tokens_simple(workspace):
-    """Token estimation uses chars // 4."""
+    """Token estimation uses chars // 4 when tiktoken unavailable."""
     agent, _ = _make_agent(workspace)
 
     messages = [
         {"role": "system", "content": "a" * 400},  # 100 tokens
         {"role": "user", "content": "b" * 200},     # 50 tokens
     ]
-    estimated = agent._estimate_tokens(messages)
+    with patch.object(AgentLoop, "_get_tokenizer", return_value=None):
+        estimated = agent._estimate_tokens(messages)
     assert estimated == 150
 
 
@@ -84,7 +85,8 @@ def test_estimate_tokens_multimodal(workspace):
             {"type": "text", "text": "x" * 80},
         ]},
     ]
-    estimated = agent._estimate_tokens(messages)
+    with patch.object(AgentLoop, "_get_tokenizer", return_value=None):
+        estimated = agent._estimate_tokens(messages)
     assert estimated == 20  # 80 chars // 4
 
 
@@ -92,6 +94,33 @@ def test_estimate_tokens_empty(workspace):
     """Empty messages return 0."""
     agent, _ = _make_agent(workspace)
     assert agent._estimate_tokens([]) == 0
+
+
+def test_estimate_tokens_with_tiktoken(workspace):
+    """When tiktoken is available, uses accurate token counting."""
+    agent, _ = _make_agent(workspace)
+
+    # Create a mock tokenizer
+    mock_enc = MagicMock()
+    mock_enc.encode.return_value = list(range(42))  # 42 tokens
+
+    with patch.object(AgentLoop, "_get_tokenizer", return_value=mock_enc):
+        messages = [{"role": "user", "content": "Hello world"}]
+        result = agent._estimate_tokens(messages)
+
+    assert result == 42
+    mock_enc.encode.assert_called_once()
+
+
+def test_estimate_tokens_fallback_without_tiktoken(workspace):
+    """When tiktoken is unavailable, falls back to chars // 4."""
+    agent, _ = _make_agent(workspace)
+
+    with patch.object(AgentLoop, "_get_tokenizer", return_value=None):
+        messages = [{"role": "user", "content": "a" * 80}]
+        result = agent._estimate_tokens(messages)
+
+    assert result == 20  # 80 chars // 4
 
 
 # ============================================================================
@@ -104,9 +133,10 @@ def test_should_flush_below_threshold(workspace):
     agent, _ = _make_agent(workspace, memory_config=MemoryConfig(
         max_context_tokens=1000, flush_threshold_ratio=0.75,
     ))
-    # 700 tokens < 750 threshold
+    # 700 tokens < 750 threshold (using chars // 4 fallback)
     messages = [{"role": "user", "content": "a" * 2800}]
-    assert agent._should_flush(messages) is False
+    with patch.object(AgentLoop, "_get_tokenizer", return_value=None):
+        assert agent._should_flush(messages) is False
 
 
 def test_should_flush_above_threshold(workspace):
@@ -114,9 +144,10 @@ def test_should_flush_above_threshold(workspace):
     agent, _ = _make_agent(workspace, memory_config=MemoryConfig(
         max_context_tokens=1000, flush_threshold_ratio=0.75,
     ))
-    # 800 tokens > 750 threshold
+    # 800 tokens > 750 threshold (using chars // 4 fallback)
     messages = [{"role": "user", "content": "a" * 3200}]
-    assert agent._should_flush(messages) is True
+    with patch.object(AgentLoop, "_get_tokenizer", return_value=None):
+        assert agent._should_flush(messages) is True
 
 
 # ============================================================================
@@ -149,6 +180,49 @@ async def test_memory_flush_calls_tools(workspace):
     flush_file = workspace / "memory" / "flush_test.md"
     assert flush_file.exists()
     assert flush_file.read_text() == "flushed"
+
+
+async def test_memory_flush_multiple_tool_calls(workspace):
+    """Multiple tool calls in one response produce a single assistant message."""
+    tool_response = LLMResponse(
+        content="Saving memories...",
+        tool_calls=[
+            ToolCallRequest(
+                id="call_1",
+                name="write_file",
+                arguments={"path": str(workspace / "memory" / "file1.md"), "content": "one"},
+            ),
+            ToolCallRequest(
+                id="call_2",
+                name="write_file",
+                arguments={"path": str(workspace / "memory" / "file2.md"), "content": "two"},
+            ),
+        ],
+    )
+    done_response = LLMResponse(content="DONE")
+
+    agent, provider = _make_agent(workspace, responses=[tool_response, done_response])
+
+    messages = [{"role": "system", "content": "test"}]
+    await agent._memory_flush(messages)
+
+    # Both files should be written
+    assert (workspace / "memory" / "file1.md").read_text() == "one"
+    assert (workspace / "memory" / "file2.md").read_text() == "two"
+
+    # Inspect flush_messages passed to the second provider call
+    second_call_messages = provider.calls[1]["messages"]
+    # Find all assistant messages appended during flush (after the user system message)
+    assistant_msgs = [m for m in second_call_messages if m.get("role") == "assistant"
+                      and "tool_calls" in m]
+    # There should be exactly ONE assistant message with both tool calls
+    assert len(assistant_msgs) == 1
+    assert len(assistant_msgs[0]["tool_calls"]) == 2
+
+    # Tool results should follow as separate messages
+    tool_msgs = [m for m in second_call_messages if m.get("role") == "tool"]
+    assert len(tool_msgs) == 2
+    assert {m["tool_call_id"] for m in tool_msgs} == {"call_1", "call_2"}
 
 
 async def test_memory_flush_no_tools(workspace):
@@ -246,6 +320,108 @@ async def test_compact_preserves_system_prompt(workspace):
 
     assert compacted[0]["role"] == "system"
     assert compacted[0]["content"] == system_content
+
+
+async def test_compact_history_summary_none(workspace):
+    """Compaction handles LLM returning content=None gracefully."""
+    summary_response = LLMResponse(content=None)  # e.g. LLM only returned tool calls
+
+    agent, _ = _make_agent(
+        workspace,
+        responses=[summary_response],
+        memory_config=MemoryConfig(compact_keep_recent=2),
+    )
+
+    messages = [
+        {"role": "system", "content": "System prompt"},
+        {"role": "user", "content": "Old message 1"},
+        {"role": "assistant", "content": "Old response 1"},
+        {"role": "user", "content": "Recent 1"},
+        {"role": "assistant", "content": "Recent 2"},
+    ]
+
+    compacted = await agent._compact_history(messages)
+
+    # Should not contain literal "None" string
+    summary_msg = compacted[1]
+    assert "[Previous conversation summary]" in summary_msg["content"]
+    assert "None" not in summary_msg["content"]
+    assert "No summary available." in summary_msg["content"]
+
+
+async def test_compact_history_recent_starts_with_tool(workspace):
+    """When keep boundary falls inside a tool call sequence, recent is adjusted."""
+    summary_response = LLMResponse(content="Summary of old messages.")
+
+    agent, provider = _make_agent(
+        workspace,
+        responses=[summary_response],
+        memory_config=MemoryConfig(compact_keep_recent=3),
+    )
+
+    messages = [
+        {"role": "system", "content": "System prompt"},
+        {"role": "user", "content": "Old message"},
+        {"role": "assistant", "content": "Old response"},
+        {"role": "user", "content": "What file is this?"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "tc1", "type": "function",
+             "function": {"name": "read_file", "arguments": '{"path": "x.py"}'}},
+        ]},
+        {"role": "tool", "tool_call_id": "tc1", "name": "read_file", "content": "print('hi')"},  # <-- would be recent[0] with keep=3
+        {"role": "assistant", "content": "The file prints hi."},
+        {"role": "user", "content": "Thanks"},
+    ]
+
+    compacted = await agent._compact_history(messages)
+
+    # The recent portion must NOT start with a tool message
+    recent_start = 2  # after system_prompt + summary
+    assert compacted[recent_start]["role"] != "tool"
+    # All roles in the result should be valid sequence
+    roles = [m["role"] for m in compacted]
+    for i, role in enumerate(roles):
+        if role == "tool":
+            # A tool message must be preceded by an assistant message (possibly
+            # with other tool messages in between for the same assistant turn)
+            prev_roles = roles[:i]
+            assert "assistant" in prev_roles
+
+
+async def test_compact_history_filters_tool_messages_for_summarizer(workspace):
+    """Summarizer does not receive tool role or assistant tool_calls messages."""
+    summary_response = LLMResponse(content="Summary.")
+
+    agent, provider = _make_agent(
+        workspace,
+        responses=[summary_response],
+        memory_config=MemoryConfig(compact_keep_recent=2),
+    )
+
+    messages = [
+        {"role": "system", "content": "System prompt"},
+        {"role": "user", "content": "Read file x.py"},
+        {"role": "assistant", "content": "Reading...", "tool_calls": [
+            {"id": "tc1", "type": "function",
+             "function": {"name": "read_file", "arguments": '{"path": "x.py"}'}},
+        ]},
+        {"role": "tool", "tool_call_id": "tc1", "name": "read_file", "content": "print('hi')"},
+        {"role": "assistant", "content": "The file contains a print statement."},
+        {"role": "user", "content": "Recent 1"},
+        {"role": "assistant", "content": "Recent 2"},
+    ]
+
+    compacted = await agent._compact_history(messages)
+
+    # Inspect what was sent to the summarizer
+    summarizer_call = provider.calls[0]
+    summarizer_messages = summarizer_call["messages"]
+
+    # No tool role messages should be in the summarizer input
+    for msg in summarizer_messages:
+        assert msg["role"] != "tool", f"Found tool message in summarizer input: {msg}"
+        if msg["role"] == "assistant":
+            assert "tool_calls" not in msg, f"Found tool_calls in assistant message: {msg}"
 
 
 # ============================================================================

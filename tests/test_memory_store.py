@@ -1,9 +1,11 @@
-"""Tests for MemoryStore: chunking, keyword search, summary, tokenizer."""
+"""Tests for MemoryStore: chunking, keyword search, summary, tokenizer, context building."""
 
 import pytest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from nanobot.agent.memory import MemoryStore, Chunk
+from nanobot.agent.context import ContextBuilder
 from nanobot.config.schema import MemoryConfig
 
 
@@ -210,3 +212,42 @@ def test_get_memory_context_combines_parts(memory_file):
     assert "Long-term Memory (summary)" in context
     assert "Today's Notes" in context
     assert "memory_search" in context
+
+
+# ============================================================================
+# Query-aware retrieval (ContextBuilder)
+# ============================================================================
+
+
+async def test_build_system_prompt_with_user_message(memory_file):
+    """Relevant memories appear in prompt when user_message is provided."""
+    ctx = ContextBuilder(memory_file, memory_config=MemoryConfig())
+
+    prompt = await ctx.build_system_prompt(user_message="What do I prefer Python or JS?")
+
+    assert "Relevant Memories" in prompt
+    assert "Python" in prompt
+
+
+async def test_build_system_prompt_without_user_message(memory_file):
+    """No extra search is performed when user_message is empty."""
+    ctx = ContextBuilder(memory_file, memory_config=MemoryConfig())
+
+    with patch.object(ctx.memory, "search", new_callable=AsyncMock) as mock_search:
+        prompt = await ctx.build_system_prompt(user_message="")
+        mock_search.assert_not_called()
+
+    # Should still have the static memory summary
+    assert "Memory" in prompt
+
+
+async def test_build_system_prompt_no_relevant_results(workspace):
+    """Graceful handling when query-aware search returns no results."""
+    ctx = ContextBuilder(workspace, memory_config=MemoryConfig())
+
+    # No MEMORY.md, no daily notes — search returns empty
+    prompt = await ctx.build_system_prompt(user_message="quantum computing")
+
+    # Should not crash, should not have "Relevant Memories" section
+    assert "Relevant Memories" not in prompt
+    assert "nanobot" in prompt  # Still has identity section
