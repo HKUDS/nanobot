@@ -59,19 +59,70 @@
 #### 4. Example Configuration
 - **`config.example.json`** - Complete example with all routing options
 
+## Testing the Smart Router
+
+### Quick Test
+
+1. **Configure routing** in `~/.nanobot/config.json`:
+```json
+{
+  "routing": {
+    "enabled": true,
+    "tiers": {
+      "simple": {"model": "gpt-4o-mini", "cost_per_mtok": 0.60},
+      "medium": {"model": "anthropic/claude-sonnet-4", "cost_per_mtok": 15.0},
+      "complex": {"model": "anthropic/claude-opus-4", "cost_per_mtok": 75.0},
+      "reasoning": {"model": "o3", "cost_per_mtok": 10.0}
+    }
+  }
+}
+```
+
+2. **Test different message types**:
+```bash
+# Simple query - should use gpt-4o-mini
+nanobot agent -m "What is 2+2?"
+
+# Code task - should use claude-sonnet-4
+nanobot agent -m "Write a Python function to sort a list"
+
+# Complex debugging - should use claude-opus-4
+nanobot agent -m "Debug this distributed system issue with race conditions"
+
+# Reasoning task - should use o3
+nanobot agent -m "Prove that the sum of angles in a triangle is 180 degrees"
+```
+
+3. **Check routing decisions** in logs:
+```bash
+# Look for lines like:
+# "Smart routing: simple (confidence: 0.92, layer: client)"
+# "Smart routing: complex (confidence: 0.88, layer: llm)"
+```
+
+### Manual Testing Script
+
+```python
+from nanobot.agent.router import classify_content
+
+# Test classification
+test_messages = [
+    "What is the capital of France?",
+    "Write a function to parse JSON",
+    "Debug why this distributed system is failing",
+    "Prove this theorem step by step",
+]
+
+for msg in test_messages:
+    decision, scores = classify_content(msg)
+    print(f"Message: {msg[:50]}...")
+    print(f"  Tier: {decision.tier.value}")
+    print(f"  Confidence: {decision.confidence:.2f}")
+    print(f"  Layer: {decision.layer}")
+    print()
+```
+
 ## Next Steps
-
-### Priority 1: Integration ⚡
-- [ ] **Integrate RoutingStage into AgentLoop**
-  - Modify `nanobot/agent/loop.py`
-  - Replace static model selection with smart routing
-  - Add routing context to message processing
-  - Test with various message types
-
-- [ ] **Update AgentLoop initialization**
-  - Pass routing config to AgentLoop
-  - Initialize RoutingStage with provider
-  - Wire up analytics/logging
 
 ### Priority 2: CLI Commands 🖥️
 - [ ] **Add `nanobot routing` commands**
