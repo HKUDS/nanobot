@@ -26,15 +26,16 @@ class CronTool(Tool):
     
     @property
     def description(self) -> str:
-        return """Schedule tasks and reminders. 
+        return """Schedule tasks, reminders, and timers. 
+Use this for ANY request involving time: "in 5 seconds", "every day", "at 9pm", "remind me later".
 
 CRITICAL - YOU MUST CHOOSE THE CORRECT TYPE:
-1. 'echo' (MANDATORY for text): Use this for simple reminders like "Remind me to drink water" or "Call Mom". It sends the text directly. Do NOT use 'agent' for this.
-2. 'agent' (ONLY for logic): Use this ONLY if you need to use tools (e.g. "Check weather every morning", "Summarize news"). The result will be sent as the notification.
+1. 'echo' (MANDATORY for text/simple reminders): Use this for "Remind me to drink water", "Call Mom in 5 mins". It sends the text directly. FASTEST & RELIABLE.
+2. 'agent' (ONLY for AI logic): Use this ONLY if you need to use tools/thinking (e.g. "Check weather every morning", "Check USD rate").
 
 Examples:
-- "Remind me to sleep" -> type='echo', message="Time to sleep!"
-- "Check stock price at 9am" -> type='agent', message="Check AAPL price"
+- "Remind me to sleep in 10m" -> type='echo', message="Time to sleep!", every_seconds=600
+- "Check stock price at 9am" -> type='agent', message="Check AAPL price", at="...T09:00:00"
 """
 
     @property
