@@ -341,16 +341,24 @@ nanobot gateway
 </details>
 
 <details>
-<summary><b>QQ (QQ私聊)</b></summary>
+<summary><b>QQ (QQ单聊)</b></summary>
 
-Uses **botpy SDK** with WebSocket — no public IP required.
+Uses **botpy SDK** with WebSocket — no public IP required. Currently supports **private messages only**.
 
-**1. Create a QQ bot**
-- Visit [QQ Open Platform](https://q.qq.com)
+**1. Register & create bot**
+- Visit [QQ Open Platform](https://q.qq.com) → Register as a developer (personal or enterprise)
 - Create a new bot application
-- Get **AppID** and **Secret** from "Developer Settings"
+- Go to **开发设置 (Developer Settings)** → copy **AppID** and **AppSecret**
 
-**2. Configure**
+**2. Set up sandbox for testing**
+- In the bot management console, find **沙箱配置 (Sandbox Config)**
+- Under **在消息列表配置**, click **添加成员** and add your own QQ number
+- Once added, scan the bot's QR code with mobile QQ → open the bot profile → tap "发消息" to start chatting
+
+**3. Configure**
+
+> - `allowFrom`: Leave empty for public access, or add user openids to restrict. You can find openids in the nanobot logs when a user messages the bot.
+> - For production: submit a review in the bot console and publish. See [QQ Bot Docs](https://bot.q.qq.com/wiki/) for the full publishing flow.
 
 ```json
 {
@@ -365,17 +373,13 @@ Uses **botpy SDK** with WebSocket — no public IP required.
 }
 ```
 
-> `allowFrom`: Leave empty for public access, or add user openids to restrict access.
-> Example: `"allowFrom": ["user_openid_1", "user_openid_2"]`
-
-**3. Run**
+**4. Run**
 
 ```bash
 nanobot gateway
 ```
 
-> [!TIP]
-> QQ bot currently supports **private messages only**. Group chat support coming soon!
+Now send a message to the bot from QQ — it should respond!
 
 </details>
 
