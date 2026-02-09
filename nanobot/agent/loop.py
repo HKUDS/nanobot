@@ -449,9 +449,10 @@ class AgentLoop:
             )
 
         # Build command - use shell mode for Windows PATH compatibility
-        cmd_parts = ["claude", "--print", "--dangerously-skip-permissions"]
+        # Use --output-format json to get session_id for continuity
+        cmd_parts = ["claude", "--print", "--dangerously-skip-permissions", "--output-format", "json"]
 
-        # Use --resume if we have a session_id
+        # Use --resume if we have a session_id (for conversation continuity)
         if session.claude_session_id:
             cmd_parts.extend(["--resume", session.claude_session_id])
 
@@ -476,30 +477,40 @@ class AgentLoop:
             output = stdout.decode("utf-8", errors="replace")
             error_output = stderr.decode("utf-8", errors="replace")
 
-            # Try to extract session_id from output for future --resume
-            # Claude Code may output session info in JSON format
-            if not session.claude_session_id and output:
-                session_match = re.search(r'"session_id"\s*:\s*"([^"]+)"', output)
-                if session_match:
-                    session.claude_session_id = session_match.group(1)
-                    logger.debug(f"Captured Claude session_id: {session.claude_session_id}")
+            # Parse JSON output to extract session_id and result
+            display_text = output
+            try:
+                if output.strip():
+                    json_output = json.loads(output)
+                    # Extract session_id for conversation continuity
+                    if "session_id" in json_output:
+                        session.claude_session_id = json_output["session_id"]
+                        logger.debug(f"Captured Claude session_id: {session.claude_session_id}")
+                    # Extract the actual response text
+                    if "result" in json_output:
+                        display_text = json_output["result"]
+                    elif "content" in json_output:
+                        display_text = json_output["content"]
+            except json.JSONDecodeError:
+                # Not JSON, use raw output (fallback for older claude versions)
+                logger.debug("Claude output is not JSON, using raw output")
 
             # Save session state
             session.add_message("user", f"[Claude Code] {content}")
-            session.add_message("assistant", output[:500] if output else "(无输出)")
+            session.add_message("assistant", display_text[:500] if display_text else "(无输出)")
             self.sessions.save(session)
 
             # Prepare response
             if process.returncode != 0 and error_output:
                 result = f"⚠️ Claude Code 返回错误:\n```\n{error_output[:2000]}\n```"
-                if output:
-                    result += f"\n\n输出:\n{output[:3000]}"
-            elif output:
+                if display_text:
+                    result += f"\n\n输出:\n{display_text[:3000]}"
+            elif display_text:
                 # Truncate very long output
-                if len(output) > 4000:
-                    result = output[:4000] + f"\n\n... (输出过长，已截断，共 {len(output)} 字符)"
+                if len(display_text) > 4000:
+                    result = display_text[:4000] + f"\n\n... (输出过长，已截断，共 {len(display_text)} 字符)"
                 else:
-                    result = output
+                    result = display_text
             else:
                 result = "(Claude Code 无输出)"
 
