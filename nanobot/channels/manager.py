@@ -95,6 +95,19 @@ class ChannelManager:
                 logger.info("DingTalk channel enabled")
             except ImportError as e:
                 logger.warning(f"DingTalk channel not available: {e}")
+        
+        # Slack channel
+        if self.config.channels.slack.enabled:
+            try:
+                from nanobot.channels.slack import SlackChannel
+                self.channels["slack"] = SlackChannel(
+                    self.config.channels.slack,
+                    self.bus
+                )
+                logger.info("Slack channel enabled")
+            except ImportError as e:
+                logger.warning(f"Slack channel not available: {e}")
+
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
