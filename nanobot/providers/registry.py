@@ -183,15 +183,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("zai", "glm-4.7"),
         env_key="ZAI_API_KEY",
         display_name="Z.ai",
-        litellm_prefix="openai",            # Uses OpenAI protocol
-        skip_prefixes=("openai/",),
+        litellm_prefix="zhipu",             # MUST use zhipu/chatglm to handle id.secret JWT auth
+        skip_prefixes=("zhipu/", "chatglm/", "zai/"),
         env_extras=(
-            ("OPENAI_API_KEY", "{api_key}"),
+            ("ZHIPUAI_API_KEY", "{api_key}"),
+            ("ZHIPUAI_API_BASE", "{api_base}"),
         ),
         is_gateway=False,
         is_local=False,
         default_api_base="https://api.z.ai/api/coding/paas/v4",
-        strip_model_prefix=True,            # glm-4.7 → openai/glm-4.7
+        strip_model_prefix=True,            # glm-4.7 → zhipu/glm-4.7
         model_overrides=(),
     ),
 
