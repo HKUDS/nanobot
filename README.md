@@ -378,8 +378,9 @@ Config file: `~/.nanobot/config.json`
 
 ### Providers
 
-> [!NOTE]
-> Groq provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
+> [!TIP]
+> - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
+> - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
