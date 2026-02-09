@@ -43,7 +43,8 @@ class LiteLLMProvider(LLMProvider):
             self.rate_limiter = RateLimiter(
                 burst_size=min(rate_limit, 4),  # Cap at 4 for safety
                 window_seconds=60.0,
-                min_delay_seconds=2.0  # Still enforce 2s spacing within burst
+                min_delay_seconds=2.0,  # Still enforce 2s spacing within burst
+                provider=provider_name,
             )
         else:
             self.rate_limiter = None
