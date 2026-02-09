@@ -79,6 +79,7 @@ class CronService:
         self._running = False
         self._running_jobs: set[str] = set()
         self._lock = asyncio.Lock()  # Protect file access
+        self._wakeup_event = asyncio.Event() # To wake up loop immediately
     
     def _load_store(self) -> CronStore:
         """Load jobs from disk."""
@@ -235,7 +236,12 @@ class CronService:
                     delta_s = max(0.1, delta_ms / 1000)
                     sleep_time = min(60, delta_s)
                 
-                await asyncio.sleep(sleep_time)
+                # Wait for timeout OR wakeup event
+                try:
+                    await asyncio.wait_for(self._wakeup_event.wait(), timeout=sleep_time)
+                    self._wakeup_event.clear() # Reset event
+                except asyncio.TimeoutError:
+                    pass # Timeout reached naturally
                 
             except asyncio.CancelledError:
                 break
@@ -252,14 +258,12 @@ class CronService:
         due_jobs = [
             j for j in self._store.jobs
             if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
+            and j.id not in self._running_jobs # Skip running jobs
         ]
         
         if due_jobs:
             logger.info(f"Cron: found {len(due_jobs)} due jobs")
             for job in due_jobs:
-                if job.id in self._running_jobs:
-                    logger.warning(f"Cron: job '{job.name}' ({job.id}) is already running, skipping")
-                    continue
                 # Run concurrently
                 asyncio.create_task(self._execute_job(job))
 
@@ -367,6 +371,7 @@ class CronService:
             
             store.jobs.extend(new_jobs)
             self._save_store()
+            self._wakeup_event.set() # Wake up loop
             
             logger.info(f"Cron: added {len(new_jobs)} jobs batch")
             return new_jobs
@@ -381,6 +386,7 @@ class CronService:
             
             if removed:
                 self._save_store()
+                self._wakeup_event.set() # Wake up loop
                 logger.info(f"Cron: removed job {job_id}")
             
             return removed
@@ -398,6 +404,7 @@ class CronService:
                     else:
                         job.state.next_run_at_ms = None
                     self._save_store()
+                    self._wakeup_event.set() # Wake up loop
                     return job
             return None
     

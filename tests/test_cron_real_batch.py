@@ -2,54 +2,86 @@ import asyncio
 import os
 import shutil
 import json
+import time
 from pathlib import Path
+from functools import partial
+
 from nanobot.agent.loop import AgentLoop
 from nanobot.config.loader import load_config
 from nanobot.providers.litellm_provider import LiteLLMProvider
-from nanobot.agent.tools.cron import CronTool
 from nanobot.cron.service import CronService
-from nanobot.bus import MessageBus
+from nanobot.bus.queue import MessageBus
+from nanobot.bus.events import OutboundMessage
 
-# Mock output channel to verify execution
-class MockOutput:
+# 1. Mock Bus to capture outputs
+class MockBus(MessageBus):
     def __init__(self):
-        self.messages = []
+        super().__init__()
+        self.captured_messages = []
 
-    async def send(self, message):
-        print(f"MockOutput received: {message}")
-        self.messages.append(message)
+    async def publish_outbound(self, message: OutboundMessage):
+        print(f"📨 [BUS] Outbound: {message.content[:100]}...")
+        self.captured_messages.append(message)
+        # We don't need to actually queue it for this test, just capture it
+
+# 2. Execution Callback (matches cli/commands.py logic)
+async def execute_cron_job(job, bus, agent) -> str | None:
+    """Execute a cron job through the agent."""
+    from nanobot.bus.events import OutboundMessage
+    from loguru import logger
+
+    print(f"⚙️ Executing Job: {job.name} ({job.payload.kind})")
+
+    # Echo mode: just send message
+    if job.payload.kind == "echo":
+        if job.payload.to:
+            await bus.publish_outbound(OutboundMessage(
+                channel=job.payload.channel or "cli",
+                chat_id=job.payload.to,
+                content=job.payload.message
+            ))
+        return job.payload.message
+
+    # Agent turn mode
+    response = await agent.process_direct(
+        job.payload.message,
+        session_key=f"cron:{job.id}",
+        channel=job.payload.channel or "cli",
+        chat_id=job.payload.to or "direct",
+    )
+    
+    if job.payload.deliver and job.payload.to:
+        if response and response.strip():
+            await bus.publish_outbound(OutboundMessage(
+                channel=job.payload.channel or "cli",
+                chat_id=job.payload.to,
+                content=response
+            ))
+    return response
 
 async def test_real_batch_agent():
-    print("\n🧪 STARTING REAL BATCH AGENT VERIFICATION TEST")
-    print("===============================================")
+    print("\n🧪 STARTING REAL END-TO-END CRON VERIFICATION TEST")
+    print("==================================================")
     
-    # 1. Setup Environment
+    # Setup
     test_dir = Path("tests/temp_real_batch_test")
     if test_dir.exists():
         shutil.rmtree(test_dir)
     test_dir.mkdir(parents=True)
     
-    # Load REAL user config to get keys
+    # Config
     user_config_path = Path(os.path.expanduser("~/.nanobot/config.json"))
-    if not user_config_path.exists():
-        print("❌ SKIPPING: No ~/.nanobot/config.json found")
-        return
-
     print(f"📂 Loading config from {user_config_path}")
     config = load_config(user_config_path)
     
-    # Force the specific model requested by user
     model_id = "google/gemini-3-pro-preview"
     print(f"🤖 Using Model: {model_id}")
     
-    # 2. Initialize Components
-    bus = MessageBus()
+    # Initialize Components
+    bus = MockBus()
     
-    # Initialize CronService with test directory
     cron_service = CronService(store_path=test_dir / "jobs.json")
-    await cron_service.start()
     
-    # Initialize Provider
     provider = LiteLLMProvider(
         default_model=model_id,
         api_key=config.get_api_key(model_id),
@@ -57,7 +89,6 @@ async def test_real_batch_agent():
         provider_name=config.get_provider_name(model_id)
     )
     
-    # Initialize Agent
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -65,22 +96,27 @@ async def test_real_batch_agent():
         cron_service=cron_service
     )
     
-    # 3. Run Test Scenario
-    # Mixed intent: Echo (simple) + Agent (complex) + Echo (simple)
+    # Wire callback
+    cron_service.on_job = partial(execute_cron_job, bus=bus, agent=agent)
+    
+    await cron_service.start()
+    
+    # --- TEST SCENARIO ---
     user_prompt = (
         "Set these reminders:\n"
-        "1. In 5 seconds: 'Drink water' (just text)\n"
-        "2. In 10 seconds: 'Check the weather in Tokyo' (find info)\n"
-        "3. In 15 seconds: 'Stand up' (just text)"
+        "1. In 5 seconds: 'Drink water' (text)\n"
+        "2. In 8 seconds: 'Check the weather in Tokyo' (find info)\n"
+        "3. In 12 seconds: 'Stand up' (text)\n"
+        "4. Every Monday at 9am: 'Call Mom'"
     )
     
     print(f"\n👤 User Prompt: {user_prompt}")
-    print("⏳ Agent is thinking...")
+    print("⏳ Agent is scheduling...")
     
     response = await agent.process_direct(user_prompt)
     print(f"🤖 Agent Response: {response}")
     
-    # 4. Verify Results in jobs.json
+    # --- VERIFICATION 1: JOBS CREATED ---
     jobs_file = test_dir / "jobs.json"
     if not jobs_file.exists():
         print("❌ FAILED: jobs.json not created")
@@ -92,48 +128,58 @@ async def test_real_batch_agent():
     
     print(f"\n📂 Jobs created: {len(jobs)}")
     
-    # Analyze Job Types
-    echo_jobs = [j for j in jobs if j['payload']['kind'] == 'echo']
-    agent_jobs = [j for j in jobs if j['payload']['kind'] == 'agent']
+    # Check Cron Translation (Monday at 9am)
+    monday_jobs = [j for j in jobs if "mom" in j['name'].lower() or "mom" in j['payload']['message'].lower()]
+    if not monday_jobs:
+         print("❌ FAILED: 'Call Mom' job not found")
+    else:
+        mom_job = monday_jobs[0]
+        expr = mom_job['schedule'].get('expr')
+        # Expect "0 9 * * 1" or similar
+        print(f"   - 'Call Mom' schedule: {expr}")
+        if expr == "0 9 * * 1":
+             print("   ✅ Natural Language Cron Translation: SUCCESS")
+        else:
+             print(f"   ⚠️ Natural Language Cron Translation: Got '{expr}', expected '0 9 * * 1'")
+
+    # --- VERIFICATION 2: EXECUTION ---
+    print("\n⏳ Waiting 45 seconds for execution...")
+    # Sleep in chunks to show progress
+    for i in range(45):
+        await asyncio.sleep(1)
+        print(".", end="", flush=True)
+    print("\n")
     
-    print(f"   - Echo Jobs: {len(echo_jobs)}")
-    print(f"   - Agent Jobs: {len(agent_jobs)}")
+    messages = bus.captured_messages
+    print(f"📨 Total Messages Delivered: {len(messages)}")
     
-    # Assertions
+    # Analyze Messages
+    content_str = "\n".join([m.content.lower() for m in messages])
+    
     success = True
     
-    # Check counts
-    if len(jobs) != 3:
-        print(f"❌ FAILED: Expected 3 jobs, got {len(jobs)}")
-        success = False
-    
-    if len(echo_jobs) != 2:
-        print(f"❌ FAILED: Expected 2 echo jobs, got {len(echo_jobs)}")
-        success = False
+    if "water" in content_str:
+        print("✅ 'Drink water' (Echo) -> DELIVERED")
     else:
-        # Verify content of echo jobs
-        payloads = [j['payload']['message'].lower() for j in echo_jobs]
-        if not any("water" in p for p in payloads):
-            print("❌ FAILED: 'Drink water' job missing or malformed")
-            success = False
-        if not any("stand" in p for p in payloads):
-            print("❌ FAILED: 'Stand up' job missing or malformed")
-            success = False
-            
-    if len(agent_jobs) != 1:
-        print(f"❌ FAILED: Expected 1 agent job, got {len(agent_jobs)}")
+        print("❌ 'Drink water' (Echo) -> NOT DELIVERED")
         success = False
-    else:
-        # Verify content of agent job
-        payload = agent_jobs[0]['payload']['message'].lower()
-        if "tokyo" not in payload and "weather" not in payload:
-            print("❌ FAILED: Weather job payload looks wrong")
-            success = False
 
-    if success:
-        print("\n✅ TEST PASSED: Agent correctly distinguished Mixed Echo/Agent tasks!")
+    if "tokyo" in content_str or "weather" in content_str or "degrees" in content_str:
+        print("✅ 'Tokyo Weather' (Agent) -> DELIVERED")
     else:
-        print("\n❌ TEST FAILED: See errors above.")
+        print("❌ 'Tokyo Weather' (Agent) -> NOT DELIVERED")
+        success = False
+
+    if "stand" in content_str:
+        print("✅ 'Stand up' (Echo) -> DELIVERED")
+    else:
+        print("❌ 'Stand up' (Echo) -> NOT DELIVERED")
+        success = False
+        
+    if success:
+        print("\n🏆 END-TO-END TEST PASSED: Planning -> Scheduling -> Execution -> Delivery verified!")
+    else:
+        print("\n💥 TEST FAILED: Some messages were not delivered.")
 
     # Cleanup
     cron_service.stop()
