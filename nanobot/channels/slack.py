@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from loguru import logger
-from slack_sdk.socket_mode.aiohttp import SocketModeClient
+from slack_sdk.socket_mode.websockets import SocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
@@ -115,8 +115,8 @@ class SlackChannel(BaseChannel):
         sender_id = event.get("user")
         chat_id = event.get("channel")
 
-        # Ignore bot/system messages to prevent loops
-        if event.get("subtype") == "bot_message" or event.get("subtype"):
+        # Ignore bot/system messages (any subtype = not a normal user message)
+        if event.get("subtype"):
             return
         if self._bot_user_id and sender_id == self._bot_user_id:
             return
