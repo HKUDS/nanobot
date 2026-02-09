@@ -494,7 +494,6 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 
 ### Security
 
-> [!TIP]
 > For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
 
 | Option | Default | Description |
