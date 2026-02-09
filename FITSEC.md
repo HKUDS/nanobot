@@ -12,47 +12,30 @@ FIT-Sec adds three core safety primitives to nanoBot:
 
 ## Quick Start
 
-### Using SecureAgentLoop (Recommended)
+### Using SecureToolRegistry (opt-in)
 
-Replace `AgentLoop` with `SecureAgentLoop` to enable FIT-Sec:
-
-```python
-from nanobot.agent.secure_loop import SecureAgentLoop
-
-# Create secure agent loop
-agent = SecureAgentLoop(
-    bus=message_bus,
-    provider=llm_provider,
-    workspace=Path("./workspace"),
-    strict_mode=True,  # Deny unknown tools
-)
-
-# Grant temporary approval for shell commands (O2)
-agent.grant_tool_approval("exec", duration_seconds=300)
-
-# Process messages with security checks
-response = await agent.process_direct("List files in current directory")
-```
-
-### Using SecureToolRegistry Directly
+This fork currently provides an \emph{opt-in} tool-execution wrapper. It is not wired into nanoBot's default agent loop yet.
+The wrapper routes tool calls through the FIT-Sec runtime (Omega taxonomy, monitorability gate, Emptiness Window, and audit log).
 
 ```python
+from pathlib import Path
+
 from nanobot.agent.tools.secure_registry import SecureToolRegistry
-from nanobot.fitsec import OmegaLevel
+from nanobot.fitsec import OmegaLevel, PolicyDeniedError
 
-registry = SecureToolRegistry(
-    workspace=Path("./workspace"),
+reg = SecureToolRegistry(
     strict_mode=True,
+    audit_path=Path("workspace/fitsec_audit.jsonl"),
 )
 
-# Register custom tool with explicit Omega level
-registry.register(my_tool, omega_level=OmegaLevel.OMEGA_1)
+# Register tools (the wrapper records a manifest for auditability).
+reg.register(my_tool, omega_level=OmegaLevel.OMEGA_1)
 
-# Execute with policy checks
+# Execute with policy checks + audit.
 try:
-    result = await registry.execute("my_tool", {"arg": "value"})
-except PolicyDeniedError:
-    print("Action blocked by policy")
+    result = await reg.execute("my_tool", {"arg": "value"})
+except PolicyDeniedError as e:
+    print("Blocked:", e)
 ```
 
 ## Omega Classifications

@@ -278,7 +278,7 @@ class FitSecRuntime:
                 tool_call=tool_call,
                 manifest=manifest,
                 policy_decision=decision,
-                executed=True,
+                executed=False,
                 error=str(e),
             )
             raise

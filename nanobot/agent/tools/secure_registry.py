@@ -26,6 +26,7 @@ from nanobot.fitsec import (
     GateFailedError,
     GateStatus,
     OmegaLevel,
+    PolicyDecision,
     PolicyDeniedError,
     ToolCall,
     ToolManifest,
@@ -109,20 +110,49 @@ class SecureToolRegistry:
         # Emptiness Window (O0 is allowed; others depend on emptiness config)
         if not self._runtime.emptiness.check_allowed(omega):
             self._runtime.emptiness.record_blocked_call(call)
+            decision = PolicyDecision(
+                decision=Decision.DENY,
+                omega_level=omega,
+                gate_status=GateStatus.UNKNOWN,
+                rationale="Blocked by Emptiness Window",
+            )
             self._runtime.audit.log(
                 tool_call=call,
                 manifest=manifest,
-                policy_decision=self._runtime.policy.evaluate(call, manifest, GateStatus.UNKNOWN),
+                policy_decision=decision,
                 executed=False,
                 error="EmptinessActiveError",
             )
             raise EmptinessActiveError("Blocked by Emptiness Window")
 
+        # Emergency gate blocks all O1/O2.
+        if self._runtime.emergency_gate.is_active() and omega != OmegaLevel.OMEGA_0:
+            decision = PolicyDecision(
+                decision=Decision.DENY,
+                omega_level=omega,
+                gate_status=GateStatus.UNKNOWN,
+                rationale=f"Emergency gate active: {self._runtime.emergency_gate.get_reason()}",
+            )
+            self._runtime.audit.log(
+                tool_call=call,
+                manifest=manifest,
+                policy_decision=decision,
+                executed=False,
+                error="EmergencyGateActive",
+            )
+            raise GateFailedError("Emergency gate is active")
+
         gate_status = GateStatus.PASS
         if omega in (OmegaLevel.OMEGA_1, OmegaLevel.OMEGA_2):
             gate_status = self._runtime.gate.check()
             if gate_status not in (GateStatus.PASS, GateStatus.UNKNOWN) and self._runtime.strict_mode:
-                decision = self._runtime.policy.evaluate(call, manifest, gate_status)
+                decision = PolicyDecision(
+                    decision=Decision.DENY,
+                    omega_level=omega,
+                    gate_status=gate_status,
+                    rationale=f"Monitorability gate failed: {gate_status.name}",
+                    metrics_snapshot=self._runtime.gate.get_metrics(),
+                )
                 self._runtime.audit.log(
                     tool_call=call,
                     manifest=manifest,
@@ -143,7 +173,18 @@ class SecureToolRegistry:
             )
             raise PolicyDeniedError(decision.rationale)
 
-        result = await self._registry.execute(name, params)
+        try:
+            result = await self._registry.execute(name, params)
+        except Exception as e:
+            self._runtime.audit.log(
+                tool_call=call,
+                manifest=manifest,
+                policy_decision=decision,
+                executed=False,
+                error=str(e),
+            )
+            raise
+
         self._runtime.audit.log(
             tool_call=call,
             manifest=manifest,
@@ -157,4 +198,3 @@ class SecureToolRegistry:
     def runtime(self) -> FitSecRuntime:
         """Access FIT-Sec runtime (policy/gate/emptiness/audit)."""
         return self._runtime
-

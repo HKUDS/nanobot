@@ -74,7 +74,7 @@ def test_o2_approval_allows_execution_and_audits() -> None:
     assert entries[0].error is None
 
 
-def test_omega2_approval_expires() -> None:
+def test_omega2_approval_expires(monkeypatch: pytest.MonkeyPatch) -> None:
     rt = FitSecRuntime(audit_path=None, strict_mode=True)
     rt.register_tool(
         ToolManifest(
@@ -86,10 +86,12 @@ def test_omega2_approval_expires() -> None:
         executor=lambda action, args: "OK",
     )
 
+    now = 1000.0
+    monkeypatch.setattr(time, "time", lambda: now)
+
     rt.policy.grant_omega2_approval("exec", duration_seconds=0.01)
-    time.sleep(0.02)
+    now = 1000.02
 
     call = ToolCall(tool_id="exec", action="execute", args={})
     with pytest.raises(PolicyDeniedError):
         rt.execute(call)
-

@@ -115,7 +115,11 @@ class AuditLogger:
                 if e.policy_decision.decision.name == decision_filter
             ]
 
-        if limit:
+        if limit is not None:
+            if limit < 0:
+                raise ValueError("limit must be >= 0")
+            if limit == 0:
+                return []
             entries = entries[-limit:]
 
         return entries
