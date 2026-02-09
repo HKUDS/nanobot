@@ -433,8 +433,13 @@ def agent(
     if message:
         # Single message mode
         async def run_once():
-            response = await agent_loop.process_direct(message, session_id)
-            console.print(f"\n{__logo__} {response}")
+            console.print(f"\n{__logo__} ", end="")
+            await agent_loop.process_direct(
+                message, 
+                session_id,
+                stream_callback=lambda chunk: console.print(chunk, end="")
+            )
+            console.print()
         
         asyncio.run(run_once())
     else:
@@ -460,8 +465,13 @@ def agent(
                     if not user_input.strip():
                         continue
                     
-                    response = await agent_loop.process_direct(user_input, session_id)
-                    console.print(f"\n{__logo__} {response}\n")
+                    console.print(f"\n{__logo__} ", end="")
+                    await agent_loop.process_direct(
+                        user_input, 
+                        session_id,
+                        stream_callback=lambda chunk: console.print(chunk, end="")
+                    )
+                    console.print()
                 except KeyboardInterrupt:
                     _save_history()
                     _restore_terminal()

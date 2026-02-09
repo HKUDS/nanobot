@@ -63,6 +63,23 @@ class LLMProvider(ABC):
             LLMResponse with content and/or tool calls.
         """
         pass
+
+    @abstractmethod
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ):
+        """
+        Send a chat completion request and stream the response.
+        
+        Yields:
+            Partial LLMResponse or just strings? Let's say partial LLMResponse.
+        """
+        pass
     
     @abstractmethod
     def get_default_model(self) -> str:
