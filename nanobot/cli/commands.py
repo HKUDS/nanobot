@@ -10,7 +10,10 @@ import sys
 
 import typer
 from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from nanobot import __version__, __logo__
 
@@ -21,6 +24,7 @@ app = typer.Typer(
 )
 
 console = Console()
+EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 
 # ---------------------------------------------------------------------------
 # Lightweight CLI input: readline for arrow keys / history, termios for flush
@@ -130,6 +134,28 @@ def _prompt_text() -> str:
     if _USING_LIBEDIT:
         return "\033[1;34mYou:\033[0m "
     return "\001\033[1;34m\002You:\001\033[0m\002 "
+
+
+def _print_agent_response(response: str, render_markdown: bool) -> None:
+    """Render assistant response with consistent terminal styling."""
+    content = response or ""
+    body = Markdown(content) if render_markdown else Text(content)
+    console.print()
+    console.print(
+        Panel(
+            body,
+            title=f"{__logo__} nanobot",
+            title_align="left",
+            border_style="cyan",
+            padding=(0, 1),
+        )
+    )
+    console.print()
+
+
+def _is_exit_command(command: str) -> bool:
+    """Return True when input should end interactive chat."""
+    return command.lower() in EXIT_COMMANDS
 
 
 async def _read_interactive_input_async() -> str:
@@ -410,16 +436,24 @@ def gateway(
 def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:default", "--session", "-s", help="Session ID"),
+    markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
+    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
 ):
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config
     from nanobot.bus.queue import MessageBus
     from nanobot.agent.loop import AgentLoop
+    from loguru import logger
     
     config = load_config()
     
     bus = MessageBus()
     provider = _make_provider(config)
+
+    if logs:
+        logger.enable("nanobot")
+    else:
+        logger.disable("nanobot")
     
     agent_loop = AgentLoop(
         bus=bus,
@@ -430,17 +464,25 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
     )
     
+    # Show spinner when logs are off (no output to miss); skip when logs are on
+    def _thinking_ctx():
+        if logs:
+            from contextlib import nullcontext
+            return nullcontext()
+        return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
+
     if message:
         # Single message mode
         async def run_once():
-            response = await agent_loop.process_direct(message, session_id)
-            console.print(f"\n{__logo__} {response}")
+            with _thinking_ctx():
+                response = await agent_loop.process_direct(message, session_id)
+            _print_agent_response(response, render_markdown=markdown)
         
         asyncio.run(run_once())
     else:
         # Interactive mode
         _enable_line_editing()
-        console.print(f"{__logo__} Interactive mode (Ctrl+C to exit)\n")
+        console.print(f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n")
 
         # input() runs in a worker thread that can't be cancelled.
         # Without this handler, asyncio.run() would hang waiting for it.
@@ -457,12 +499,25 @@ def agent(
                 try:
                     _flush_pending_tty_input()
                     user_input = await _read_interactive_input_async()
-                    if not user_input.strip():
+                    command = user_input.strip()
+                    if not command:
                         continue
+
+                    if _is_exit_command(command):
+                        _save_history()
+                        _restore_terminal()
+                        console.print("\nGoodbye!")
+                        break
                     
-                    response = await agent_loop.process_direct(user_input, session_id)
-                    console.print(f"\n{__logo__} {response}\n")
+                    with _thinking_ctx():
+                        response = await agent_loop.process_direct(user_input, session_id)
+                    _print_agent_response(response, render_markdown=markdown)
                 except KeyboardInterrupt:
+                    _save_history()
+                    _restore_terminal()
+                    console.print("\nGoodbye!")
+                    break
+                except EOFError:
                     _save_history()
                     _restore_terminal()
                     console.print("\nGoodbye!")

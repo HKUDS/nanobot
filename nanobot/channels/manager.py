@@ -95,6 +95,17 @@ class ChannelManager:
                 logger.info("DingTalk channel enabled")
             except ImportError as e:
                 logger.warning(f"DingTalk channel not available: {e}")
+
+        # Email channel
+        if self.config.channels.email.enabled:
+            try:
+                from nanobot.channels.email import EmailChannel
+                self.channels["email"] = EmailChannel(
+                    self.config.channels.email, self.bus
+                )
+                logger.info("Email channel enabled")
+            except ImportError as e:
+                logger.warning(f"Email channel not available: {e}")
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
