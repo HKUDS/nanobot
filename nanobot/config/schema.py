@@ -48,12 +48,23 @@ class DiscordConfig(BaseModel):
 
 
 class TelnyxVoiceConfig(BaseModel):
-    """Telnyx Voice channel configuration."""
+    """Telnyx Voice channel configuration.
+
+    Telnyx provides a full Voice AI stack through one API:
+      - TTS (Text-to-Speech): Telnyx NaturalHD, ElevenLabs, MiniMax, AWS, Azure
+      - STT (Speech-to-Text): Telnyx, Deepgram, Google, Azure engines
+      - Call Control: Programmable voice with SIP, PSTN, WebRTC support
+
+    Standalone WebSocket endpoints (no phone call needed):
+      - TTS: wss://api.telnyx.com/v2/text-to-speech/speech
+      - STT: wss://api.telnyx.com/v2/speech-to-text/transcription
+    """
     enabled: bool = False
     api_key: str = ""  # Telnyx API key (starts with KEY)
-    webhook_port: int = 8088  # Port for receiving Telnyx webhooks
-    voice: str = "female"  # TTS voice: male, female, or a specific voice ID
-    language: str = "en-US"  # Language for TTS and speech recognition
+    webhook_port: int = 8088  # Port for receiving Telnyx call control webhooks
+    tts_voice: str = "Telnyx.NaturalHD.astra"  # TTS voice ID (Provider.Tier.name)
+    stt_engine: str = "telnyx"  # STT engine: telnyx, deepgram, google, azure
+    language: str = "en-US"  # Language for TTS and STT
     allow_from: list[str] = Field(default_factory=list)  # Allowed caller phone numbers (E.164)
 
 

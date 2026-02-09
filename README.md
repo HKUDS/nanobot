@@ -374,9 +374,27 @@ nanobot gateway
 </details>
 
 <details>
-<summary><b>Telnyx Voice (Phone Calls)</b></summary>
+<summary><b>Telnyx Voice (Phone Calls + TTS + STT)</b></summary>
 
-Give your nanobot a phone number. Receive calls, transcribe speech, and respond with TTS.
+Give your nanobot a phone number. Receive calls, transcribe speech with real-time STT, and respond with streaming TTS. Inspired by [ClawdTalk](https://dev.clawdtalk.com/).
+
+**Telnyx Voice AI Stack:**
+- **TTS (Text-to-Speech):** Streaming WebSocket API with multiple voice providers
+  - Telnyx NaturalHD (default, great quality/cost balance)
+  - ElevenLabs (premium, expressive)
+  - MiniMax (multilingual, expressive)
+  - AWS Neural (Amazon Polly)
+  - Azure Neural / Azure Neural HD
+- **STT (Speech-to-Text):** Real-time transcription with multiple engines
+  - Telnyx (best accuracy, lowest latency)
+  - Deepgram (nova-2, nova-3, flux)
+  - Google (interim results support)
+  - Azure (strong multilingual)
+- **Call Control:** Programmable voice with SIP, PSTN, and WebRTC
+
+**Standalone WebSocket endpoints** (no phone call needed):
+- TTS: `wss://api.telnyx.com/v2/text-to-speech/speech?voice={voice_id}`
+- STT: `wss://api.telnyx.com/v2/speech-to-text/transcription?transcription_engine={engine}`
 
 **1. Get a Telnyx account and phone number**
 - Sign up at [portal.telnyx.com](https://portal.telnyx.com)
@@ -393,13 +411,23 @@ Give your nanobot a phone number. Receive calls, transcribe speech, and respond 
       "enabled": true,
       "apiKey": "KEYxxxxxxxx",
       "webhookPort": 8088,
-      "voice": "female",
+      "ttsVoice": "Telnyx.NaturalHD.astra",
+      "sttEngine": "telnyx",
       "language": "en-US",
       "allowFrom": ["+14155551234"]
     }
   }
 }
 ```
+
+**Available TTS voices** (format: `Provider.Tier.voicename`):
+| Provider | Examples |
+|----------|----------|
+| Telnyx NaturalHD | `Telnyx.NaturalHD.astra`, `Telnyx.NaturalHD.luna` |
+| ElevenLabs | `ElevenLabs.Flash.aria`, `ElevenLabs.Multilingual.chris` |
+| MiniMax | `MiniMax.speech-2.6-turbo.English_Trustworth_Man` |
+| AWS Neural | `AWS.Neural.joanna`, `AWS.Neural.matthew` |
+| Azure Neural | `Azure.Neural.jenny`, `Azure.NeuralHD.aria` |
 
 **3. Run**
 
