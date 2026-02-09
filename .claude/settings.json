@@ -1,0 +1,21 @@
+{
+  "model": "claude-sonnet-4-20250514",
+  "permissions": {
+    "allow": [
+      "Write",
+      "Read", 
+      "Edit",
+      "Bash(git *)",
+      "Bash(pip *)",
+      "Bash(python *)",
+      "Bash(pytest *)",
+      "Bash(ruff *)",
+      "Bash(mkdir *)",
+      "Bash(cat *)",
+      "Bash(ls *)",
+      "Bash(rm *)",
+      "Bash(cp *)",
+      "Bash(mv *)"
+    ]
+  }
+}
