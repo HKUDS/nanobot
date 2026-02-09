@@ -4,11 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
-<<<<<<< HEAD
 from nanobot.agent.tools.smriti.store import MemoryStore
-=======
-from nanobot.agent.tools.smriti_lite import MemoryStore
->>>>>>> 0b3a14a (feat:Long-term memory with smriti_lite)
 
 
 class MemoryTool(Tool):

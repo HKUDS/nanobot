@@ -105,7 +105,6 @@ Only use the 'message' tool when you need to send a message to a specific chat c
 For normal conversation, just respond with text - do not call the message tool.
 
 Always be helpful, accurate, and concise. When using tools, explain what you're doing.
-<<<<<<< HEAD
 
 ## MEMORY USAGE
     When you want to store durable info, use the tool:
@@ -124,20 +123,6 @@ Always be helpful, accurate, and concise. When using tools, explain what you're 
     Query syntax supported in recall:
         - kind:todo  scope:daily|long  #tag  @person  ^<id>  plus free-text terms
 """
-=======
-## MEMORY USAGE
-    When you want to store durable info, use the tool:
-        - memory(action="remember", text="...", kind="note|todo|fact|pref|decision", scope="daily|long")
-    To retrieve:
-        - memory(action="recall", text="scope:long #tag @person keywords", limit=8)
-    To soft-forget / restore:
-        - memory(action="forget", mid="^<id>")
-        - memory(action="restore", mid="^<id>")
-    To promote daily -> long-term:
-        - memory(action="promote", mid="^<id>", remove=true)
-    Query syntax supported in recall:
-        - kind:todo  scope:daily|long  #tag  @person  ^<id>  plus free-text terms"""
->>>>>>> 0b3a14a (feat:Long-term memory with smriti_lite)
     
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""

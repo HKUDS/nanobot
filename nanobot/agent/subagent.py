@@ -17,10 +17,6 @@ from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, ListDirT
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.memory import MemoryTool
-<<<<<<< HEAD
-=======
-
->>>>>>> 0b3a14a (feat:Long-term memory with smriti_lite)
 
 class SubagentManager:
     """
@@ -114,15 +110,9 @@ class SubagentManager:
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
-<<<<<<< HEAD
             if self.context.memory:
                 tools.register(MemoryTool(self.context.memory))
 
-=======
-
-            if self.context.memory: tools.register(MemoryTool(self.context.memory))
-            
->>>>>>> 0b3a14a (feat:Long-term memory with smriti_lite)
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)
             messages: list[dict[str, Any]] = [
