@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "jobs": [
+    {
+      "id": "30f3cf65",
+      "name": "Past Task (Catch-up)",
+      "enabled": false,
+      "schedule": {
+        "kind": "at",
+        "atMs": 1770661652890,
+        "everyMs": null,
+        "expr": null,
+        "tz": null
+      },
+      "payload": {
+        "kind": "echo",
+        "message": "This should execute IMMEDIATELY (Catch-up)",
+        "deliver": true,
+        "channel": "test_cli",
+        "to": "test_user"
+      },
+      "state": {
+        "nextRunAtMs": null,
+        "lastRunAtMs": 1770661712903,
+        "lastStatus": "ok",
+        "lastError": null
+      },
+      "createdAtMs": 1770661712891,
+      "updatedAtMs": 1770661712904,
+      "deleteAfterRun": false
+    },
+    {
+      "id": "151dd5cd",
+      "name": "Immediate Task",
+      "enabled": false,
+      "schedule": {
+        "kind": "at",
+        "atMs": 1770661712890,
+        "everyMs": null,
+        "expr": null,
+        "tz": null
+      },
+      "payload": {
+        "kind": "echo",
+        "message": "This is almost now",
+        "deliver": true,
+        "channel": "test_cli",
+        "to": "test_user"
+      },
+      "state": {
+        "nextRunAtMs": null,
+        "lastRunAtMs": 1770661712904,
+        "lastStatus": "ok",
+        "lastError": null
+      },
+      "createdAtMs": 1770661712891,
+      "updatedAtMs": 1770661712905,
+      "deleteAfterRun": false
+    },
+    {
+      "id": "b8590810",
+      "name": "Future Task 1",
+      "enabled": false,
+      "schedule": {
+        "kind": "at",
+        "atMs": 1770661717890,
+        "everyMs": null,
+        "expr": null,
+        "tz": null
+      },
+      "payload": {
+        "kind": "agent",
+        "message": "Wait for 5 seconds...",
+        "deliver": true,
+        "channel": "test_cli",
+        "to": "test_user"
+      },
+      "state": {
+        "nextRunAtMs": null,
+        "lastRunAtMs": 1770661717895,
+        "lastStatus": "ok",
+        "lastError": null
+      },
+      "createdAtMs": 1770661712891,
+      "updatedAtMs": 1770661717895,
+      "deleteAfterRun": false
+    },
+    {
+      "id": "aff0e78c",
+      "name": "Future Task 2",
+      "enabled": false,
+      "schedule": {
+        "kind": "at",
+        "atMs": 1770661722890,
+        "everyMs": null,
+        "expr": null,
+        "tz": null
+      },
+      "payload": {
+        "kind": "echo",
+        "message": "Wait for 10 seconds...",
+        "deliver": true,
+        "channel": "test_cli",
+        "to": "test_user"
+      },
+      "state": {
+        "nextRunAtMs": null,
+        "lastRunAtMs": 1770661722903,
+        "lastStatus": "ok",
+        "lastError": null
+      },
+      "createdAtMs": 1770661712891,
+      "updatedAtMs": 1770661722903,
+      "deleteAfterRun": false
+    }
+  ]
+}
