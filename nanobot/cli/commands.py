@@ -144,7 +144,7 @@ def _print_agent_response(response: str, render_markdown: bool) -> None:
     console.print(
         Panel(
             body,
-            title=f"{__logo__} Nanobot",
+            title=f"{__logo__} nanobot",
             title_align="left",
             border_style="cyan",
             padding=(0, 1),
@@ -464,10 +464,17 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
     )
     
+    # Show spinner when logs are off (no output to miss); skip when logs are on
+    def _thinking_ctx():
+        if logs:
+            from contextlib import nullcontext
+            return nullcontext()
+        return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
+
     if message:
         # Single message mode
         async def run_once():
-            with console.status("[dim]Nanobot is thinking...[/dim]", spinner="dots"):
+            with _thinking_ctx():
                 response = await agent_loop.process_direct(message, session_id)
             _print_agent_response(response, render_markdown=markdown)
         
@@ -475,7 +482,7 @@ def agent(
     else:
         # Interactive mode
         _enable_line_editing()
-        console.print(f"{__logo__} Interactive mode (Ctrl+C to exit)\n")
+        console.print(f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n")
 
         # input() runs in a worker thread that can't be cancelled.
         # Without this handler, asyncio.run() would hang waiting for it.
@@ -497,10 +504,12 @@ def agent(
                         continue
 
                     if _is_exit_command(command):
+                        _save_history()
+                        _restore_terminal()
                         console.print("\nGoodbye!")
                         break
                     
-                    with console.status("[dim]Nanobot is thinking...[/dim]", spinner="dots"):
+                    with _thinking_ctx():
                         response = await agent_loop.process_direct(user_input, session_id)
                     _print_agent_response(response, render_markdown=markdown)
                 except KeyboardInterrupt:
@@ -509,6 +518,8 @@ def agent(
                     console.print("\nGoodbye!")
                     break
                 except EOFError:
+                    _save_history()
+                    _restore_terminal()
                     console.print("\nGoodbye!")
                     break
         
