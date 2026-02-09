@@ -103,6 +103,26 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # GitHub Copilot: OpenAI-compatible API with dynamic token refresh.
+    # Uses GitHub OAuth token (ghu_...) which is exchanged for Copilot tokens.
+    # Detected by "ghu_" prefix in api_key or "copilot" keyword in model name.
+    ProviderSpec(
+        name="copilot",
+        keywords=("copilot", "github-copilot"),
+        env_key="GITHUB_TOKEN",             # GitHub OAuth token (ghu_...)
+        display_name="GitHub Copilot",
+        litellm_prefix="openai",            # Copilot API is OpenAI-compatible
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="ghu_",        # GitHub OAuth tokens start with "ghu_"
+        detect_by_base_keyword="githubcopilot",
+        default_api_base="https://api.individual.githubcopilot.com",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # === Standard providers (matched by model-name keywords) ===============
 
     # Anthropic: LiteLLM recognizes "claude-*" natively, no prefix needed.
