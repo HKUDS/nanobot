@@ -376,11 +376,11 @@ def channels_status():
         fs_config
     )
 
-    # Moltchat
-    mc = config.channels.moltchat
+    # Mochat
+    mc = config.channels.mochat
     mc_base = mc.base_url or "[dim]not configured[/dim]"
     table.add_row(
-        "Moltchat",
+        "Mochat",
         "✓" if mc.enabled else "✗",
         mc_base
     )

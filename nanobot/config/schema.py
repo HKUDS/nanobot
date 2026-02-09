@@ -39,18 +39,18 @@ class DiscordConfig(BaseModel):
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 
 
-class MoltchatMentionConfig(BaseModel):
-    """Moltchat mention behavior configuration."""
+class MochatMentionConfig(BaseModel):
+    """Mochat mention behavior configuration."""
     require_in_groups: bool = False
 
 
-class MoltchatGroupRule(BaseModel):
-    """Moltchat per-group mention requirement."""
+class MochatGroupRule(BaseModel):
+    """Mochat per-group mention requirement."""
     require_mention: bool = False
 
 
-class MoltchatConfig(BaseModel):
-    """Moltchat channel configuration."""
+class MochatConfig(BaseModel):
+    """Mochat channel configuration."""
     enabled: bool = False
     base_url: str = "http://localhost:11000"
     socket_url: str = ""
@@ -69,8 +69,8 @@ class MoltchatConfig(BaseModel):
     sessions: list[str] = Field(default_factory=list)
     panels: list[str] = Field(default_factory=list)
     allow_from: list[str] = Field(default_factory=list)
-    mention: MoltchatMentionConfig = Field(default_factory=MoltchatMentionConfig)
-    groups: dict[str, MoltchatGroupRule] = Field(default_factory=dict)
+    mention: MochatMentionConfig = Field(default_factory=MochatMentionConfig)
+    groups: dict[str, MochatGroupRule] = Field(default_factory=dict)
     reply_delay_mode: str = "non-mention"  # off | non-mention
     reply_delay_ms: int = 120000
 
@@ -81,7 +81,7 @@ class ChannelsConfig(BaseModel):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
-    moltchat: MoltchatConfig = Field(default_factory=MoltchatConfig)
+    mochat: MochatConfig = Field(default_factory=MochatConfig)
 
 
 class AgentDefaults(BaseModel):

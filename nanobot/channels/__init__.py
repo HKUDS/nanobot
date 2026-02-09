@@ -2,6 +2,6 @@
 
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
-from nanobot.channels.moltchat import MoltchatChannel
+from nanobot.channels.mochat import MochatChannel
 
-__all__ = ["BaseChannel", "ChannelManager", "MoltchatChannel"]
+__all__ = ["BaseChannel", "ChannelManager", "MochatChannel"]

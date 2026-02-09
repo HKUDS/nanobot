@@ -164,7 +164,7 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, or Moltchat — anytime, anywhere.
+Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, or Mochat — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
@@ -172,7 +172,7 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, or Moltchat �
 | **Discord** | Easy (bot token + intents) |
 | **WhatsApp** | Medium (scan QR) |
 | **Feishu** | Medium (app credentials) |
-| **Moltchat** | Medium (claw token + websocket) |
+| **Mochat** | Medium (claw token + websocket) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -207,7 +207,7 @@ nanobot gateway
 </details>
 
 <details>
-<summary><b>Moltchat (Claw IM)</b></summary>
+<summary><b>Mochat (Claw IM)</b></summary>
 
 Uses **Socket.IO WebSocket** by default, with HTTP polling fallback.
 
@@ -221,7 +221,7 @@ Uses **Socket.IO WebSocket** by default, with HTTP polling fallback.
 ```json
 {
   "channels": {
-    "moltchat": {
+    "mochat": {
       "enabled": true,
       "baseUrl": "https://mochat.io",
       "socketUrl": "https://mochat.io",
@@ -244,7 +244,7 @@ nanobot gateway
 ```
 
 > [!TIP]
-> Keep `clawToken` private. It should only be sent in `X-Claw-Token` header to your Moltchat API endpoint.
+> Keep `clawToken` private. It should only be sent in `X-Claw-Token` header to your Mochat API endpoint.
 
 </details>
 
@@ -456,7 +456,7 @@ docker run -v ~/.nanobot:/root/.nanobot --rm nanobot onboard
 # Edit config on host to add API keys
 vim ~/.nanobot/config.json
 
-# Run gateway (connects to enabled channels, e.g. Telegram/Discord/Moltchat)
+# Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat)
 docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
 
 # Or run a single command

@@ -1,4 +1,4 @@
-"""Moltchat channel implementation using Socket.IO with HTTP polling fallback."""
+"""Mochat channel implementation using Socket.IO with HTTP polling fallback."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import MoltchatConfig
+from nanobot.config.schema import MochatConfig
 from nanobot.utils.helpers import get_data_path
 
 try:
@@ -39,7 +39,7 @@ CURSOR_SAVE_DEBOUNCE_S = 0.5
 
 
 @dataclass
-class MoltchatBufferedEntry:
+class MochatBufferedEntry:
     """Buffered inbound entry for delayed dispatch."""
 
     raw_body: str
@@ -55,20 +55,20 @@ class MoltchatBufferedEntry:
 class DelayState:
     """Per-target delayed message state."""
 
-    entries: list[MoltchatBufferedEntry] = field(default_factory=list)
+    entries: list[MochatBufferedEntry] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     timer: asyncio.Task | None = None
 
 
 @dataclass
-class MoltchatTarget:
+class MochatTarget:
     """Outbound target resolution result."""
 
     id: str
     is_panel: bool
 
 
-def normalize_moltchat_content(content: Any) -> str:
+def normalize_mochat_content(content: Any) -> str:
     """Normalize content payload to text."""
     if isinstance(content, str):
         return content.strip()
@@ -80,17 +80,17 @@ def normalize_moltchat_content(content: Any) -> str:
         return str(content)
 
 
-def resolve_moltchat_target(raw: str) -> MoltchatTarget:
+def resolve_mochat_target(raw: str) -> MochatTarget:
     """Resolve id and target kind from user-provided target string."""
     trimmed = (raw or "").strip()
     if not trimmed:
-        return MoltchatTarget(id="", is_panel=False)
+        return MochatTarget(id="", is_panel=False)
 
     lowered = trimmed.lower()
     cleaned = trimmed
     forced_panel = False
 
-    prefixes = ["moltchat:", "mochat:", "group:", "channel:", "panel:"]
+    prefixes = ["mochat:", "group:", "channel:", "panel:"]
     for prefix in prefixes:
         if lowered.startswith(prefix):
             cleaned = trimmed[len(prefix) :].strip()
@@ -99,9 +99,9 @@ def resolve_moltchat_target(raw: str) -> MoltchatTarget:
             break
 
     if not cleaned:
-        return MoltchatTarget(id="", is_panel=False)
+        return MochatTarget(id="", is_panel=False)
 
-    return MoltchatTarget(id=cleaned, is_panel=forced_panel or not cleaned.startswith("session_"))
+    return MochatTarget(id=cleaned, is_panel=forced_panel or not cleaned.startswith("session_"))
 
 
 def extract_mention_ids(value: Any) -> list[str]:
@@ -152,7 +152,7 @@ def resolve_was_mentioned(payload: dict[str, Any], agent_user_id: str) -> bool:
 
 
 def resolve_require_mention(
-    config: MoltchatConfig,
+    config: MochatConfig,
     session_id: str,
     group_id: str,
 ) -> bool:
@@ -167,7 +167,7 @@ def resolve_require_mention(
     return bool(config.mention.require_in_groups)
 
 
-def build_buffered_body(entries: list[MoltchatBufferedEntry], is_group: bool) -> str:
+def build_buffered_body(entries: list[MochatBufferedEntry], is_group: bool) -> str:
     """Build text body from one or more buffered entries."""
     if not entries:
         return ""
@@ -200,20 +200,20 @@ def parse_timestamp(value: Any) -> int | None:
         return None
 
 
-class MoltchatChannel(BaseChannel):
-    """Moltchat channel using socket.io with fallback polling workers."""
+class MochatChannel(BaseChannel):
+    """Mochat channel using socket.io with fallback polling workers."""
 
-    name = "moltchat"
+    name = "mochat"
 
-    def __init__(self, config: MoltchatConfig, bus: MessageBus):
+    def __init__(self, config: MochatConfig, bus: MessageBus):
         super().__init__(config, bus)
-        self.config: MoltchatConfig = config
+        self.config: MochatConfig = config
         self._http: httpx.AsyncClient | None = None
         self._socket: Any = None
         self._ws_connected = False
         self._ws_ready = False
 
-        self._state_dir = get_data_path() / "moltchat"
+        self._state_dir = get_data_path() / "mochat"
         self._cursor_path = self._state_dir / "session_cursors.json"
         self._session_cursor: dict[str, int] = {}
         self._cursor_save_task: asyncio.Task | None = None
@@ -239,9 +239,9 @@ class MoltchatChannel(BaseChannel):
         self._target_locks: dict[str, asyncio.Lock] = {}
 
     async def start(self) -> None:
-        """Start Moltchat channel workers and websocket connection."""
+        """Start Mochat channel workers and websocket connection."""
         if not self.config.claw_token:
-            logger.error("Moltchat claw_token not configured")
+            logger.error("Mochat claw_token not configured")
             return
 
         self._running = True
@@ -296,7 +296,7 @@ class MoltchatChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         """Send outbound message to session or panel."""
         if not self.config.claw_token:
-            logger.warning("Moltchat claw_token missing, skip send")
+            logger.warning("Mochat claw_token missing, skip send")
             return
 
         content_parts = [msg.content.strip()] if msg.content and msg.content.strip() else []
@@ -306,9 +306,9 @@ class MoltchatChannel(BaseChannel):
         if not content:
             return
 
-        target = resolve_moltchat_target(msg.chat_id)
+        target = resolve_mochat_target(msg.chat_id)
         if not target.id:
-            logger.warning("Moltchat outbound target is empty")
+            logger.warning("Mochat outbound target is empty")
             return
 
         is_panel = target.is_panel or target.id in self._panel_set
@@ -330,7 +330,7 @@ class MoltchatChannel(BaseChannel):
                     reply_to=msg.reply_to,
                 )
         except Exception as e:
-            logger.error(f"Failed to send Moltchat message: {e}")
+            logger.error(f"Failed to send Mochat message: {e}")
 
     def _seed_targets_from_config(self) -> None:
         sessions, self._auto_discover_sessions = self._normalize_id_list(self.config.sessions)
@@ -351,7 +351,7 @@ class MoltchatChannel(BaseChannel):
 
     async def _start_socket_client(self) -> bool:
         if not SOCKETIO_AVAILABLE:
-            logger.warning("python-socketio not installed, Moltchat using polling fallback")
+            logger.warning("python-socketio not installed, Mochat using polling fallback")
             return False
 
         serializer = "default"
@@ -385,7 +385,7 @@ class MoltchatChannel(BaseChannel):
         async def connect() -> None:
             self._ws_connected = True
             self._ws_ready = False
-            logger.info("Moltchat websocket connected")
+            logger.info("Mochat websocket connected")
 
             subscribed = await self._subscribe_all()
             self._ws_ready = subscribed
@@ -400,13 +400,13 @@ class MoltchatChannel(BaseChannel):
                 return
             self._ws_connected = False
             self._ws_ready = False
-            logger.warning("Moltchat websocket disconnected")
+            logger.warning("Mochat websocket disconnected")
             await self._ensure_fallback_workers()
 
         @client.event
         async def connect_error(data: Any) -> None:
             message = str(data)
-            logger.error(f"Moltchat websocket connect error: {message}")
+            logger.error(f"Mochat websocket connect error: {message}")
 
         @client.on("claw.session.events")
         async def on_session_events(payload: dict[str, Any]) -> None:
@@ -441,7 +441,7 @@ class MoltchatChannel(BaseChannel):
             )
             return True
         except Exception as e:
-            logger.error(f"Failed to connect Moltchat websocket: {e}")
+            logger.error(f"Failed to connect Mochat websocket: {e}")
             try:
                 await client.disconnect()
             except Exception:
@@ -486,7 +486,7 @@ class MoltchatChannel(BaseChannel):
             },
         )
         if not ack.get("result"):
-            logger.error(f"Moltchat subscribeSessions failed: {ack.get('message', 'unknown error')}")
+            logger.error(f"Mochat subscribeSessions failed: {ack.get('message', 'unknown error')}")
             return False
 
         data = ack.get("data")
@@ -516,7 +516,7 @@ class MoltchatChannel(BaseChannel):
             },
         )
         if not ack.get("result"):
-            logger.error(f"Moltchat subscribePanels failed: {ack.get('message', 'unknown error')}")
+            logger.error(f"Mochat subscribePanels failed: {ack.get('message', 'unknown error')}")
             return False
 
         return True
@@ -544,7 +544,7 @@ class MoltchatChannel(BaseChannel):
             try:
                 await self._refresh_targets(subscribe_new=self._ws_ready)
             except Exception as e:
-                logger.warning(f"Moltchat refresh failed: {e}")
+                logger.warning(f"Mochat refresh failed: {e}")
 
             if self._fallback_mode:
                 await self._ensure_fallback_workers()
@@ -560,7 +560,7 @@ class MoltchatChannel(BaseChannel):
         try:
             response = await self._list_sessions()
         except Exception as e:
-            logger.warning(f"Moltchat listSessions failed: {e}")
+            logger.warning(f"Mochat listSessions failed: {e}")
             return
 
         sessions = response.get("sessions")
@@ -599,7 +599,7 @@ class MoltchatChannel(BaseChannel):
         try:
             response = await self._get_workspace_group()
         except Exception as e:
-            logger.warning(f"Moltchat getWorkspaceGroup failed: {e}")
+            logger.warning(f"Mochat getWorkspaceGroup failed: {e}")
             return
 
         raw_panels = response.get("panels")
@@ -683,7 +683,7 @@ class MoltchatChannel(BaseChannel):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.warning(f"Moltchat watch fallback error ({session_id}): {e}")
+                logger.warning(f"Mochat watch fallback error ({session_id}): {e}")
                 await asyncio.sleep(max(0.1, self.config.retry_delay_ms / 1000.0))
 
     async def _panel_poll_worker(self, panel_id: str) -> None:
@@ -723,7 +723,7 @@ class MoltchatChannel(BaseChannel):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.warning(f"Moltchat panel polling error ({panel_id}): {e}")
+                logger.warning(f"Mochat panel polling error ({panel_id}): {e}")
 
             await asyncio.sleep(sleep_s)
 
@@ -803,7 +803,7 @@ class MoltchatChannel(BaseChannel):
         if message_id and self._remember_message_id(seen_key, message_id):
             return
 
-        raw_body = normalize_moltchat_content(payload.get("content"))
+        raw_body = normalize_mochat_content(payload.get("content"))
         if not raw_body:
             raw_body = "[empty message]"
 
@@ -826,7 +826,7 @@ class MoltchatChannel(BaseChannel):
         if require_mention and not was_mentioned and not use_delay:
             return
 
-        entry = MoltchatBufferedEntry(
+        entry = MochatBufferedEntry(
             raw_body=raw_body,
             author=author,
             sender_name=sender_name,
@@ -883,7 +883,7 @@ class MoltchatChannel(BaseChannel):
         key: str,
         target_id: str,
         target_kind: str,
-        entry: MoltchatBufferedEntry,
+        entry: MochatBufferedEntry,
     ) -> None:
         state = self._delay_states.setdefault(key, DelayState())
 
@@ -912,7 +912,7 @@ class MoltchatChannel(BaseChannel):
         target_id: str,
         target_kind: str,
         reason: str,
-        entry: MoltchatBufferedEntry | None,
+        entry: MochatBufferedEntry | None,
     ) -> None:
         state = self._delay_states.setdefault(key, DelayState())
 
@@ -944,7 +944,7 @@ class MoltchatChannel(BaseChannel):
         self,
         target_id: str,
         target_kind: str,
-        entries: list[MoltchatBufferedEntry],
+        entries: list[MochatBufferedEntry],
         was_mentioned: bool,
     ) -> None:
         if not entries:
@@ -1092,7 +1092,7 @@ class MoltchatChannel(BaseChannel):
         try:
             data = json.loads(self._cursor_path.read_text("utf-8"))
         except Exception as e:
-            logger.warning(f"Failed to read Moltchat cursor file: {e}")
+            logger.warning(f"Failed to read Mochat cursor file: {e}")
             return
 
         cursors = data.get("cursors") if isinstance(data, dict) else None
@@ -1114,14 +1114,14 @@ class MoltchatChannel(BaseChannel):
             self._state_dir.mkdir(parents=True, exist_ok=True)
             self._cursor_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", "utf-8")
         except Exception as e:
-            logger.warning(f"Failed to save Moltchat cursor file: {e}")
+            logger.warning(f"Failed to save Mochat cursor file: {e}")
 
     def _base_url(self) -> str:
         return self.config.base_url.strip().rstrip("/")
 
     async def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not self._http:
-            raise RuntimeError("Moltchat HTTP client not initialized")
+            raise RuntimeError("Mochat HTTP client not initialized")
 
         url = f"{self._base_url()}{path}"
         response = await self._http.post(
@@ -1135,7 +1135,7 @@ class MoltchatChannel(BaseChannel):
 
         text = response.text
         if not response.is_success:
-            raise RuntimeError(f"Moltchat HTTP {response.status_code}: {text[:200]}")
+            raise RuntimeError(f"Mochat HTTP {response.status_code}: {text[:200]}")
 
         parsed: Any
         try:
@@ -1146,7 +1146,7 @@ class MoltchatChannel(BaseChannel):
         if isinstance(parsed, dict) and isinstance(parsed.get("code"), int):
             if parsed["code"] != 200:
                 message = str(parsed.get("message") or parsed.get("name") or "request failed")
-                raise RuntimeError(f"Moltchat API error: {message} (code={parsed['code']})")
+                raise RuntimeError(f"Mochat API error: {message} (code={parsed['code']})")
             data = parsed.get("data")
             return data if isinstance(data, dict) else {}
 

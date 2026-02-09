@@ -1,27 +1,27 @@
 import pytest
 
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.moltchat import (
-    MoltchatBufferedEntry,
-    MoltchatChannel,
+from nanobot.channels.mochat import (
+    MochatBufferedEntry,
+    MochatChannel,
     build_buffered_body,
-    resolve_moltchat_target,
+    resolve_mochat_target,
     resolve_require_mention,
     resolve_was_mentioned,
 )
-from nanobot.config.schema import MoltchatConfig, MoltchatGroupRule, MoltchatMentionConfig
+from nanobot.config.schema import MochatConfig, MochatGroupRule, MochatMentionConfig
 
 
-def test_resolve_moltchat_target_prefixes() -> None:
-    t = resolve_moltchat_target("panel:abc")
+def test_resolve_mochat_target_prefixes() -> None:
+    t = resolve_mochat_target("panel:abc")
     assert t.id == "abc"
     assert t.is_panel is True
 
-    t = resolve_moltchat_target("session_123")
+    t = resolve_mochat_target("session_123")
     assert t.id == "session_123"
     assert t.is_panel is False
 
-    t = resolve_moltchat_target("mochat:session_456")
+    t = resolve_mochat_target("mochat:session_456")
     assert t.id == "session_456"
     assert t.is_panel is False
 
@@ -40,12 +40,12 @@ def test_resolve_was_mentioned_from_meta_and_text() -> None:
 
 
 def test_resolve_require_mention_priority() -> None:
-    cfg = MoltchatConfig(
+    cfg = MochatConfig(
         groups={
-            "*": MoltchatGroupRule(require_mention=False),
-            "group-a": MoltchatGroupRule(require_mention=True),
+            "*": MochatGroupRule(require_mention=False),
+            "group-a": MochatGroupRule(require_mention=True),
         },
-        mention=MoltchatMentionConfig(require_in_groups=False),
+        mention=MochatMentionConfig(require_in_groups=False),
     )
 
     assert resolve_require_mention(cfg, session_id="panel-x", group_id="group-a") is True
@@ -55,14 +55,14 @@ def test_resolve_require_mention_priority() -> None:
 @pytest.mark.asyncio
 async def test_delay_buffer_flushes_on_mention() -> None:
     bus = MessageBus()
-    cfg = MoltchatConfig(
+    cfg = MochatConfig(
         enabled=True,
         claw_token="token",
         agent_user_id="bot",
         reply_delay_mode="non-mention",
         reply_delay_ms=60_000,
     )
-    channel = MoltchatChannel(cfg, bus)
+    channel = MochatChannel(cfg, bus)
 
     first = {
         "type": "message.add",
@@ -94,7 +94,7 @@ async def test_delay_buffer_flushes_on_mention() -> None:
     assert bus.inbound_size == 1
 
     msg = await bus.consume_inbound()
-    assert msg.channel == "moltchat"
+    assert msg.channel == "mochat"
     assert msg.chat_id == "panel-1"
     assert "user1: first" in msg.content
     assert "user2: hello <@bot>" in msg.content
@@ -106,8 +106,8 @@ async def test_delay_buffer_flushes_on_mention() -> None:
 def test_build_buffered_body_group_labels() -> None:
     body = build_buffered_body(
         entries=[
-            MoltchatBufferedEntry(raw_body="a", author="u1", sender_name="Alice"),
-            MoltchatBufferedEntry(raw_body="b", author="u2", sender_username="bot"),
+            MochatBufferedEntry(raw_body="a", author="u1", sender_name="Alice"),
+            MochatBufferedEntry(raw_body="b", author="u2", sender_username="bot"),
         ],
         is_group=True,
     )
