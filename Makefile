@@ -12,6 +12,7 @@ Wants=network-online.target
 User=om
 Group=om
 WorkingDirectory=/home/om/nanobot
+EnvironmentFile=/home/om/.nanobot/workspace/.env
 ExecStart=/home/om/nanobot/.venv/bin/nanobot gateway
 Restart=always
 RestartSec=5
