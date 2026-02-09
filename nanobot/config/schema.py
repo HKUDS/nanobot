@@ -90,6 +90,7 @@ class ProvidersConfig(BaseModel):
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
+    volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # 火山方舟
 
 
 class GatewayConfig(BaseModel):
