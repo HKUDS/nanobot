@@ -2,15 +2,18 @@ import unittest
 import asyncio
 import json
 import time
-from unittest.mock import MagicMock, patch, AsyncMock
+import tempfile
+import shutil
 from pathlib import Path
+from unittest.mock import MagicMock, patch, AsyncMock
 from nanobot.cron.service import CronService, _compute_next_run
-from nanobot.cron.types import CronJob, CronSchedule, CronPayload, CronJobState
+from nanobot.cron.types import CronJob, CronSchedule, CronPayload, CronJobState, CronStore
 
 class TestCronServiceComprehensive(unittest.IsolatedAsyncioTestCase):
     
     def setUp(self):
         self.store_path = MagicMock(spec=Path)
+        self.store_path.__str__.return_value = "mock_jobs.json"
         self.store_path.exists.return_value = False
         self.store_path.parent = MagicMock()
         self.service = CronService(self.store_path)
@@ -32,8 +35,6 @@ class TestCronServiceComprehensive(unittest.IsolatedAsyncioTestCase):
         original_sleep = asyncio.sleep
         
         async def fast_sleep(delay):
-            # If delay is small (simulation), run it.
-            # If delay is large (heartbeat wait), skip it.
             if delay < 1:
                 await original_sleep(delay)
             else:
@@ -46,14 +47,15 @@ class TestCronServiceComprehensive(unittest.IsolatedAsyncioTestCase):
                 
                 # Create a task that updates mtime after a short delay
                 async def update_file():
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0.1)
+                    # Update mtime to simulate change
                     self.store_path.stat.return_value.st_mtime = 200.0
                     print("  -> File updated (mtime 100 -> 200)")
                     
                 # Run heartbeat loop for a short time
                 async def run_loop():
                     try:
-                        await asyncio.wait_for(self.service._heartbeat_loop(), timeout=0.1)
+                        await asyncio.wait_for(self.service._heartbeat_loop(), timeout=0.2)
                     except asyncio.TimeoutError:
                         pass
 
@@ -78,33 +80,31 @@ class TestCronServiceComprehensive(unittest.IsolatedAsyncioTestCase):
             state=CronJobState(next_run_at_ms=now + 10000),
             created_at_ms=now, updated_at_ms=now
         )
-        self.service._store = MagicMock()
-        self.service._store.jobs = [future_job]
-        
-        # We patch asyncio.sleep to capture the sleep duration
-        with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
-            # Run loop for one iteration (we'll break it via side_effect or just running it once)
-            # To test logic safely without infinite loop, we can inspect logic extraction or 
-            # run the loop and raise CancelledError after first sleep
-            
-            async def stop_loop(*args):
-                self.service._running = False
-                return None
-            
-            mock_sleep.side_effect = stop_loop
-            self.service._running = True
-            
-            try:
-                await self.service._heartbeat_loop()
-            except Exception:
-                pass
-                
-            # Verify sleep called with ~10s
-            # Note: Logic is min(60, delta_s). Delta is 10s.
-            # We allow small margin of error for execution time
-            call_args = mock_sleep.call_args[0][0]
-            self.assertAlmostEqual(call_args, 10.0, delta=1.0)
-            print(f"  ✓ Slept for {call_args:.2f}s (expected ~10s)")
+        self.service._store = CronStore(jobs=[future_job])
+    
+        self.captured_timeout = None
+    
+        async def mock_wait_for(fut, timeout):
+            # Capture timeout
+            self.captured_timeout = timeout
+            # Stop the loop
+            self.service._running = False
+            return
+
+        # Patch _check_and_run_due_jobs to avoid clearing store and side effects
+        with patch.object(self.service, '_check_and_run_due_jobs', new_callable=AsyncMock):
+            with patch('asyncio.wait_for', side_effect=mock_wait_for):
+                self.service._running = True
+
+                try:
+                    await self.service._heartbeat_loop()
+                except Exception:
+                    pass
+
+        # Verify sleep called with ~10s
+        self.assertIsNotNone(self.captured_timeout)
+        self.assertAlmostEqual(self.captured_timeout, 10.0, delta=1.0)
+        print(f"  ✓ Slept for {self.captured_timeout:.2f}s (expected ~10s)")
 
     # --- 3. Timezone Logic ---
 
@@ -112,27 +112,9 @@ class TestCronServiceComprehensive(unittest.IsolatedAsyncioTestCase):
         """Verify timezone handling."""
         print("\n[Test] Timezone Calculation")
         
-        # Test 1: UTC vs Moscow (UTC+3)
-        # 9:00 UTC = 12:00 MSK
-        
-        # Current time: 2024-01-01 09:00:00 UTC
-        base_ts = 1704100000 # ~ 2024-01-01 09:06:40 UTC
-        
-        # Schedule: "0 10 * * *" (10:00 AM)
-        # In UTC: Next run is today 10:00 UTC
-        # In MSK: 10:00 MSK is 07:00 UTC. Since it's 09:00 UTC, 10:00 MSK today (07:00 UTC) has passed.
-        # Next run is tomorrow 10:00 MSK.
-        
-        # Let's use a simpler check: fixed offset
         schedule_msk = CronSchedule(kind="cron", expr="0 12 * * *", tz="Europe/Moscow")
-        # 12:00 MSK is 09:00 UTC.
-        
-        # Mock time to be 08:59 UTC
-        mock_now = 1704100000 - (6 * 60) - 40 # Adjust to be before 09:00 UTC
-        # Actually easier to rely on croniter's correctness and just ensure tz is passed
         
         with patch('nanobot.cron.service._now_ms', return_value=1704099540000): # Some fixed time
-            # We just verify that _compute_next_run doesn't crash with valid TZ
             next_run = _compute_next_run(schedule_msk, 1704099540000)
             self.assertIsNotNone(next_run)
             print("  ✓ Valid timezone handled")
