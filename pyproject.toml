@@ -32,6 +32,8 @@ dependencies = [
     "python-telegram-bot[socks]>=21.0",
     "lark-oapi>=1.0.0",
     "socksio>=1.0.0",
+    "slack-sdk>=3.26.0",
+    "qq-botpy>=1.0.0",
 ]
 
 [project.optional-dependencies]
