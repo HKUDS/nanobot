@@ -26,7 +26,16 @@ class CronTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Schedule tasks/reminders. CRITICAL: For simple text reminders (e.g. 'Remind me to drink water'), YOU MUST USE type='echo'. This sends the text directly and reliably. Do NOT use 'agent' for reminders. Only use 'agent' for complex tasks (e.g. 'Check stock price'). When using 'agent', return the result as your final answer; DO NOT use the `send_message` tool."
+        return """Schedule tasks and reminders. 
+
+CRITICAL - YOU MUST CHOOSE THE CORRECT TYPE:
+1. 'echo' (MANDATORY for text): Use this for simple reminders like "Remind me to drink water" or "Call Mom". It sends the text directly. Do NOT use 'agent' for this.
+2. 'agent' (ONLY for logic): Use this ONLY if you need to use tools (e.g. "Check weather every morning", "Summarize news"). The result will be sent as the notification.
+
+Examples:
+- "Remind me to sleep" -> type='echo', message="Time to sleep!"
+- "Check stock price at 9am" -> type='agent', message="Check AAPL price"
+"""
 
     @property
     def parameters(self) -> dict[str, Any]:
