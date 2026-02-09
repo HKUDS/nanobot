@@ -4,13 +4,15 @@
 
 nanobot is an ultra-lightweight AI assistant (~4000 lines Python). We're adding a persistent memory system that provides true conversational continuity.
 
+**claw-builder managed project** — Uses PR-based supervision with quality gates.
+
 ## Quick Reference
 
 ```bash
 # Install
 pip install -e ".[dev]"
 
-# Test
+# Test (MUST pass before commits)
 pytest tests/ -v
 
 # Lint
@@ -18,23 +20,39 @@ ruff check nanobot/
 
 # Format
 ruff format nanobot/
+
+# Type check
+mypy nanobot/memory/ --ignore-missing-imports
+
+# Coverage
+pytest tests/ --cov=nanobot --cov-report=term-missing
 ```
 
 ## Current Focus
 
-Building a memory architecture with:
-1. **Conversation Store** — Every turn embedded and linked
-2. **Hybrid Search** — Vector + BM25
-3. **Triage Agent** — Routes fast vs memory path
-4. **Memory Agent** — Synthesizes context packets
+Building memory architecture in phases:
+1. **Conversation Store** — Every turn embedded and linked (LanceDB)
+2. **Memory Agent** — Context synthesis (Haiku-class model)
+3. **Triage Agent** — Fast path vs memory lookup routing
+4. **Integration** — Wire into agent loop
 5. **Dossiers** — Entity knowledge documents
+6. **Ingestion** — Post-conversation processing
+7. **Streamlined Context** — Replace history with packets
+8. **Polish** — Docs and optimization
 
-## Key Decisions
+## Key Constraints
 
-- **Vector DB:** LanceDB (local, fast, Python-native)
-- **BM25:** bm25s (Scipy-based, fast)
-- **Embeddings:** sentence-transformers (local) or OpenAI
-- **Small Models:** claude-3-haiku via litellm
+- **Tests required** — Every new file needs tests. No marking done without passing tests.
+- **Coverage ≥80%** — New code must be tested
+- **One file = one responsibility** — Keep files focused
+- **PR review required** — End of phase or every 15 tasks triggers PR
+
+## Coding Standards
+
+- Type hints on all function signatures
+- Docstrings on public APIs (Google style)
+- Async for I/O and LLM calls
+- No magic numbers
 
 ## Project Structure
 
@@ -49,23 +67,25 @@ nanobot/
 │   ├── dossier.py   # Entity dossiers
 │   └── ingestion.py # Post-processing
 ├── providers/       # LLM providers
-└── channels/        # Chat integrations
+├── channels/        # Chat integrations
+└── config/          # Configuration
 ```
-
-## Coding Standards
-
-- Type hints on all functions
-- Docstrings on public APIs
-- Tests for every new module
-- Async for I/O operations
-- One responsibility per file
 
 ## Task Workflow
 
-See `.ralph/fix_plan.md` for current tasks. Work on the first unchecked `- [ ]` item, test it, then mark it `- [x]`.
+1. Read `.claw/WORKPLAN.md` for current task
+2. Implement the task
+3. Write tests
+4. Run `pytest tests/ -v` — must pass
+5. Run `ruff check nanobot/` — must pass
+6. Mark task `[x]` in WORKPLAN.md
+7. Commit with descriptive message
+8. At phase end: create PR, wait for review
 
 ## Reference Docs
 
-- PIB: `.ralph/specs/pib.md`
-- Agent instructions: `.ralph/AGENT.md`
-- Full prompt: `.ralph/PROMPT.md`
+- **PIB:** `.claw/specs/pib.md`
+- **WORKPLAN:** `.claw/WORKPLAN.md`
+- **PROMPT:** `.claw/PROMPT.md`
+- **AGENT:** `.claw/AGENT.md`
+- **Config:** `.claw/config.yaml`

@@ -1,0 +1,26 @@
+# .clawrc - claw-builder project configuration
+
+# Project identification
+PROJECT_NAME="nanobot"
+PROJECT_TYPE="python"
+
+# Loop settings
+MAX_TASKS_PER_PR=15
+PR_ON_PHASE_END=true
+PR_ON_VALIDATION_FAILURE=true
+
+# Session management
+SESSION_EXPIRY_HOURS=24
+
+# Circuit breaker thresholds
+CB_NO_PROGRESS_THRESHOLD=3
+CB_SAME_ERROR_THRESHOLD=5
+
+# Quality gates
+MIN_COVERAGE=80
+REQUIRE_TESTS=true
+REQUIRE_TYPE_CHECK=true
+
+# Supervision
+SUPERVISOR_CHAT_ID="-1003858866213"
+SUPERVISOR_CHANNEL="telegram"

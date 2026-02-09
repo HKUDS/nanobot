@@ -1,0 +1,34 @@
+{
+  "hooks": [
+    {
+      "name": "auto-format-python",
+      "event": "PostToolUse",
+      "matcher": {
+        "tool": ["Write", "Edit"],
+        "patterns": ["*.py"]
+      },
+      "action": "bash",
+      "command": "ruff check --fix \"$TOOL_INPUT_path\" 2>/dev/null; ruff format \"$TOOL_INPUT_path\" 2>/dev/null || true"
+    },
+    {
+      "name": "lint-check",
+      "event": "PostToolUse", 
+      "matcher": {
+        "tool": ["Write", "Edit"],
+        "patterns": ["nanobot/**/*.py"]
+      },
+      "action": "bash",
+      "command": "ruff check \"$TOOL_INPUT_path\" || echo 'LINT_WARNING: Fix linting issues before committing'"
+    },
+    {
+      "name": "pre-commit-tests",
+      "event": "PreToolUse",
+      "matcher": {
+        "tool": ["Bash"],
+        "patterns": ["git commit*"]
+      },
+      "action": "bash",
+      "command": "pytest tests/ -v --tb=short 2>&1 | tail -20; if [ ${PIPESTATUS[0]} -ne 0 ]; then echo 'TESTS FAILED - Fix before committing'; exit 1; fi"
+    }
+  ]
+}

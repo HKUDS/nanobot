@@ -44,8 +44,6 @@
 
 ## 3. In-Scope Capabilities (v1)
 
-<!-- List as user-facing behaviors, not features -->
-
 - [ ] Every conversational turn is persisted and searchable
 - [ ] User can ask about past conversations and get accurate responses
 - [ ] Topic switches are handled gracefully — old context filed away, retrievable later
@@ -61,8 +59,6 @@
 ---
 
 ## 4. Explicit Non-Goals (v1)
-
-<!-- What we will NOT do, even if it seems valuable -->
 
 - Multi-user memory (this is personal assistant memory, not shared knowledge base)
 - External document ingestion (focus is on conversation memory, not RAG over files)
@@ -161,8 +157,6 @@
 
 ## 8. Acceptance Tests
 
-<!-- Given / When / Then format. 5-12 tests. -->
-
 1. **Given** a previous conversation about "clawOS project" **When** user asks "What's the status of clawOS?" **Then** the response accurately reflects the most recent discussion of clawOS
 
 2. **Given** no relevant memory exists **When** user asks about something never discussed **Then** assistant says it doesn't have that information rather than hallucinating
@@ -187,8 +181,6 @@
 
 ## 9. Deferred Implementation Questions
 
-<!-- "How" questions to resolve later -->
-
 - What embedding model to use? (OpenAI, local, Voyage?)
 - What vector database backend? (SQLite+sqlite-vec, LanceDB, ChromaDB?)
 - What's the dossier schema? (Fields, versioning, update triggers?)
@@ -201,8 +193,6 @@
 ---
 
 ## 10. Open Questions
-
-<!-- True intent blockers only. Aim for ≤3. -->
 
 None — all resolved.
 
