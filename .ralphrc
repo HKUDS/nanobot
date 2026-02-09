@@ -1,0 +1,25 @@
+# Ralph Loop Configuration
+
+# Session management
+SESSION_CONTINUITY=false
+MAX_CONSECUTIVE_DONE_SIGNALS=5
+RESET_SESSION_AFTER_LOOPS=50
+
+# Timeouts (seconds)
+LOOP_TIMEOUT=600
+RESPONSE_TIMEOUT=300
+
+# Tool permissions
+ALLOWED_TOOLS="Write,Read,Edit,Bash(*)"
+
+# Progress tracking
+CHECKPOINT_TASKS=15
+PR_ON_PHASE_END=true
+
+# Supervision
+SUPERVISOR_NOTIFY=true
+SUPERVISOR_CHAT_ID="-1003858866213"
+
+# Logging
+LOG_LEVEL=INFO
+LOG_OUTPUT=true

@@ -4,7 +4,7 @@
 
 nanobot is an ultra-lightweight AI assistant (~4000 lines Python). We're adding a persistent memory system that provides true conversational continuity.
 
-**claw-builder managed project** — Uses PR-based supervision with quality gates.
+**Ralph-managed project** — Uses PR-based supervision with quality gates.
 
 ## Quick Reference
 
@@ -47,6 +47,18 @@ Building memory architecture in phases:
 - **One file = one responsibility** — Keep files focused
 - **PR review required** — End of phase or every 15 tasks triggers PR
 
+## PR Checkpoint Workflow — CRITICAL
+
+See `.claude/skills/pr-checkpoint/SKILL.md` for detailed instructions.
+
+**You MUST create a PR and STOP when:**
+- Phase complete (all tasks checked)
+- ~15 tasks done since last PR
+- Major architectural decision
+- Tests failing and you're stuck
+
+**After creating PR:** Do NOT continue. Wait for supervisor (Kai) to review.
+
 ## Coding Standards
 
 - Type hints on all function signatures
@@ -73,19 +85,19 @@ nanobot/
 
 ## Task Workflow
 
-1. Read `.claw/WORKPLAN.md` for current task
+1. Read `.ralph/fix_plan.md` for current task
 2. Implement the task
 3. Write tests
 4. Run `pytest tests/ -v` — must pass
 5. Run `ruff check nanobot/` — must pass
-6. Mark task `[x]` in WORKPLAN.md
+6. Mark task `[x]` in fix_plan.md
 7. Commit with descriptive message
-8. At phase end: create PR, wait for review
+8. Check if PR checkpoint reached (use pr-checkpoint skill)
 
 ## Reference Docs
 
-- **PIB:** `.claw/specs/pib.md`
-- **WORKPLAN:** `.claw/WORKPLAN.md`
-- **PROMPT:** `.claw/PROMPT.md`
-- **AGENT:** `.claw/AGENT.md`
-- **Config:** `.claw/config.yaml`
+- **PIB:** `.ralph/specs/pib.md`
+- **fix_plan:** `.ralph/fix_plan.md`
+- **PROMPT:** `.ralph/PROMPT.md`
+- **AGENT:** `.ralph/AGENT.md`
+- **PR Skill:** `.claude/skills/pr-checkpoint/SKILL.md`

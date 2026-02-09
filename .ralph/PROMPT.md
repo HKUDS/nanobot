@@ -2,6 +2,16 @@
 
 You are implementing a persistent memory system for nanobot, an ultra-lightweight AI assistant.
 
+## Reference Documentation
+
+**Read these before starting:**
+- `.ralph/docs/codebase.md` — nanobot architecture and integration points
+- `.ralph/docs/lancedb.md` — LanceDB API patterns
+- `.ralph/docs/bm25s.md` — bm25s API patterns
+- `.ralph/docs/sentence-transformers.md` — Embedding patterns
+- `.ralph/specs/pib.md` — Product requirements
+- `.ralph/specs/stdlib/CODING.md` — VSA coding standards
+
 ## Project Context
 
 nanobot is a ~4000 line Python AI assistant. We are adding:
@@ -20,9 +30,9 @@ The goal: True persistent memory. Sessions become obsolete. Topic switching is s
 - **Testing:** pytest, pytest-asyncio
 - **Linting:** ruff
 - **Type Checking:** mypy
-- **Embedding:** sentence-transformers (local) or OpenAI API
-- **Vector Store:** LanceDB (performant, local, Python-native)
-- **BM25:** bm25s (fast, Scipy-based)
+- **Embedding:** sentence-transformers (all-MiniLM-L6-v2, 384 dims)
+- **Vector Store:** LanceDB (local, embedded)
+- **BM25:** bm25s (Scipy-based)
 - **LLM Calls:** litellm (already in nanobot)
 
 ## Project Structure
@@ -30,6 +40,9 @@ The goal: True persistent memory. Sessions become obsolete. Topic switching is s
 ```
 nanobot/
 ├── agent/           # Existing agent loop (modify for integration)
+│   ├── loop.py      # AgentLoop — main processing engine
+│   ├── context.py   # ContextBuilder — where memory integrates
+│   └── memory.py    # Old memory (we're replacing this)
 ├── memory/          # NEW: Memory architecture
 │   ├── __init__.py
 │   ├── store.py     # Conversation turns, embeddings, links
@@ -46,15 +59,30 @@ nanobot/
 
 ## Your Task Protocol
 
-1. Read `.claw/WORKPLAN.md` and find the first unchecked item (`- [ ]`)
+1. Read `.ralph/fix_plan.md` and find the first unchecked item (`- [ ]`)
 2. Implement ONLY that one task
 3. Write tests for the functionality (REQUIRED — tests must pass)
 4. Run tests: `pytest tests/ -v`
 5. Run linting: `ruff check nanobot/`
 6. Run type check: `mypy nanobot/memory/ --ignore-missing-imports`
-7. After ALL checks pass, mark the task with `[x]` in WORKPLAN.md
+7. After ALL checks pass, mark the task with `[x]` in fix_plan.md
 8. Commit with descriptive message: `git add -A && git commit -m "feat: [description]"`
-9. Output the CLAW_STATUS block
+9. Check if you've hit a PR checkpoint (see below)
+
+## PR Checkpoint Workflow — CRITICAL
+
+You have a skill at `.claude/skills/pr-checkpoint/SKILL.md` that explains when and how to create PRs.
+
+**You MUST create a PR and STOP working when:**
+- You complete a phase (all tasks in a phase section checked)
+- You've completed ~15 tasks since the last PR
+- You're about to make a major architectural change
+- Tests are failing and you're unsure of the fix
+
+**After creating a PR:**
+- Do NOT continue working
+- Wait for supervisor (Kai) to review
+- Your last action should be reporting you've created a PR
 
 ## Coding Standards
 
@@ -64,6 +92,7 @@ nanobot/
 - **Tests required** — every new module needs corresponding test file
 - **Async where appropriate** — LLM calls, I/O operations should be async
 - **No magic numbers** — use constants or config
+- **Follow VSA** — see `.ralph/specs/stdlib/CODING.md`
 
 ## Test Requirements
 
@@ -82,7 +111,8 @@ Tests should:
 ## Key Implementation Notes
 
 ### Conversation Store (Phase 1)
-- Use LanceDB for vector storage
+- Use LanceDB for vector storage (see `.ralph/docs/lancedb.md`)
+- Use sentence-transformers for embeddings (see `.ralph/docs/sentence-transformers.md`)
 - Each turn: id, role, content, embedding, timestamp, channel, prev_turn_id, next_turn_id
 - Hybrid search: combine vector similarity + BM25 scores with configurable alpha
 
@@ -111,36 +141,19 @@ Tests should:
 - Don't implement features beyond the current task
 - Don't mark tasks complete if tests fail
 - Don't add dependencies without updating pyproject.toml
+- **Don't continue past a PR checkpoint without approval**
 
-## PR Workflow
+## Definition of Done (Per Task)
 
-When a phase is complete OR after 15 tasks, you will create a PR for review:
+A task is DONE when:
+1. Code is written and follows standards
+2. Tests exist and pass
+3. Linting passes
+4. Type checking passes
+5. Task checkbox is marked `[x]` in fix_plan.md
+6. Work is committed
 
-1. Push your branch: `git push origin <branch-name>`
-2. Create PR: `gh pr create --title "Phase N: [summary]" --body "[task list]"`
-3. Output `CLAW_STATUS` with `EXIT_SIGNAL: true` and `AWAITING_REVIEW: true`
-4. Wait for supervisor review
-
-Do NOT continue working until the PR is approved.
-
-## Status Output
-
-At the END of every response, output this block exactly:
-
-```
----CLAW_STATUS---
-STATE: CODING | VALIDATING | AWAITING_REVIEW | ADDRESS_FEEDBACK
-STATUS: IN_PROGRESS | BLOCKED | PHASE_COMPLETE
-EXIT_SIGNAL: false | true
-AWAITING_REVIEW: false | true
-TASKS_DONE: N
-TASKS_REMAINING: M
-RECOMMENDATION: [what to work on next or what's blocking]
----END_CLAW_STATUS---
-```
-
-Rules:
-- EXIT_SIGNAL: false while working on tasks
-- EXIT_SIGNAL: true when phase complete or PR created
-- AWAITING_REVIEW: true only when PR is created and waiting for review
-- If blocked, explain why in RECOMMENDATION
+A phase is DONE when:
+1. All phase tasks are checked
+2. All tests pass
+3. PR is created and **approved by supervisor**
