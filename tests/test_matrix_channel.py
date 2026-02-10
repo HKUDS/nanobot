@@ -14,6 +14,12 @@ class _DummyTask:
     def cancel(self) -> None:
         self.cancelled = True
 
+    def __await__(self):
+        async def _done():
+            return None
+
+        return _done().__await__()
+
 
 class _FakeAsyncClient:
     def __init__(self, homeserver, user, store_path, config) -> None:
@@ -25,14 +31,22 @@ class _FakeAsyncClient:
         self.access_token: str | None = None
         self.device_id: str | None = None
         self.load_store_called = False
+        self.stop_sync_forever_called = False
         self.join_calls: list[str] = []
         self.callbacks: list[tuple[object, object]] = []
+        self.response_callbacks: list[tuple[object, object]] = []
 
     def add_event_callback(self, callback, event_type) -> None:
         self.callbacks.append((callback, event_type))
 
+    def add_response_callback(self, callback, response_type) -> None:
+        self.response_callbacks.append((callback, response_type))
+
     def load_store(self) -> None:
         self.load_store_called = True
+
+    def stop_sync_forever(self) -> None:
+        self.stop_sync_forever_called = True
 
     async def join(self, room_id: str) -> None:
         self.join_calls.append(room_id)
@@ -81,8 +95,26 @@ async def test_start_skips_load_store_when_device_id_missing(
 
     assert len(clients) == 1
     assert clients[0].load_store_called is False
+    assert len(clients[0].response_callbacks) == 3
 
     await channel.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_stops_sync_forever_before_close(monkeypatch) -> None:
+    channel = MatrixChannel(_make_config(device_id="DEVICE"), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    task = _DummyTask()
+
+    channel.client = client
+    channel._sync_task = task
+    channel._running = True
+
+    await channel.stop()
+
+    assert channel._running is False
+    assert client.stop_sync_forever_called is True
+    assert task.cancelled is False
 
 
 @pytest.mark.asyncio
