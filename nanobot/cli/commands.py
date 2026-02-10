@@ -561,6 +561,24 @@ def channels_status():
         "✓" if dc.enabled else "✗",
         dc.gateway_url
     )
+
+    # Feishu
+    fs = config.channels.feishu
+    fs_config = f"app_id: {fs.app_id[:10]}..." if fs.app_id else "[dim]not configured[/dim]"
+    table.add_row(
+        "Feishu",
+        "✓" if fs.enabled else "✗",
+        fs_config
+    )
+
+    # Mochat
+    mc = config.channels.mochat
+    mc_base = mc.base_url or "[dim]not configured[/dim]"
+    table.add_row(
+        "Mochat",
+        "✓" if mc.enabled else "✗",
+        mc_base
+    )
     
     # Telegram
     tg = config.channels.telegram
