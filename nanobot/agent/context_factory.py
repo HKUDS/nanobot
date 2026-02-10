@@ -92,49 +92,6 @@ class ContextBuilderProtocol(Protocol):
         """
         ...
 
-
-class ExtendedContextBuilderProtocol(ContextBuilderProtocol, Protocol):
-    """Extended protocol with optional methods for more advanced plugins.
-
-    Plugins can implement these methods to provide additional functionality.
-    """
-
-    def get_available_methods(self) -> list[str]:
-        """Get list of available custom methods provided by this plugin.
-
-        Returns:
-            List of method names that can be called dynamically.
-        """
-        ...
-
-    def call_custom_method(self, method_name: str, *args, **kwargs) -> Any:
-        """Call a custom method provided by the plugin.
-
-        Args:
-            method_name: Name of the method to call.
-            *args: Positional arguments for the method.
-            **kwargs: Keyword arguments for the method.
-
-        Returns:
-            Result of the method call.
-
-        Raises:
-            AttributeError: If the method is not available.
-        """
-        ...
-
-    def validate_config(self, config: dict[str, Any]) -> bool:
-        """Validate plugin-specific configuration.
-
-        Args:
-            config: Configuration dictionary for the plugin.
-
-        Returns:
-            True if configuration is valid, False otherwise.
-        """
-        ...
-
-
 class ContextBuilderFactory:
     """Factory for creating context builder instances with plugin support."""
 
@@ -206,48 +163,6 @@ class ContextBuilderFactory:
             )
 
     @staticmethod
-    def validate_plugin(
-        context_provider_package: str,
-        context_provider_class: str,
-    ) -> tuple[bool, str]:
-        """Validate that a plugin can be loaded and implements the required protocol.
-
-        Args:
-            context_provider_package: Python package containing the context builder class.
-            context_provider_class: Name of the context builder class.
-
-        Returns:
-            Tuple of (is_valid, error_message). is_valid is True if plugin is valid.
-        """
-        try:
-            # Try to create an instance with a dummy workspace
-            dummy_workspace = Path("/tmp/dummy")
-            instance = ContextBuilderFactory.create(
-                workspace=dummy_workspace,
-                context_provider_package=context_provider_package,
-                context_provider_class=context_provider_class,
-            )
-
-            # Check required methods
-            required_methods = [
-                "build_system_prompt",
-                "build_messages",
-                "add_tool_result",
-                "add_assistant_message",
-            ]
-
-            for method in required_methods:
-                if not hasattr(instance, method):
-                    return False, f"Missing required method: {method}"
-                if not callable(getattr(instance, method)):
-                    return False, f"Method {method} is not callable"
-
-            return True, "Plugin is valid"
-
-        except Exception as e:
-            return False, f"Plugin validation failed: {e}"
-
-    @staticmethod
     def get_default_builder() -> Type[ContextBuilderProtocol]:
         """Get the default context builder class.
 
@@ -257,56 +172,4 @@ class ContextBuilderFactory:
         from nanobot.agent.context import ContextBuilder
 
         return ContextBuilder
-
-    @staticmethod
-    def list_available_plugins(search_paths: list[str] | None = None) -> list[dict[str, str]]:
-        """Discover available context builder plugins in the given search paths.
-
-        Args:
-            search_paths: List of directory paths to search for plugins.
-                If None, uses sys.path.
-
-        Returns:
-            List of dictionaries with plugin information.
-        """
-        plugins = []
-
-        if search_paths is None:
-            search_paths = sys.path
-
-        # This is a simple implementation - in a real system you might want
-        # to look for specific entry points or metadata files
-        for path in search_paths:
-            path_obj = Path(path)
-            if path_obj.is_dir():
-                # Look for Python modules that might be context plugins
-                for py_file in path_obj.glob("**/*context*.py"):
-                    # Skip __pycache__ and test files
-                    if "__pycache__" in str(py_file) or "test" in py_file.stem.lower():
-                        continue
-
-                    # Try to determine if this is a context plugin
-                    # (This is heuristic - a real system would use entry points)
-                    try:
-                        # Extract module path
-                        rel_path = py_file.relative_to(path_obj)
-                        module_parts = list(rel_path.with_suffix("").parts)
-                        module_name = ".".join(module_parts)
-
-                        # Skip if it's our own module
-                        if module_name.startswith("nanobot.agent.context"):
-                            continue
-
-                        plugins.append(
-                            {
-                                "module": module_name,
-                                "file": str(py_file),
-                                "type": "potential",  # We don't know for sure
-                            }
-                        )
-                    except (ValueError, ImportError):
-                        continue
-
-        return plugins
-
 
