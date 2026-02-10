@@ -241,6 +241,27 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         ),
     ),
 
+    # Venice.ai: Privacy-focused, uncensored models. OpenAI-compatible.
+    # Uses "openai/" prefix with custom api_base to route via LiteLLM.
+    ProviderSpec(
+        name="venice",
+        keywords=("venice",),
+        env_key="VENICE_API_KEY",
+        display_name="Venice.ai",
+        litellm_prefix="openai",            # Venice models → openai/{model}
+        skip_prefixes=(),
+        env_extras=(
+            ("OPENAI_API_BASE", "{api_base}"),
+        ),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="venice",
+        default_api_base="https://api.venice.ai/api/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # === Local deployment (matched by config key, NOT by api_base) =========
 
     # vLLM / any OpenAI-compatible local server.
