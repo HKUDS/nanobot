@@ -139,7 +139,7 @@ class SubagentManager:
                             "type": "function",
                             "function": {
                                 "name": tc.name,
-                                "arguments": json.dumps(tc.arguments),
+                                "arguments": json.dumps(tc.arguments, ensure_ascii=False),
                             },
                         }
                         for tc in response.tool_calls
@@ -152,7 +152,7 @@ class SubagentManager:
                     
                     # Execute tools
                     for tool_call in response.tool_calls:
-                        args_str = json.dumps(tool_call.arguments)
+                        args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                         logger.debug(f"Subagent [{task_id}] executing: {tool_call.name} with arguments: {args_str}")
                         result = await tools.execute(tool_call.name, tool_call.arguments)
                         messages.append({
