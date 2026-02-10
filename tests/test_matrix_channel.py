@@ -2,8 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.matrix import MatrixChannel
+from nanobot.channels.matrix import TYPING_NOTICE_TIMEOUT_MS, MatrixChannel
 from nanobot.config.schema import MatrixConfig
 
 
@@ -35,6 +36,10 @@ class _FakeAsyncClient:
         self.join_calls: list[str] = []
         self.callbacks: list[tuple[object, object]] = []
         self.response_callbacks: list[tuple[object, object]] = []
+        self.room_send_calls: list[dict[str, object]] = []
+        self.typing_calls: list[tuple[str, bool, int]] = []
+        self.raise_on_send = False
+        self.raise_on_typing = False
 
     def add_event_callback(self, callback, event_type) -> None:
         self.callbacks.append((callback, event_type))
@@ -50,6 +55,34 @@ class _FakeAsyncClient:
 
     async def join(self, room_id: str) -> None:
         self.join_calls.append(room_id)
+
+    async def room_send(
+        self,
+        room_id: str,
+        message_type: str,
+        content: dict[str, object],
+        ignore_unverified_devices: bool,
+    ) -> None:
+        self.room_send_calls.append(
+            {
+                "room_id": room_id,
+                "message_type": message_type,
+                "content": content,
+                "ignore_unverified_devices": ignore_unverified_devices,
+            }
+        )
+        if self.raise_on_send:
+            raise RuntimeError("send failed")
+
+    async def room_typing(
+        self,
+        room_id: str,
+        typing_state: bool = True,
+        timeout: int = 30_000,
+    ) -> None:
+        self.typing_calls.append((room_id, typing_state, timeout))
+        if self.raise_on_typing:
+            raise RuntimeError("typing failed")
 
     async def close(self) -> None:
         return None
@@ -143,3 +176,84 @@ async def test_room_invite_respects_allow_list_when_configured() -> None:
     await channel._on_room_invite(room, event)
 
     assert client.join_calls == []
+
+
+@pytest.mark.asyncio
+async def test_on_message_sets_typing_for_allowed_sender() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    handled: list[str] = []
+
+    async def _fake_handle_message(**kwargs) -> None:
+        handled.append(kwargs["sender_id"])
+
+    channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
+
+    room = SimpleNamespace(room_id="!room:matrix.org", display_name="Test room")
+    event = SimpleNamespace(sender="@alice:matrix.org", body="Hello")
+
+    await channel._on_message(room, event)
+
+    assert handled == ["@alice:matrix.org"]
+    assert client.typing_calls == [
+        ("!room:matrix.org", True, TYPING_NOTICE_TIMEOUT_MS),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_on_message_skips_typing_for_self_message() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    room = SimpleNamespace(room_id="!room:matrix.org", display_name="Test room")
+    event = SimpleNamespace(sender="@bot:matrix.org", body="Hello")
+
+    await channel._on_message(room, event)
+
+    assert client.typing_calls == []
+
+
+@pytest.mark.asyncio
+async def test_on_message_skips_typing_for_denied_sender() -> None:
+    channel = MatrixChannel(_make_config(allow_from=["@bob:matrix.org"]), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    room = SimpleNamespace(room_id="!room:matrix.org", display_name="Test room")
+    event = SimpleNamespace(sender="@alice:matrix.org", body="Hello")
+
+    await channel._on_message(room, event)
+
+    assert client.typing_calls == []
+
+
+@pytest.mark.asyncio
+async def test_send_clears_typing_after_send() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    await channel.send(
+        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content="Hi")
+    )
+
+    assert len(client.room_send_calls) == 1
+    assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
+
+
+@pytest.mark.asyncio
+async def test_send_clears_typing_when_send_fails() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    client.raise_on_send = True
+    channel.client = client
+
+    with pytest.raises(RuntimeError, match="send failed"):
+        await channel.send(
+            OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content="Hi")
+        )
+
+    assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
