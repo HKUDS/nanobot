@@ -282,6 +282,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+
+    # Nvidia: NIM models, needs "nvidia_nim/" prefix.
+    ProviderSpec(
+        name="nvidia",
+        keywords=("nvidia", "nvidia_nim"),
+        env_key="NVIDIA_NIM_API_KEY",
+        display_name="Nvidia",
+        litellm_prefix="nvidia_nim",
+        skip_prefixes=("nvidia_nim/",),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="nvidia",
+        default_api_base="https://integrate.api.nvidia.com/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
 )
 
 

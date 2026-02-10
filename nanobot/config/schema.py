@@ -188,6 +188,7 @@ class ProvidersConfig(BaseModel):
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
+    nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # Nvidia
 
 
 class GatewayConfig(BaseModel):
