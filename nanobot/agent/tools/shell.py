@@ -128,14 +128,19 @@ class ExecTool(Tool):
             cwd_path = Path(cwd).resolve()
 
             win_paths = re.findall(r"[A-Za-z]:\\[^\\\"']+", cmd)
-            posix_paths = re.findall(r"/[^\s\"']+", cmd)
+            # Only match absolute paths (start with / after command boundary or space)
+            # This avoids matching relative paths like ".venv/bin/python"
+            posix_paths = re.findall(r"(?:^|[\s|>])(/[^\s\"'>]+)", cmd)
+            # Remove the prefix to get the actual path
+            posix_paths = [p.strip() for p in posix_paths]
 
             for raw in win_paths + posix_paths:
                 try:
                     p = Path(raw).resolve()
                 except Exception:
                     continue
-                if cwd_path not in p.parents and p != cwd_path:
+                # Only check if it's an absolute path outside cwd
+                if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
                     return "Error: Command blocked by safety guard (path outside working dir)"
 
         return None
