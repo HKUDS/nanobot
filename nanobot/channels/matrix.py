@@ -2,6 +2,7 @@ import asyncio
 import logging
 from typing import Any
 
+import nh3
 from loguru import logger
 from mistune import create_markdown
 from nio import (
@@ -26,21 +27,106 @@ MATRIX_HTML_FORMAT = "org.matrix.custom.html"
 
 # Keep plugin output aligned with Matrix recommended HTML tags:
 # https://spec.matrix.org/latest/client-server-api/#mroommessage-msgtypes
-# - table/strikethrough/task_lists are already used in replies.
+# - table/strikethrough are already used in replies.
 # - url, superscript, and subscript map to common tags (<a>, <sup>, <sub>)
 #   that Matrix clients (e.g. Element/FluffyChat) can render consistently.
 # We intentionally avoid plugins that emit less-portable tags to keep output
 # predictable across clients.
 MATRIX_MARKDOWN = create_markdown(
     escape=True,
-    plugins=["table", "strikethrough", "task_lists", "url", "superscript", "subscript"],
+    plugins=["table", "strikethrough", "url", "superscript", "subscript"],
+)
+
+# Sanitizer policy rationale:
+# - Baseline follows Matrix formatted message guidance:
+#   https://spec.matrix.org/latest/client-server-api/#mroommessage-msgtypes
+# - We intentionally use a tighter subset than the full spec to keep behavior
+#   predictable across clients and reduce risk from LLM-generated content.
+# - URLs are restricted to common safe schemes for links, and image sources are
+#   additionally constrained to mxc:// for Matrix-native media handling.
+# - Spec items intentionally NOT enabled yet:
+#   - href schemes ftp/magnet (we keep link schemes smaller for now).
+#   - a[target] (clients already control link-opening behavior).
+#   - span[data-mx-bg-color|data-mx-color|data-mx-spoiler|data-mx-maths]
+#   - div[data-mx-maths]
+#   These can be added later when we explicitly support those Matrix features.
+MATRIX_ALLOWED_HTML_TAGS = {
+    "p",
+    "a",
+    "strong",
+    "em",
+    "del",
+    "code",
+    "pre",
+    "blockquote",
+    "ul",
+    "ol",
+    "li",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr",
+    "br",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "caption",
+    "sup",
+    "sub",
+    "img",
+}
+MATRIX_ALLOWED_HTML_ATTRIBUTES: dict[str, set[str]] = {
+    "a": {"href"},
+    "code": {"class"},
+    "ol": {"start"},
+    "img": {"src", "alt", "title", "width", "height"},
+}
+MATRIX_ALLOWED_URL_SCHEMES = {"https", "http", "matrix", "mailto", "mxc"}
+
+
+def _filter_matrix_html_attribute(tag: str, attr: str, value: str) -> str | None:
+    """Filter attribute values to a safe Matrix-compatible subset."""
+    if tag == "a" and attr == "href":
+        lower_value = value.lower()
+        if lower_value.startswith(("https://", "http://", "matrix:", "mailto:")):
+            return value
+        return None
+
+    if tag == "img" and attr == "src":
+        return value if value.lower().startswith("mxc://") else None
+
+    if tag == "code" and attr == "class":
+        classes = [
+            cls
+            for cls in value.split()
+            if cls.startswith("language-") and not cls.startswith("language-_")
+        ]
+        return " ".join(classes) if classes else None
+
+    return value
+
+
+MATRIX_HTML_CLEANER = nh3.Cleaner(
+    tags=MATRIX_ALLOWED_HTML_TAGS,
+    attributes=MATRIX_ALLOWED_HTML_ATTRIBUTES,
+    attribute_filter=_filter_matrix_html_attribute,
+    url_schemes=MATRIX_ALLOWED_URL_SCHEMES,
+    strip_comments=True,
+    link_rel="noopener noreferrer",
 )
 
 
 def _render_markdown_html(text: str) -> str | None:
     """Render markdown to HTML for Matrix formatted messages."""
     try:
-        formatted = MATRIX_MARKDOWN(text).strip()
+        rendered = MATRIX_MARKDOWN(text)
+        formatted = MATRIX_HTML_CLEANER.clean(rendered).strip()
     except Exception as e:
         logger.debug(
             "Matrix markdown rendering failed ({}): {}",

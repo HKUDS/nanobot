@@ -421,7 +421,7 @@ async def test_send_adds_formatted_body_for_markdown() -> None:
     assert content["format"] == MATRIX_HTML_FORMAT
     assert "<h1>Headline</h1>" in str(content["formatted_body"])
     assert "<table>" in str(content["formatted_body"])
-    assert "task-list-item-checkbox" in str(content["formatted_body"])
+    assert "<li>[x] done</li>" in str(content["formatted_body"])
 
 
 @pytest.mark.asyncio
@@ -439,9 +439,53 @@ async def test_send_adds_formatted_body_for_inline_url_superscript_subscript() -
     assert content["msgtype"] == "m.text"
     assert content["body"] == markdown_text
     assert content["format"] == MATRIX_HTML_FORMAT
-    assert '<a href="https://example.com">' in str(content["formatted_body"])
+    assert '<a href="https://example.com" rel="noopener noreferrer">' in str(
+        content["formatted_body"]
+    )
     assert "<sup>2</sup>" in str(content["formatted_body"])
     assert "<sub>2</sub>" in str(content["formatted_body"])
+
+
+@pytest.mark.asyncio
+async def test_send_sanitizes_disallowed_link_scheme() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    markdown_text = "[click](javascript:alert(1))"
+    await channel.send(
+        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content=markdown_text)
+    )
+
+    formatted_body = str(client.room_send_calls[0]["content"]["formatted_body"])
+    assert "javascript:" not in formatted_body
+    assert "<a" in formatted_body
+    assert "href=" not in formatted_body
+
+
+def test_matrix_html_cleaner_strips_event_handlers_and_script_tags() -> None:
+    dirty_html = '<a href="https://example.com" onclick="evil()">x</a><script>alert(1)</script>'
+    cleaned_html = matrix_module.MATRIX_HTML_CLEANER.clean(dirty_html)
+
+    assert "<script" not in cleaned_html
+    assert "onclick=" not in cleaned_html
+    assert '<a href="https://example.com"' in cleaned_html
+
+
+@pytest.mark.asyncio
+async def test_send_keeps_only_mxc_image_sources() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    markdown_text = "![ok](mxc://example.org/mediaid) ![no](https://example.com/a.png)"
+    await channel.send(
+        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content=markdown_text)
+    )
+
+    formatted_body = str(client.room_send_calls[0]["content"]["formatted_body"])
+    assert 'src="mxc://example.org/mediaid"' in formatted_body
+    assert 'src="https://example.com/a.png"' not in formatted_body
 
 
 @pytest.mark.asyncio
