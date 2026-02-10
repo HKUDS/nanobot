@@ -72,9 +72,51 @@ Skills with available="false" need dependencies installed first - you can try in
     
     def _get_identity(self) -> str:
         """Get the core identity section."""
-        from datetime import datetime
-        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        from datetime import datetime, timezone
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            # Fallback for Python < 3.9 or if module is missing
+            try:
+                from backports.zoneinfo import ZoneInfo
+            except ImportError:
+                ZoneInfo = None
+
+        from nanobot.config import load_config
+
+        # Get current UTC time
+        utc_now = datetime.now(timezone.utc)
+        # Format: 2026-02-10 09:30 (Tuesday)
+        utc_str = utc_now.strftime("%Y-%m-%d %H:%M (%A)")
+        
+        # Default to showing UTC
+        time_display = f"Server Time: {utc_str} UTC"
+
+        # Try to get user timezone from config
+        try:
+            config = load_config()
+            user_tz_name = config.agents.defaults.timezone
+            if user_tz_name and ZoneInfo:
+                user_tz = ZoneInfo(user_tz_name)
+                user_now = utc_now.astimezone(user_tz)
+                user_str = user_now.strftime("%Y-%m-%d %H:%M (%A)")
+                time_display += f"\nUser Time:   {user_str} ({user_tz_name})"
+            else:
+                time_display += "\nUser Time:   Unknown (Ask User for Timezone!)"
+        except Exception:
+            # If config loading or timezone conversion fails, stick to UTC
+            time_display += "\nUser Time:   Unknown (Ask User for Timezone!)"
+            
+        now = time_display
+        
+        # Sanitize workspace path to avoid ethnic/location bias from username
+        # e.g. "C:\Users\Samvel\..." -> "C:\Users\{user}\..."
+        import os
         workspace_path = str(self.workspace.expanduser().resolve())
+        username = os.getenv("USERNAME") or os.getenv("USER")
+        if username and username in workspace_path:
+            workspace_path = workspace_path.replace(username, "{user}")
+            
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
         
@@ -89,6 +131,10 @@ You are nanobot, a helpful AI assistant. You have access to tools that allow you
 
 ## Current Time
 {now}
+
+**CRITICAL**:
+- You do NOT know the user's timezone if "User Time" is Unknown.
+- ALWAYS ask the user for their timezone before scheduling tasks.
 
 ## Runtime
 {runtime}

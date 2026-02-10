@@ -83,7 +83,7 @@ Examples:
                 },
                 "timezone": {
                     "type": "string",
-                    "description": "User timezone (e.g., 'Europe/Moscow'). MANDATORY if not UTC."
+                    "description": "User timezone (e.g., 'Europe/London'). REQUIRED for absolute times (ISO) and cron expressions. If unknown, ASK THE USER."
                 },
                 "job_id": {
                     "type": "string",
@@ -173,6 +173,12 @@ Examples:
             future_ms = int(time.time() * 1000) + (seconds * 1000)
             return CronSchedule(kind="at", at_ms=future_ms, tz=timezone)
         
+        # === STRICT TIMEZONE VALIDATION ===
+        # For absolute time (ISO) and Cron expressions, timezone is MANDATORY.
+        # We do not want to guess or default to UTC silently.
+        if not timezone:
+            return "Error: 'timezone' argument is REQUIRED for this schedule type. Please ask the user for their timezone."
+
         # 2. Check for ISO timestamp (basic check: has T and starts with digit)
         if "T" in cron_expr and cron_expr[0].isdigit():
             try:

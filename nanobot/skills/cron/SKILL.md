@@ -22,7 +22,8 @@ cron(action="add", type="echo", message="Drink water", cron_expr="in 20m")
 
 **"Remind me to sleep at 11pm"**
 ```python
-cron(action="add", type="echo", message="Sleep time", cron_expr="0 23 * * *", timezone="Europe/Moscow")
+# Requires user's timezone!
+cron(action="add", type="echo", message="Sleep time", cron_expr="0 23 * * *", timezone="<User_Timezone>")
 ```
 
 ### 2. AI Tasks (Agent)
