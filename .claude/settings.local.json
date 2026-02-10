@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat:*)",
+      "Bash(__NEW_LINE_67e656997ee47232__ python update_loop.py)",
+      "Bash(read_file:*)",
+      "Bash(git merge:*)"
+    ]
+  }
+}

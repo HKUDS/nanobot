@@ -25,12 +25,13 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
     
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(self, skill_names: list[str] | None = None, session_metadata: dict[str, Any] | None = None) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
         
         Args:
             skill_names: Optional list of skills to include.
+            session_metadata: Optional session metadata.
         
         Returns:
             Complete system prompt.
@@ -49,6 +50,10 @@ class ContextBuilder:
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
+
+        # Session Context
+        if session_metadata:
+            parts.append(self._format_session_metadata(session_metadata))
         
         # Skills - progressive loading
         # 1. Always-loaded skills: include full content
@@ -87,6 +92,11 @@ You are nanobot, a helpful AI assistant. You have access to tools that allow you
 - Send messages to users on chat channels
 - Spawn subagents for complex background tasks
 
+## Role & Instructions
+You are an intelligent assistant for B2B project managers.
+When the user says 'Update session memory' (or '更新会话记忆'), you MUST use the `update_session_memory` tool to update the customer profile.
+Always refer to the 'Session Context' section to understand the customer background (domain, role, etc.) when answering questions.
+
 ## Current Time
 {now}
 
@@ -118,6 +128,60 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         
         return "\n\n".join(parts) if parts else ""
     
+    def _format_session_metadata(self, metadata: dict[str, Any]) -> str:
+        """Format session metadata into system prompt section."""
+        lines = ["# Session Context"]
+        
+        if website := metadata.get("website_domain"):
+            lines.append(f"Website: {website}")
+        if business := metadata.get("business_type"):
+            lines.append(f"Business Type: {business}")
+        if intro := metadata.get("brand_intro"):
+            lines.append(f"Brand Intro: {intro}")
+            
+        contacts = metadata.get("contacts", [])
+        if contacts:
+            lines.append("Contacts:")
+            for contact in contacts:
+                name = contact.get("name", "Unknown")
+                role = contact.get("role", "Unknown")
+                lines.append(f"- {name} ({role})")
+                
+        if summary := metadata.get("last_summary"):
+            lines.append("
+# Conversation Summary")
+            lines.append(summary)
+            
+        return "
+".join(lines)
+    
+    def _format_session_metadata(self, metadata: dict[str, Any]) -> str:
+        """Format session metadata into system prompt section."""
+        lines = ["# Session Context"]
+        
+        if website := metadata.get("website_domain"):
+            lines.append(f"Website: {website}")
+        if business := metadata.get("business_type"):
+            lines.append(f"Business Type: {business}")
+        if intro := metadata.get("brand_intro"):
+            lines.append(f"Brand Intro: {intro}")
+            
+        contacts = metadata.get("contacts", [])
+        if contacts:
+            lines.append("Contacts:")
+            for contact in contacts:
+                name = contact.get("name", "Unknown")
+                role = contact.get("role", "Unknown")
+                lines.append(f"- {name} ({role})")
+                
+        if summary := metadata.get("last_summary"):
+            lines.append("
+# Conversation Summary")
+            lines.append(summary)
+            
+        return "
+".join(lines)
+    
     def build_messages(
         self,
         history: list[dict[str, Any]],
@@ -126,6 +190,7 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        session_metadata: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Build the complete message list for an LLM call.
@@ -137,6 +202,7 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
             media: Optional list of local file paths for images/media.
             channel: Current channel (telegram, feishu, etc.).
             chat_id: Current chat/user ID.
+            session_metadata: Optional session metadata.
 
         Returns:
             List of messages including system prompt.
@@ -144,7 +210,7 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         messages = []
 
         # System prompt
-        system_prompt = self.build_system_prompt(skill_names)
+        system_prompt = self.build_system_prompt(skill_names, session_metadata)
         if channel and chat_id:
             system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
         messages.append({"role": "system", "content": system_prompt})
