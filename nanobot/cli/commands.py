@@ -302,8 +302,16 @@ This file stores important information that should persist across sessions.
 def _make_provider(config):
     """Create LiteLLMProvider from config. Exits if no API key found."""
     from nanobot.providers.litellm_provider import LiteLLMProvider
-    p = config.get_provider()
     model = config.agents.defaults.model
+    # Resolve alias and check if it's an alias
+    actual_model, provider_config = config.resolve_model(model)
+    if provider_config:
+        p = provider_config
+        model = actual_model
+        is_resolved = True
+    else:
+        p = config.get_provider()
+        is_resolved = False
     if not (p and p.api_key) and not model.startswith("bedrock/"):
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers section")
@@ -314,6 +322,7 @@ def _make_provider(config):
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=config.get_provider_name(),
+        is_resolved=is_resolved,
     )
 
 
@@ -357,7 +366,6 @@ def gateway(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
@@ -860,7 +868,12 @@ def status():
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS
 
-        console.print(f"Model: {config.agents.defaults.model}")
+        raw_model = config.agents.defaults.model
+        resolved_model, _ = config.resolve_model(raw_model)
+        if raw_model != resolved_model:
+            console.print(f"Model: {raw_model} [dim]→ {resolved_model}[/dim]")
+        else:
+            console.print(f"Model: {raw_model}")
         
         # Check API keys from registry
         for spec in PROVIDERS:
