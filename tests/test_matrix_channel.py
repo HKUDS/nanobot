@@ -197,7 +197,7 @@ async def test_on_message_sets_typing_for_allowed_sender() -> None:
     channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
 
     room = SimpleNamespace(room_id="!room:matrix.org", display_name="Test room")
-    event = SimpleNamespace(sender="@alice:matrix.org", body="Hello")
+    event = SimpleNamespace(sender="@alice:matrix.org", body="Hello", source={})
 
     await channel._on_message(room, event)
 
@@ -214,7 +214,7 @@ async def test_on_message_skips_typing_for_self_message() -> None:
     channel.client = client
 
     room = SimpleNamespace(room_id="!room:matrix.org", display_name="Test room")
-    event = SimpleNamespace(sender="@bot:matrix.org", body="Hello")
+    event = SimpleNamespace(sender="@bot:matrix.org", body="Hello", source={})
 
     await channel._on_message(room, event)
 
@@ -227,12 +227,151 @@ async def test_on_message_skips_typing_for_denied_sender() -> None:
     client = _FakeAsyncClient("", "", "", None)
     channel.client = client
 
+    handled: list[str] = []
+
+    async def _fake_handle_message(**kwargs) -> None:
+        handled.append(kwargs["sender_id"])
+
+    channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
+
     room = SimpleNamespace(room_id="!room:matrix.org", display_name="Test room")
-    event = SimpleNamespace(sender="@alice:matrix.org", body="Hello")
+    event = SimpleNamespace(sender="@alice:matrix.org", body="Hello", source={})
 
     await channel._on_message(room, event)
 
+    assert handled == []
     assert client.typing_calls == []
+
+
+@pytest.mark.asyncio
+async def test_on_message_mention_policy_requires_mx_mentions() -> None:
+    channel = MatrixChannel(_make_config(group_policy="mention"), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    handled: list[str] = []
+
+    async def _fake_handle_message(**kwargs) -> None:
+        handled.append(kwargs["sender_id"])
+
+    channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
+
+    room = SimpleNamespace(room_id="!room:matrix.org", display_name="Test room", member_count=3)
+    event = SimpleNamespace(sender="@alice:matrix.org", body="Hello", source={"content": {}})
+
+    await channel._on_message(room, event)
+
+    assert handled == []
+    assert client.typing_calls == []
+
+
+@pytest.mark.asyncio
+async def test_on_message_mention_policy_accepts_bot_user_mentions() -> None:
+    channel = MatrixChannel(_make_config(group_policy="mention"), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    handled: list[str] = []
+
+    async def _fake_handle_message(**kwargs) -> None:
+        handled.append(kwargs["sender_id"])
+
+    channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
+
+    room = SimpleNamespace(room_id="!room:matrix.org", display_name="Test room", member_count=3)
+    event = SimpleNamespace(
+        sender="@alice:matrix.org",
+        body="Hello",
+        source={"content": {"m.mentions": {"user_ids": ["@bot:matrix.org"]}}},
+    )
+
+    await channel._on_message(room, event)
+
+    assert handled == ["@alice:matrix.org"]
+    assert client.typing_calls == [("!room:matrix.org", True, TYPING_NOTICE_TIMEOUT_MS)]
+
+
+@pytest.mark.asyncio
+async def test_on_message_mention_policy_allows_direct_room_without_mentions() -> None:
+    channel = MatrixChannel(_make_config(group_policy="mention"), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    handled: list[str] = []
+
+    async def _fake_handle_message(**kwargs) -> None:
+        handled.append(kwargs["sender_id"])
+
+    channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
+
+    room = SimpleNamespace(room_id="!dm:matrix.org", display_name="DM", member_count=2)
+    event = SimpleNamespace(sender="@alice:matrix.org", body="Hello", source={"content": {}})
+
+    await channel._on_message(room, event)
+
+    assert handled == ["@alice:matrix.org"]
+    assert client.typing_calls == [("!dm:matrix.org", True, TYPING_NOTICE_TIMEOUT_MS)]
+
+
+@pytest.mark.asyncio
+async def test_on_message_allowlist_policy_requires_room_id() -> None:
+    channel = MatrixChannel(
+        _make_config(group_policy="allowlist", group_allow_from=["!allowed:matrix.org"]),
+        MessageBus(),
+    )
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    handled: list[str] = []
+
+    async def _fake_handle_message(**kwargs) -> None:
+        handled.append(kwargs["chat_id"])
+
+    channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
+
+    denied_room = SimpleNamespace(room_id="!denied:matrix.org", display_name="Denied", member_count=3)
+    event = SimpleNamespace(sender="@alice:matrix.org", body="Hello", source={"content": {}})
+    await channel._on_message(denied_room, event)
+
+    allowed_room = SimpleNamespace(
+        room_id="!allowed:matrix.org",
+        display_name="Allowed",
+        member_count=3,
+    )
+    await channel._on_message(allowed_room, event)
+
+    assert handled == ["!allowed:matrix.org"]
+    assert client.typing_calls == [("!allowed:matrix.org", True, TYPING_NOTICE_TIMEOUT_MS)]
+
+
+@pytest.mark.asyncio
+async def test_on_message_room_mention_requires_opt_in() -> None:
+    channel = MatrixChannel(_make_config(group_policy="mention"), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    handled: list[str] = []
+
+    async def _fake_handle_message(**kwargs) -> None:
+        handled.append(kwargs["sender_id"])
+
+    channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
+
+    room = SimpleNamespace(room_id="!room:matrix.org", display_name="Test room", member_count=3)
+    room_mention_event = SimpleNamespace(
+        sender="@alice:matrix.org",
+        body="Hello everyone",
+        source={"content": {"m.mentions": {"room": True}}},
+    )
+
+    await channel._on_message(room, room_mention_event)
+    assert handled == []
+    assert client.typing_calls == []
+
+    channel.config.allow_room_mentions = True
+    await channel._on_message(room, room_mention_event)
+    assert handled == ["@alice:matrix.org"]
+    assert client.typing_calls == [("!room:matrix.org", True, TYPING_NOTICE_TIMEOUT_MS)]
 
 
 @pytest.mark.asyncio
