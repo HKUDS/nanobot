@@ -294,6 +294,10 @@ This file stores important information that should persist across sessions.
 """)
         console.print("  [dim]Created memory/MEMORY.md[/dim]")
 
+    # Create skills directory for custom user skills
+    skills_dir = workspace / "skills"
+    skills_dir.mkdir(exist_ok=True)
+
 
 def _make_provider(config):
     """Create LiteLLMProvider from config. Exits if no API key found."""
@@ -560,6 +564,24 @@ def channels_status():
         "Discord",
         "✓" if dc.enabled else "✗",
         dc.gateway_url
+    )
+
+    # Feishu
+    fs = config.channels.feishu
+    fs_config = f"app_id: {fs.app_id[:10]}..." if fs.app_id else "[dim]not configured[/dim]"
+    table.add_row(
+        "Feishu",
+        "✓" if fs.enabled else "✗",
+        fs_config
+    )
+
+    # Mochat
+    mc = config.channels.mochat
+    mc_base = mc.base_url or "[dim]not configured[/dim]"
+    table.add_row(
+        "Mochat",
+        "✓" if mc.enabled else "✗",
+        mc_base
     )
     
     # Telegram
