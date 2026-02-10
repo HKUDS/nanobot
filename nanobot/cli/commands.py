@@ -561,7 +561,7 @@ def channels_status():
         "✓" if dc.enabled else "✗",
         dc.gateway_url
     )
-    
+
     # Telegram
     tg = config.channels.telegram
     tg_config = f"token: {tg.token[:10]}..." if tg.token else "[dim]not configured[/dim]"
@@ -578,6 +578,42 @@ def channels_status():
         "Slack",
         "✓" if slack.enabled else "✗",
         slack_config
+    )
+
+    # Feishu
+    feishu = config.channels.feishu
+    feishu_config = "configured" if feishu.app_id and feishu.app_secret else "[dim]not configured[/dim]"
+    table.add_row(
+        "Feishu",
+        "✓" if feishu.enabled else "✗",
+        feishu_config
+    )
+
+    # DingTalk
+    dingtalk = config.channels.dingtalk
+    dingtalk_config = "configured" if dingtalk.client_id and dingtalk.client_secret else "[dim]not configured[/dim]"
+    table.add_row(
+        "DingTalk",
+        "✓" if dingtalk.enabled else "✗",
+        dingtalk_config
+    )
+
+    # Email
+    email = config.channels.email
+    email_config = "configured" if email.imap_host and email.smtp_host else "[dim]not configured[/dim]"
+    table.add_row(
+        "Email",
+        "✓" if email.enabled else "✗",
+        email_config
+    )
+
+    # QQ
+    qq = config.channels.qq
+    qq_config = "configured" if qq.app_id and qq.secret else "[dim]not configured[/dim]"
+    table.add_row(
+        "QQ",
+        "✓" if qq.enabled else "✗",
+        qq_config
     )
 
     console.print(table)
