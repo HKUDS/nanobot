@@ -60,6 +60,17 @@ class DiscordConfig(Base):
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 
 
+class MatrixConfig(Base):
+    """Matrix (Element) channel configuration."""
+
+    enabled: bool = False
+    homeserver: str = "https://matrix.org"
+    access_token: str = ""
+    user_id: str = ""  # @bot:matrix.org
+    device_id: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+
+
 class EmailConfig(Base):
     """Email channel configuration (IMAP inbound + SMTP outbound)."""
 
@@ -176,6 +187,7 @@ class ChannelsConfig(Base):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
 class AgentDefaults(Base):
