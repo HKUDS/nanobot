@@ -195,10 +195,25 @@ class DingTalkChannel(BaseChannel):
             return
 
         headers = {"x-acs-dingtalk-access-token": token}
-        msg_param = json.dumps({
-            "text": msg.content,
+
+        content = msg.content
+        at_user_ids = []
+
+        # If sending to a group, mention the original sender if known
+        if msg.chat_id.startswith("group:") and msg.metadata.get("sender_id"):
+            sender_id = msg.metadata.get("sender_id")
+            # DingTalk Markdown mention syntax: @{userId}
+            content = f"{content}\n\n@{sender_id}"
+            at_user_ids = [sender_id]
+
+        msg_param_dict = {
+            "text": content,
             "title": "Nanobot Reply",
-        })
+        }
+        if at_user_ids:
+            msg_param_dict["atUserIds"] = at_user_ids
+
+        msg_param = json.dumps(msg_param_dict)
 
         if msg.chat_id.startswith("group:"):
             # Group chat
@@ -264,6 +279,7 @@ class DingTalkChannel(BaseChannel):
                 content=str(content),
                 metadata={
                     "sender_name": sender_name,
+                    "sender_id": sender_id,
                     "platform": "dingtalk",
                     "conversation_type": conversation_type,
                 },
