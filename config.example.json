@@ -1,0 +1,21 @@
+{
+  "llm": {
+    "provider": "google",
+    "api_key": "YOUR_GOOGLE_API_KEY",
+    "model": "gemini-2.0-flash-exp"
+  },
+  "channels": {
+    "telegram": {
+      "token": "YOUR_TELEGRAM_BOT_TOKEN",
+      "admin_id": 123456789
+    }
+  },
+  "tools": {
+    "allow_file_ops": true,
+    "allow_shell": false
+  },
+  "stt": {
+    "provider": "groq",
+    "api_key": "YOUR_GROQ_API_KEY"
+  }
+}

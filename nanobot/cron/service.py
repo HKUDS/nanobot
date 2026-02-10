@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Coroutine
 
 from loguru import logger
+from filelock import FileLock
 
 from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule, CronStore
 
@@ -19,7 +20,8 @@ def _now_ms() -> int:
 def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
     """Compute next run time in ms."""
     if schedule.kind == "at":
-        return schedule.at_ms if schedule.at_ms and schedule.at_ms > now_ms else None
+        # Fix: Return at_ms even if it is in the past (allow catch-up)
+        return schedule.at_ms
     
     if schedule.kind == "every":
         if not schedule.every_ms or schedule.every_ms <= 0:
@@ -30,10 +32,34 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
     if schedule.kind == "cron" and schedule.expr:
         try:
             from croniter import croniter
-            cron = croniter(schedule.expr, time.time())
-            next_time = cron.get_next()
-            return int(next_time * 1000)
-        except Exception:
+            import datetime
+            from zoneinfo import ZoneInfo
+            
+            base_time = datetime.datetime.fromtimestamp(now_ms / 1000, tz=datetime.timezone.utc)
+            
+            # If a timezone is specified in the schedule, use it for calculation
+            if schedule.tz:
+                try:
+                    tz = ZoneInfo(schedule.tz)
+                    # Convert base_time to the target timezone for cron calculation
+                    local_time = base_time.astimezone(tz)
+                    cron = croniter(schedule.expr, local_time)
+                    next_time = cron.get_next(datetime.datetime)
+                    # Convert back to UTC timestamp
+                    return int(next_time.timestamp() * 1000)
+                except Exception as e:
+                    logger.error(f"Cron: invalid timezone '{schedule.tz}': {e}")
+                    # Fallback to UTC
+                    cron = croniter(schedule.expr, base_time)
+                    next_time = cron.get_next(float)
+                    return int(next_time * 1000)
+            else:
+                # Default behavior (UTC)
+                cron = croniter(schedule.expr, base_time)
+                next_time = cron.get_next(float)
+                return int(next_time * 1000)
+        except Exception as e:
+            logger.error(f"Cron: failed to compute next run: {e}")
             return None
     
     return None
@@ -52,6 +78,10 @@ class CronService:
         self._store: CronStore | None = None
         self._timer_task: asyncio.Task | None = None
         self._running = False
+        self._running_jobs: set[str] = set()
+        self._lock = asyncio.Lock()  # Protect internal state
+        self._file_lock = FileLock(str(self.store_path) + ".lock") # Protect file access
+        self._wakeup_event = asyncio.Event() # To wake up loop immediately
     
     def _load_store(self) -> CronStore:
         """Load jobs from disk."""
@@ -150,7 +180,9 @@ class CronService:
         self._load_store()
         self._recompute_next_runs()
         self._save_store()
-        self._arm_timer()
+        
+        # Start the heartbeat loop instead of single-shot timer
+        self._timer_task = asyncio.create_task(self._heartbeat_loop())
         logger.info(f"Cron service started with {len(self._store.jobs if self._store else [])} jobs")
     
     def stop(self) -> None:
@@ -176,163 +208,267 @@ class CronService:
         times = [j.state.next_run_at_ms for j in self._store.jobs 
                  if j.enabled and j.state.next_run_at_ms]
         return min(times) if times else None
-    
-    def _arm_timer(self) -> None:
-        """Schedule the next timer tick."""
-        if self._timer_task:
-            self._timer_task.cancel()
+
+    async def _heartbeat_loop(self) -> None:
+        """Main service loop: wake up frequently to check file changes and due jobs."""
+        last_mtime = 0.0
         
-        next_wake = self._get_next_wake_ms()
-        if not next_wake or not self._running:
+        while self._running:
+            try:
+                # 1. Hot Reload: Check if file changed
+                if self.store_path.exists():
+                    current_mtime = self.store_path.stat().st_mtime
+                    if current_mtime > last_mtime:
+                        if last_mtime > 0: # Skip log on first run
+                            logger.info("Cron: jobs.json changed, reloading...")
+                        self._store = None # Force reload
+                        self._load_store()
+                        self._recompute_next_runs()
+                        last_mtime = current_mtime
+                
+                # 2. Check due jobs
+                await self._check_and_run_due_jobs()
+                
+                # 3. Smart Sleep: Sleep until next job or max 60s (for hot reload)
+                sleep_time = 60
+                next_wake = self._get_next_wake_ms()
+                
+                if next_wake:
+                    delta_ms = next_wake - _now_ms()
+                    delta_s = max(0.1, delta_ms / 1000)
+                    sleep_time = min(60, delta_s)
+                
+                # Wait for timeout OR wakeup event
+                try:
+                    await asyncio.wait_for(self._wakeup_event.wait(), timeout=sleep_time)
+                    self._wakeup_event.clear() # Reset event
+                except asyncio.TimeoutError:
+                    pass # Timeout reached naturally
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Cron loop error: {e}")
+                await asyncio.sleep(60) # Prevent busy loop on error
+
+    async def _check_and_run_due_jobs(self) -> None:
+        """Check for due jobs and execute them."""
+        # Use FileLock to ensure atomic check-and-claim
+        # This prevents multiple processes from picking up the same job
+        
+        jobs_to_run = []
+        
+        try:
+            # Critical Section: Claim jobs
+            with self._file_lock:
+                self._store = None # Force reload from disk
+                store = self._load_store()
+                
+                if not store:
+                    return
+                
+                now = _now_ms()
+                due_jobs = [
+                    j for j in store.jobs
+                    if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
+                    and j.id not in self._running_jobs # Skip locally running jobs
+                ]
+                
+                for job in due_jobs:
+                    # CLAIM: Update state immediately to prevent others from running it
+                    job.state.last_run_at_ms = now
+                    job.updated_at_ms = now
+                    
+                    # Calculate next run time NOW (At-Most-Once delivery)
+                    if job.schedule.kind == "at":
+                        job.state.next_run_at_ms = None # Mark as consumed
+                    else:
+                        job.state.next_run_at_ms = _compute_next_run(job.schedule, now)
+                    
+                    jobs_to_run.append(job)
+                
+                if jobs_to_run:
+                    self._save_store()
+                    logger.info(f"Cron: claimed {len(jobs_to_run)} due jobs")
+                    
+        except Exception as e:
+            logger.error(f"Cron: failed to check jobs: {e}")
             return
-        
-        delay_ms = max(0, next_wake - _now_ms())
-        delay_s = delay_ms / 1000
-        
-        async def tick():
-            await asyncio.sleep(delay_s)
-            if self._running:
-                await self._on_timer()
-        
-        self._timer_task = asyncio.create_task(tick())
-    
-    async def _on_timer(self) -> None:
-        """Handle timer tick - run due jobs."""
-        if not self._store:
-            return
-        
-        now = _now_ms()
-        due_jobs = [
-            j for j in self._store.jobs
-            if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
-        ]
-        
-        for job in due_jobs:
-            await self._execute_job(job)
-        
-        self._save_store()
-        self._arm_timer()
-    
+
+        # Execute jobs (outside lock)
+        if jobs_to_run:
+            for job in jobs_to_run:
+                asyncio.create_task(self._execute_job(job))
+
+
     async def _execute_job(self, job: CronJob) -> None:
         """Execute a single job."""
-        start_ms = _now_ms()
+        self._running_jobs.add(job.id)
         logger.info(f"Cron: executing job '{job.name}' ({job.id})")
         
         try:
-            response = None
             if self.on_job:
-                response = await self.on_job(job)
+                await self.on_job(job)
             
-            job.state.last_status = "ok"
-            job.state.last_error = None
+            status = "ok"
+            error = None
             logger.info(f"Cron: job '{job.name}' completed")
             
         except Exception as e:
-            job.state.last_status = "error"
-            job.state.last_error = str(e)
+            status = "error"
+            error = str(e)
             logger.error(f"Cron: job '{job.name}' failed: {e}")
         
-        job.state.last_run_at_ms = start_ms
-        job.updated_at_ms = _now_ms()
+        # Update status (Critical Section)
+        try:
+            with self._file_lock:
+                self._store = None # Force reload
+                store = self._load_store()
+                
+                # Find the job in fresh store
+                fresh_job = next((j for j in store.jobs if j.id == job.id), None)
+                if fresh_job:
+                    fresh_job.state.last_status = status
+                    fresh_job.state.last_error = error
+                    fresh_job.updated_at_ms = _now_ms()
+                    
+                    # Handle one-shot deletion (cleanup)
+                    if job.schedule.kind == "at":
+                        if fresh_job.delete_after_run:
+                            store.jobs = [j for j in store.jobs if j.id != job.id]
+                        else:
+                            fresh_job.enabled = False
+                    
+                    self._save_store()
+        except Exception as e:
+            logger.error(f"Cron: failed to update job status: {e}")
         
-        # Handle one-shot jobs
-        if job.schedule.kind == "at":
-            if job.delete_after_run:
-                self._store.jobs = [j for j in self._store.jobs if j.id != job.id]
-            else:
-                job.enabled = False
-                job.state.next_run_at_ms = None
-        else:
-            # Compute next run
-            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+        self._running_jobs.discard(job.id)
     
     # ========== Public API ==========
     
-    def list_jobs(self, include_disabled: bool = False) -> list[CronJob]:
+    async def list_jobs(self, include_disabled: bool = False) -> list[CronJob]:
         """List all jobs."""
         store = self._load_store()
         jobs = store.jobs if include_disabled else [j for j in store.jobs if j.enabled]
         return sorted(jobs, key=lambda j: j.state.next_run_at_ms or float('inf'))
     
-    def add_job(
+    async def add_job(
         self,
         name: str,
         schedule: CronSchedule,
         message: str,
+        kind: str = "agent_turn",
         deliver: bool = False,
         channel: str | None = None,
         to: str | None = None,
         delete_after_run: bool = False,
     ) -> CronJob:
         """Add a new job."""
-        store = self._load_store()
-        now = _now_ms()
+        jobs = await self.add_jobs_batch([
+            {
+                "name": name,
+                "schedule": schedule,
+                "message": message,
+                "kind": kind,
+                "deliver": deliver,
+                "channel": channel,
+                "to": to,
+                "delete_after_run": delete_after_run
+            }
+        ])
+        return jobs[0]
+
+    async def add_jobs_batch(self, jobs_data: list[dict[str, Any]]) -> list[CronJob]:
+        """Add multiple jobs atomically."""
+        if not jobs_data:
+            return []
+
+        # Acquire internal lock first to prevent concurrent adds in same process
+        async with self._lock:
+            # Acquire file lock to prevent concurrent adds across processes
+            with self._file_lock:
+                self._store = None # Force reload
+                store = self._load_store()
+                now = _now_ms()
+                new_jobs = []
         
-        job = CronJob(
-            id=str(uuid.uuid4())[:8],
-            name=name,
-            enabled=True,
-            schedule=schedule,
-            payload=CronPayload(
-                kind="agent_turn",
-                message=message,
-                deliver=deliver,
-                channel=channel,
-                to=to,
-            ),
-            state=CronJobState(next_run_at_ms=_compute_next_run(schedule, now)),
-            created_at_ms=now,
-            updated_at_ms=now,
-            delete_after_run=delete_after_run,
-        )
-        
-        store.jobs.append(job)
-        self._save_store()
-        self._arm_timer()
-        
-        logger.info(f"Cron: added job '{name}' ({job.id})")
-        return job
-    
-    def remove_job(self, job_id: str) -> bool:
-        """Remove a job by ID."""
-        store = self._load_store()
-        before = len(store.jobs)
-        store.jobs = [j for j in store.jobs if j.id != job_id]
-        removed = len(store.jobs) < before
-        
-        if removed:
-            self._save_store()
-            self._arm_timer()
-            logger.info(f"Cron: removed job {job_id}")
-        
-        return removed
-    
-    def enable_job(self, job_id: str, enabled: bool = True) -> CronJob | None:
-        """Enable or disable a job."""
-        store = self._load_store()
-        for job in store.jobs:
-            if job.id == job_id:
-                job.enabled = enabled
-                job.updated_at_ms = _now_ms()
-                if enabled:
-                    job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
-                else:
-                    job.state.next_run_at_ms = None
+                for data in jobs_data:
+                    job = CronJob(
+                        id=str(uuid.uuid4())[:8],
+                        name=data["name"],
+                        enabled=True,
+                        schedule=data["schedule"],
+                        payload=CronPayload(
+                            kind=data.get("kind", "agent_turn"),
+                            message=data["message"],
+                            deliver=data.get("deliver", False),
+                            channel=data.get("channel"),
+                            to=data.get("to"),
+                        ),
+                        state=CronJobState(next_run_at_ms=_compute_next_run(data["schedule"], now)),
+                        created_at_ms=now,
+                        updated_at_ms=now,
+                        delete_after_run=data.get("delete_after_run", False),
+                    )
+                    new_jobs.append(job)
+                
+                store.jobs.extend(new_jobs)
                 self._save_store()
-                self._arm_timer()
-                return job
-        return None
+            
+            self._wakeup_event.set() # Wake up loop
+            
+            logger.info(f"Cron: added {len(new_jobs)} jobs batch")
+            return new_jobs
+    
+    async def remove_job(self, job_id: str) -> bool:
+        """Remove a job by ID."""
+        async with self._lock:
+            with self._file_lock:
+                self._store = None # Force reload
+                store = self._load_store()
+                before = len(store.jobs)
+                store.jobs = [j for j in store.jobs if j.id != job_id]
+                removed = len(store.jobs) < before
+                
+                if removed:
+                    self._save_store()
+            
+            if removed:
+                self._wakeup_event.set() # Wake up loop
+                logger.info(f"Cron: removed job {job_id}")
+            
+            return removed
+    
+    async def enable_job(self, job_id: str, enabled: bool = True) -> CronJob | None:
+        """Enable or disable a job."""
+        async with self._lock:
+            with self._file_lock:
+                self._store = None # Force reload
+                store = self._load_store()
+                for job in store.jobs:
+                    if job.id == job_id:
+                        job.enabled = enabled
+                        job.updated_at_ms = _now_ms()
+                        if enabled:
+                            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+                        else:
+                            job.state.next_run_at_ms = None
+                        self._save_store()
+                        self._wakeup_event.set() # Wake up loop
+                        return job
+            return None
     
     async def run_job(self, job_id: str, force: bool = False) -> bool:
         """Manually run a job."""
+        # Note: We don't lock the whole run, as it might take time.
+        # But we need to load store safely.
         store = self._load_store()
         for job in store.jobs:
             if job.id == job_id:
                 if not force and not job.enabled:
                     return False
                 await self._execute_job(job)
-                self._save_store()
-                self._arm_timer()
                 return True
         return False
     

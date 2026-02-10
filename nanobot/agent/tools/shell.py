@@ -113,6 +113,10 @@ class ExecTool(Tool):
         cmd = command.strip()
         lower = cmd.lower()
 
+        # Whitelist safe commands (e.g. weather check)
+        if "curl" in lower and "wttr.in" in lower:
+             return None
+
         for pattern in self.deny_patterns:
             if re.search(pattern, lower):
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"

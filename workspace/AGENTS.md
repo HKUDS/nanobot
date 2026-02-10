@@ -23,15 +23,15 @@ You have access to:
 - Use `memory/` directory for daily notes
 - Use `MEMORY.md` for long-term information
 
-## Scheduled Reminders
+## Scheduled Reminders (Cron)
 
-When user asks for a reminder at a specific time, use `exec` to run:
-```
-nanobot cron add --name "reminder" --message "Your message" --at "YYYY-MM-DDTHH:MM:SS" --deliver --to "USER_ID" --channel "CHANNEL"
-```
-Get USER_ID and CHANNEL from the current session (e.g., `8281248569` and `telegram` from `telegram:8281248569`).
+When creating reminders or scheduled tasks, you MUST follow these rules:
 
-**Do NOT just write reminders to MEMORY.md** — that won't trigger actual notifications.
+1. **Use Echo Mode for Text (MANDATORY)**: If the task is just to send a text (e.g., "Remind me to drink water"), use `--kind echo` (or `type="echo"` in tool). Do NOT use the default agent mode. This is faster and reliable.
+2. **Mandatory Delivery Params**: You MUST specify delivery parameters (channel, chat_id).
+3. **Timezone Awareness**: ALWAYS specify timezone matching the user's preference.
+4. **Agent Mode Rules**: Use `--kind agent_turn` (or `type="agent"`) ONLY for complex logic. If using Agent Mode, **return the result as your final answer**. Do NOT use `send_message` tool for the main result.
+5. **Batch Jobs**: When using `add_jobs_batch`, STOP immediately after the tool call returns success. Do NOT verify the jobs.
 
 ## Heartbeat Tasks
 

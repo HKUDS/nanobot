@@ -9,6 +9,10 @@ from nanobot.config.schema import Config
 
 def get_config_path() -> Path:
     """Get the default configuration file path."""
+    # Check local directory first
+    local_config = Path.cwd() / "config.json"
+    if local_config.exists():
+        return local_config
     return Path.home() / ".nanobot" / "config.json"
 
 

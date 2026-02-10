@@ -17,5 +17,9 @@ docs/
 __pycache__/
 poetry.lock
 .pytest_cache/
-tests/
 botpy.log
+config.json
+nanobot_workspace/
+tests/temp_workspace/
+.trae/
+.ssh/

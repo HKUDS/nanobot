@@ -1,6 +1,6 @@
 ---
 name: cron
-description: Schedule reminders and recurring tasks.
+description: Schedule reminders and recurring tasks (Hot Reload, Echo Mode).
 ---
 
 # Cron
@@ -9,32 +9,44 @@ Use the `cron` tool to schedule reminders or recurring tasks.
 
 ## Two Modes
 
-1. **Reminder** - message is sent directly to user
-2. **Task** - message is a task description, agent executes and sends result
+1. **Echo** (`type="echo"`) - DIRECT MESSAGE. Best for simple text reminders. FAST & CHEAP.
+2. **Agent** (`type="agent"`) - AI TASK. Agent thinks/uses tools. Use only if logic is needed.
 
 ## Examples
 
-Fixed reminder:
-```
-cron(action="add", message="Time to take a break!", every_seconds=1200)
-```
-
-Dynamic task (agent executes each time):
-```
-cron(action="add", message="Check HKUDS/nanobot GitHub stars and report", every_seconds=600)
+### 1. Simple Reminders (Echo)
+**"Remind me to drink water in 20 mins"**
+```python
+cron(action="add", type="echo", message="Drink water", cron_expr="in 20m")
 ```
 
-List/remove:
-```
-cron(action="list")
-cron(action="remove", job_id="abc123")
+**"Remind me to sleep at 11pm"**
+```python
+cron(action="add", type="echo", message="Sleep time", cron_expr="0 23 * * *", timezone="Europe/Moscow")
 ```
 
-## Time Expressions
+### 2. AI Tasks (Agent)
+**"Check weather every morning at 8am"**
+```python
+cron(action="add", type="agent", message="Check London weather and report", cron_expr="0 8 * * *", timezone="Europe/London")
+```
 
-| User says | Parameters |
-|-----------|------------|
-| every 20 minutes | every_seconds: 1200 |
-| every hour | every_seconds: 3600 |
-| every day at 8am | cron_expr: "0 8 * * *" |
-| weekdays at 5pm | cron_expr: "0 17 * * 1-5" |
+### 3. Batch Schedule
+**"Remind me to stretch every 2 hours and drink water every hour"**
+```python
+cron(action="add", batch=[
+    {"message": "Stretch", "cron_expr": "in 2h", "type": "echo"},
+    {"message": "Drink water", "cron_expr": "in 1h", "type": "echo"}
+])
+```
+
+## Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `action` | `add`, `list`, `remove` |
+| `type` | `echo` (default, direct msg) or `agent` (AI logic) |
+| `message` | The reminder text or task instruction |
+| `cron_expr` | Schedule: "in 10m" (relative), "0 9 * * *" (cron), or ISO timestamp |
+| `timezone` | e.g. "Europe/London" (Required for cron/ISO if not UTC) |
+| `batch` | List of jobs to add at once (atomic) |
