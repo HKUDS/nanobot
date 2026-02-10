@@ -341,16 +341,24 @@ nanobot gateway
 </details>
 
 <details>
-<summary><b>QQ (QQ私聊)</b></summary>
+<summary><b>QQ (QQ单聊)</b></summary>
 
-Uses **botpy SDK** with WebSocket — no public IP required.
+Uses **botpy SDK** with WebSocket — no public IP required. Currently supports **private messages only**.
 
-**1. Create a QQ bot**
-- Visit [QQ Open Platform](https://q.qq.com)
+**1. Register & create bot**
+- Visit [QQ Open Platform](https://q.qq.com) → Register as a developer (personal or enterprise)
 - Create a new bot application
-- Get **AppID** and **Secret** from "Developer Settings"
+- Go to **开发设置 (Developer Settings)** → copy **AppID** and **AppSecret**
 
-**2. Configure**
+**2. Set up sandbox for testing**
+- In the bot management console, find **沙箱配置 (Sandbox Config)**
+- Under **在消息列表配置**, click **添加成员** and add your own QQ number
+- Once added, scan the bot's QR code with mobile QQ → open the bot profile → tap "发消息" to start chatting
+
+**3. Configure**
+
+> - `allowFrom`: Leave empty for public access, or add user openids to restrict. You can find openids in the nanobot logs when a user messages the bot.
+> - For production: submit a review in the bot console and publish. See [QQ Bot Docs](https://bot.q.qq.com/wiki/) for the full publishing flow.
 
 ```json
 {
@@ -365,17 +373,13 @@ Uses **botpy SDK** with WebSocket — no public IP required.
 }
 ```
 
-> `allowFrom`: Leave empty for public access, or add user openids to restrict access.
-> Example: `"allowFrom": ["user_openid_1", "user_openid_2"]`
-
-**3. Run**
+**4. Run**
 
 ```bash
 nanobot gateway
 ```
 
-> [!TIP]
-> QQ bot currently supports **private messages only**. Group chat support coming soon!
+Now send a message to the bot from QQ — it should respond!
 
 </details>
 
@@ -424,13 +428,17 @@ nanobot gateway
 Uses **Socket Mode** — no public URL required.
 
 **1. Create a Slack app**
-- Go to [Slack API](https://api.slack.com/apps) → Create New App
-- **OAuth & Permissions**: Add bot scopes: `chat:write`, `reactions:write`, `app_mentions:read`
-- Install to your workspace and copy the **Bot Token** (`xoxb-...`)
-- **Socket Mode**: Enable it and generate an **App-Level Token** (`xapp-...`) with `connections:write` scope
-- **Event Subscriptions**: Subscribe to `message.im`, `message.channels`, `app_mention`
+- Go to [Slack API](https://api.slack.com/apps) → **Create New App** → "From scratch"
+- Pick a name and select your workspace
 
-**2. Configure**
+**2. Configure the app**
+- **Socket Mode**: Toggle ON → Generate an **App-Level Token** with `connections:write` scope → copy it (`xapp-...`)
+- **OAuth & Permissions**: Add bot scopes: `chat:write`, `reactions:write`, `app_mentions:read`
+- **Event Subscriptions**: Toggle ON → Subscribe to bot events: `message.im`, `message.channels`, `app_mention` → Save Changes
+- **App Home**: Scroll to **Show Tabs** → Enable **Messages Tab** → Check **"Allow users to send Slash commands and messages from the messages tab"**
+- **Install App**: Click **Install to Workspace** → Authorize → copy the **Bot Token** (`xoxb-...`)
+
+**3. Configure nanobot**
 
 ```json
 {
@@ -445,14 +453,17 @@ Uses **Socket Mode** — no public URL required.
 }
 ```
 
-> `groupPolicy`: `"mention"` (respond only when @mentioned), `"open"` (respond to all messages), or `"allowlist"` (restrict to specific channels).
-> DM policy defaults to open. Set `"dm": {"enabled": false}` to disable DMs.
-
-**3. Run**
+**4. Run**
 
 ```bash
 nanobot gateway
 ```
+
+DM the bot directly or @mention it in a channel — it should respond!
+
+> [!TIP]
+> - `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all channel messages), or `"allowlist"` (restrict to specific channels).
+> - DM policy defaults to open. Set `"dm": {"enabled": false}` to disable DMs.
 
 </details>
 
