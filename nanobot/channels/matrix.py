@@ -173,9 +173,16 @@ def _render_markdown_html(text: str) -> str | None:
     return formatted
 
 
-def _build_matrix_text_content(text: str) -> dict[str, str]:
+def _build_matrix_text_content(text: str) -> dict[str, Any]:
     """Build Matrix m.text payload with plaintext fallback and optional HTML."""
-    content: dict[str, str] = {"msgtype": "m.text", "body": text}
+    content: dict[str, Any] = {
+        "msgtype": "m.text",
+        "body": text,
+        # Matrix spec recommends always including m.mentions for message
+        # semantics/interoperability, even when no mentions are present.
+        # https://spec.matrix.org/v1.17/client-server-api/#mmentions
+        "m.mentions": {},
+    }
     formatted_html = _render_markdown_html(text)
     if not formatted_html:
         return content

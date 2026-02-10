@@ -627,7 +627,11 @@ async def test_send_clears_typing_after_send() -> None:
     )
 
     assert len(client.room_send_calls) == 1
-    assert client.room_send_calls[0]["content"] == {"msgtype": "m.text", "body": "Hi"}
+    assert client.room_send_calls[0]["content"] == {
+        "msgtype": "m.text",
+        "body": "Hi",
+        "m.mentions": {},
+    }
     assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
 
 
@@ -678,6 +682,7 @@ async def test_send_adds_formatted_body_for_markdown() -> None:
     content = client.room_send_calls[0]["content"]
     assert content["msgtype"] == "m.text"
     assert content["body"] == markdown_text
+    assert content["m.mentions"] == {}
     assert content["format"] == MATRIX_HTML_FORMAT
     assert "<h1>Headline</h1>" in str(content["formatted_body"])
     assert "<table>" in str(content["formatted_body"])
@@ -698,6 +703,7 @@ async def test_send_adds_formatted_body_for_inline_url_superscript_subscript() -
     content = client.room_send_calls[0]["content"]
     assert content["msgtype"] == "m.text"
     assert content["body"] == markdown_text
+    assert content["m.mentions"] == {}
     assert content["format"] == MATRIX_HTML_FORMAT
     assert '<a href="https://example.com" rel="noopener noreferrer">' in str(
         content["formatted_body"]
@@ -764,7 +770,7 @@ async def test_send_falls_back_to_plaintext_when_markdown_render_fails(monkeypat
     )
 
     content = client.room_send_calls[0]["content"]
-    assert content == {"msgtype": "m.text", "body": markdown_text}
+    assert content == {"msgtype": "m.text", "body": markdown_text, "m.mentions": {}}
 
 
 @pytest.mark.asyncio
@@ -778,4 +784,8 @@ async def test_send_keeps_plaintext_only_for_plain_text() -> None:
         OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content=text)
     )
 
-    assert client.room_send_calls[0]["content"] == {"msgtype": "m.text", "body": text}
+    assert client.room_send_calls[0]["content"] == {
+        "msgtype": "m.text",
+        "body": text,
+        "m.mentions": {},
+    }
