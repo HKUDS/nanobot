@@ -19,4 +19,3 @@ poetry.lock
 .pytest_cache/
 tests/
 botpy.log
-.worktrees/
