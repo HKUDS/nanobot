@@ -4,6 +4,14 @@
 
 Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
 
+## Nanobot Core Principles
+
+- Ultra-lightweight core (~4,000 lines) over framework bloat.
+- Research-ready, readable code over hidden complexity.
+- Fast startup and low resource usage to maximize iteration speed.
+- Easy onboarding and deployment with minimal setup friction.
+- Quintessence: radical simplicity to maximize learning speed, development velocity, and practical impact.
+
 Context7 Library IDs for this project (use to skip library-matching):
 
 | Library    | Context7 ID             |
