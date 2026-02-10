@@ -212,6 +212,35 @@ class ExecToolConfig(BaseModel):
     timeout: int = 60
 
 
+class MemoryConfig(BaseModel):
+    """Long-term memory configuration."""
+    backend: str = "file"  # "file" (original MEMORY.md) or "vector" (Mem0 + ChromaDB)
+
+    # Vector store settings (only used when backend="vector")
+    collection_name: str = "nanobot_memories"
+
+    # LLM for memory extraction (Mem0 needs an LLM to extract facts)
+    llm_provider: str = "litellm"  # litellm, openai, anthropic, etc.
+    llm_model: str = "openai/gpt-4o-mini"  # cheap/fast model for extraction
+    llm_temperature: float = 0.1
+    llm_max_tokens: int = 2000
+    llm_api_key: str | None = None  # If None, uses env vars / nanobot's provider key
+    llm_api_base: str | None = None
+
+    # Embedder settings
+    embedder_provider: str = "openai"  # openai, huggingface, ollama, etc.
+    embedding_model: str = "text-embedding-3-small"
+    embedder_api_key: str | None = None  # If None, uses env vars
+
+    # Retrieval settings
+    top_k: int = 8  # Number of memories to retrieve per query
+    score_threshold: float = 0.0  # Minimum relevance score (0.0 = no filter)
+
+    # Write-back settings
+    write_back_enabled: bool = True  # Extract memories after each conversation turn
+    write_back_min_message_length: int = 20  # Skip very short messages
+
+
 class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
@@ -226,6 +255,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     
     @property
     def workspace_path(self) -> Path:

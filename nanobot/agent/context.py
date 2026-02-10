@@ -6,50 +6,60 @@ import platform
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.memory import BaseMemoryStore, FileMemoryStore, create_memory_store
 
 
 class ContextBuilder:
     """
     Builds the context (system prompt + messages) for the agent.
-    
+
     Assembles bootstrap files, memory, skills, and conversation history
     into a coherent prompt for the LLM.
     """
-    
+
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
-    
-    def __init__(self, workspace: Path):
+
+    def __init__(self, workspace: Path, memory_config=None):
         self.workspace = workspace
-        self.memory = MemoryStore(workspace)
+        self.memory: BaseMemoryStore = create_memory_store(workspace, memory_config)
         self.skills = SkillsLoader(workspace)
-    
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        current_message: str | None = None,
+        user_id: str | None = None,
+    ) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
-        
+
         Args:
             skill_names: Optional list of skills to include.
-        
+            current_message: Current user message for relevance-based memory retrieval.
+            user_id: Session key for user-scoped memory retrieval.
+
         Returns:
             Complete system prompt.
         """
         parts = []
-        
+
         # Core identity
         parts.append(self._get_identity())
-        
+
         # Bootstrap files
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
-        
-        # Memory context
-        memory = self.memory.get_memory_context()
+
+        # Memory context — top-k retrieval when query available, else fallback
+        memory = self.memory.get_memory_context(
+            query=current_message,
+            user_id=user_id,
+        )
         if memory:
             parts.append(f"# Memory\n\n{memory}")
-        
+
         # Skills - progressive loading
         # 1. Always-loaded skills: include full content
         always_skills = self.skills.get_always_skills()
@@ -57,7 +67,7 @@ class ContextBuilder:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
-        
+
         # 2. Available skills: only show summary (agent uses read_file to load)
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
@@ -67,7 +77,7 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
-        
+
         return "\n\n---\n\n".join(parts)
     
     def _get_identity(self) -> str:
@@ -99,13 +109,28 @@ Your workspace is at: {workspace_path}
 - Daily notes: {workspace_path}/memory/YYYY-MM-DD.md
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
+{self._get_memory_instructions(workspace_path)}
+
 IMPORTANT: When responding to direct questions or conversations, reply directly with your text response.
 Only use the 'message' tool when you need to send a message to a specific chat channel (like WhatsApp).
 For normal conversation, just respond with text - do not call the message tool.
 
-Always be helpful, accurate, and concise. When using tools, explain what you're doing.
-When remembering something, write to {workspace_path}/memory/MEMORY.md"""
+Always be helpful, accurate, and concise. When using tools, explain what you're doing."""
     
+    def _get_memory_instructions(self, workspace_path: str) -> str:
+        """Get memory-related instructions based on the active backend."""
+        from nanobot.memory.vector_store import VectorMemoryStore
+
+        if isinstance(self.memory, VectorMemoryStore):
+            return """## Memory System
+Your long-term memory is managed automatically via vector search (ChromaDB + Mem0):
+- Relevant memories from past conversations are retrieved and shown in the "Memory" section above.
+- New facts, preferences, and important information are automatically extracted and stored after each conversation turn.
+- You do NOT need to manually write to MEMORY.md for long-term recall (though you still can for explicit notes)."""
+        else:
+            return f"""## Memory System
+When remembering something, write to {workspace_path}/memory/MEMORY.md"""
+
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
@@ -143,8 +168,15 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         """
         messages = []
 
-        # System prompt
-        system_prompt = self.build_system_prompt(skill_names)
+        # Derive user_id from session key for memory scoping
+        user_id = f"{channel}:{chat_id}" if channel and chat_id else None
+
+        # System prompt — pass current_message for top-k memory retrieval
+        system_prompt = self.build_system_prompt(
+            skill_names,
+            current_message=current_message,
+            user_id=user_id,
+        )
         if channel and chat_id:
             system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
         messages.append({"role": "system", "content": system_prompt})

@@ -46,8 +46,9 @@ class AgentLoop:
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
+        memory_config: "MemoryConfig | None" = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, MemoryConfig
         from nanobot.cron.service import CronService
         self.bus = bus
         self.provider = provider
@@ -56,10 +57,11 @@ class AgentLoop:
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
+        self.memory_config = memory_config or MemoryConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
-        
-        self.context = ContextBuilder(workspace)
+
+        self.context = ContextBuilder(workspace, memory_config=self.memory_config)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -241,14 +243,51 @@ class AgentLoop:
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
-        
+
+        # Write-back: extract and store memories from this conversation turn
+        await self._memory_write_back(msg.content, final_content, msg.session_key)
+
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
             metadata=msg.metadata or {},  # Pass through for channel-specific needs (e.g. Slack thread_ts)
         )
-    
+
+    async def _memory_write_back(
+        self, user_message: str, assistant_response: str, session_key: str
+    ) -> None:
+        """
+        Post-response hook: extract memories from the conversation turn and store them.
+
+        Runs asynchronously to avoid blocking the response. Skips if write-back
+        is disabled or message is too short.
+        """
+        if not self.memory_config.write_back_enabled:
+            return
+
+        if len(user_message) < self.memory_config.write_back_min_message_length:
+            return
+
+        try:
+            messages = [
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "content": assistant_response},
+            ]
+            # Run in a thread to avoid blocking the event loop
+            # (Mem0's add() can call an LLM for extraction)
+            import asyncio
+
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: self.context.memory.add(
+                    messages, user_id=session_key
+                ),
+            )
+        except Exception as e:
+            logger.warning(f"Memory write-back failed: {e}")
+
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
         Process a system message (e.g., subagent announce).
