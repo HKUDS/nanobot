@@ -7,10 +7,19 @@ from nanobot.agent.tools.base import Tool
 
 
 def _resolve_path(path: str, allowed_dir: Path | None = None) -> Path:
-    """Resolve path and optionally enforce directory restriction."""
-    resolved = Path(path).expanduser().resolve()
-    if allowed_dir and not str(resolved).startswith(str(allowed_dir.resolve())):
-        raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
+    """Resolve path and optionally enforce directory restriction.
+
+    Uses proper path comparison instead of string prefix matching to prevent
+    bypass via sibling directories (e.g. allowed="/tmp/safe" would wrongly
+    permit "/tmp/safevil/secret" with a naive startswith check).
+    Symlinks are resolved before the check to prevent symlink-based escapes.
+    """
+    resolved = Path(path).expanduser().resolve(strict=False)
+    if allowed_dir:
+        allowed = allowed_dir.resolve(strict=False)
+        # Use Path.is_relative_to (Python 3.9+) for correct directory containment
+        if not resolved.is_relative_to(allowed):
+            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
     return resolved
 
 

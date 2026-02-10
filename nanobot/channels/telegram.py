@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html as html_mod
 import re
 from typing import TYPE_CHECKING
 
@@ -52,7 +53,12 @@ def _markdown_to_telegram_html(text: str) -> str:
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     
     # 6. Links [text](url) - must be before bold/italic to handle nested cases
-    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+    # Escape the URL to prevent attribute injection (XSS via quote breakout)
+    def _safe_link(m: re.Match) -> str:
+        link_text = m.group(1)
+        url = html_mod.escape(m.group(2), quote=True)
+        return f'<a href="{url}">{link_text}</a>'
+    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _safe_link, text)
     
     # 7. Bold **text** or __text__
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
