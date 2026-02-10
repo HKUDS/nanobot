@@ -32,6 +32,10 @@ MATRIX_HTML_FORMAT = "org.matrix.custom.html"
 #   that Matrix clients (e.g. Element/FluffyChat) can render consistently.
 # We intentionally avoid plugins that emit less-portable tags to keep output
 # predictable across clients.
+# escape=True is intentional: raw HTML from model output is rendered as text,
+# not as live HTML. This includes Matrix-specific raw snippets such as
+# <span data-mx-...> and <div data-mx-maths>, unless we later add explicit
+# structured support for those features.
 MATRIX_MARKDOWN = create_markdown(
     escape=True,
     plugins=["table", "strikethrough", "url", "superscript", "subscript"],
