@@ -425,6 +425,26 @@ async def test_send_adds_formatted_body_for_markdown() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_adds_formatted_body_for_inline_url_superscript_subscript() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    markdown_text = "Visit https://example.com and x^2^ plus H~2~O."
+    await channel.send(
+        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content=markdown_text)
+    )
+
+    content = client.room_send_calls[0]["content"]
+    assert content["msgtype"] == "m.text"
+    assert content["body"] == markdown_text
+    assert content["format"] == MATRIX_HTML_FORMAT
+    assert '<a href="https://example.com">' in str(content["formatted_body"])
+    assert "<sup>2</sup>" in str(content["formatted_body"])
+    assert "<sub>2</sub>" in str(content["formatted_body"])
+
+
+@pytest.mark.asyncio
 async def test_send_falls_back_to_plaintext_when_markdown_render_fails(monkeypatch) -> None:
     channel = MatrixChannel(_make_config(), MessageBus())
     client = _FakeAsyncClient("", "", "", None)

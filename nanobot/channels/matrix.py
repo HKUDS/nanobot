@@ -24,9 +24,16 @@ LOGGING_STACK_BASE_DEPTH = 2
 TYPING_NOTICE_TIMEOUT_MS = 30_000
 MATRIX_HTML_FORMAT = "org.matrix.custom.html"
 
+# Keep plugin output aligned with Matrix recommended HTML tags:
+# https://spec.matrix.org/latest/client-server-api/#mroommessage-msgtypes
+# - table/strikethrough/task_lists are already used in replies.
+# - url, superscript, and subscript map to common tags (<a>, <sup>, <sub>)
+#   that Matrix clients (e.g. Element/FluffyChat) can render consistently.
+# We intentionally avoid plugins that emit less-portable tags to keep output
+# predictable across clients.
 MATRIX_MARKDOWN = create_markdown(
     escape=True,
-    plugins=["table", "strikethrough", "task_lists"],
+    plugins=["table", "strikethrough", "task_lists", "url", "superscript", "subscript"],
 )
 
 
@@ -47,8 +54,11 @@ def _render_markdown_html(text: str) -> str | None:
 
     # Skip formatted_body for plain output (<p>...</p>) to keep payload minimal.
     stripped = formatted.strip()
-    if stripped.startswith("<p>") and stripped.endswith("</p>") and "<p>" not in stripped[3:-4]:
-        return None
+    if stripped.startswith("<p>") and stripped.endswith("</p>"):
+        paragraph_inner = stripped[3:-4]
+        # Keep plaintext-only paragraphs minimal, but preserve inline markup/links.
+        if "<" not in paragraph_inner and ">" not in paragraph_inner:
+            return None
 
     return formatted
 
