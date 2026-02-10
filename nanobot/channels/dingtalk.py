@@ -1,8 +1,10 @@
 """DingTalk/DingDing channel implementation using Stream Mode."""
 
 import asyncio
+import hashlib
 import json
 import time
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -56,7 +58,14 @@ class NanobotDingTalkHandler(CallbackHandler):
             if not content:
                 content = message.data.get("text", {}).get("content", "").strip()
 
-            if not content:
+            # Extract image download codes (picture / richText messages)
+            image_download_codes = []
+            try:
+                image_download_codes = chatbot_msg.get_image_list() or []
+            except Exception:
+                pass
+
+            if not content and not image_download_codes:
                 logger.warning(
                     f"Received empty or unsupported message type: {chatbot_msg.message_type}"
                 )
@@ -95,6 +104,7 @@ class NanobotDingTalkHandler(CallbackHandler):
                     chat_id=chat_id,
                     is_group=conversation_type == "2",
                     conversation_title=conversation_title,
+                    image_download_codes=image_download_codes,
                 )
             )
             self.channel._background_tasks.add(task)
@@ -207,6 +217,59 @@ class DingTalkChannel(BaseChannel):
             logger.error(f"Failed to get DingTalk access token: {e}")
             return None
 
+    async def _download_image(self, download_code: str) -> str | None:
+        """Download an image from DingTalk using its download code.
+
+        Returns the local file path on success, None on failure.
+        """
+        token = await self._get_access_token()
+        if not token or not self._http:
+            return None
+
+        try:
+            # Step 1: Convert downloadCode to a temporary download URL
+            url = "https://api.dingtalk.com/v1.0/robot/messageFiles/download"
+            resp = await self._http.post(
+                url,
+                json={"robotCode": self.config.client_id, "downloadCode": download_code},
+                headers={"x-acs-dingtalk-access-token": token},
+            )
+            resp.raise_for_status()
+            download_url = resp.json().get("downloadUrl")
+            if not download_url:
+                logger.error("DingTalk image download: no downloadUrl in response")
+                return None
+
+            # Step 2: Download the actual image bytes
+            img_resp = await self._http.get(download_url, follow_redirects=True)
+            img_resp.raise_for_status()
+
+            # Determine extension from Content-Type
+            ct = img_resp.headers.get("content-type", "")
+            ext_map = {
+                "image/jpeg": ".jpg",
+                "image/png": ".png",
+                "image/gif": ".gif",
+                "image/webp": ".webp",
+                "image/bmp": ".bmp",
+            }
+            ext = ext_map.get(ct.split(";")[0].strip(), ".jpg")
+
+            # Step 3: Save to ~/.nanobot/media/
+            # Sanitise download_code for use as filename (may contain / + = etc.)
+            safe_name = hashlib.md5(download_code.encode()).hexdigest()[:16]
+            media_dir = Path.home() / ".nanobot" / "media"
+            media_dir.mkdir(parents=True, exist_ok=True)
+            file_path = media_dir / f"dingtalk_{safe_name}{ext}"
+            file_path.write_bytes(img_resp.content)
+
+            logger.debug(f"Downloaded DingTalk image to {file_path}")
+            return str(file_path)
+
+        except Exception as e:
+            logger.error(f"Failed to download DingTalk image: {e}")
+            return None
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through DingTalk (private or group)."""
         token = await self._get_access_token()
@@ -258,7 +321,8 @@ class DingTalkChannel(BaseChannel):
 
     async def _on_message(self, content: str, sender_id: str, sender_name: str,
                           chat_id: str | None = None, is_group: bool = False,
-                          conversation_title: str = "") -> None:
+                          conversation_title: str = "",
+                          image_download_codes: list[str] | None = None) -> None:
         """Handle incoming message (called by NanobotDingTalkHandler).
 
         Delegates to BaseChannel._handle_message() which enforces allow_from
@@ -269,16 +333,35 @@ class DingTalkChannel(BaseChannel):
             logger.info(f"DingTalk inbound: {content} from {sender_name}"
                         f"{' (group)' if is_group else ''}"
                         f"{f' in [{conversation_title}]' if conversation_title else ''}")
+
+            # Download images and build media paths
+            content_parts = []
+            media_paths = []
+
+            if content:
+                content_parts.append(content)
+
+            if image_download_codes:
+                for code in image_download_codes:
+                    file_path = await self._download_image(code)
+                    if file_path:
+                        media_paths.append(file_path)
+                        content_parts.append(f"[image: {file_path}]")
+                    else:
+                        content_parts.append("[image: download failed]")
+
+            effective_content = "\n".join(content_parts) if content_parts else "[empty message]"
+
             # For group chat, prepend sender name so the agent knows who is speaking
             if is_group:
                 prefix = f"[群:{conversation_title}] " if conversation_title else ""
-                effective_content = f"{prefix}{sender_name}: {content}"
-            else:
-                effective_content = str(content)
+                effective_content = f"{prefix}{sender_name}: {effective_content}"
+
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=effective_chat_id,
                 content=effective_content,
+                media=media_paths,
                 metadata={
                     "sender_name": sender_name,
                     "platform": "dingtalk",

@@ -142,7 +142,7 @@ class CronService:
             ]
         }
         
-        self.store_path.write_text(json.dumps(data, indent=2))
+        self.store_path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
     
     async def start(self) -> None:
         """Start the cron service."""

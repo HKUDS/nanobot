@@ -152,6 +152,21 @@ class ToolsConfig(BaseModel):
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
 
 
+class McpServerConfig(BaseModel):
+    """Single MCP server configuration."""
+    command: str = ""                                    # stdio mode: startup command
+    args: list[str] = Field(default_factory=list)        # command arguments
+    env: dict[str, str] = Field(default_factory=dict)    # environment variables
+    url: str = ""                                        # SSE/HTTP mode: server URL
+    transport: str = "stdio"                             # "stdio" | "sse" | "streamable-http"
+    enabled: bool = True
+
+
+class McpConfig(BaseModel):
+    """MCP servers configuration."""
+    servers: dict[str, McpServerConfig] = Field(default_factory=dict)
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
@@ -159,6 +174,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    mcp: McpConfig = Field(default_factory=McpConfig)
     
     @property
     def workspace_path(self) -> Path:

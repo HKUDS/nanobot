@@ -46,6 +46,7 @@ class AgentLoop:
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
+        mcp_servers: dict | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
@@ -70,9 +71,14 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            mcp_servers=mcp_servers,
         )
-        
+
         self._running = False
+        self._mcp_manager = None
+        if mcp_servers:
+            from nanobot.agent.tools.mcp import MCPManager
+            self._mcp_manager = MCPManager(mcp_servers)
         self._register_default_tools()
     
     def _register_default_tools(self) -> None:
@@ -141,6 +147,25 @@ class AgentLoop:
         """Stop the agent loop."""
         self._running = False
         logger.info("Agent loop stopping")
+
+    async def start_mcp(self) -> None:
+        """Connect MCP servers and register their tools."""
+        if self._mcp_manager:
+            tools = await self._mcp_manager.start()
+            for tool in tools:
+                self.tools.register(tool)
+            logger.info(
+                f"MCP: registered {len(tools)} tools from "
+                f"{len(self._mcp_manager.server_names)} servers"
+            )
+
+    async def stop_mcp(self) -> None:
+        """Unregister MCP tools and disconnect servers."""
+        if self._mcp_manager:
+            for name in list(self.tools._tools.keys()):
+                if name.startswith("mcp__"):
+                    self.tools.unregister(name)
+            await self._mcp_manager.stop()
     
     async def _process_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """

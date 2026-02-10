@@ -35,6 +35,7 @@ class SubagentManager:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        mcp_servers: dict | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.provider = provider
@@ -44,6 +45,7 @@ class SubagentManager:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.mcp_servers = mcp_servers
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
     
     async def spawn(
@@ -109,7 +111,22 @@ class SubagentManager:
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
-            
+
+            # Register MCP tools if configured
+            mcp_manager = None
+            if self.mcp_servers:
+                try:
+                    from nanobot.agent.tools.mcp import MCPManager
+                    mcp_manager = MCPManager(self.mcp_servers)
+                    mcp_tools = await mcp_manager.start()
+                    for mt in mcp_tools:
+                        tools.register(mt)
+                    if mcp_tools:
+                        logger.debug(f"Subagent [{task_id}] registered {len(mcp_tools)} MCP tools")
+                except Exception as e:
+                    logger.warning(f"Subagent [{task_id}] MCP init failed: {e}")
+                    mcp_manager = None
+
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)
             messages: list[dict[str, Any]] = [
@@ -170,11 +187,17 @@ class SubagentManager:
             
             logger.info(f"Subagent [{task_id}] completed successfully")
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
-            
+
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             logger.error(f"Subagent [{task_id}] failed: {e}")
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
+        finally:
+            if mcp_manager is not None:
+                try:
+                    await mcp_manager.stop()
+                except Exception:
+                    pass
     
     async def _announce_result(
         self,

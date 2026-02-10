@@ -360,6 +360,7 @@ def gateway(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
+        mcp_servers={n: c for n, c in config.mcp.servers.items() if c.enabled} or None,
     )
     
     # Set cron callback (needs agent)
@@ -406,9 +407,16 @@ def gateway(
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
     
     console.print(f"[green]✓[/green] Heartbeat: every 30m")
-    
+
+    # Show MCP status
+    if config.mcp.servers:
+        enabled = [n for n, c in config.mcp.servers.items() if c.enabled]
+        if enabled:
+            console.print(f"[green]✓[/green] MCP servers: {', '.join(enabled)}")
+
     async def run():
         try:
+            await agent.start_mcp()
             await cron.start()
             await heartbeat.start()
             await asyncio.gather(
@@ -420,6 +428,7 @@ def gateway(
             heartbeat.stop()
             cron.stop()
             agent.stop()
+            await agent.stop_mcp()
             await channels.stop_all()
     
     asyncio.run(run())
@@ -462,6 +471,7 @@ def agent(
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        mcp_servers={n: c for n, c in config.mcp.servers.items() if c.enabled} or None,
     )
     
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -474,10 +484,14 @@ def agent(
     if message:
         # Single message mode
         async def run_once():
-            with _thinking_ctx():
-                response = await agent_loop.process_direct(message, session_id)
-            _print_agent_response(response, render_markdown=markdown)
-        
+            await agent_loop.start_mcp()
+            try:
+                with _thinking_ctx():
+                    response = await agent_loop.process_direct(message, session_id)
+                _print_agent_response(response, render_markdown=markdown)
+            finally:
+                await agent_loop.stop_mcp()
+
         asyncio.run(run_once())
     else:
         # Interactive mode
@@ -495,33 +509,37 @@ def agent(
         signal.signal(signal.SIGINT, _exit_on_sigint)
         
         async def run_interactive():
-            while True:
-                try:
-                    _flush_pending_tty_input()
-                    user_input = await _read_interactive_input_async()
-                    command = user_input.strip()
-                    if not command:
-                        continue
+            await agent_loop.start_mcp()
+            try:
+                while True:
+                    try:
+                        _flush_pending_tty_input()
+                        user_input = await _read_interactive_input_async()
+                        command = user_input.strip()
+                        if not command:
+                            continue
 
-                    if _is_exit_command(command):
+                        if _is_exit_command(command):
+                            _save_history()
+                            _restore_terminal()
+                            console.print("\nGoodbye!")
+                            break
+
+                        with _thinking_ctx():
+                            response = await agent_loop.process_direct(user_input, session_id)
+                        _print_agent_response(response, render_markdown=markdown)
+                    except KeyboardInterrupt:
                         _save_history()
                         _restore_terminal()
                         console.print("\nGoodbye!")
                         break
-                    
-                    with _thinking_ctx():
-                        response = await agent_loop.process_direct(user_input, session_id)
-                    _print_agent_response(response, render_markdown=markdown)
-                except KeyboardInterrupt:
-                    _save_history()
-                    _restore_terminal()
-                    console.print("\nGoodbye!")
-                    break
-                except EOFError:
-                    _save_history()
-                    _restore_terminal()
-                    console.print("\nGoodbye!")
-                    break
+                    except EOFError:
+                        _save_history()
+                        _restore_terminal()
+                        console.print("\nGoodbye!")
+                        break
+            finally:
+                await agent_loop.stop_mcp()
         
         asyncio.run(run_interactive())
 
@@ -805,6 +823,88 @@ def cron_run(
         console.print(f"[green]✓[/green] Job executed")
     else:
         console.print(f"[red]Failed to run job {job_id}[/red]")
+
+
+# ============================================================================
+# MCP Commands
+# ============================================================================
+
+
+mcp_app = typer.Typer(help="Manage MCP servers")
+app.add_typer(mcp_app, name="mcp")
+
+
+@mcp_app.command("list")
+def mcp_list():
+    """List configured MCP servers."""
+    from nanobot.config.loader import load_config
+
+    config = load_config()
+    servers = config.mcp.servers
+
+    if not servers:
+        console.print("No MCP servers configured.")
+        console.print("[dim]Add servers in ~/.nanobot/config.json under mcp.servers[/dim]")
+        return
+
+    table = Table(title="MCP Servers")
+    table.add_column("Name", style="cyan")
+    table.add_column("Transport")
+    table.add_column("Command / URL")
+    table.add_column("Enabled", style="green")
+
+    for name, cfg in servers.items():
+        if cfg.transport == "stdio":
+            target = f"{cfg.command} {' '.join(cfg.args)}" if cfg.args else cfg.command
+        else:
+            target = cfg.url or "(not set)"
+        table.add_row(
+            name,
+            cfg.transport,
+            target,
+            "[green]yes[/green]" if cfg.enabled else "[dim]no[/dim]",
+        )
+
+    console.print(table)
+
+
+@mcp_app.command("tools")
+def mcp_tools():
+    """Connect to MCP servers and list discovered tools."""
+    from nanobot.config.loader import load_config
+
+    config = load_config()
+    servers = {n: c for n, c in config.mcp.servers.items() if c.enabled}
+
+    if not servers:
+        console.print("No enabled MCP servers configured.")
+        return
+
+    async def discover():
+        from nanobot.agent.tools.mcp import MCPManager
+
+        manager = MCPManager(servers)
+        try:
+            tools = await manager.start()
+            if not tools:
+                console.print("No tools discovered from MCP servers.")
+                return
+
+            table = Table(title="MCP Tools")
+            table.add_column("Server", style="cyan")
+            table.add_column("Tool Name")
+            table.add_column("Description")
+
+            for t in tools:
+                table.add_row(t._server_name, t._tool_name, t._tool_description[:80])
+
+            console.print(table)
+            console.print(f"\n[green]{len(tools)}[/green] tools from [green]{len(manager.server_names)}[/green] servers")
+        finally:
+            await manager.stop()
+
+    with console.status("[dim]Connecting to MCP servers...[/dim]", spinner="dots"):
+        asyncio.run(discover())
 
 
 # ============================================================================
