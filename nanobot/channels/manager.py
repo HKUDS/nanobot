@@ -32,8 +32,34 @@ class ChannelManager:
         self.session_manager = session_manager
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
+        self.tts_provider: Any | None = None
         
         self._init_channels()
+        self._init_tts()
+
+    def _init_tts(self) -> None:
+        """Initialize TTS provider."""
+        try:
+            tts_config = self.config.audio.tts
+            provider_type = tts_config.defaults.provider
+            
+            if provider_type == "openai_tts":
+                from nanobot.providers.tts import OpenAITTSProvider
+                api_key = self.config.providers.openai_tts.api_key or self.config.providers.openai.api_key
+                if api_key:
+                    self.tts_provider = OpenAITTSProvider(
+                        api_key=api_key,
+                        voice=tts_config.defaults.voice,
+                        speed=tts_config.defaults.speed
+                    )
+                    logger.info("TTS provider initialized: OpenAI")
+            elif provider_type == "edge_tts":
+                from nanobot.providers.tts import EdgeTTSProvider
+                self.tts_provider = EdgeTTSProvider()
+                logger.info("TTS provider initialized: EdgeTTS")
+                
+        except Exception as e:
+            logger.warning(f"Failed to initialize TTS: {e}")
     
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
@@ -90,7 +116,9 @@ class ChannelManager:
             try:
                 from nanobot.channels.dingtalk import DingTalkChannel
                 self.channels["dingtalk"] = DingTalkChannel(
-                    self.config.channels.dingtalk, self.bus
+                    self.config.channels.dingtalk,
+                    self.bus,
+                    groq_api_key=self.config.providers.groq.api_key,
                 )
                 logger.info("DingTalk channel enabled")
             except ImportError as e:
@@ -189,6 +217,27 @@ class ChannelManager:
                 channel = self.channels.get(msg.channel)
                 if channel:
                     try:
+                        # Handle TTS if requested
+                        if self.tts_provider and msg.metadata and msg.metadata.get("reply_voice"):
+                            try:
+                                from pathlib import Path
+                                import uuid
+                                
+                                # Generate unique filename
+                                media_dir = Path.home() / ".nanobot" / "media"
+                                media_dir.mkdir(parents=True, exist_ok=True)
+                                output_path = media_dir / f"reply_{uuid.uuid4().hex[:8]}.mp3"
+                                
+                                # Generate speech
+                                logger.info(f"Generating TTS for message to {msg.chat_id}")
+                                audio_path = await self.tts_provider.generate_speech(msg.content, output_path)
+                                
+                                if audio_path:
+                                    msg.metadata["voice_file"] = str(audio_path)
+                                    logger.debug(f"Attached voice file: {audio_path}")
+                            except Exception as e:
+                                logger.error(f"TTS generation failed: {e}")
+
                         await channel.send(msg)
                     except Exception as e:
                         logger.error(f"Error sending to {msg.channel}: {e}")

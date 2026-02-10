@@ -49,16 +49,58 @@ class NanobotDingTalkHandler(CallbackHandler):
             # Parse using SDK's ChatbotMessage for robust handling
             chatbot_msg = ChatbotMessage.from_dict(message.data)
 
-            # Extract text content; fall back to raw dict if SDK object is empty
+            # Check for different message types
+            msg_type = getattr(chatbot_msg, "msgtype", None) or message.data.get("msgtype")
             content = ""
-            if chatbot_msg.text:
-                content = chatbot_msg.text.content.strip()
-            if not content:
-                content = message.data.get("text", {}).get("content", "").strip()
+            media_paths = []
+            
+            if msg_type == "text":
+                if chatbot_msg.text:
+                    content = chatbot_msg.text.content.strip()
+                if not content:
+                    content = message.data.get("text", {}).get("content", "").strip()
+            elif msg_type == "audio":
+                # Audio message - check for downloadCode or url
+                # message.data example: {"msgtype": "audio", "content": {"downloadCode": "..."}}
+                audio_content = message.data.get("content", {})
+                download_code = audio_content.get("downloadCode")
+                
+                if download_code:
+                    try:
+                        logger.info(f"Downloading DingTalk audio with code: {download_code}")
+                        file_path = await self.channel._download_file(download_code)
+                        
+                        if file_path:
+                            # Check if Groq key is configured
+                            if not self.channel.groq_api_key:
+                                logger.warning("Groq API key missing for DingTalk transcription")
+                                content = "[Voice message: Transcription failed (Groq API Key missing)]"
+                            else:
+                                # Transcribe
+                                from nanobot.providers.transcription import GroqTranscriptionProvider
+                                transcriber = GroqTranscriptionProvider(api_key=self.channel.groq_api_key)
+                                transcription = await transcriber.transcribe(file_path)
+                                
+                                if transcription:
+                                    content = transcription
+                                    logger.info(f"DingTalk voice transcribed: {content}")
+                                else:
+                                    logger.warning("DingTalk voice transcription failed (empty)")
+                                    content = "[Voice message: Transcription failed]"
+                        else:
+                            logger.error("Failed to download DingTalk audio file")
+                            content = "[Voice message: Download failed]"
+
+                    except Exception as e:
+                        logger.error(f"Error handling audio: {e}")
+                        content = f"[Voice message error: {e}]"
+            else:
+                if chatbot_msg.text:
+                    content = chatbot_msg.text.content.strip()
 
             if not content:
                 logger.warning(
-                    f"Received empty or unsupported message type: {chatbot_msg.message_type}"
+                    f"Received empty or unsupported message type: {msg_type}"
                 )
                 return AckMessage.STATUS_OK, "OK"
 
@@ -70,7 +112,7 @@ class NanobotDingTalkHandler(CallbackHandler):
             # Forward to Nanobot via _on_message (non-blocking).
             # Store reference to prevent GC before task completes.
             task = asyncio.create_task(
-                self.channel._on_message(content, sender_id, sender_name)
+                self.channel._on_message(content, sender_id, sender_name, is_voice=(msg_type == "audio"))
             )
             self.channel._background_tasks.add(task)
             task.add_done_callback(self.channel._background_tasks.discard)
@@ -96,9 +138,17 @@ class DingTalkChannel(BaseChannel):
 
     name = "dingtalk"
 
-    def __init__(self, config: DingTalkConfig, bus: MessageBus):
+    name = "dingtalk"
+
+    def __init__(
+        self,
+        config: DingTalkConfig,
+        bus: MessageBus,
+        groq_api_key: str = ""
+    ):
         super().__init__(config, bus)
         self.config: DingTalkConfig = config
+        self.groq_api_key = groq_api_key
         self._client: Any = None
         self._http: httpx.AsyncClient | None = None
 
@@ -182,6 +232,57 @@ class DingTalkChannel(BaseChannel):
             logger.error(f"Failed to get DingTalk access token: {e}")
             return None
 
+    async def _download_file(self, download_code: str, file_ext: str = ".mp3") -> str | None:
+        """Download file using downloadCode."""
+        token = await self._get_access_token()
+        if not token:
+            return None
+            
+        url = "https://api.dingtalk.com/v1.0/robot/messageFiles/download"
+        headers = {
+            "x-acs-dingtalk-access-token": token,
+            "Content-Type": "application/json"
+        }
+        data = {
+            "downloadCode": download_code,
+            "robotCode": self.config.client_id
+        }
+        
+        try:
+            # 1. Get download URL
+            resp = await self._http.post(url, json=data, headers=headers)
+            resp.raise_for_status()
+            download_url = resp.json().get("downloadUrl")
+            
+            if not download_url:
+                logger.error("No downloadUrl returned from DingTalk")
+                return None
+                
+            # 2. Download file content
+            # Remove Authentication header for the actual file download usually?
+            # The downloadUrl usually is a signed OSS URL.
+            # We use a fresh client or just no headers.
+            async with httpx.AsyncClient() as client:
+                file_resp = await client.get(download_url)
+                file_resp.raise_for_status()
+                content = file_resp.content
+
+            # 3. Save to temp file
+            from pathlib import Path
+            import uuid
+            media_dir = Path.home() / ".nanobot" / "media"
+            media_dir.mkdir(parents=True, exist_ok=True)
+            file_path = media_dir / f"ding_{uuid.uuid4().hex[:8]}{file_ext}"
+            
+            with open(file_path, "wb") as f:
+                f.write(content)
+                
+            return str(file_path)
+            
+        except Exception as e:
+            logger.error(f"Failed to download DingTalk file: {e}")
+            return None
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through DingTalk."""
         token = await self._get_access_token()
@@ -209,6 +310,44 @@ class DingTalkChannel(BaseChannel):
             return
 
         try:
+            # Check for voice message
+            if msg.metadata and msg.metadata.get("voice_file"):
+                voice_path = msg.metadata["voice_file"]
+                try:
+                    # 1. Upload to DingTalk
+                    with open(voice_path, "rb") as f:
+                        # Ensure we read the file content
+                        content = f.read()
+                        media_id = self._client.upload_to_dingtalk(
+                            content,
+                            filetype="voice",
+                            filename="voice.mp3",
+                            mimetype="audio/mpeg"
+                        )
+                    
+                    if media_id:
+                        # 2. Send voice message
+                        voice_data = {
+                            "robotCode": self.config.client_id,
+                            "userIds": [msg.chat_id],
+                            "msgKey": "sampleAudio",
+                            "msgParam": json.dumps({
+                                "mediaId": media_id,
+                                "duration": "10",  # Approximation
+                            }),
+                        }
+                        resp = await self._http.post(url, json=voice_data, headers=headers)
+                        if resp.status_code != 200:
+                            logger.error(f"DingTalk voice send failed: {resp.text}")
+                        else:
+                            logger.debug(f"DingTalk voice sent to {msg.chat_id}")
+                        
+                        # Continue to send text message as transcript/fallback
+                        
+                except Exception as e:
+                    logger.error(f"Failed to send DingTalk voice, falling back to text: {e}")
+
+            # Fallback to text/markdown
             resp = await self._http.post(url, json=data, headers=headers)
             if resp.status_code != 200:
                 logger.error(f"DingTalk send failed: {resp.text}")
@@ -217,7 +356,7 @@ class DingTalkChannel(BaseChannel):
         except Exception as e:
             logger.error(f"Error sending DingTalk message: {e}")
 
-    async def _on_message(self, content: str, sender_id: str, sender_name: str) -> None:
+    async def _on_message(self, content: str, sender_id: str, sender_name: str, is_voice: bool = False) -> None:
         """Handle incoming message (called by NanobotDingTalkHandler).
 
         Delegates to BaseChannel._handle_message() which enforces allow_from
@@ -225,6 +364,7 @@ class DingTalkChannel(BaseChannel):
         """
         try:
             logger.info(f"DingTalk inbound: {content} from {sender_name}")
+            
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=sender_id,  # For private chat, chat_id == sender_id
@@ -232,6 +372,7 @@ class DingTalkChannel(BaseChannel):
                 metadata={
                     "sender_name": sender_name,
                     "platform": "dingtalk",
+                    "is_voice": is_voice,
                 },
             )
         except Exception as e:
