@@ -2,9 +2,14 @@ from types import SimpleNamespace
 
 import pytest
 
+import nanobot.channels.matrix as matrix_module
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.matrix import TYPING_NOTICE_TIMEOUT_MS, MatrixChannel
+from nanobot.channels.matrix import (
+    MATRIX_HTML_FORMAT,
+    TYPING_NOTICE_TIMEOUT_MS,
+    MatrixChannel,
+)
 from nanobot.config.schema import MatrixConfig
 
 
@@ -241,6 +246,7 @@ async def test_send_clears_typing_after_send() -> None:
     )
 
     assert len(client.room_send_calls) == 1
+    assert client.room_send_calls[0]["content"] == {"msgtype": "m.text", "body": "Hi"}
     assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
 
 
@@ -257,3 +263,56 @@ async def test_send_clears_typing_when_send_fails() -> None:
         )
 
     assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
+
+
+@pytest.mark.asyncio
+async def test_send_adds_formatted_body_for_markdown() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    markdown_text = "# Headline\n\n- [x] done\n\n| A | B |\n| - | - |\n| 1 | 2 |"
+    await channel.send(
+        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content=markdown_text)
+    )
+
+    content = client.room_send_calls[0]["content"]
+    assert content["msgtype"] == "m.text"
+    assert content["body"] == markdown_text
+    assert content["format"] == MATRIX_HTML_FORMAT
+    assert "<h1>Headline</h1>" in str(content["formatted_body"])
+    assert "<table>" in str(content["formatted_body"])
+    assert "task-list-item-checkbox" in str(content["formatted_body"])
+
+
+@pytest.mark.asyncio
+async def test_send_falls_back_to_plaintext_when_markdown_render_fails(monkeypatch) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    def _raise(text: str) -> str:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(matrix_module, "MATRIX_MARKDOWN", _raise)
+    markdown_text = "# Headline"
+    await channel.send(
+        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content=markdown_text)
+    )
+
+    content = client.room_send_calls[0]["content"]
+    assert content == {"msgtype": "m.text", "body": markdown_text}
+
+
+@pytest.mark.asyncio
+async def test_send_keeps_plaintext_only_for_plain_text() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    text = "just a normal sentence without markdown markers"
+    await channel.send(
+        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content=text)
+    )
+
+    assert client.room_send_calls[0]["content"] == {"msgtype": "m.text", "body": text}
