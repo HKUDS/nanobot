@@ -296,21 +296,64 @@ This file stores important information that should persist across sessions.
 
 
 def _make_provider(config):
-    """Create LiteLLMProvider from config. Exits if no API key found."""
-    from nanobot.providers.litellm_provider import LiteLLMProvider
-    p = config.get_provider()
+    """Create provider from config (LiteLLM or LazyLLM)."""
     model = config.agents.defaults.model
-    if not (p and p.api_key) and not model.startswith("bedrock/"):
-        console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers section")
-        raise typer.Exit(1)
-    return LiteLLMProvider(
-        api_key=p.api_key if p else None,
-        api_base=config.get_api_base(),
-        default_model=model,
-        extra_headers=p.extra_headers if p else None,
-        provider_name=config.get_provider_name(),
+    provider_type = config.get_provider_type()
+
+    if provider_type == "litellm":
+        try:
+            from nanobot.providers.litellm_provider import LiteLLMProvider
+        except Exception:
+            console.print("[red]Error: litellm is not installed.[/red]")
+            console.print("Install dependencies and retry: pip install -e .")
+            raise typer.Exit(1)
+
+        p = config.get_provider(model)
+        if not (p and p.api_key) and not model.startswith("bedrock/"):
+            console.print("[red]Error: No API key configured.[/red]")
+            console.print("Set one in ~/.nanobot/config.json under providers section")
+            raise typer.Exit(1)
+        return LiteLLMProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            provider_name=config.get_provider_name(),
     )
+    elif provider_type == "lazyllm":
+        try:
+            from nanobot.providers.lazyllm_provider import LazyLLMProvider
+        except Exception:
+            console.print("[red]Error: lazyllm is not installed.[/red]")
+            console.print("Install dependencies and retry: pip install -e .")
+            raise typer.Exit(1)
+
+        lazy_cfg = config.providers.lazyllm
+        default_model = _get_runtime_model(config)
+        if not default_model:
+            console.print("[red]Error: No model configured for lazyllm.[/red]")
+            console.print("Set agents.defaults.model to 'source/model'.")
+            raise typer.Exit(1)
+        if not (lazy_cfg.api_key or lazy_cfg.api_base):
+            console.print("[red]Error: No lazyllm credentials configured.[/red]")
+            console.print("Set providers.lazyllm.apiKey (or apiBase for local service).")
+            raise typer.Exit(1)
+
+        return LazyLLMProvider(
+            api_key=lazy_cfg.api_key or None,
+            api_base=lazy_cfg.api_base,
+            default_model=default_model,
+            type=lazy_cfg.model_type,
+        )
+    else:
+        console.print(f"[red]Error: Unsupported provider type '{provider_type}'.[/red]")
+        console.print("Use one of: litellm, lazyllm")
+        raise typer.Exit(1)
+
+
+def _get_runtime_model(config) -> str:
+    """Resolve runtime model from agent defaults."""
+    return (config.agents.defaults.model or "").strip()
 
 
 # ============================================================================
@@ -342,6 +385,7 @@ def gateway(
     config = load_config()
     bus = MessageBus()
     provider = _make_provider(config)
+    runtime_model = _get_runtime_model(config)
     session_manager = SessionManager(config.workspace_path)
     
     # Create cron service first (callback set after agent creation)
@@ -353,7 +397,7 @@ def gateway(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
+        model=runtime_model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
@@ -854,24 +898,35 @@ def status():
     console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
 
     if config_path.exists():
-        from nanobot.providers.registry import PROVIDERS
+        active_provider = config.get_provider_type()
+        runtime_model = _get_runtime_model(config)
+        console.print(f"Provider: {active_provider}")
+        console.print(f"Model: {runtime_model}")
 
-        console.print(f"Model: {config.agents.defaults.model}")
-        
-        # Check API keys from registry
-        for spec in PROVIDERS:
-            p = getattr(config.providers, spec.name, None)
-            if p is None:
-                continue
-            if spec.is_local:
-                # Local deployments show api_base instead of api_key
-                if p.api_base:
-                    console.print(f"{spec.label}: [green]✓ {p.api_base}[/green]")
+        if active_provider == "litellm":
+            from nanobot.providers.registry import PROVIDERS
+
+            # Check API keys from registry
+            for spec in PROVIDERS:
+                p = getattr(config.providers, spec.name, None)
+                if p is None:
+                    continue
+                if spec.is_local:
+                    # Local deployments show api_base instead of api_key
+                    if p.api_base:
+                        console.print(f"{spec.label}: [green]✓ {p.api_base}[/green]")
+                    else:
+                        console.print(f"{spec.label}: [dim]not set[/dim]")
                 else:
-                    console.print(f"{spec.label}: [dim]not set[/dim]")
-            else:
-                has_key = bool(p.api_key)
-                console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+                    has_key = bool(p.api_key)
+                    console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+        elif active_provider == "lazyllm":
+            lazy_cfg = config.providers.lazyllm
+            console.print(f"LazyLLM type: {lazy_cfg.model_type}")
+            has_auth = bool(lazy_cfg.api_key or lazy_cfg.api_base)
+            console.print(f"LazyLLM auth: {'[green]✓[/green]' if has_auth else '[dim]not set[/dim]'}")
+        else:
+            console.print(f"[red]Invalid provider in config: {active_provider}[/red]")
 
 
 if __name__ == "__main__":
