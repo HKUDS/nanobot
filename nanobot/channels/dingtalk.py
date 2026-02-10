@@ -212,9 +212,16 @@ class DingTalkChannel(BaseChannel):
             content = f"{content}\n\n@{sender_name}"
             at_user_ids = [sender_id]
 
+        # Generate dynamic title from content for better preview
+        title = content.replace("\n", " ").strip()[:30]
+        if len(content) > 30:
+            title += "..."
+        if not title:
+            title = "Nanobot Reply"
+
         msg_param_dict = {
             "text": content,
-            "title": "Nanobot Reply",
+            "title": title,
         }
         if at_user_ids:
             msg_param_dict["atUserIds"] = at_user_ids
