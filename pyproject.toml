@@ -32,7 +32,9 @@ dependencies = [
     "python-telegram-bot[socks]>=21.0",
     "lark-oapi>=1.0.0",
     "socksio>=1.0.0",
-    "matrix-nio>=0.25.2"
+    "matrix-nio[e2e]>=0.25.2",
+    "mistune>=3.0.0",
+    "nh3>=0.2.17",
 ]
 
 [project.optional-dependencies]
