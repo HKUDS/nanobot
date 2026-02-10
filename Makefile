@@ -1,6 +1,6 @@
-.PHONY: deploy update restart status logs create
+.PHONY: deploy update restart status logs daemon
 
-deploy: update restart
+deploy: update daemon restart
 
 define SERVICE_FILE
 [Unit]
@@ -24,15 +24,15 @@ WantedBy=multi-user.target
 endef
 export SERVICE_FILE
 
-create:
-	echo "$$SERVICE_FILE" | sudo tee /etc/systemd/system/nanobot-gateway.service > /dev/null
-	sudo systemctl daemon-reload
-	sudo systemctl enable nanobot-gateway
-	ln -sf /home/om/nanobot/.venv/bin/nanobot /home/om/.local/bin/nanobot
-
 update:
 	git pull origin development
 	uv pip install -e .
+	ln -sf /home/om/nanobot/.venv/bin/nanobot /home/om/.local/bin/nanobot
+
+daemon:
+	echo "$$SERVICE_FILE" | sudo tee /etc/systemd/system/nanobot-gateway.service > /dev/null
+	sudo systemctl daemon-reload
+	sudo systemctl enable nanobot-gateway
 	ln -sf /home/om/nanobot/.venv/bin/nanobot /home/om/.local/bin/nanobot
 
 restart:
