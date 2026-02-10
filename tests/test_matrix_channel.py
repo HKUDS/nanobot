@@ -14,6 +14,8 @@ from nanobot.channels.matrix import (
 )
 from nanobot.config.schema import MatrixConfig
 
+_ROOM_SEND_UNSET = object()
+
 
 class _DummyTask:
     def __init__(self) -> None:
@@ -73,16 +75,16 @@ class _FakeAsyncClient:
         room_id: str,
         message_type: str,
         content: dict[str, object],
-        ignore_unverified_devices: bool,
+        ignore_unverified_devices: object = _ROOM_SEND_UNSET,
     ) -> None:
-        self.room_send_calls.append(
-            {
-                "room_id": room_id,
-                "message_type": message_type,
-                "content": content,
-                "ignore_unverified_devices": ignore_unverified_devices,
-            }
-        )
+        call: dict[str, object] = {
+            "room_id": room_id,
+            "message_type": message_type,
+            "content": content,
+        }
+        if ignore_unverified_devices is not _ROOM_SEND_UNSET:
+            call["ignore_unverified_devices"] = ignore_unverified_devices
+        self.room_send_calls.append(call)
         if self.raise_on_send:
             raise RuntimeError("send failed")
 
@@ -149,9 +151,44 @@ async def test_start_skips_load_store_when_device_id_missing(
     await channel.start()
 
     assert len(clients) == 1
+    assert clients[0].config.encryption_enabled is True
     assert clients[0].load_store_called is False
     assert len(clients[0].callbacks) == 3
     assert len(clients[0].response_callbacks) == 3
+
+    await channel.stop()
+
+
+@pytest.mark.asyncio
+async def test_start_disables_e2ee_when_configured(
+    monkeypatch, tmp_path
+) -> None:
+    clients: list[_FakeAsyncClient] = []
+
+    def _fake_client(*args, **kwargs) -> _FakeAsyncClient:
+        client = _FakeAsyncClient(*args, **kwargs)
+        clients.append(client)
+        return client
+
+    def _fake_create_task(coro):
+        coro.close()
+        return _DummyTask()
+
+    monkeypatch.setattr("nanobot.channels.matrix.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "nanobot.channels.matrix.AsyncClientConfig",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    monkeypatch.setattr("nanobot.channels.matrix.AsyncClient", _fake_client)
+    monkeypatch.setattr(
+        "nanobot.channels.matrix.asyncio.create_task", _fake_create_task
+    )
+
+    channel = MatrixChannel(_make_config(device_id="", e2ee_enabled=False), MessageBus())
+    await channel.start()
+
+    assert len(clients) == 1
+    assert clients[0].config.encryption_enabled is False
 
     await channel.stop()
 
@@ -632,7 +669,22 @@ async def test_send_clears_typing_after_send() -> None:
         "body": "Hi",
         "m.mentions": {},
     }
+    assert client.room_send_calls[0]["ignore_unverified_devices"] is True
     assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
+
+
+@pytest.mark.asyncio
+async def test_send_omits_ignore_unverified_devices_when_e2ee_disabled() -> None:
+    channel = MatrixChannel(_make_config(e2ee_enabled=False), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    await channel.send(
+        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content="Hi")
+    )
+
+    assert len(client.room_send_calls) == 1
+    assert "ignore_unverified_devices" not in client.room_send_calls[0]
 
 
 @pytest.mark.asyncio

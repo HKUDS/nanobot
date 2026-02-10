@@ -254,7 +254,7 @@ class MatrixChannel(BaseChannel):
             store_path=store_path,  # Where tokens are saved
             config=AsyncClientConfig(
                 store_sync_tokens=True,  # Auto-persists next_batch tokens
-                encryption_enabled=True,
+                encryption_enabled=self.config.e2ee_enabled,
             ),
         )
 
@@ -264,6 +264,14 @@ class MatrixChannel(BaseChannel):
 
         self._register_event_callbacks()
         self._register_response_callbacks()
+
+        if self.config.e2ee_enabled:
+            logger.info("Matrix E2EE is enabled.")
+        else:
+            logger.warning(
+                "Matrix E2EE is disabled; encrypted room messages may be undecryptable and "
+                "encrypted-device verification is not applied on send."
+            )
 
         if self.config.device_id:
             try:
@@ -316,13 +324,17 @@ class MatrixChannel(BaseChannel):
         if not self.client:
             return
 
+        room_send_kwargs: dict[str, Any] = {
+            "room_id": msg.chat_id,
+            "message_type": "m.room.message",
+            "content": _build_matrix_text_content(msg.content),
+        }
+        if self.config.e2ee_enabled:
+            # TODO(matrix): Add explicit config for strict verified-device sending mode.
+            room_send_kwargs["ignore_unverified_devices"] = True
+
         try:
-            await self.client.room_send(
-                room_id=msg.chat_id,
-                message_type="m.room.message",
-                content=_build_matrix_text_content(msg.content),
-                ignore_unverified_devices=True,
-            )
+            await self.client.room_send(**room_send_kwargs)
         finally:
             await self._stop_typing_keepalive(msg.chat_id, clear_typing=True)
 
