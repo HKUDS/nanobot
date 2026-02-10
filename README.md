@@ -526,6 +526,7 @@ Config file: `~/.nanobot/config.json`
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
+| `copilot` | LLM (GitHub Copilot SDK, access to Copilot models) | [GitHub Copilot](https://github.com/features/copilot) |
 
 <details>
 <summary><b>Adding a New Provider (Developer Guide)</b></summary>
@@ -568,6 +569,81 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 | `detect_by_key_prefix` | Detect gateway by API key prefix | `"sk-or-"` |
 | `detect_by_base_keyword` | Detect gateway by API base URL | `"openrouter"` |
 | `strip_model_prefix` | Strip existing prefix before re-prefixing | `True` (for AiHubMix) |
+
+</details>
+
+<details>
+<summary><b>GitHub Copilot Provider</b></summary>
+
+Use **GitHub Copilot** as your LLM provider — access models like `gpt-4.1`, `claude-sonnet-4.5`, and more through your existing Copilot subscription.
+
+> [!NOTE]
+> The Copilot provider uses the [GitHub Copilot SDK](https://github.com/github/copilot-sdk) instead of LiteLLM. It communicates with a local Copilot CLI process via JSON-RPC.
+
+**Prerequisites**
+
+1. An active [GitHub Copilot](https://github.com/features/copilot) subscription
+2. GitHub Copilot CLI installed and authenticated:
+
+```bash
+# Verify installation
+copilot --version
+
+# Authenticate (if not already)
+copilot auth login
+```
+
+3. Install the SDK extra:
+
+```bash
+pip install nanobot-ai[copilot]
+# or if installed from source:
+pip install -e ".[copilot]"
+```
+
+**Configure** (`~/.nanobot/config.json`)
+
+```json
+{
+  "providers": {
+    "copilot": {
+      "apiKey": "github"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "copilot/gpt-4.1"
+    }
+  }
+}
+```
+
+> `apiKey` is a sentinel value to activate the provider — actual authentication is handled by the Copilot CLI. Set it to any non-empty string (e.g. `"github"`).
+
+**Available models**
+
+Any model available in your Copilot subscription can be used. Prefix with `copilot/`:
+
+| Model | Config value |
+|-------|-------------|
+| GPT-4.1 | `"copilot/gpt-4.1"` |
+| GPT-4o | `"copilot/gpt-4o"` |
+| Claude Sonnet 4.5 | `"copilot/claude-sonnet-4.5"` |
+
+You can query available models at runtime via the Copilot CLI.
+
+**Chat**
+
+```bash
+nanobot agent -m "Hello from Copilot!"
+```
+
+**Verify**
+
+```bash
+nanobot status
+# Should show: GitHub Copilot: ✓
+```
 
 </details>
 

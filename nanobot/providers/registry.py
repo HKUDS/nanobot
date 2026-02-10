@@ -241,6 +241,26 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         ),
     ),
 
+    # === Non-LiteLLM providers (use their own SDK) =========================
+
+    # GitHub Copilot: uses Copilot SDK (not LiteLLM), session-based.
+    ProviderSpec(
+        name="copilot",
+        keywords=("copilot",),
+        env_key="",                          # Uses GitHub CLI auth, not env var
+        display_name="GitHub Copilot",
+        litellm_prefix="",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # === Local deployment (matched by config key, NOT by api_base) =========
 
     # vLLM / any OpenAI-compatible local server.
