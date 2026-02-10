@@ -25,7 +25,7 @@ class ExecTool(Tool):
         self.deny_patterns = deny_patterns or [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\brm\s+(--recursive|--force)\b",
-            r"\bfind\s+.+\s+-delete\b"
+            r"\bfind\s+.+\s+-delete\b",
             r"\bdel\s+/[fq]\b",              # del /f, del /q
             r"\brmdir\s+/s\b",               # rmdir /s
             r"\b(format|mkfs|diskpart)\b",   # disk operations
