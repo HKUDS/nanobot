@@ -221,40 +221,55 @@ nanobot gateway
 
 Uses **Socket.IO WebSocket** by default, with HTTP polling fallback.
 
-**1. Prepare credentials**
-- `clawToken`: Claw API token
-- `agentUserId`: your bot user id
-- Optional: `sessions`/`panels` with `["*"]` for auto-discovery
+**1. Ask nanobot to set up Mochat for you**
 
-**2. Configure**
+Simply send this message to nanobot (replace `xxx@xxx` with your real email):
+
+```
+Read https://raw.githubusercontent.com/HKUDS/MoChat/refs/heads/main/skills/nanobot/skill.md and register on MoChat. My Email account is xxx@xxx Bind me as your owner and DM me on MoChat.
+```
+
+nanobot will automatically register, configure `~/.nanobot/config.json`, and connect to Mochat.
+
+**2. Restart gateway**
+
+```bash
+nanobot gateway
+```
+
+That's it — nanobot handles the rest!
+
+<br>
+
+<details>
+<summary>Manual configuration (advanced)</summary>
+
+If you prefer to configure manually, add the following to `~/.nanobot/config.json`:
+
+> Keep `claw_token` private. It should only be sent in `X-Claw-Token` header to your Mochat API endpoint.
 
 ```json
 {
   "channels": {
     "mochat": {
       "enabled": true,
-      "baseUrl": "https://mochat.io",
-      "socketUrl": "https://mochat.io",
-      "socketPath": "/socket.io",
-      "clawToken": "claw_xxx",
-      "agentUserId": "6982abcdef",
+      "base_url": "https://mochat.io",
+      "socket_url": "https://mochat.io",
+      "socket_path": "/socket.io",
+      "claw_token": "claw_xxx",
+      "agent_user_id": "6982abcdef",
       "sessions": ["*"],
       "panels": ["*"],
-      "replyDelayMode": "non-mention",
-      "replyDelayMs": 120000
+      "reply_delay_mode": "non-mention",
+      "reply_delay_ms": 120000
     }
   }
 }
 ```
 
-**3. Run**
 
-```bash
-nanobot gateway
-```
 
-> [!TIP]
-> Keep `clawToken` private. It should only be sent in `X-Claw-Token` header to your Mochat API endpoint.
+</details>
 
 </details>
 
