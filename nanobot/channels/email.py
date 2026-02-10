@@ -130,7 +130,11 @@ class EmailChannel(BaseChannel):
                 subject = override
 
         email_msg = EmailMessage()
-        email_msg["From"] = self.config.from_address or self.config.smtp_username or self.config.imap_username
+        email_msg["From"] = (
+            self.config.from_address
+            or self.config.smtp_username
+            or self.config.imap_username
+        )
         email_msg["To"] = to_addr
         email_msg["Subject"] = subject
         email_msg.set_content(msg.content or "")
@@ -178,7 +182,9 @@ class EmailChannel(BaseChannel):
                 smtp.send_message(msg)
             return
 
-        with smtplib.SMTP(self.config.smtp_host, self.config.smtp_port, timeout=timeout) as smtp:
+        with smtplib.SMTP(
+            self.config.smtp_host, self.config.smtp_port, timeout=timeout
+        ) as smtp:
             if self.config.smtp_use_tls:
                 smtp.starttls(context=ssl.create_default_context())
             smtp.login(self.config.smtp_username, self.config.smtp_password)
@@ -325,14 +331,22 @@ class EmailChannel(BaseChannel):
     @staticmethod
     def _extract_message_bytes(fetched: list[Any]) -> bytes | None:
         for item in fetched:
-            if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], (bytes, bytearray)):
+            if (
+                isinstance(item, tuple)
+                and len(item) >= 2
+                and isinstance(item[1], (bytes, bytearray))
+            ):
                 return bytes(item[1])
         return None
 
     @staticmethod
     def _extract_uid(fetched: list[Any]) -> str:
         for item in fetched:
-            if isinstance(item, tuple) and item and isinstance(item[0], (bytes, bytearray)):
+            if (
+                isinstance(item, tuple)
+                and item
+                and isinstance(item[0], (bytes, bytearray))
+            ):
                 head = bytes(item[0]).decode("utf-8", errors="ignore")
                 m = re.search(r"UID\s+(\d+)", head)
                 if m:

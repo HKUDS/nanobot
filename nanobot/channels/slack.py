@@ -5,9 +5,9 @@ import re
 from typing import Any
 
 from loguru import logger
-from slack_sdk.socket_mode.websockets import SocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
+from slack_sdk.socket_mode.websockets import SocketModeClient
 from slack_sdk.web.async_client import AsyncWebClient
 
 from nanobot.bus.events import OutboundMessage
@@ -45,7 +45,9 @@ class SlackChannel(BaseChannel):
             web_client=self._web_client,
         )
 
-        self._socket_client.socket_mode_request_listeners.append(self._on_socket_request)
+        self._socket_client.socket_mode_request_listeners.append(
+            self._on_socket_request
+        )
 
         # Resolve bot user ID for mention handling
         try:
@@ -124,7 +126,11 @@ class SlackChannel(BaseChannel):
         # Avoid double-processing: Slack sends both `message` and `app_mention`
         # for mentions in channels. Prefer `app_mention`.
         text = event.get("text") or ""
-        if event_type == "message" and self._bot_user_id and f"<@{self._bot_user_id}>" in text:
+        if (
+            event_type == "message"
+            and self._bot_user_id
+            and f"<@{self._bot_user_id}>" in text
+        ):
             return
 
         # Debug: log basic event shape
@@ -145,7 +151,9 @@ class SlackChannel(BaseChannel):
         if not self._is_allowed(sender_id, chat_id, channel_type):
             return
 
-        if channel_type != "im" and not self._should_respond_in_channel(event_type, text, chat_id):
+        if channel_type != "im" and not self._should_respond_in_channel(
+            event_type, text, chat_id
+        ):
             return
 
         text = self._strip_bot_mention(text)
@@ -188,7 +196,9 @@ class SlackChannel(BaseChannel):
             return chat_id in self.config.group_allow_from
         return True
 
-    def _should_respond_in_channel(self, event_type: str, text: str, chat_id: str) -> bool:
+    def _should_respond_in_channel(
+        self, event_type: str, text: str, chat_id: str
+    ) -> bool:
         if self.config.group_policy == "open":
             return True
         if self.config.group_policy == "mention":

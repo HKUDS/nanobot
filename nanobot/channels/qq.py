@@ -77,7 +77,9 @@ class QQChannel(BaseChannel):
     async def _run_bot(self) -> None:
         """Run the bot connection."""
         try:
-            await self._client.start(appid=self.config.app_id, secret=self.config.secret)
+            await self._client.start(
+                appid=self.config.app_id, secret=self.config.secret
+            )
         except Exception as e:
             logger.error(f"QQ auth failed, check AppID/Secret at q.qq.com: {e}")
             self._running = False
@@ -116,7 +118,9 @@ class QQChannel(BaseChannel):
             self._processed_ids.append(data.id)
 
             author = data.author
-            user_id = str(getattr(author, 'id', None) or getattr(author, 'user_openid', 'unknown'))
+            user_id = str(
+                getattr(author, "id", None) or getattr(author, "user_openid", "unknown")
+            )
             content = (data.content or "").strip()
             if not content:
                 return
