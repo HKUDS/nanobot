@@ -121,6 +121,24 @@ For OpenRouter - recommended for global users:
 }
 ```
 
+Alternatively, use a self-hosted **SearXNG** instance (no Brave key required):
+
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "searxng",
+        "searxng": {
+          "baseUrl": "https://searx.example.com",
+          "apiKey": "YOUR_TOKEN"
+        }
+      }
+    }
+  }
+}
+```
+
 **3. Chat**
 
 ```bash
@@ -640,6 +658,38 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 | `detect_by_key_prefix` | Detect gateway by API key prefix | `"sk-or-"` |
 | `detect_by_base_keyword` | Detect gateway by API base URL | `"openrouter"` |
 | `strip_model_prefix` | Strip existing prefix before re-prefixing | `True` (for AiHubMix) |
+
+</details>
+
+### Web Search
+
+nanobot provides:
+- `web_search`: web search (Brave Search API or a self-hosted SearXNG instance)
+- `web_fetch`: fetch a URL and extract readable content
+
+<details>
+<summary><b>Web search config reference</b></summary>
+
+Config location: `tools.web.search` (all keys are `camelCase` in `config.json`).
+
+| Key | Type | Default | Notes |
+|---|---:|---:|---|
+| `provider` | string | `brave` | One of: `brave`, `searxng`, `auto` |
+| `apiKey` | string | `""` | Brave Search API key (also supports env `BRAVE_API_KEY`) |
+| `maxResults` | int | `5` | Default result count (tool call can override with `count`) |
+| `searxng.baseUrl` | string | `""` | e.g. `https://searx.example.com` (also supports env `SEARXNG_URL` / `SEARXNG_BASE_URL`) |
+| `searxng.apiKey` | string | `""` | Sent as `Authorization: Bearer <apiKey>` (also supports env `SEARXNG_API_KEY`) |
+| `searxng.timeoutS` | number | `10.0` | HTTP timeout for SearXNG requests |
+| `searxng.language` | string/null | `null` | e.g. `en` |
+| `searxng.categories` | string[] | `[]` | e.g. `["general","science"]` |
+| `searxng.safesearch` | int/null | `null` | Instance-dependent (commonly 0–2) |
+| `searxng.timeRange` | string/null | `null` | e.g. `day`, `week`, `month`, `year` (instance-dependent) |
+| `searxng.engines` | string[] | `[]` | e.g. `["google","bing"]` |
+
+Notes:
+- `provider: "auto"` prefers SearXNG when `searxng.baseUrl` (or env var) is set, otherwise falls back to Brave.
+- `searxng.baseUrl` can be either `https://host` or `https://host/search`.
+- Tool-call overrides supported for SearXNG: `count`, `language`, `categories`, `time_range`, `safesearch`, `engines`.
 
 </details>
 

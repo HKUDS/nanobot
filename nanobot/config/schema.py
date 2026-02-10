@@ -1,6 +1,8 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
+from typing import Literal
+
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
@@ -197,10 +199,25 @@ class GatewayConfig(BaseModel):
     port: int = 18790
 
 
+class SearxngSearchConfig(BaseModel):
+    """SearXNG configuration for the web_search tool."""
+
+    base_url: str = ""  # e.g. "https://searx.example.com"
+    api_key: str = ""  # Optional; depends on your instance setup
+    timeout_s: float = 10.0
+    language: str | None = None  # e.g. "en"
+    categories: list[str] = Field(default_factory=list)  # e.g. ["general", "science"]
+    safesearch: int | None = None  # Commonly 0-2 (instance-dependent)
+    time_range: str | None = None  # e.g. "day", "week", "month", "year"
+    engines: list[str] = Field(default_factory=list)  # e.g. ["google", "bing"]
+
+
 class WebSearchConfig(BaseModel):
     """Web search tool configuration."""
-    api_key: str = ""  # Brave Search API key
+    provider: Literal["brave", "searxng", "auto"] = "brave"
+    api_key: str = ""  # Brave Search API key (also read from BRAVE_API_KEY)
     max_results: int = 5
+    searxng: SearxngSearchConfig = Field(default_factory=SearxngSearchConfig)
 
 
 class WebToolsConfig(BaseModel):

@@ -44,47 +44,241 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
+    """Search the web using Brave Search API or a SearXNG instance."""
     
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
-    parameters = {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "Search query"},
-            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10}
-        },
-        "required": ["query"]
-    }
     
-    def __init__(self, api_key: str | None = None, max_results: int = 5):
-        self.api_key = api_key or os.environ.get("BRAVE_API_KEY", "")
-        self.max_results = max_results
+    def __init__(
+        self,
+        api_key: str | None = None,
+        max_results: int = 5,
+        config: "WebSearchConfig | None" = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
+        # Backwards compatible initialization:
+        # - legacy callers may pass brave api_key + max_results
+        # - preferred: pass Config.tools.web.search as `config`
+        from nanobot.config.schema import WebSearchConfig
+
+        self.config: WebSearchConfig = config or WebSearchConfig(
+            api_key=api_key or "",
+            max_results=max_results,
+        )
+        if api_key is not None:
+            self.config.api_key = api_key
+        if max_results != 5:
+            self.config.max_results = max_results
+
+        self._transport = transport
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        provider = self._resolve_provider()
+        return self._tool_parameters_for_provider(provider)
+
+    def _resolve_provider(self) -> str:
+        provider = (self.config.provider or "brave").strip().lower()
+        if provider not in {"brave", "searxng", "auto"}:
+            return "brave"
+        if provider == "auto":
+            return "searxng" if self._searxng_base_url() else "brave"
+        return provider
+
+    def _brave_api_key(self) -> str:
+        return self.config.api_key or os.environ.get("BRAVE_API_KEY", "")
+
+    def _searxng_base_url(self) -> str:
+        return (
+            self.config.searxng.base_url
+            or os.environ.get("SEARXNG_BASE_URL", "")
+            or os.environ.get("SEARXNG_URL", "")
+        ).strip()
+
+    def _searxng_api_key(self) -> str:
+        return (self.config.searxng.api_key or os.environ.get("SEARXNG_API_KEY", "")).strip()
+
+    def _searxng_endpoint(self) -> str:
+        base_url = self._searxng_base_url()
+        if not base_url:
+            return ""
+        base_url = base_url.rstrip("/")
+        if base_url.endswith("/search"):
+            return base_url
+        return f"{base_url}/search"
+
+    def _tool_parameters_for_provider(self, provider: str) -> dict[str, Any]:
+        # Keep tool definitions aligned with the actually configured provider so
+        # the LLM does not try to pass irrelevant SearXNG-only parameters when
+        # Brave is in use (or vice versa).
+        base: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"},
+                "count": {
+                    "type": "integer",
+                    "description": "Results (1-10)",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "default": min(max(int(self.config.max_results or 5), 1), 10),
+                },
+            },
+            "required": ["query"],
+        }
+
+        if provider != "searxng":
+            return base
+
+        cfg = self.config.searxng
+        props = base["properties"]
+        props.update(
+            {
+                "language": {"type": "string", "description": "Language hint (e.g. 'en')"},
+                "categories": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "SearXNG categories",
+                },
+                "time_range": {"type": "string", "description": "SearXNG time range (e.g. day/week/month/year)"},
+                "safesearch": {"type": "integer", "description": "SearXNG safesearch level"},
+                "engines": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "SearXNG engines (optional)",
+                },
+            }
+        )
+
+        # Add defaults only when they are configured; avoid default=null for non-nullable types.
+        if cfg.language:
+            props["language"]["default"] = cfg.language
+        if cfg.categories:
+            props["categories"]["default"] = cfg.categories
+        if cfg.time_range:
+            props["time_range"]["default"] = cfg.time_range
+        if cfg.safesearch is not None:
+            props["safesearch"]["default"] = cfg.safesearch
+        if cfg.engines:
+            props["engines"]["default"] = cfg.engines
+
+        return base
+
+    def to_schema(self) -> dict[str, Any]:
+        provider = self._resolve_provider()
+        description = (
+            "Search the web using Brave Search API. Returns titles, URLs, and snippets."
+            if provider == "brave"
+            else "Search the web using a SearXNG instance. Returns titles, URLs, and snippets."
+        )
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": description,
+                "parameters": self._tool_parameters_for_provider(provider),
+            },
+        }
     
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        if not self.api_key:
-            return "Error: BRAVE_API_KEY not configured"
-        
+        provider = self._resolve_provider()
+        n = min(max(count or self.config.max_results, 1), 10)
+
+        if provider == "brave":
+            return await self._search_brave(query=query, n=n)
+        if provider == "searxng":
+            return await self._search_searxng(query=query, n=n, **kwargs)
+
+        return f"Error: Unknown web search provider '{provider}'"
+
+    async def _search_brave(self, query: str, n: int) -> str:
+        api_key = self._brave_api_key()
+        if not api_key:
+            return "Error: Brave search not configured (set tools.web.search.apiKey or BRAVE_API_KEY)"
+
         try:
-            n = min(max(count or self.max_results, 1), 10)
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(transport=self._transport) as client:
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
                     params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
-                    timeout=10.0
+                    headers={"Accept": "application/json", "X-Subscription-Token": api_key},
+                    timeout=10.0,
                 )
                 r.raise_for_status()
-            
+
             results = r.json().get("web", {}).get("results", [])
             if not results:
                 return f"No results for: {query}"
-            
+
             lines = [f"Results for: {query}\n"]
             for i, item in enumerate(results[:n], 1):
                 lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
                 if desc := item.get("description"):
                     lines.append(f"   {desc}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Error: {e}"
+
+    async def _search_searxng(
+        self,
+        query: str,
+        n: int,
+        language: str | None = None,
+        categories: list[str] | None = None,
+        time_range: str | None = None,
+        safesearch: int | None = None,
+        engines: list[str] | None = None,
+        **_: Any,
+    ) -> str:
+        endpoint = self._searxng_endpoint()
+        if not endpoint:
+            return "Error: SearXNG not configured (set tools.web.search.searxng.baseUrl or SEARXNG_URL)"
+
+        cfg = self.config.searxng
+        params: dict[str, Any] = {
+            "q": query,
+            "format": "json",
+        }
+
+        if (lang := (language or cfg.language)) and lang.strip():
+            params["language"] = lang.strip()
+
+        cats = categories if categories is not None else cfg.categories
+        if cats:
+            params["categories"] = ",".join([c for c in cats if c and c.strip()])
+
+        if (tr := (time_range or cfg.time_range)) and tr.strip():
+            params["time_range"] = tr.strip()
+
+        ss = safesearch if safesearch is not None else cfg.safesearch
+        if ss is not None:
+            params["safesearch"] = ss
+
+        engs = engines if engines is not None else cfg.engines
+        if engs:
+            params["engines"] = ",".join([e for e in engs if e and e.strip()])
+
+        headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
+        if api_key := self._searxng_api_key():
+            headers["Authorization"] = api_key if api_key.startswith("Bearer ") else f"Bearer {api_key}"
+
+        try:
+            async with httpx.AsyncClient(transport=self._transport, timeout=cfg.timeout_s) as client:
+                r = await client.get(endpoint, params=params, headers=headers)
+                r.raise_for_status()
+                data = r.json()
+
+            results = data.get("results", []) or []
+            if not results:
+                return f"No results for: {query}"
+
+            lines = [f"Results for: {query}\n"]
+            for i, item in enumerate(results[:n], 1):
+                title = _strip_tags(item.get("title") or "").strip()
+                url = (item.get("url") or "").strip()
+                snippet = _normalize(_strip_tags(item.get("content") or item.get("snippet") or "")).strip()
+                lines.append(f"{i}. {title}\n   {url}")
+                if snippet:
+                    lines.append(f"   {snippet}")
             return "\n".join(lines)
         except Exception as e:
             return f"Error: {e}"
