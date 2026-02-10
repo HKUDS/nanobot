@@ -276,9 +276,7 @@ class AgentLoop:
             ]
             # Run in a thread to avoid blocking the event loop
             # (Mem0's add() can call an LLM for extraction)
-            import asyncio
-
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             await loop.run_in_executor(
                 None,
                 lambda: self.context.memory.add(
