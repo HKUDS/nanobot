@@ -249,7 +249,8 @@ class CronService:
     # ========== Public API ==========
     
     def list_jobs(self, include_disabled: bool = False) -> list[CronJob]:
-        """List all jobs."""
+        """List all jobs (reloads from disk to catch external changes)."""
+        self._store = None
         store = self._load_store()
         jobs = store.jobs if include_disabled else [j for j in store.jobs if j.enabled]
         return sorted(jobs, key=lambda j: j.state.next_run_at_ms or float('inf'))

@@ -14,7 +14,12 @@ Use the `cron` tool to schedule reminders or recurring tasks.
 
 ## Examples
 
-Fixed reminder:
+One-time reminder:
+```
+cron(action="add", message="Call the doctor", run_at="2024-12-25T09:00:00")
+```
+
+Recurring reminder:
 ```
 cron(action="add", message="Time to take a break!", every_seconds=1200)
 ```
@@ -34,6 +39,8 @@ cron(action="remove", job_id="abc123")
 
 | User says | Parameters |
 |-----------|------------|
+| in 2 hours | run_at: (calculate ISO datetime) |
+| tomorrow at 9am | run_at: "2024-01-15T09:00:00" |
 | every 20 minutes | every_seconds: 1200 |
 | every hour | every_seconds: 3600 |
 | every day at 8am | cron_expr: "0 8 * * *" |
