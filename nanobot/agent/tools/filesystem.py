@@ -8,13 +8,22 @@ from nanobot.agent.tools.base import Tool
 
 
 def _resolve_path(path: str, workspace: Path | None = None, allowed_dir: Path | None = None) -> Path:
-    """Resolve path against workspace (if relative) and enforce directory restriction."""
+    """Resolve path against workspace (if relative) and enforce directory restriction.
+
+    Uses proper path comparison instead of string prefix matching to prevent
+    bypass via sibling directories (e.g. allowed="/tmp/safe" would wrongly
+    permit "/tmp/safevil/secret" with a naive startswith check).
+    Symlinks are resolved before the check to prevent symlink-based escapes.
+    """
     p = Path(path).expanduser()
     if not p.is_absolute() and workspace:
         p = workspace / p
     resolved = p.resolve()
-    if allowed_dir and not str(resolved).startswith(str(allowed_dir.resolve())):
-        raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
+    if allowed_dir:
+        allowed = allowed_dir.resolve()
+        # Use Path.is_relative_to (Python 3.9+) for correct directory containment
+        if not resolved.is_relative_to(allowed):
+            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
     return resolved
 
 
