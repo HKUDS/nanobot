@@ -188,6 +188,7 @@ class ProvidersConfig(BaseModel):
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
+    copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # GitHub Copilot SDK
 
 
 class GatewayConfig(BaseModel):
