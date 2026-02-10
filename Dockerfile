@@ -1,5 +1,9 @@
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
+# 设置时区为Asia/Shanghai
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone && apt-get update && apt-get install -y tzdata
+
 # Install Node.js 20 for the WhatsApp bridge
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates gnupg git && \
