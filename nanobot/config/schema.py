@@ -20,6 +20,15 @@ class TelegramConfig(BaseModel):
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
 
 
+class LineConfig(BaseModel):
+    """LINE channel configuration."""
+    enabled: bool = False
+    channel_access_token: str = ""  # Channel access token from LINE Developers Console
+    channel_secret: str = ""  # Channel secret for webhook signature verification
+    webhook_path: str = "/nanobot/line"
+    allow_from: list[str] = Field(default_factory=list)  # Allowed LINE user IDs
+
+
 class FeishuConfig(BaseModel):
     """Feishu/Lark channel configuration using WebSocket long connection."""
     enabled: bool = False
@@ -145,6 +154,7 @@ class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    line: LineConfig = Field(default_factory=LineConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
     mochat: MochatConfig = Field(default_factory=MochatConfig)

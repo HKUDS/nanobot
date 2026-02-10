@@ -1,0 +1,34 @@
+---
+description: LINE channel implementation progress and constraints
+globs:
+  - nanobot/channels/line.py
+  - nanobot/channels/manager.py
+  - nanobot/config/schema.py
+alwaysApply: false
+---
+
+# LINE channel progress
+
+## Goal status
+- LINE webhook signature verification is now aligned with official docs (HMAC-SHA256 + base64).
+- LINE channel is now registered in config schema and channel manager.
+- Inbound media (image/video/audio/file) download is implemented.
+- Outbound messaging supports text and image URL messages.
+- Reply token is preferred, with push fallback.
+- Basic loading animation request is sent for user chats.
+- Gateway now includes a built-in HTTP server that serves LINE webhook path directly.
+
+## Implementation notes
+- `LineConfig` has been added to `ChannelsConfig` as `channels.line`.
+- `LineChannel.send()` now expects `OutboundMessage`.
+- Reply mode is skipped when LINE event mode is `standby`.
+- LINE media download uses `api-data.line.me`.
+- Outbound image messages require public HTTPS URLs in `msg.media`.
+- `nanobot gateway` now starts HTTP listener on configured gateway host and CLI port.
+- LINE webhook requests are routed by exact path match to `LineChannel.handle_webhook`.
+
+## Operational constraints
+- Local file paths cannot be sent as LINE image messages directly.
+- Reply token is treated as short-lived and guarded by timestamp age check.
+- HTTP 429 is retried with short backoff.
+- Reverse proxy must forward the exact webhook path (for example `/nanobot/line`) without rewrite.
