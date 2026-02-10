@@ -202,8 +202,14 @@ class DingTalkChannel(BaseChannel):
         # If sending to a group, mention the original sender if known
         if msg.chat_id.startswith("group:") and msg.metadata.get("sender_id"):
             sender_id = msg.metadata.get("sender_id")
-            # DingTalk Markdown mention syntax: @{userId}
-            content = f"{content}\n\n@{sender_id}"
+            sender_name = msg.metadata.get("sender_name", "User")
+
+            # DingTalk Markdown mention syntax: @{userId} triggers alert
+            # But to display the name, we should append the name, not the ID.
+            # However, standard practice is to rely on the client rendering @{userId} if supported,
+            # or just use the name if we want readability.
+            # If we want BOTH alert and readable name, we append text "@Name" and set atUserIds=[ID].
+            content = f"{content}\n\n@{sender_name}"
             at_user_ids = [sender_id]
 
         msg_param_dict = {
