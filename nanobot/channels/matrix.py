@@ -38,6 +38,7 @@ from nanobot.utils.helpers import safe_filename
 
 LOGGING_STACK_BASE_DEPTH = 2
 TYPING_NOTICE_TIMEOUT_MS = 30_000
+TYPING_KEEPALIVE_INTERVAL_SECONDS = 20.0
 MATRIX_HTML_FORMAT = "org.matrix.custom.html"
 MATRIX_ATTACHMENT_MARKER_TEMPLATE = "[attachment: {}]"
 MATRIX_ATTACHMENT_TOO_LARGE_TEMPLATE = "[attachment: {} - too large]"
@@ -224,6 +225,7 @@ class MatrixChannel(BaseChannel):
         super().__init__(config, bus)
         self.client: AsyncClient | None = None
         self._sync_task: asyncio.Task | None = None
+        self._typing_tasks: dict[str, asyncio.Task] = {}
 
     async def start(self) -> None:
         """Start Matrix client and begin sync loop."""
@@ -272,6 +274,9 @@ class MatrixChannel(BaseChannel):
         """Stop the Matrix channel with graceful sync shutdown."""
         self._running = False
 
+        for room_id in list(self._typing_tasks):
+            await self._stop_typing_keepalive(room_id, clear_typing=False)
+
         if self.client:
             # Request sync_forever loop to exit cleanly.
             self.client.stop_sync_forever()
@@ -306,7 +311,7 @@ class MatrixChannel(BaseChannel):
                 ignore_unverified_devices=True,
             )
         finally:
-            await self._set_typing(msg.chat_id, False)
+            await self._stop_typing_keepalive(msg.chat_id, clear_typing=True)
 
     def _register_event_callbacks(self) -> None:
         """Register Matrix event callbacks used by this channel."""
@@ -367,6 +372,41 @@ class MatrixChannel(BaseChannel):
                 type(e).__name__,
                 str(e),
             )
+
+    async def _start_typing_keepalive(self, room_id: str) -> None:
+        """Start periodic Matrix typing refresh for a room."""
+        await self._stop_typing_keepalive(room_id, clear_typing=False)
+        await self._set_typing(room_id, True)
+        if not self._running:
+            return
+
+        async def _typing_loop() -> None:
+            try:
+                while self._running:
+                    await asyncio.sleep(TYPING_KEEPALIVE_INTERVAL_SECONDS)
+                    await self._set_typing(room_id, True)
+            except asyncio.CancelledError:
+                pass
+
+        self._typing_tasks[room_id] = asyncio.create_task(_typing_loop())
+
+    async def _stop_typing_keepalive(
+        self,
+        room_id: str,
+        *,
+        clear_typing: bool,
+    ) -> None:
+        """Stop periodic Matrix typing refresh for a room."""
+        task = self._typing_tasks.pop(room_id, None)
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        if clear_typing:
+            await self._set_typing(room_id, False)
 
     async def _sync_loop(self) -> None:
         while self._running:
@@ -684,7 +724,7 @@ class MatrixChannel(BaseChannel):
         if not self._should_process_message(room, event):
             return
 
-        await self._set_typing(room.room_id, True)
+        await self._start_typing_keepalive(room.room_id)
         try:
             await self._handle_message(
                 sender_id=event.sender,
@@ -693,7 +733,7 @@ class MatrixChannel(BaseChannel):
                 metadata={"room": getattr(room, "display_name", room.room_id)},
             )
         except Exception:
-            await self._set_typing(room.room_id, False)
+            await self._stop_typing_keepalive(room.room_id, clear_typing=True)
             raise
 
     async def _on_media_message(self, room: MatrixRoom, event: Any) -> None:
@@ -718,7 +758,7 @@ class MatrixChannel(BaseChannel):
         # TODO: Optionally add audio transcription support for Matrix attachments,
         # similar to Telegram's voice/audio flow, behind explicit config.
 
-        await self._set_typing(room.room_id, True)
+        await self._start_typing_keepalive(room.room_id)
         try:
             await self._handle_message(
                 sender_id=event.sender,
@@ -731,5 +771,5 @@ class MatrixChannel(BaseChannel):
                 },
             )
         except Exception:
-            await self._set_typing(room.room_id, False)
+            await self._stop_typing_keepalive(room.room_id, clear_typing=True)
             raise

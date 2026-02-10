@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -222,6 +223,24 @@ async def test_on_message_sets_typing_for_allowed_sender() -> None:
     assert client.typing_calls == [
         ("!room:matrix.org", True, TYPING_NOTICE_TIMEOUT_MS),
     ]
+
+
+@pytest.mark.asyncio
+async def test_typing_keepalive_refreshes_periodically(monkeypatch) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    channel._running = True
+
+    monkeypatch.setattr(matrix_module, "TYPING_KEEPALIVE_INTERVAL_SECONDS", 0.01)
+
+    await channel._start_typing_keepalive("!room:matrix.org")
+    await asyncio.sleep(0.03)
+    await channel._stop_typing_keepalive("!room:matrix.org", clear_typing=True)
+
+    true_updates = [call for call in client.typing_calls if call[1] is True]
+    assert len(true_updates) >= 2
+    assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
 
 
 @pytest.mark.asyncio
@@ -609,6 +628,24 @@ async def test_send_clears_typing_after_send() -> None:
 
     assert len(client.room_send_calls) == 1
     assert client.room_send_calls[0]["content"] == {"msgtype": "m.text", "body": "Hi"}
+    assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
+
+
+@pytest.mark.asyncio
+async def test_send_stops_typing_keepalive_task() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    channel._running = True
+
+    await channel._start_typing_keepalive("!room:matrix.org")
+    assert "!room:matrix.org" in channel._typing_tasks
+
+    await channel.send(
+        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content="Hi")
+    )
+
+    assert "!room:matrix.org" not in channel._typing_tasks
     assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
 
 
