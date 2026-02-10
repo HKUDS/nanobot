@@ -183,6 +183,10 @@ def _build_matrix_text_content(text: str) -> dict[str, object]:
     """Build Matrix m.text payload with plaintext fallback and optional HTML."""
     content: dict[str, object] = {
         "msgtype": "m.text",
+        # Note: When `formatted_body` is present, Matrix spec expects `body` to
+        # be its plaintext representation (fallback for clients without HTML).
+        # We currently keep raw text (often markdown) for simplicity.
+        # https://spec.matrix.org/v1.17/client-server-api/#mroommessage-msgtypes
         "body": text,
         # Matrix spec recommends always including m.mentions for message
         # semantics/interoperability, even when no mentions are present.
