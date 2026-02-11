@@ -195,13 +195,13 @@ class DingTalkChannel(BaseChannel):
         headers = {"x-acs-dingtalk-access-token": token}
 
         content = msg.content
-        at_user_ids = []
 
         # If sending to a group, mention the original sender if known
         if msg.chat_id.startswith("group:") and msg.metadata.get("sender_id"):
-            sender_id = msg.metadata.get("sender_id")
-            content = f"{content}\n\n@{sender_id}"
-            at_user_ids = [sender_id]
+            # Mentioning group members is temporarily not supported。
+            # https://open.dingtalk.com/document/development/the-robot-sends-a-group-message#:~:text=%E6%8E%A5%E5%8F%A3-,%E6%9A%82%E4%B8%8D%E6%94%AF%E6%8C%81,-%40%20%E5%8A%9F%E8%83%BD%E3%80%82
+            sender_name = msg.metadata.get("sender_name") or "Unknown"
+            content = f"{content}\n\n@{sender_name}"
 
         # Generate dynamic title from content for better preview
         title = content.replace("\n", " ").strip()[:30]
@@ -214,8 +214,6 @@ class DingTalkChannel(BaseChannel):
             "text": content,
             "title": title,
         }
-        if at_user_ids:
-            msg_param_dict["at"] = {"atUserIds": at_user_ids}
 
         msg_param = json.dumps(msg_param_dict)
 
