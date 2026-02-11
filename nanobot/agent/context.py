@@ -131,14 +131,14 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
     def _format_session_metadata(self, metadata: dict[str, Any]) -> str:
         """Format session metadata into system prompt section."""
         lines = ["# Session Context"]
-        
+
         if website := metadata.get("website_domain"):
             lines.append(f"Website: {website}")
         if business := metadata.get("business_type"):
             lines.append(f"Business Type: {business}")
         if intro := metadata.get("brand_intro"):
             lines.append(f"Brand Intro: {intro}")
-            
+
         contacts = metadata.get("contacts", [])
         if contacts:
             lines.append("Contacts:")
@@ -146,41 +146,12 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
                 name = contact.get("name", "Unknown")
                 role = contact.get("role", "Unknown")
                 lines.append(f"- {name} ({role})")
-                
+
         if summary := metadata.get("last_summary"):
-            lines.append("
-# Conversation Summary")
+            lines.append("\n# Conversation Summary")
             lines.append(summary)
-            
-        return "
-".join(lines)
-    
-    def _format_session_metadata(self, metadata: dict[str, Any]) -> str:
-        """Format session metadata into system prompt section."""
-        lines = ["# Session Context"]
-        
-        if website := metadata.get("website_domain"):
-            lines.append(f"Website: {website}")
-        if business := metadata.get("business_type"):
-            lines.append(f"Business Type: {business}")
-        if intro := metadata.get("brand_intro"):
-            lines.append(f"Brand Intro: {intro}")
-            
-        contacts = metadata.get("contacts", [])
-        if contacts:
-            lines.append("Contacts:")
-            for contact in contacts:
-                name = contact.get("name", "Unknown")
-                role = contact.get("role", "Unknown")
-                lines.append(f"- {name} ({role})")
-                
-        if summary := metadata.get("last_summary"):
-            lines.append("
-# Conversation Summary")
-            lines.append(summary)
-            
-        return "
-".join(lines)
+
+        return "\n".join(lines)
     
     def build_messages(
         self,
