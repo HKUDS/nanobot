@@ -5,8 +5,8 @@ import json
 import time
 from typing import Any
 
-from loguru import logger
 import httpx
+from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -15,11 +15,11 @@ from nanobot.config.schema import DingTalkConfig
 
 try:
     from dingtalk_stream import (
-        DingTalkStreamClient,
-        Credential,
+        AckMessage,
         CallbackHandler,
         CallbackMessage,
-        AckMessage,
+        Credential,
+        DingTalkStreamClient,
     )
     from dingtalk_stream.chatbot import ChatbotMessage
 
@@ -69,9 +69,7 @@ class NanobotDingTalkHandler(CallbackHandler):
 
             # Forward to Nanobot via _on_message (non-blocking).
             # Store reference to prevent GC before task completes.
-            task = asyncio.create_task(
-                self.channel._on_message(content, sender_id, sender_name)
-            )
+            task = asyncio.create_task(self.channel._on_message(content, sender_id, sender_name))
             self.channel._background_tasks.add(task)
             task.add_done_callback(self.channel._background_tasks.discard)
 
@@ -113,9 +111,7 @@ class DingTalkChannel(BaseChannel):
         """Start the DingTalk bot with Stream Mode."""
         try:
             if not DINGTALK_AVAILABLE:
-                logger.error(
-                    "DingTalk Stream SDK not installed. Run: pip install dingtalk-stream"
-                )
+                logger.error("DingTalk Stream SDK not installed. Run: pip install dingtalk-stream")
                 return
 
             if not self.config.client_id or not self.config.client_secret:
@@ -198,10 +194,12 @@ class DingTalkChannel(BaseChannel):
             "robotCode": self.config.client_id,
             "userIds": [msg.chat_id],  # chat_id is the user's staffId
             "msgKey": "sampleMarkdown",
-            "msgParam": json.dumps({
-                "text": msg.content,
-                "title": "Nanobot Reply",
-            }),
+            "msgParam": json.dumps(
+                {
+                    "text": msg.content,
+                    "title": "Nanobot Reply",
+                }
+            ),
         }
 
         if not self._http:

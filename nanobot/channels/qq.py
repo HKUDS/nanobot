@@ -68,8 +68,8 @@ class QQChannel(BaseChannel):
             return
 
         self._running = True
-        BotClass = _make_bot_class(self)
-        self._client = BotClass()
+        bot_class = _make_bot_class(self)
+        self._client = bot_class()
 
         self._bot_task = asyncio.create_task(self._run_bot())
         logger.info("QQ bot started (C2C private message)")
@@ -116,7 +116,7 @@ class QQChannel(BaseChannel):
             self._processed_ids.append(data.id)
 
             author = data.author
-            user_id = str(getattr(author, 'id', None) or getattr(author, 'user_openid', 'unknown'))
+            user_id = str(getattr(author, "id", None) or getattr(author, "user_openid", "unknown"))
             content = (data.content or "").strip()
             if not content:
                 return
