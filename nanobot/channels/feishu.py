@@ -70,10 +70,9 @@ class FeishuStreamingSession:
         self._lock = threading.Lock()
 
     def _build_streaming_card_json(self, initial_text: str = "Thinking...") -> str:
-        """Build Card JSON 2.0 with streaming mode enabled."""
+        """Build Card JSON 2.0 with streaming mode enabled (no header for better preview)."""
         card = {
             "schema": "2.0",
-            "header": {"title": {"content": "🤖 AI Assistant", "tag": "plain_text"}},
             "config": {
                 "streaming_mode": True,
                 "summary": {"content": "[生成中...]"},
@@ -217,7 +216,7 @@ class FeishuStreamingSession:
                 .request_body(
                     ContentCardElementRequestBody.builder()
                     .content(text)
-                    .uuid(str(uuid.uuid4()))  # New UUID for each request
+                    .uuid(str(uuid.uuid4()))
                     .sequence(seq)
                     .build()
                 )
@@ -225,23 +224,27 @@ class FeishuStreamingSession:
             )
             self.client.cardkit.v1.card_element.content(content_request)
 
-            # Close streaming mode
-            settings_json = json.dumps({"config": {"streaming_mode": False}}, ensure_ascii=False)
+            # Close streaming mode and clear summary (removes "[生成中...]")
+            settings = {"config": {"streaming_mode": False, "summary": {"content": ""}}}
             settings_request = (
                 SettingsCardRequest.builder()
                 .card_id(self.card_id)
                 .request_body(
                     SettingsCardRequestBody.builder()
-                    .settings(settings_json)
-                    .uuid(str(uuid.uuid4()))  # New UUID for each request
+                    .settings(json.dumps(settings, ensure_ascii=False))
+                    .uuid(str(uuid.uuid4()))
                     .sequence(seq + 1)
                     .build()
                 )
                 .build()
             )
 
-            return self.client.cardkit.v1.card.settings(settings_request).success()
-        except Exception:
+            resp = self.client.cardkit.v1.card.settings(settings_request)
+            if not resp.success():
+                logger.warning(f"Failed to close streaming: {resp.code} {resp.msg}")
+            return resp.success()
+        except Exception as e:
+            logger.error(f"Error closing streaming session: {e}")
             return False
 
 
