@@ -281,16 +281,19 @@ Information about the user goes here.
 This file stores important information that should persist across sessions.
 
 ## User Information
-
-(Important facts about the user)
+<!-- Important facts about the user: name, occupation, background, etc. -->
 
 ## Preferences
+<!-- User preferences: communication style, tools, workflows, etc. -->
 
-(User preferences learned over time)
+## Project Context
+<!-- Current and past projects the user is working on -->
 
-## Important Notes
+## Important Facts
+<!-- Key information to remember across sessions -->
 
-(Things to remember)
+## Relationships & Contacts
+<!-- People, teams, organizations mentioned in conversations -->
 """)
         console.print("  [dim]Created memory/MEMORY.md[/dim]")
 
@@ -481,6 +484,12 @@ def agent(
             with _thinking_ctx():
                 response = await agent_loop.process_direct(message, session_id)
             _print_agent_response(response, render_markdown=markdown)
+            
+            # Wait for background tasks (e.g., memory consolidation) to complete
+            if agent_loop._pending_tasks:
+                console.print("[dim]🧠 Updating memory in background...[/dim]")
+                await agent_loop.wait_pending_tasks(timeout=60.0)
+                console.print("[dim]✓ Memory updated[/dim]")
         
         asyncio.run(run_once())
     else:

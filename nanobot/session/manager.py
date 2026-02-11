@@ -56,6 +56,42 @@ class Session:
         """Clear all messages in the session."""
         self.messages = []
         self.updated_at = datetime.now()
+    
+    def consolidate_messages(self, keep_recent: int = 10) -> list[dict[str, Any]]:
+        """
+        Remove old messages from the session, keeping only the most recent N.
+        
+        Args:
+            keep_recent: Number of recent messages to keep
+            
+        Returns:
+            List of removed messages (oldest to newest)
+        """
+        if len(self.messages) <= keep_recent:
+            return []
+        
+        # Calculate how many to remove
+        num_to_remove = len(self.messages) - keep_recent
+        
+        # Extract old messages
+        removed_messages = self.messages[:num_to_remove]
+        
+        # Keep only recent messages
+        self.messages = self.messages[num_to_remove:]
+        self.updated_at = datetime.now()
+        
+        return removed_messages
+    
+    def count_turns(self) -> int:
+        """
+        Count the number of user/assistant conversation turns.
+        
+        Returns:
+            Number of turns (pair of user+assistant messages)
+        """
+        # Count user messages (each user message typically followed by assistant)
+        user_count = sum(1 for m in self.messages if m.get("role") == "user")
+        return user_count
 
 
 class SessionManager:

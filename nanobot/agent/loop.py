@@ -18,7 +18,9 @@ from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.memory import MemorySearchTool
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.memory_consolidator import MemoryConsolidator
 from nanobot.session.manager import SessionManager
 
 
@@ -71,8 +73,14 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
+        self.memory_consolidator = MemoryConsolidator(
+            provider=provider,
+            workspace=workspace,
+            model=self.model,
+        )
         
         self._running = False
+        self._pending_tasks: list[asyncio.Task] = []
         self._register_default_tools()
     
     def _register_default_tools(self) -> None:
@@ -106,6 +114,10 @@ class AgentLoop:
         # Cron tool (for scheduling)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        
+        # Memory search tool
+        memory_search_tool = MemorySearchTool(memory_dir=self.workspace / "memory")
+        self.tools.register(memory_search_tool)
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -242,11 +254,20 @@ class AgentLoop:
         session.add_message("assistant", final_content)
         self.sessions.save(session)
         
+        # Check if memory consolidation is needed
+        consolidation_triggered = False
+        if len(session.messages) > 50:
+            await self._trigger_memory_consolidation(session, msg)
+            consolidation_triggered = True
+        
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
-            metadata=msg.metadata or {},  # Pass through for channel-specific needs (e.g. Slack thread_ts)
+            metadata={
+                **(msg.metadata or {}),
+                "memory_consolidation_triggered": consolidation_triggered
+            },
         )
     
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
@@ -347,6 +368,61 @@ class AgentLoop:
             chat_id=origin_chat_id,
             content=final_content
         )
+    
+    async def _trigger_memory_consolidation(
+        self,
+        session,
+        msg: InboundMessage,
+    ) -> None:
+        """
+        Trigger memory consolidation in background when session exceeds threshold.
+        """
+        logger.info(f"Session has {len(session.messages)} messages, triggering memory consolidation")
+        
+        # Extract first 40 messages (will be removed from session)
+        old_messages = session.messages[:40]
+        
+        # Create background task for consolidation
+        async def consolidate():
+            try:
+                result = await self.memory_consolidator.consolidate(
+                    old_messages=old_messages,
+                )
+                
+                # Clean session, keeping only recent 10 messages
+                removed = session.consolidate_messages(keep_recent=10)
+                self.sessions.save(session)
+                
+                logger.info(f"Memory consolidation result: {result}")
+                logger.info(f"Removed {len(removed)} old messages from session, kept 10 most recent")
+            except Exception as e:
+                logger.error(f"Memory consolidation failed: {e}")
+        
+        task = asyncio.create_task(consolidate())
+        self._pending_tasks.append(task)
+        logger.info("Memory consolidation started in background")
+    
+    async def wait_pending_tasks(self, timeout: float = 60.0) -> None:
+        """
+        Wait for all pending background tasks to complete.
+        
+        Args:
+            timeout: Maximum time to wait in seconds
+        """
+        if not self._pending_tasks:
+            return
+        
+        logger.info(f"Waiting for {len(self._pending_tasks)} background task(s) to complete...")
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*self._pending_tasks, return_exceptions=True),
+                timeout=timeout
+            )
+            logger.info("All background tasks completed")
+        except asyncio.TimeoutError:
+            logger.warning(f"Background tasks timed out after {timeout}s")
+        finally:
+            self._pending_tasks.clear()
     
     async def process_direct(
         self,
