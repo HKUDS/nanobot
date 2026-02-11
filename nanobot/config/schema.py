@@ -18,6 +18,13 @@ class TelegramConfig(BaseModel):
     token: str = ""  # Bot token from @BotFather
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
+    drop_pending_updates: bool = True  # Drop queued updates on startup
+    startup_retry_attempts: int = 3  # Startup retries when Telegram polling fails
+    startup_retry_delay_seconds: int = 5  # Delay between startup retries
+    codex_listener_base_url: str = "http://127.0.0.1:19823"  # Codex-Listener API base URL
+    plan_bridge_buttons_enabled: bool = True  # Show PlanBridge inline buttons from listener
+    plan_bridge_auto_bind_natural_language: bool = True  # Auto-bind plain text replies to single open needs_input task
+    plan_bridge_require_execute_confirm: bool = True  # Require second tap before creating execution task
 
 
 class FeishuConfig(BaseModel):

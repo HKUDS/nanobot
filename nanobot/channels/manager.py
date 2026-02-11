@@ -143,11 +143,28 @@ class ChannelManager:
                 logger.warning(f"QQ channel not available: {e}")
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
-        """Start a channel and log any exceptions."""
-        try:
-            await channel.start()
-        except Exception as e:
-            logger.error(f"Failed to start channel {name}: {e}")
+        """Start a channel with bounded retries and raise on permanent failure."""
+        channel_config = getattr(self.config.channels, name, None)
+        attempts = getattr(channel_config, "startup_retry_attempts", 1) if channel_config else 1
+        delay_s = getattr(channel_config, "startup_retry_delay_seconds", 0) if channel_config else 0
+        attempts = max(1, int(attempts))
+        delay_s = max(0.0, float(delay_s))
+
+        for attempt in range(1, attempts + 1):
+            try:
+                await channel.start()
+                return
+            except Exception as e:
+                if attempt < attempts:
+                    logger.warning(
+                        f"Failed to start channel {name} (attempt {attempt}/{attempts}): {e}. "
+                        f"Retrying in {delay_s:.1f}s"
+                    )
+                    await asyncio.sleep(delay_s)
+                    continue
+
+                logger.error(f"Failed to start channel {name} after {attempts} attempts: {e}")
+                raise RuntimeError(f"Channel {name} failed to start") from e
 
     async def start_all(self) -> None:
         """Start all channels and the outbound dispatcher."""
@@ -165,7 +182,17 @@ class ChannelManager:
             tasks.append(asyncio.create_task(self._start_channel(name, channel)))
         
         # Wait for all to complete (they should run forever)
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # If a channel fails permanently, surface the error so systemd can restart the process.
+        try:
+            await asyncio.gather(*tasks)
+        except Exception:
+            if self._dispatch_task:
+                self._dispatch_task.cancel()
+                try:
+                    await self._dispatch_task
+                except asyncio.CancelledError:
+                    pass
+            raise
     
     async def stop_all(self) -> None:
         """Stop all channels and the dispatcher."""

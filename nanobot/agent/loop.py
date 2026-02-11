@@ -231,7 +231,39 @@ class AgentLoop:
                 break
         
         if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+            # If we hit tool-iteration limit, surface the latest tool outputs
+            # instead of returning a generic non-actionable fallback.
+            latest_results: list[tuple[str, str]] = []
+            for item in reversed(messages):
+                if item.get("role") != "tool":
+                    continue
+                raw = str(item.get("content", "")).strip()
+                if not raw:
+                    continue
+                tool_name = str(item.get("name", "tool"))
+                latest_results.append((tool_name, raw))
+                if len(latest_results) >= 2:
+                    break
+
+            if latest_results:
+                lines = ["本次达到工具回合上限，但我拿到了最新结果："]
+                for tool_name, raw in reversed(latest_results):
+                    snippet = raw
+                    if len(snippet) > 600:
+                        snippet = snippet[:600] + "\n...(已截断)"
+                    lines.append(f"- `{tool_name}` 输出：\n{snippet}")
+                lines.append("请直接给我 task_id 或明确下一步，我继续处理。")
+                final_content = "\n".join(lines)
+            else:
+                final_content = (
+                    "本次已执行完工具流程，但在限制回合内未生成最终答复。"
+                    "请把问题再具体一点（例如带 task_id），我会直接返回结果。"
+                )
+        elif not str(final_content).strip():
+            final_content = (
+                "抱歉，这次没有生成有效回复。"
+                "请你再发一次，我会重新处理并给出明确结果。"
+            )
         
         # Log response preview
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
