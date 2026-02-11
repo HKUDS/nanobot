@@ -58,7 +58,7 @@
   <tr>
     <td align="center"><p align="center"><img src="case/search.gif" width="180" height="400"></p></td>
     <td align="center"><p align="center"><img src="case/code.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/scedule.gif" width="180" height="400"></p></td>
+    <td align="center"><p align="center"><img src="case/schedule.gif" width="180" height="400"></p></td>
     <td align="center"><p align="center"><img src="case/memory.gif" width="180" height="400"></p></td>
   </tr>
   <tr>
