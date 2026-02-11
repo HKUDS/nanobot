@@ -42,6 +42,7 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 20,
         brave_api_key: str | None = None,
+        search_engine: str = "tavily",
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
@@ -55,6 +56,7 @@ class AgentLoop:
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.brave_api_key = brave_api_key
+        self.search_engine = search_engine
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -68,6 +70,7 @@ class AgentLoop:
             bus=bus,
             model=self.model,
             brave_api_key=brave_api_key,
+            search_engine=search_engine,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
@@ -92,7 +95,10 @@ class AgentLoop:
         ))
         
         # Web tools
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key))
+        self.tools.register(WebSearchTool(
+            api_key=self.brave_api_key,
+            engine=self.search_engine
+        ))
         self.tools.register(WebFetchTool())
         
         # Message tool

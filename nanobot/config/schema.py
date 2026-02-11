@@ -199,7 +199,8 @@ class GatewayConfig(BaseModel):
 
 class WebSearchConfig(BaseModel):
     """Web search tool configuration."""
-    api_key: str = ""  # Brave Search API key
+    engine: str = "tavily"  # Search engine: "tavily" (default), "brave", or "duckduckgo"
+    api_key: str = ""  # API key for Tavily or Brave Search (not needed for DuckDuckGo)
     max_results: int = 5
 
 
