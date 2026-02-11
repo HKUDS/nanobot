@@ -99,8 +99,8 @@ class WebFetchTool(Tool):
         "type": "object",
         "properties": {
             "url": {"type": "string", "description": "URL to fetch"},
-            "extractMode": {"type": "string", "enum": ["markdown", "text"], "default": "markdown"},
-            "maxChars": {"type": "integer", "minimum": 100}
+            "extract_mode": {"type": "string", "enum": ["markdown", "text"], "default": "markdown"},
+            "max_chars": {"type": "integer", "minimum": 100}
         },
         "required": ["url"]
     }
@@ -108,10 +108,10 @@ class WebFetchTool(Tool):
     def __init__(self, max_chars: int = 50000):
         self.max_chars = max_chars
 
-    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
+    async def execute(self, url: str, extract_mode: str = "markdown", max_chars: int | None = None, **kwargs: Any) -> str:
         from readability import Document
 
-        max_chars = maxChars or self.max_chars
+        max_chars = max_chars or self.max_chars
 
         # Validate URL before fetching
         is_valid, error_msg = _validate_url(url)
@@ -135,7 +135,7 @@ class WebFetchTool(Tool):
             # HTML
             elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
                 doc = Document(r.text)
-                content = self._to_markdown(doc.summary()) if extractMode == "markdown" else _strip_tags(doc.summary())
+                content = self._to_markdown(doc.summary()) if extract_mode == "markdown" else _strip_tags(doc.summary())
                 text = f"# {doc.title()}\n\n{content}" if doc.title() else content
                 extractor = "readability"
             else:

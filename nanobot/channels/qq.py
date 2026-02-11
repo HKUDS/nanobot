@@ -68,8 +68,8 @@ class QQChannel(BaseChannel):
             return
 
         self._running = True
-        BotClass = _make_bot_class(self)
-        self._client = BotClass()
+        bot_class = _make_bot_class(self)
+        self._client = bot_class()
 
         self._bot_task = asyncio.create_task(self._run_bot())
         logger.info("QQ bot started (C2C private message)")

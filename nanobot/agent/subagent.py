@@ -1,4 +1,10 @@
 """Subagent manager for background task execution."""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import ExecToolConfig
 
 import asyncio
 import json

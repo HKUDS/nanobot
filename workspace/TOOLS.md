@@ -55,7 +55,7 @@ Returns search results with titles, URLs, and snippets. Requires `tools.web.sear
 ### web_fetch
 Fetch and extract main content from a URL.
 ```
-web_fetch(url: str, extractMode: str = "markdown", maxChars: int = 50000) -> str
+web_fetch(url: str, extract_mode: str = "markdown", max_chars: int = 50000) -> str
 ```
 
 **Notes:**

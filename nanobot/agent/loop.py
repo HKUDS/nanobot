@@ -1,8 +1,10 @@
 """Agent loop: the core processing engine."""
+from __future__ import annotations
 
 import asyncio
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -20,6 +22,9 @@ from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import SessionManager
 
+if TYPE_CHECKING:
+    from nanobot.config.schema import ExecToolConfig
+    from nanobot.cron.service import CronService
 
 class AgentLoop:
     """
@@ -41,8 +46,8 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 20,
         brave_api_key: str | None = None,
-        exec_config: "ExecToolConfig | None" = None,
-        cron_service: "CronService | None" = None,
+        exec_config: ExecToolConfig | None = None,
+        cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
     ):
