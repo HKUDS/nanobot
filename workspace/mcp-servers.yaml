@@ -1,0 +1,22 @@
+mcpServers:
+  browser:
+    name: "Browser Automation"
+    command: "npx"
+    args: ["-y", "@BrowserMCP/mcp"]
+
+  # Planned: works after MCP runtime is implemented in nanobot core
+  qdrant:
+    name: "Qdrant Vector Database"
+    command: "python3"
+    args: ["workspace/scripts/qdrant_mcp_server.py"]
+    env:
+      QDRANT_URL: "http://localhost:6333"
+      MISTRAL_API_BASE: "https://api.mistral.ai/v1"
+      MISTRAL_API_KEY: "${MISTRAL_API_KEY}"
+
+  searxng:
+    name: "SearXNG Search"
+    command: "python3"
+    args: ["workspace/scripts/searxng_mcp_server.py"]
+    env:
+      SEARXNG_URL: "http://localhost:8080"
