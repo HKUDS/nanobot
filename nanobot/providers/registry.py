@@ -260,25 +260,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
-    # === Auxiliary (not a primary LLM provider) ============================
-    # Groq: mainly used for Whisper voice transcription, also usable for LLM.
-    # Needs "groq/" prefix for LiteLLM routing. Placed last — it rarely wins fallback.
-    ProviderSpec(
-        name="groq",
-        keywords=("groq",),
-        env_key="GROQ_API_KEY",
-        display_name="Groq",
-        litellm_prefix="groq",  # llama3-8b-8192 → groq/llama3-8b-8192
-        skip_prefixes=("groq/",),  # avoid double-prefix
-        env_extras=(),
-        is_gateway=False,
-        is_local=False,
-        detect_by_key_prefix="",
-        detect_by_base_keyword="",
-        default_api_base="",
-        strip_model_prefix=False,
-        model_overrides=(),
-    ),
 )
 
 

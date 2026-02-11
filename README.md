@@ -121,6 +121,20 @@ For OpenRouter - recommended for global users:
 }
 ```
 
+Optional voice transcription (Telegram):
+```json
+{
+  "providers": {
+    "openai": {
+      "apiKey": "sk-xxx"
+    }
+  },
+  "transcription": {
+    "model": "gpt-4o-transcribe"
+  }
+}
+```
+
 **3. Chat**
 
 ```bash
@@ -580,7 +594,7 @@ Config file: `~/.nanobot/config.json`
 ### Providers
 
 > [!TIP]
-> - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
+> - **OpenAI** can transcribe Telegram voice messages when configured. The model defaults to `gpt-4o-transcribe` and is configurable via `transcription.model`.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
 
@@ -590,7 +604,6 @@ Config file: `~/.nanobot/config.json`
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
-| `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `minimax` | LLM (MiniMax direct) | [platform.minimax.io](https://platform.minimax.io) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
@@ -740,7 +753,7 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 
-- [x] **Voice Transcription** — Support for Groq Whisper (Issue #13)
+- [x] **Voice Transcription** — Support for OpenAI transcription (Issue #13)
 - [ ] **Multi-modal** — See and hear (images, voice, video)
 - [ ] **Long-term memory** — Never forget important context
 - [ ] **Better reasoning** — Multi-step planning and reflection
