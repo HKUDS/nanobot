@@ -23,6 +23,8 @@ try:
         CreateMessageReactionRequestBody,
         Emoji,
         P2ImMessageReceiveV1,
+        P2ImMessageMessageReadV1,
+        P2ImMessageReactionCreatedV1,
     )
     FEISHU_AVAILABLE = True
 except ImportError:
@@ -82,12 +84,18 @@ class FeishuChannel(BaseChannel):
             .log_level(lark.LogLevel.INFO) \
             .build()
         
-        # Create event handler (only register message receive, ignore other events)
+        # Create event handler (register message receive and other common events)
         event_handler = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
             self.config.verification_token or "",
         ).register_p2_im_message_receive_v1(
             self._on_message_sync
+        ).register_p2_im_message_reaction_created_v1(
+            self._on_reaction_created
+        ).register_p2_im_message_message_read_v1(
+            self._on_message_read
+        ).register_p2_im_chat_access_event_bot_p2p_chat_entered_v1(
+            self._on_bot_p2p_chat_entered
         ).build()
         
         # Create WebSocket client for long connection
@@ -305,3 +313,26 @@ class FeishuChannel(BaseChannel):
             
         except Exception as e:
             logger.error(f"Error processing Feishu message: {e}")
+
+    def _on_reaction_created(self, data: "P2ImMessageReactionCreatedV1") -> None:
+        """
+        Handler for message reaction events.
+        We don't need to process these, but registering prevents error logs.
+        """
+        pass
+    
+    def _on_message_read(self, data: "P2ImMessageMessageReadV1") -> None:
+        """
+        Handler for message read events.
+        We don't need to process these, but registering prevents error logs.
+        """
+        pass
+    
+    def _on_bot_p2p_chat_entered(self, data: Any) -> None:
+        """
+        Handler for bot entering p2p chat events.
+        This is triggered when a user opens a chat with the bot.
+        We don't need to process these, but registering prevents error logs.
+        """
+        logger.debug("Bot entered p2p chat (user opened chat window)")
+        pass
