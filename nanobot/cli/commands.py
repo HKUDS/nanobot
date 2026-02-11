@@ -98,13 +98,19 @@ def _init_prompt_session() -> None:
 
 
 def _print_agent_response(response: str, render_markdown: bool) -> None:
-    """Render assistant response with clean, copy-friendly header."""
+    """Render assistant response with consistent terminal styling."""
     content = response or ""
     body = Markdown(content) if render_markdown else Text(content)
     console.print()
-    # Use a simple header instead of a Panel box, making it easier to copy text
-    console.print(f"{__logo__} [bold cyan]nanobot[/bold cyan]")
-    console.print(body)
+    console.print(
+        Panel(
+            body,
+            title=f"{__logo__} nanobot",
+            title_align="left",
+            border_style="cyan",
+            padding=(0, 1),
+        )
+    )
     console.print()
 
 
