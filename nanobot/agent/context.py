@@ -2,6 +2,7 @@
 
 import base64
 import mimetypes
+import platform
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +75,8 @@ Skills with available="false" need dependencies installed first - you can try in
         from datetime import datetime
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         workspace_path = str(self.workspace.expanduser().resolve())
+        system = platform.system()
+        runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
         
         return f"""# nanobot 🐈
 
@@ -86,6 +89,9 @@ You are nanobot, a helpful AI assistant. You have access to tools that allow you
 
 ## Current Time
 {now}
+
+## Runtime
+{runtime}
 
 ## Workspace
 Your workspace is at: {workspace_path}
@@ -201,7 +207,8 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         self,
         messages: list[dict[str, Any]],
         content: str | None,
-        tool_calls: list[dict[str, Any]] | None = None
+        tool_calls: list[dict[str, Any]] | None = None,
+        reasoning_content: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Add an assistant message to the message list.
@@ -210,6 +217,7 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
             messages: Current message list.
             content: Message content.
             tool_calls: Optional tool calls.
+            reasoning_content: Thinking output (Kimi, DeepSeek-R1, etc.).
         
         Returns:
             Updated message list.
@@ -218,6 +226,10 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         
         if tool_calls:
             msg["tool_calls"] = tool_calls
+        
+        # Thinking models reject history without this
+        if reasoning_content:
+            msg["reasoning_content"] = reasoning_content
         
         messages.append(msg)
         return messages
