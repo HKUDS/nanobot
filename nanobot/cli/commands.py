@@ -10,7 +10,6 @@ import sys
 import typer
 from rich.console import Console
 from rich.markdown import Markdown
-from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
@@ -102,15 +101,8 @@ def _print_agent_response(response: str, render_markdown: bool) -> None:
     content = response or ""
     body = Markdown(content) if render_markdown else Text(content)
     console.print()
-    console.print(
-        Panel(
-            body,
-            title=f"{__logo__} nanobot",
-            title_align="left",
-            border_style="cyan",
-            padding=(0, 1),
-        )
-    )
+    console.print(f"[cyan]{__logo__} nanobot[/cyan]")
+    console.print(body)
     console.print()
 
 
