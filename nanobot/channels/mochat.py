@@ -20,6 +20,7 @@ from nanobot.utils.helpers import get_data_path
 
 try:
     import socketio
+
     SOCKETIO_AVAILABLE = True
 except ImportError:
     socketio = None
@@ -27,6 +28,7 @@ except ImportError:
 
 try:
     import msgpack  # noqa: F401
+
     MSGPACK_AVAILABLE = True
 except ImportError:
     MSGPACK_AVAILABLE = False
@@ -39,9 +41,11 @@ CURSOR_SAVE_DEBOUNCE_S = 0.5
 # Data classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MochatBufferedEntry:
     """Buffered inbound entry for delayed dispatch."""
+
     raw_body: str
     author: str
     sender_name: str = ""
@@ -54,6 +58,7 @@ class MochatBufferedEntry:
 @dataclass
 class DelayState:
     """Per-target delayed message state."""
+
     entries: list[MochatBufferedEntry] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     timer: asyncio.Task | None = None
@@ -62,6 +67,7 @@ class DelayState:
 @dataclass
 class MochatTarget:
     """Outbound target resolution result."""
+
     id: str
     is_panel: bool
 
@@ -69,6 +75,7 @@ class MochatTarget:
 # ---------------------------------------------------------------------------
 # Pure helpers
 # ---------------------------------------------------------------------------
+
 
 def _safe_dict(value: Any) -> dict:
     """Return *value* if it's a dict, else empty dict."""
@@ -85,15 +92,24 @@ def _str_field(src: dict, *keys: str) -> str:
 
 
 def _make_synthetic_event(
-    message_id: str, author: str, content: Any,
-    meta: Any, group_id: str, converse_id: str,
-    timestamp: Any = None, *, author_info: Any = None,
+    message_id: str,
+    author: str,
+    content: Any,
+    meta: Any,
+    group_id: str,
+    converse_id: str,
+    timestamp: Any = None,
+    *,
+    author_info: Any = None,
 ) -> dict[str, Any]:
     """Build a synthetic ``message.add`` event dict."""
     payload: dict[str, Any] = {
-        "messageId": message_id, "author": author,
-        "content": content, "meta": _safe_dict(meta),
-        "groupId": group_id, "converseId": converse_id,
+        "messageId": message_id,
+        "author": author,
+        "content": content,
+        "meta": _safe_dict(meta),
+        "groupId": group_id,
+        "converseId": converse_id,
     }
     if author_info is not None:
         payload["authorInfo"] = _safe_dict(author_info)
@@ -126,7 +142,7 @@ def resolve_mochat_target(raw: str) -> MochatTarget:
     cleaned, forced_panel = trimmed, False
     for prefix in ("mochat:", "group:", "channel:", "panel:"):
         if lowered.startswith(prefix):
-            cleaned = trimmed[len(prefix):].strip()
+            cleaned = trimmed[len(prefix) :].strip()
             forced_panel = prefix in {"group:", "channel:", "panel:"}
             break
 
@@ -211,6 +227,7 @@ def parse_timestamp(value: Any) -> int | None:
 # ---------------------------------------------------------------------------
 # Channel
 # ---------------------------------------------------------------------------
+
 
 class MochatChannel(BaseChannel):
     """Mochat channel using socket.io with fallback polling workers."""
@@ -301,7 +318,7 @@ class MochatChannel(BaseChannel):
             logger.warning("Mochat claw_token missing, skip send")
             return
 
-        parts = ([msg.content.strip()] if msg.content and msg.content.strip() else [])
+        parts = [msg.content.strip()] if msg.content and msg.content.strip() else []
         if msg.media:
             parts.extend(m for m in msg.media if isinstance(m, str) and m.strip())
         content = "\n".join(parts).strip()
@@ -313,14 +330,23 @@ class MochatChannel(BaseChannel):
             logger.warning("Mochat outbound target is empty")
             return
 
-        is_panel = (target.is_panel or target.id in self._panel_set) and not target.id.startswith("session_")
+        is_panel = (target.is_panel or target.id in self._panel_set) and not target.id.startswith(
+            "session_"
+        )
         try:
             if is_panel:
-                await self._api_send("/api/claw/groups/panels/send", "panelId", target.id,
-                                     content, msg.reply_to, self._read_group_id(msg.metadata))
+                await self._api_send(
+                    "/api/claw/groups/panels/send",
+                    "panelId",
+                    target.id,
+                    content,
+                    msg.reply_to,
+                    self._read_group_id(msg.metadata),
+                )
             else:
-                await self._api_send("/api/claw/sessions/send", "sessionId", target.id,
-                                     content, msg.reply_to)
+                await self._api_send(
+                    "/api/claw/sessions/send", "sessionId", target.id, content, msg.reply_to
+                )
         except Exception as e:
             logger.error(f"Failed to send Mochat message: {e}")
 
@@ -359,7 +385,9 @@ class MochatChannel(BaseChannel):
             reconnection_attempts=self.config.max_retry_attempts or None,
             reconnection_delay=max(0.1, self.config.socket_reconnect_delay_ms / 1000.0),
             reconnection_delay_max=max(0.1, self.config.socket_max_reconnect_delay_ms / 1000.0),
-            logger=False, engineio_logger=False, serializer=serializer,
+            logger=False,
+            engineio_logger=False,
+            serializer=serializer,
         )
 
         @client.event
@@ -390,9 +418,13 @@ class MochatChannel(BaseChannel):
         async def on_panel_events(payload: dict[str, Any]) -> None:
             await self._handle_watch_payload(payload, "panel")
 
-        for ev in ("notify:chat.inbox.append", "notify:chat.message.add",
-                    "notify:chat.message.update", "notify:chat.message.recall",
-                    "notify:chat.message.delete"):
+        for ev in (
+            "notify:chat.inbox.append",
+            "notify:chat.message.add",
+            "notify:chat.message.update",
+            "notify:chat.message.recall",
+            "notify:chat.message.delete",
+        ):
             client.on(ev, self._build_notify_handler(ev))
 
         socket_url = (self.config.socket_url or self.config.base_url).strip().rstrip("/")
@@ -401,7 +433,9 @@ class MochatChannel(BaseChannel):
         try:
             self._socket = client
             await client.connect(
-                socket_url, transports=["websocket"], socketio_path=socket_path,
+                socket_url,
+                transports=["websocket"],
+                socketio_path=socket_path,
                 auth={"token": self.config.claw_token},
                 wait_timeout=max(1.0, self.config.socket_connect_timeout_ms / 1000.0),
             )
@@ -421,6 +455,7 @@ class MochatChannel(BaseChannel):
                 await self._handle_notify_inbox_append(payload)
             elif event_name.startswith("notify:chat.message."):
                 await self._handle_notify_chat_message(payload)
+
         return handler
 
     # ---- subscribe ---------------------------------------------------------
@@ -439,10 +474,14 @@ class MochatChannel(BaseChannel):
             if sid not in self._session_cursor:
                 self._cold_sessions.add(sid)
 
-        ack = await self._socket_call("com.claw.im.subscribeSessions", {
-            "sessionIds": session_ids, "cursors": self._session_cursor,
-            "limit": self.config.watch_limit,
-        })
+        ack = await self._socket_call(
+            "com.claw.im.subscribeSessions",
+            {
+                "sessionIds": session_ids,
+                "cursors": self._session_cursor,
+                "limit": self.config.watch_limit,
+            },
+        )
         if not ack.get("result"):
             logger.error(f"Mochat subscribeSessions failed: {ack.get('message', 'unknown error')}")
             return False
@@ -571,7 +610,9 @@ class MochatChannel(BaseChannel):
         for sid in sorted(self._session_set):
             t = self._session_fallback_tasks.get(sid)
             if not t or t.done():
-                self._session_fallback_tasks[sid] = asyncio.create_task(self._session_watch_worker(sid))
+                self._session_fallback_tasks[sid] = asyncio.create_task(
+                    self._session_watch_worker(sid)
+                )
         for pid in sorted(self._panel_set):
             t = self._panel_fallback_tasks.get(pid)
             if not t or t.done():
@@ -590,10 +631,15 @@ class MochatChannel(BaseChannel):
     async def _session_watch_worker(self, session_id: str) -> None:
         while self._running and self._fallback_mode:
             try:
-                payload = await self._post_json("/api/claw/sessions/watch", {
-                    "sessionId": session_id, "cursor": self._session_cursor.get(session_id, 0),
-                    "timeoutMs": self.config.watch_timeout_ms, "limit": self.config.watch_limit,
-                })
+                payload = await self._post_json(
+                    "/api/claw/sessions/watch",
+                    {
+                        "sessionId": session_id,
+                        "cursor": self._session_cursor.get(session_id, 0),
+                        "timeoutMs": self.config.watch_timeout_ms,
+                        "limit": self.config.watch_limit,
+                    },
+                )
                 await self._handle_watch_payload(payload, "session")
             except asyncio.CancelledError:
                 break
@@ -605,9 +651,13 @@ class MochatChannel(BaseChannel):
         sleep_s = max(1.0, self.config.refresh_interval_ms / 1000.0)
         while self._running and self._fallback_mode:
             try:
-                resp = await self._post_json("/api/claw/groups/panels/messages", {
-                    "panelId": panel_id, "limit": min(100, max(1, self.config.watch_limit)),
-                })
+                resp = await self._post_json(
+                    "/api/claw/groups/panels/messages",
+                    {
+                        "panelId": panel_id,
+                        "limit": min(100, max(1, self.config.watch_limit)),
+                    },
+                )
                 msgs = resp.get("messages")
                 if isinstance(msgs, list):
                     for m in reversed(msgs):
@@ -617,8 +667,10 @@ class MochatChannel(BaseChannel):
                             message_id=str(m.get("messageId") or ""),
                             author=str(m.get("author") or ""),
                             content=m.get("content"),
-                            meta=m.get("meta"), group_id=str(resp.get("groupId") or ""),
-                            converse_id=panel_id, timestamp=m.get("createdAt"),
+                            meta=m.get("meta"),
+                            group_id=str(resp.get("groupId") or ""),
+                            converse_id=panel_id,
+                            timestamp=m.get("createdAt"),
                             author_info=m.get("authorInfo"),
                         )
                         await self._process_inbound_event(panel_id, evt, "panel")
@@ -655,12 +707,18 @@ class MochatChannel(BaseChannel):
                 if not isinstance(event, dict):
                     continue
                 seq = event.get("seq")
-                if target_kind == "session" and isinstance(seq, int) and seq > self._session_cursor.get(target_id, prev):
+                if (
+                    target_kind == "session"
+                    and isinstance(seq, int)
+                    and seq > self._session_cursor.get(target_id, prev)
+                ):
                     self._mark_session_cursor(target_id, seq)
                 if event.get("type") == "message.add":
                     await self._process_inbound_event(target_id, event, target_kind)
 
-    async def _process_inbound_event(self, target_id: str, event: dict[str, Any], target_kind: str) -> None:
+    async def _process_inbound_event(
+        self, target_id: str, event: dict[str, Any], target_kind: str
+    ) -> None:
         payload = event.get("payload")
         if not isinstance(payload, dict):
             return
@@ -684,22 +742,32 @@ class MochatChannel(BaseChannel):
         group_id = _str_field(payload, "groupId")
         is_group = bool(group_id)
         was_mentioned = resolve_was_mentioned(payload, self.config.agent_user_id)
-        require_mention = target_kind == "panel" and is_group and resolve_require_mention(self.config, target_id, group_id)
+        require_mention = (
+            target_kind == "panel"
+            and is_group
+            and resolve_require_mention(self.config, target_id, group_id)
+        )
         use_delay = target_kind == "panel" and self.config.reply_delay_mode == "non-mention"
 
         if require_mention and not was_mentioned and not use_delay:
             return
 
         entry = MochatBufferedEntry(
-            raw_body=raw_body, author=author, sender_name=sender_name,
-            sender_username=sender_username, timestamp=parse_timestamp(event.get("timestamp")),
-            message_id=message_id, group_id=group_id,
+            raw_body=raw_body,
+            author=author,
+            sender_name=sender_name,
+            sender_username=sender_username,
+            timestamp=parse_timestamp(event.get("timestamp")),
+            message_id=message_id,
+            group_id=group_id,
         )
 
         if use_delay:
             delay_key = seen_key
             if was_mentioned:
-                await self._flush_delayed_entries(delay_key, target_id, target_kind, "mention", entry)
+                await self._flush_delayed_entries(
+                    delay_key, target_id, target_kind, "mention", entry
+                )
             else:
                 await self._enqueue_delayed_entry(delay_key, target_id, target_kind, entry)
             return
@@ -719,7 +787,9 @@ class MochatChannel(BaseChannel):
             seen_set.discard(seen_queue.popleft())
         return False
 
-    async def _enqueue_delayed_entry(self, key: str, target_id: str, target_kind: str, entry: MochatBufferedEntry) -> None:
+    async def _enqueue_delayed_entry(
+        self, key: str, target_id: str, target_kind: str, entry: MochatBufferedEntry
+    ) -> None:
         state = self._delay_states.setdefault(key, DelayState())
         async with state.lock:
             state.entries.append(entry)
@@ -731,7 +801,14 @@ class MochatChannel(BaseChannel):
         await asyncio.sleep(max(0, self.config.reply_delay_ms) / 1000.0)
         await self._flush_delayed_entries(key, target_id, target_kind, "timer", None)
 
-    async def _flush_delayed_entries(self, key: str, target_id: str, target_kind: str, reason: str, entry: MochatBufferedEntry | None) -> None:
+    async def _flush_delayed_entries(
+        self,
+        key: str,
+        target_id: str,
+        target_kind: str,
+        reason: str,
+        entry: MochatBufferedEntry | None,
+    ) -> None:
         state = self._delay_states.setdefault(key, DelayState())
         async with state.lock:
             if entry:
@@ -745,19 +822,31 @@ class MochatChannel(BaseChannel):
         if entries:
             await self._dispatch_entries(target_id, target_kind, entries, reason == "mention")
 
-    async def _dispatch_entries(self, target_id: str, target_kind: str, entries: list[MochatBufferedEntry], was_mentioned: bool) -> None:
+    async def _dispatch_entries(
+        self,
+        target_id: str,
+        target_kind: str,
+        entries: list[MochatBufferedEntry],
+        was_mentioned: bool,
+    ) -> None:
         if not entries:
             return
         last = entries[-1]
         is_group = bool(last.group_id)
         body = build_buffered_body(entries, is_group) or "[empty message]"
         await self._handle_message(
-            sender_id=last.author, chat_id=target_id, content=body,
+            sender_id=last.author,
+            chat_id=target_id,
+            content=body,
             metadata={
-                "message_id": last.message_id, "timestamp": last.timestamp,
-                "is_group": is_group, "group_id": last.group_id,
-                "sender_name": last.sender_name, "sender_username": last.sender_username,
-                "target_kind": target_kind, "was_mentioned": was_mentioned,
+                "message_id": last.message_id,
+                "timestamp": last.timestamp,
+                "is_group": is_group,
+                "group_id": last.group_id,
+                "sender_name": last.sender_name,
+                "sender_username": last.sender_username,
+                "target_kind": target_kind,
+                "was_mentioned": was_mentioned,
                 "buffered_count": len(entries),
             },
         )
@@ -783,9 +872,12 @@ class MochatChannel(BaseChannel):
         evt = _make_synthetic_event(
             message_id=str(payload.get("_id") or payload.get("messageId") or ""),
             author=str(payload.get("author") or ""),
-            content=payload.get("content"), meta=payload.get("meta"),
-            group_id=group_id, converse_id=panel_id,
-            timestamp=payload.get("createdAt"), author_info=payload.get("authorInfo"),
+            content=payload.get("content"),
+            meta=payload.get("meta"),
+            group_id=group_id,
+            converse_id=panel_id,
+            timestamp=payload.get("createdAt"),
+            author_info=payload.get("authorInfo"),
         )
         await self._process_inbound_event(panel_id, evt, "panel")
 
@@ -813,7 +905,9 @@ class MochatChannel(BaseChannel):
             author=str(detail.get("messageAuthor") or ""),
             content=str(detail.get("messagePlainContent") or detail.get("messageSnippet") or ""),
             meta={"source": "notify:chat.inbox.append", "converseId": converse_id},
-            group_id="", converse_id=converse_id, timestamp=payload.get("createdAt"),
+            group_id="",
+            converse_id=converse_id,
+            timestamp=payload.get("createdAt"),
         )
         await self._process_inbound_event(session_id, evt, "session")
 
@@ -847,10 +941,19 @@ class MochatChannel(BaseChannel):
     async def _save_session_cursors(self) -> None:
         try:
             self._state_dir.mkdir(parents=True, exist_ok=True)
-            self._cursor_path.write_text(json.dumps({
-                "schemaVersion": 1, "updatedAt": datetime.utcnow().isoformat(),
-                "cursors": self._session_cursor,
-            }, ensure_ascii=False, indent=2) + "\n", "utf-8")
+            self._cursor_path.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "updatedAt": datetime.utcnow().isoformat(),
+                        "cursors": self._session_cursor,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                "utf-8",
+            )
         except Exception as e:
             logger.warning(f"Failed to save Mochat cursor file: {e}")
 
@@ -860,9 +963,14 @@ class MochatChannel(BaseChannel):
         if not self._http:
             raise RuntimeError("Mochat HTTP client not initialized")
         url = f"{self.config.base_url.strip().rstrip('/')}{path}"
-        response = await self._http.post(url, headers={
-            "Content-Type": "application/json", "X-Claw-Token": self.config.claw_token,
-        }, json=payload)
+        response = await self._http.post(
+            url,
+            headers={
+                "Content-Type": "application/json",
+                "X-Claw-Token": self.config.claw_token,
+            },
+            json=payload,
+        )
         if not response.is_success:
             raise RuntimeError(f"Mochat HTTP {response.status_code}: {response.text[:200]}")
         try:
@@ -877,8 +985,15 @@ class MochatChannel(BaseChannel):
             return data if isinstance(data, dict) else {}
         return parsed if isinstance(parsed, dict) else {}
 
-    async def _api_send(self, path: str, id_key: str, id_val: str,
-                        content: str, reply_to: str | None, group_id: str | None = None) -> dict[str, Any]:
+    async def _api_send(
+        self,
+        path: str,
+        id_key: str,
+        id_val: str,
+        content: str,
+        reply_to: str | None,
+        group_id: str | None = None,
+    ) -> dict[str, Any]:
         """Unified send helper for session and panel messages."""
         body: dict[str, Any] = {id_key: id_val, "content": content}
         if reply_to:

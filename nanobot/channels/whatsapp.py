@@ -78,11 +78,7 @@ class WhatsAppChannel(BaseChannel):
             return
 
         try:
-            payload = {
-                "type": "send",
-                "to": msg.chat_id,
-                "text": msg.content
-            }
+            payload = {"type": "send", "to": msg.chat_id, "text": msg.content}
             await self._ws.send(json.dumps(payload))
         except Exception as e:
             logger.error(f"Error sending WhatsApp message: {e}")
@@ -112,7 +108,9 @@ class WhatsAppChannel(BaseChannel):
 
             # Handle voice transcription if it's a voice message
             if content == "[Voice Message]":
-                logger.info(f"Voice message received from {sender_id}, but direct download from bridge is not yet supported.")
+                logger.info(
+                    f"Voice message received from {sender_id}, but direct download from bridge is not yet supported."
+                )
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
 
             await self._handle_message(
@@ -122,8 +120,8 @@ class WhatsAppChannel(BaseChannel):
                 metadata={
                     "message_id": data.get("id"),
                     "timestamp": data.get("timestamp"),
-                    "is_group": data.get("isGroup", False)
-                }
+                    "is_group": data.get("isGroup", False),
+                },
             )
 
         elif msg_type == "status":

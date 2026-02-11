@@ -36,26 +36,20 @@ class CronTool(Tool):
                 "action": {
                     "type": "string",
                     "enum": ["add", "list", "remove"],
-                    "description": "Action to perform"
+                    "description": "Action to perform",
                 },
-                "message": {
-                    "type": "string",
-                    "description": "Reminder message (for add)"
-                },
+                "message": {"type": "string", "description": "Reminder message (for add)"},
                 "every_seconds": {
                     "type": "integer",
-                    "description": "Interval in seconds (for recurring tasks)"
+                    "description": "Interval in seconds (for recurring tasks)",
                 },
                 "cron_expr": {
                     "type": "string",
-                    "description": "Cron expression like '0 9 * * *' (for scheduled tasks)"
+                    "description": "Cron expression like '0 9 * * *' (for scheduled tasks)",
                 },
-                "job_id": {
-                    "type": "string",
-                    "description": "Job ID (for remove)"
-                }
+                "job_id": {"type": "string", "description": "Job ID (for remove)"},
             },
-            "required": ["action"]
+            "required": ["action"],
         }
 
     async def execute(
@@ -65,7 +59,7 @@ class CronTool(Tool):
         every_seconds: int | None = None,
         cron_expr: str | None = None,
         job_id: str | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> str:
         if action == "add":
             return self._add_job(message, every_seconds, cron_expr)
