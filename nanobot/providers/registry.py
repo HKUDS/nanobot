@@ -287,7 +287,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     # Needs "groq/" prefix for LiteLLM routing. Placed last — it rarely wins fallback.
     ProviderSpec(
         name="groq",
-        keywords=("groq",),
+        keywords=("groq", "llama3", "mixtral", "gemma"),
         env_key="GROQ_API_KEY",
         display_name="Groq",
         litellm_prefix="groq",              # llama3-8b-8192 → groq/llama3-8b-8192
