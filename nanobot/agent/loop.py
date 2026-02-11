@@ -182,6 +182,8 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
+            sender_id=msg.sender_id,
+            metadata=msg.metadata,
         )
         
         # Agent loop
@@ -291,6 +293,8 @@ class AgentLoop:
             current_message=msg.content,
             channel=origin_channel,
             chat_id=origin_chat_id,
+            sender_id=msg.sender_id,
+            metadata=msg.metadata,
         )
         
         # Agent loop (limited for announce handling)
