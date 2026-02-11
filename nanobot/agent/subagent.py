@@ -138,6 +138,7 @@ class SubagentManager:
             max_iterations = 15
             iteration = 0
             final_result: str | None = None
+            last_finish_reason = "unknown"
             
             while iteration < max_iterations:
                 iteration += 1
@@ -147,6 +148,7 @@ class SubagentManager:
                     tools=tools.get_definitions(),
                     model=self.model,
                 )
+                last_finish_reason = response.finish_reason or "unknown"
                 
                 if response.has_tool_calls:
                     # Add assistant message with tool calls
@@ -179,11 +181,28 @@ class SubagentManager:
                             "content": result,
                         })
                 else:
-                    final_result = response.content
+                    if response.content is None or response.content.strip() == "":
+                        logger.warning(
+                            f"Subagent [{task_id}] got empty/blank content without tool calls "
+                            f"(finish_reason={last_finish_reason}, iteration={iteration}/{max_iterations})"
+                        )
+                        final_result = (
+                            "Task completed, but no final response text was generated "
+                            f"(finish_reason={last_finish_reason}, iteration={iteration}/{max_iterations})."
+                        )
+                    else:
+                        final_result = response.content
                     break
             
             if final_result is None:
-                final_result = "Task completed but no final response was generated."
+                logger.warning(
+                    f"Subagent [{task_id}] hit max iterations without final response "
+                    f"(max_iterations={max_iterations}, last_finish_reason={last_finish_reason})"
+                )
+                final_result = (
+                    "Task completed, but final response generation hit the tool-call iteration limit "
+                    f"({max_iterations}). Last finish_reason={last_finish_reason}."
+                )
             
             logger.info(f"Subagent [{task_id}] completed successfully")
             await self._announce_result(task_id, label, task, final_result, origin, "ok")

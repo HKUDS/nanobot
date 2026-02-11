@@ -40,7 +40,7 @@ class AgentLoop:
         provider: LLMProvider,
         workspace: Path,
         model: str | None = None,
-        max_iterations: int = 20,
+        max_iterations: int = 50,
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
@@ -191,8 +191,8 @@ class AgentLoop:
         # Update tool contexts
         message_tool = self.tools.get("message")
         if isinstance(message_tool, MessageTool):
-            message_tool.set_context(msg.channel, msg.chat_id)
-        
+            message_tool.set_context(msg.channel, msg.chat_id, msg.metadata)
+
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(msg.channel, msg.chat_id)
@@ -213,6 +213,7 @@ class AgentLoop:
         # Agent loop
         iteration = 0
         final_content = None
+        last_finish_reason = "unknown"
         
         while iteration < self.max_iterations:
             iteration += 1
@@ -223,6 +224,7 @@ class AgentLoop:
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
+            last_finish_reason = response.finish_reason or "unknown"
             
             # Handle tool calls
             if response.has_tool_calls:
@@ -253,11 +255,30 @@ class AgentLoop:
                     )
             else:
                 # No tool calls, we're done
-                final_content = response.content
+                if response.content is None or response.content.strip() == "":
+                    logger.warning(
+                        "Model returned empty/blank content without tool calls "
+                        f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations})"
+                    )
+                    final_content = (
+                        "I could not produce a final response because the model returned empty/blank content "
+                        f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations}). "
+                        "Please retry."
+                    )
+                else:
+                    final_content = response.content
                 break
         
         if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+            logger.warning(
+                "Agent loop hit max iterations without final response "
+                f"(max_iterations={self.max_iterations}, last_finish_reason={last_finish_reason})"
+            )
+            final_content = (
+                "I stopped before a final response because the tool-call loop hit the iteration limit "
+                f"({self.max_iterations}). Last finish_reason={last_finish_reason}. "
+                "Please retry with a narrower request or increase agents.defaults.max_tool_iterations."
+            )
         
         # Log response preview
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
@@ -322,6 +343,7 @@ class AgentLoop:
         # Agent loop (limited for announce handling)
         iteration = 0
         final_content = None
+        last_finish_reason = "unknown"
         
         while iteration < self.max_iterations:
             iteration += 1
@@ -331,6 +353,7 @@ class AgentLoop:
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
+            last_finish_reason = response.finish_reason or "unknown"
             
             if response.has_tool_calls:
                 tool_call_dicts = [
@@ -357,11 +380,28 @@ class AgentLoop:
                         messages, tool_call.id, tool_call.name, result
                     )
             else:
-                final_content = response.content
+                if response.content is None or response.content.strip() == "":
+                    logger.warning(
+                        "System-message summarization returned empty/blank content without tool calls "
+                        f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations})"
+                    )
+                    final_content = (
+                        "Background task completed, but no summary text was generated "
+                        f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations})."
+                    )
+                else:
+                    final_content = response.content
                 break
         
         if final_content is None:
-            final_content = "Background task completed."
+            logger.warning(
+                "System-message loop hit max iterations without summary "
+                f"(max_iterations={self.max_iterations}, last_finish_reason={last_finish_reason})"
+            )
+            final_content = (
+                "Background task completed, but summary generation hit the tool-call iteration limit "
+                f"({self.max_iterations}). Last finish_reason={last_finish_reason}."
+            )
         
         # Save to session (mark as system message in history)
         session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
