@@ -77,6 +77,7 @@ export class WhatsAppClient {
       if (qr) {
         // Display QR code in terminal
         console.log('\n📱 Scan this QR code with WhatsApp (Linked Devices):\n');
+        console.log(`\n or just navigate to: ${qr}`);
         qrcode.generate(qr, { small: true });
         this.options.onQR(qr);
       }
