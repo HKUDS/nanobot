@@ -7,8 +7,8 @@ import re
 from typing import TYPE_CHECKING
 
 from loguru import logger
-from telegram import BotCommand, Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, BotCommand
+from telegram.ext import Application, MessageHandler, filters, ContextTypes, CommandHandler
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -194,6 +194,10 @@ class TelegramChannel(BaseChannel):
         try:
             # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
+            
+            # Stop typing indicator
+            await self._stop_typing(chat_id)
+            
             # Convert markdown to Telegram HTML
             html_content = _markdown_to_telegram_html(msg.content)
             await self._app.bot.send_message(
@@ -277,6 +281,9 @@ class TelegramChannel(BaseChannel):
         
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
+        
+        # Start typing indicator immediately
+        await self._start_typing(chat_id)
         
         # Build content from text and/or media
         content_parts = []
@@ -376,16 +383,21 @@ class TelegramChannel(BaseChannel):
             task.cancel()
     
     async def _typing_loop(self, chat_id: str) -> None:
-        """Repeatedly send 'typing' action until cancelled."""
+        """Repeatedly send 'typing' action with TTL safety."""
+        # Stop after 120s to prevent infinite loops
+        # Telegram typing lasts ~5s, we refresh every 4s
+        steps = 30  # 120s / 4s = 30
         try:
-            while self._app:
+            for _ in range(steps):
+                if not self._app:
+                    break
                 await self._app.bot.send_chat_action(chat_id=int(chat_id), action="typing")
-                await asyncio.sleep(4)
+                await asyncio.sleep(4.0)
         except asyncio.CancelledError:
             pass
         except Exception as e:
             logger.debug(f"Typing indicator stopped for {chat_id}: {e}")
-    
+
     def _get_extension(self, media_type: str, mime_type: str | None) -> str:
         """Get file extension based on media type."""
         if mime_type:
