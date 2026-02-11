@@ -141,6 +141,17 @@ class ChannelManager:
                 logger.info("QQ channel enabled")
             except ImportError as e:
                 logger.warning(f"QQ channel not available: {e}")
+
+        # HTTP channel
+        if self.config.channels.http.enabled:
+            try:
+                from nanobot.channels.http import HttpChannel
+                self.channels["http"] = HttpChannel(
+                    self.config.channels.http, self.bus
+                )
+                logger.info("HTTP channel enabled")
+            except ImportError as e:
+                logger.warning(f"HTTP channel not available: {e}")
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""

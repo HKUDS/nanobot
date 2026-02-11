@@ -141,8 +141,17 @@ class QQConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
 
+class HttpConfig(BaseModel):
+    """HTTP channel configuration."""
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 8080
+    allow_from: list[str] = Field(default_factory=list)
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
+    http: HttpConfig = Field(default_factory=HttpConfig)
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
