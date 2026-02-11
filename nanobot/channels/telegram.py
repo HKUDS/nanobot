@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import re
+from urllib.parse import urlparse
 from typing import TYPE_CHECKING
 
 from loguru import logger
 from telegram import BotCommand, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -121,6 +123,26 @@ class TelegramChannel(BaseChannel):
         
         self._running = True
         
+        # Configure request with proxy if enabled
+        request_kwargs: dict = {}
+        if self.config.proxy:
+            # Redact credentials for logging
+            safe_proxy = self.config.proxy
+            try:
+                p = urlparse(self.config.proxy)
+                if p.password:
+                    # Reconstruct netloc with redacted password
+                    user = f"{p.username}:" if p.username else ""
+                    netloc = f"{user}****@{p.hostname}"
+                    if p.port:
+                        netloc += f":{p.port}"
+                    safe_proxy = p._replace(netloc=netloc).geturl()
+            except Exception:
+                safe_proxy = "********"
+                
+            logger.info(f"Using proxy for Telegram: {safe_proxy}")
+            request = HTTPXRequest(proxy=self.config.proxy)
+
         # Build the application
         builder = Application.builder().token(self.config.token)
         if self.config.proxy:
