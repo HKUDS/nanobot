@@ -88,7 +88,7 @@ uv tool install nanobot-ai
 **Install from PyPI** (stable)
 
 ```bash
-pip install nanobot-ai
+pip install nanobot-ai 
 ```
 
 ## 🚀 Quick Start
@@ -97,7 +97,7 @@ pip install nanobot-ai
 > Set your API key in `~/.nanobot/config.json`.
 > Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
 
-**1. Initialize**
+**1. Initialize **
 
 ```bash
 nanobot onboard
