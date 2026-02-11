@@ -260,6 +260,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # ModelScope: needs "modelscope/" prefix for LiteLLM routing.
+    # Uses OpenAI-compatible API at api.modelscope.cn/v1.
+    ProviderSpec(
+        name="modelscope",
+        keywords=("modelscope",),
+        env_key="MODELSCOPE_API_KEY",
+        display_name="ModelScope",
+        litellm_prefix="",         # qwen-max → modelscope/qwen-max
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://api-inference.modelscope.cn/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # === Local deployment (matched by config key, NOT by api_base) =========
 
     # vLLM / any OpenAI-compatible local server.

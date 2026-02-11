@@ -593,6 +593,7 @@ Config file: `~/.nanobot/config.json`
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `minimax` | LLM (MiniMax direct) | [platform.minimax.io](https://platform.minimax.io) |
+| `modelscope` | LLM (ModelScope) | [modelscope.cn](https://www.modelscope.cn) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
