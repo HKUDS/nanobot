@@ -301,6 +301,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+
+    # xAI
+    ProviderSpec(
+        name="xai",                  
+        keywords=("xai", "grok"),  
+        env_key="XAI_API_KEY",       
+        display_name="xAI",          
+        litellm_prefix="xai",       
+        skip_prefixes=("xai/",),     
+    )
 )
 
 

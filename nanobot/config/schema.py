@@ -161,6 +161,7 @@ class AgentDefaults(BaseModel):
     max_tokens: int = 8192
     temperature: float = 0.7
     max_tool_iterations: int = 20
+    show_token_usage: bool = False
 
 
 class AgentsConfig(BaseModel):
@@ -189,7 +190,7 @@ class ProvidersConfig(BaseModel):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
-
+    xai: ProviderConfig = Field(default_factory=ProviderConfig)
 
 class GatewayConfig(BaseModel):
     """Gateway/server configuration."""

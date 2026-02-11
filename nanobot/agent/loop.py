@@ -46,6 +46,7 @@ class AgentLoop:
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
+        show_token_usage: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
@@ -58,6 +59,9 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.show_token_usage = show_token_usage
+        self.session_tokens = 0
+        self.message_tokens = 0
         
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -174,7 +178,38 @@ class AgentLoop:
         cron_tool = self.tools.get("cron")
         if isinstance(cron_tool, CronTool):
             cron_tool.set_context(msg.channel, msg.chat_id)
-        
+
+        # Handle special commands
+        if msg.content.startswith("/usage "):
+            parts = msg.content.split()
+            if len(parts) == 2 and parts[1].lower() in ("true", "false"):
+                self.show_token_usage = parts[1].lower() == "true"
+                # Persist to config
+                config_path = Path.home() / ".nanobot" / "config.json"
+                try:
+                    if config_path.exists():
+                        with open(config_path, "r") as f:
+                            config = json.load(f)
+                    else:
+                        config = {}
+                    config.setdefault("agents", {}).setdefault("defaults", {})["show_token_usage"] = self.show_token_usage
+                    with open(config_path, "w") as f:
+                        json.dump(config, f, indent=2)
+                except Exception as e:
+                    logger.error(f"Failed to persist config: {e}")
+                status = "enabled" if self.show_token_usage else "disabled"
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=f"Token usage display is now {status}"
+                )
+            else:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="Usage: /usage true|false"
+                )
+
         # Build initial messages (use get_history for LLM-formatted messages)
         messages = self.context.build_messages(
             history=session.get_history(),
@@ -187,16 +222,19 @@ class AgentLoop:
         # Agent loop
         iteration = 0
         final_content = None
-        
+
         while iteration < self.max_iterations:
             iteration += 1
-            
+
             # Call LLM
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
+            tokens = response.usage.get("total_tokens", 0)
+            self.message_tokens += tokens
+            self.session_tokens += tokens
             
             # Handle tool calls
             if response.has_tool_calls:
@@ -296,15 +334,18 @@ class AgentLoop:
         # Agent loop (limited for announce handling)
         iteration = 0
         final_content = None
-        
+
         while iteration < self.max_iterations:
             iteration += 1
-            
+
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
+            tokens = response.usage.get("total_tokens", 0)
+            self.message_tokens += tokens
+            self.session_tokens += tokens
             
             if response.has_tool_calls:
                 tool_call_dicts = [
@@ -347,7 +388,7 @@ class AgentLoop:
             chat_id=origin_chat_id,
             content=final_content
         )
-    
+
     async def process_direct(
         self,
         content: str,
@@ -357,22 +398,50 @@ class AgentLoop:
     ) -> str:
         """
         Process a message directly (for CLI or cron usage).
-        
+
         Args:
             content: The message content.
             session_key: Session identifier.
             channel: Source channel (for context).
             chat_id: Source chat ID (for context).
-        
+
         Returns:
             The agent's response.
         """
+        # Handle special commands for CLI
+        if content.startswith("/usage "):
+            parts = content.split()
+            if len(parts) == 2 and parts[1].lower() in ("true", "false"):
+                self.show_token_usage = parts[1].lower() == "true"
+                # Persist to config
+                config_path = Path.home() / ".nanobot" / "config.json"
+                try:
+                    if config_path.exists():
+                        with open(config_path, "r") as f:
+                            config = json.load(f)
+                    else:
+                        config = {}
+                    config.setdefault("agents", {}).setdefault("defaults", {})["show_token_usage"] = self.show_token_usage
+                    with open(config_path, "w") as f:
+                        json.dump(config, f, indent=2)
+                except Exception as e:
+                    logger.error(f"Failed to persist config: {e}")
+                status = "enabled" if self.show_token_usage else "disabled"
+                return f"Token usage display is now {status}"
+            else:
+                return "Usage: /usage true|false"
+
+        self.message_tokens = 0  # Reset counter for this message
         msg = InboundMessage(
             channel=channel,
             sender_id="user",
             chat_id=chat_id,
             content=content
         )
-        
+
         response = await self._process_message(msg)
-        return response.content if response else ""
+        content = response.content if response else ""
+        if content and self.show_token_usage:
+            content += f"\n\n*Session tokens: {self.session_tokens-self.message_tokens} + {self.message_tokens}*"
+        logger.info(f"Session tokens: {self.session_tokens-self.message_tokens} + {self.message_tokens}")
+        return content
