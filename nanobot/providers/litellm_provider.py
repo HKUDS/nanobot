@@ -96,6 +96,38 @@ class LiteLLMProvider(LLMProvider):
                 if pattern in model_lower:
                     kwargs.update(overrides)
                     return
+
+    def _preview_text(self, text: str | None, limit: int = 240) -> str:
+        """Build a single-line truncated preview for logs."""
+        if text is None:
+            return "<none>"
+        compact = text.replace("\n", "\\n")
+        if compact.strip() == "":
+            return "<blank>"
+        if len(compact) > limit:
+            return f"{compact[:limit]}...(truncated)"
+        return compact
+
+    def _log_response_summary(self, response: LLMResponse) -> None:
+        """Log a compact summary of the model response."""
+        content_preview = self._preview_text(response.content)
+        if response.has_tool_calls:
+            names = ", ".join(tc.name for tc in response.tool_calls[:5])
+            if len(response.tool_calls) > 5:
+                names = f"{names}, ..."
+            logger.debug(
+                "LLM Response: mode=function_call, "
+                f"finish_reason={response.finish_reason}, "
+                f"tool_calls={len(response.tool_calls)}, "
+                f"tool_names=[{names}], "
+                f"content={content_preview}"
+            )
+        else:
+            logger.debug(
+                "LLM Response: mode=text, "
+                f"finish_reason={response.finish_reason}, "
+                f"content={content_preview}"
+            )
     
     async def chat(
         self,
@@ -153,9 +185,12 @@ class LiteLLMProvider(LLMProvider):
         try:
             logger.debug(f"LLM Request: model={kwargs.get('model')}, api_base={kwargs.get('api_base')}")
             response = await acompletion(**kwargs)
-            return self._parse_response(response)
+            parsed = self._parse_response(response)
+            self._log_response_summary(parsed)
+            return parsed
         except Exception as e:
             # Return error as content for graceful handling
+            logger.warning(f"LLM Response: mode=error, error={str(e)}")
             return LLMResponse(
                 content=f"Error calling LLM: {str(e)}",
                 finish_reason="error",
