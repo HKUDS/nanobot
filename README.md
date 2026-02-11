@@ -73,6 +73,8 @@
 
 **Install from source** (latest features, recommended for development)
 
+first off , py311+ required !
+
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
 cd nanobot
