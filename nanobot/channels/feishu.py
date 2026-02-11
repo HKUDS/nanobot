@@ -521,7 +521,8 @@ class FeishuChannel(BaseChannel):
             use_streaming = False
             loop = asyncio.get_running_loop()
 
-            if CARDKIT_AVAILABLE:
+            # Check if streaming is enabled in config and CardKit is available
+            if self.config.streaming and CARDKIT_AVAILABLE:
                 streaming_session = FeishuStreamingSession(
                     client=self._client, chat_id=reply_to, receive_id_type=receive_id_type
                 )
