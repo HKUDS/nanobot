@@ -260,6 +260,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # AWS Bedrock: native boto3 Converse API, no LiteLLM needed.
+    # Matched by "bedrock/" prefix in model name; routing handled in commands.py.
+    ProviderSpec(
+        name="bedrock",
+        keywords=("bedrock",),
+        env_key="",                          # No env var — uses boto3 auth
+        display_name="AWS Bedrock",
+        litellm_prefix="",                   # Not used — native provider
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # === Local deployment (matched by config key, NOT by api_base) =========
 
     # vLLM / any OpenAI-compatible local server.

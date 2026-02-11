@@ -300,11 +300,23 @@ This file stores important information that should persist across sessions.
 
 
 def _make_provider(config):
-    """Create LiteLLMProvider from config. Exits if no API key found."""
+    """Create provider from config. Routes bedrock/ models to BedrockProvider."""
+    model = config.agents.defaults.model
+
+    # Bedrock: native boto3 provider
+    if model.startswith("bedrock/"):
+        from nanobot.providers.bedrock_provider import BedrockProvider
+        bedrock_cfg = config.providers.bedrock
+        return BedrockProvider(
+            api_key=bedrock_cfg.api_key if bedrock_cfg else None,
+            region=bedrock_cfg.region if bedrock_cfg else "us-east-1",
+            model=model,
+        )
+
+    # All other providers: LiteLLM
     from nanobot.providers.litellm_provider import LiteLLMProvider
     p = config.get_provider()
-    model = config.agents.defaults.model
-    if not (p and p.api_key) and not model.startswith("bedrock/"):
+    if not (p and p.api_key):
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers section")
         raise typer.Exit(1)
@@ -876,6 +888,13 @@ def status():
             else:
                 has_key = bool(p.api_key)
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+
+        # Bedrock status (not in LiteLLM registry)
+        bedrock_cfg = config.providers.bedrock
+        if bedrock_cfg.api_key:
+            console.print(f"AWS Bedrock: [green]✓ API Key[/green] (region: {bedrock_cfg.region})")
+        else:
+            console.print(f"AWS Bedrock: [dim]IAM auth[/dim] (region: {bedrock_cfg.region})")
 
 
 if __name__ == "__main__":

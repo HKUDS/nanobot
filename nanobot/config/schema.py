@@ -175,6 +175,12 @@ class ProviderConfig(BaseModel):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
+class BedrockConfig(BaseModel):
+    """AWS Bedrock provider configuration."""
+    api_key: str | None = None  # Bedrock API Key; None = use IAM auth
+    region: str = "us-east-1"
+
+
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -189,6 +195,7 @@ class ProvidersConfig(BaseModel):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
+    bedrock: BedrockConfig = Field(default_factory=BedrockConfig)  # AWS Bedrock (native boto3)
 
 
 class GatewayConfig(BaseModel):

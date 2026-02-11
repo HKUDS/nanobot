@@ -20,6 +20,7 @@
 
 ## 📢 News
 
+- **2026-02-11** 🔥 Added native AWS Bedrock provider — direct boto3 Converse API with dual auth (IAM + API Key) and cross-region inference profiles!
 - **2026-02-10** 🎉 Released v0.1.3.post6 with improvements! Check the updates [notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post6) and our [roadmap](https://github.com/HKUDS/nanobot/discussions/431).
 - **2026-02-09** 💬 Added Slack, Email, and QQ support — nanobot now supports multiple chat platforms!
 - **2026-02-08** 🔧 Refactored Providers—adding a new LLM provider now takes just 2 simple steps! Check [here](#providers).
@@ -165,6 +166,102 @@ nanobot agent -m "Hello from my local LLM!"
 
 > [!TIP]
 > The `apiKey` can be any non-empty string for local servers that don't require authentication.
+
+## ☁️ AWS Bedrock (Native)
+
+Run nanobot with AWS Bedrock directly via boto3 Converse API — no LiteLLM translation layer. Supports IAM and Bedrock API Key authentication.
+
+<details>
+<summary><b>Option A: Bedrock API Key (Recommended for quick setup)</b></summary>
+
+**1. Get a Bedrock API Key**
+- Go to [AWS Bedrock Console](https://console.aws.amazon.com/bedrock/) → **API Keys**
+- Create a new API key and copy it
+
+**2. Configure** (`~/.nanobot/config.json`)
+
+```json
+{
+  "providers": {
+    "bedrock": {
+      "apiKey": "your-bedrock-api-key",
+      "region": "us-east-1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "bedrock/us.anthropic.claude-opus-4-6-v1"
+    }
+  }
+}
+```
+
+**3. Chat**
+
+```bash
+nanobot agent -m "Hello from Bedrock!"
+```
+
+</details>
+
+<details>
+<summary><b>Option B: IAM Authentication (Standard AWS credentials)</b></summary>
+
+Uses the standard AWS credential chain: environment variables → `~/.aws/credentials` → IAM Role.
+
+**1. Ensure AWS credentials are configured**
+
+```bash
+aws configure
+# Or set environment variables:
+# export AWS_ACCESS_KEY_ID=xxx
+# export AWS_SECRET_ACCESS_KEY=xxx
+# export AWS_DEFAULT_REGION=us-east-1
+```
+
+**2. Configure** (`~/.nanobot/config.json`)
+
+```json
+{
+  "providers": {
+    "bedrock": {
+      "region": "us-east-1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "bedrock/us.anthropic.claude-opus-4-6-v1"
+    }
+  }
+}
+```
+
+> When `apiKey` is omitted (or `null`), nanobot uses IAM authentication automatically.
+
+**3. Chat**
+
+```bash
+nanobot agent -m "Hello from Bedrock!"
+```
+
+</details>
+
+### Supported Model IDs
+
+| Model ID | Description |
+|----------|-------------|
+| `bedrock/anthropic.claude-opus-4-6-v1` | Single region, Claude Opus 4.6 |
+| `bedrock/anthropic.claude-opus-4-5-v2` | Single region, Claude 4.5 |
+| `bedrock/us.anthropic.claude-opus-4-6-v1` | US cross-region inference |
+| `bedrock/eu.anthropic.claude-opus-4-6-v1` | EU cross-region inference |
+| `bedrock/ap.anthropic.claude-opus-4-6-v1` | AP cross-region inference |
+| `bedrock/global.anthropic.claude-opus-4-6-v1` | Global cross-region inference |
+| `bedrock/global.anthropic.claude-opus-4-6-v1[1m]` | Global, 1M context window |
+
+> [!TIP]
+> - **Cross-region inference profiles** (prefixed with `us.`, `eu.`, `ap.`, `global.`) are recommended — Bedrock auto-routes to the optimal region.
+> - The `region` config is used as the entry point. For cross-region models, the region is auto-inferred from the model ID prefix.
+> - Bedrock provider calls boto3 directly — `boto3>=1.35.0` is required for Converse API support.
 
 ## 💬 Chat Apps
 
@@ -597,6 +694,7 @@ Config file: `~/.nanobot/config.json`
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
+| `bedrock` | LLM (AWS Bedrock native, Converse API) | [console.aws.amazon.com/bedrock](https://console.aws.amazon.com/bedrock/) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 
 <details>
