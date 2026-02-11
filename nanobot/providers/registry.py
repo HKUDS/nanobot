@@ -310,8 +310,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
 
 def find_by_model(model: str) -> ProviderSpec | None:
     """Match a standard provider by model-name keyword (case-insensitive).
-    Skips gateways/local — those are matched by api_key/api_base instead."""
+    Skips gateways/local — those are matched by api_key/api_base instead.
+    
+    Priority:
+      1. Explicit prefix match: if model starts with "provider/", use that provider.
+         E.g., "dashscope/deepseek-v3" → DashScope (not DeepSeek).
+      2. Keyword match: fallback to keyword-based detection.
+    """
     model_lower = model.lower()
+    
+    # First pass: check for explicit litellm_prefix match (e.g., "dashscope/...")
+    if "/" in model_lower:
+        prefix = model_lower.split("/")[0]
+        for spec in PROVIDERS:
+            if spec.is_gateway or spec.is_local:
+                continue
+            if spec.litellm_prefix and spec.litellm_prefix.lower() == prefix:
+                return spec
+    
+    # Second pass: keyword-based match
     for spec in PROVIDERS:
         if spec.is_gateway or spec.is_local:
             continue
