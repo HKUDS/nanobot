@@ -19,6 +19,7 @@ from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.reasoning import ReasoningEngine
 from nanobot.session.manager import SessionManager
 
 
@@ -33,7 +34,7 @@ class AgentLoop:
     4. Executes tool calls
     5. Sends responses back
     """
-    
+
     def __init__(
         self,
         bus: MessageBus,
@@ -46,6 +47,7 @@ class AgentLoop:
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
+        enable_reasoning: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
@@ -71,7 +73,15 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
-        
+        # New: Reasoning Engine
+        self.reasoning = ReasoningEngine(
+            provider=self.provider,
+            model=self.model
+        )
+
+        # Reasoning configuration
+        self.enable_reasoning = enable_reasoning  # Can be read from config
+
         self._running = False
         self._register_default_tools()
     
@@ -183,31 +193,56 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
         )
-        
-        # Agent loop
+
+        # ===== Phase 1: Task Planning =====
+        plan = None
+        if self.enable_reasoning:
+            plan = await self.reasoning.create_plan(
+                messages=messages,
+                task=msg.content,
+                available_tools=self.tools.get_simple_definitions(),
+                context=None  # Can pass additional context
+            )
+
+            if plan:
+                # Add plan to conversation history
+                plan_message = f"""I have created an execution plan:
+                                {plan.to_readable_string()}
+                                Starting execution..."""
+
+                messages.append({
+                    "role": "assistant",
+                    "content": plan_message
+                })
+                logger.info(f"Plan created: {len(plan.steps)} steps")
+
+        # ===== Phase 2: Execution Loop (with Reflection) =====
         iteration = 0
         final_content = None
-        
+        current_step_id = 0  # Track which step we're on
+        tools_used_in_step = []  # Tools used in current step
+        step_results = []  # Collect results from each step
+
         while iteration < self.max_iterations:
             iteration += 1
-            
+
             # Call LLM
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
-            
+
             # Handle tool calls
             if response.has_tool_calls:
-                # Add assistant message with tool calls
+                # Add assistant message
                 tool_call_dicts = [
                     {
                         "id": tc.id,
                         "type": "function",
                         "function": {
                             "name": tc.name,
-                            "arguments": json.dumps(tc.arguments)  # Must be JSON string
+                            "arguments": json.dumps(tc.arguments)
                         }
                     }
                     for tc in response.tool_calls
@@ -216,39 +251,112 @@ class AgentLoop:
                     messages, response.content, tool_call_dicts,
                     reasoning_content=response.reasoning_content,
                 )
-                
+
                 # Execute tools
+                step_tool_results = []
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
+
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    step_tool_results.append(result)
+                    tools_used_in_step.append(tool_call.name)
+
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+
+                # ===== Reflection: Reflect after key steps =====
+                if self.enable_reasoning and plan and tools_used_in_step:
+                    # Check if a planned step is completed
+                    if current_step_id < len(plan.steps):
+                        current_step = plan.steps[current_step_id]
+
+                        # Check if planned tool was used
+                        if current_step.tool in tools_used_in_step:
+                            # Perform reflection
+                            reflection = await self.reasoning.reflect_on_step(
+                                messages=messages,
+                                step=current_step,
+                                actual_tools_used=tools_used_in_step,
+                                actual_result="\n".join(str(r) for r in step_tool_results)
+                            )
+
+                            # Record reflection result
+                            step_results.append({
+                                "step": current_step,
+                                "reflection": reflection
+                            })
+
+                            # If reflection indicates adjustment needed
+                            if reflection.needs_adjustment:
+                                logger.warning(
+                                    f"Step {current_step_id + 1} needs adjustment: "
+                                    f"{reflection.suggested_adjustment}"
+                                )
+                                # Can insert adjustment logic here
+                                # For example: add adjustment suggestion to conversation
+                                messages.append({
+                                    "role": "user",
+                                    "content": f"[Reflection] {reflection.insights}\n"
+                                               f"Suggestion: {reflection.suggested_adjustment}"
+                                })
+
+                            # Move to next step
+                            current_step_id += 1
+                            tools_used_in_step = []
+
             else:
-                # No tool calls, we're done
+                # No tool calls, done
                 final_content = response.content
                 break
-        
+
         if final_content is None:
-            final_content = "I've completed processing but have no response to give."
-        
-        # Log response preview
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
-        
-        # Save to session
+            final_content = "Task processing completed."
+
+            # ===== Phase 3: Verify Result =====
+        if self.enable_reasoning and plan:
+            verification = await self.reasoning.verify_completion(
+                messages=messages,
+                original_task=msg.content,
+                plan=plan,
+                final_result=final_content
+            )
+
+            # Adjust response based on verification result
+            if not verification.task_completed:
+                logger.warning("Task verification failed")
+                final_content += "\n\n⚠️ Note: Task may not be fully completed."
+                if verification.missing_items:
+                    final_content += f"\nMissing items: {', '.join(verification.missing_items)}"
+
+            if verification.quality_score < 0.6:
+                logger.warning(f"Low quality score: {verification.quality_score}")
+
+            if verification.issues:
+                final_content += f"\n\nIssues found:\n" + "\n".join(f"- {issue}" for issue in verification.issues)
+
+            # Log verification result
+            logger.info(
+                f"Verification: completed={verification.task_completed}, "
+                f"quality={verification.quality_score:.2f}, "
+                f"issues={len(verification.issues)}"
+            )
+
+            # ... Rest of code unchanged (save session, return response) ...
+
+            # Save to session
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
-        
+
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
             metadata=msg.metadata or {},  # Pass through for channel-specific needs (e.g. Slack thread_ts)
         )
-    
+
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
         Process a system message (e.g., subagent announce).
@@ -257,7 +365,7 @@ class AgentLoop:
         the response back to the correct destination.
         """
         logger.info(f"Processing system message from {msg.sender_id}")
-        
+
         # Parse origin from chat_id (format: "channel:chat_id")
         if ":" in msg.chat_id:
             parts = msg.chat_id.split(":", 1)
@@ -267,24 +375,24 @@ class AgentLoop:
             # Fallback
             origin_channel = "cli"
             origin_chat_id = msg.chat_id
-        
+
         # Use the origin session for context
         session_key = f"{origin_channel}:{origin_chat_id}"
         session = self.sessions.get_or_create(session_key)
-        
+
         # Update tool contexts
         message_tool = self.tools.get("message")
         if isinstance(message_tool, MessageTool):
             message_tool.set_context(origin_channel, origin_chat_id)
-        
+
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
             spawn_tool.set_context(origin_channel, origin_chat_id)
-        
+
         cron_tool = self.tools.get("cron")
         if isinstance(cron_tool, CronTool):
             cron_tool.set_context(origin_channel, origin_chat_id)
-        
+
         # Build messages with the announce content
         messages = self.context.build_messages(
             history=session.get_history(),
@@ -292,20 +400,20 @@ class AgentLoop:
             channel=origin_channel,
             chat_id=origin_chat_id,
         )
-        
+
         # Agent loop (limited for announce handling)
         iteration = 0
         final_content = None
-        
+
         while iteration < self.max_iterations:
             iteration += 1
-            
+
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
-            
+
             if response.has_tool_calls:
                 tool_call_dicts = [
                     {
@@ -322,7 +430,7 @@ class AgentLoop:
                     messages, response.content, tool_call_dicts,
                     reasoning_content=response.reasoning_content,
                 )
-                
+
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
@@ -333,27 +441,27 @@ class AgentLoop:
             else:
                 final_content = response.content
                 break
-        
+
         if final_content is None:
             final_content = "Background task completed."
-        
+
         # Save to session (mark as system message in history)
         session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
         session.add_message("assistant", final_content)
         self.sessions.save(session)
-        
+
         return OutboundMessage(
             channel=origin_channel,
             chat_id=origin_chat_id,
             content=final_content
         )
-    
+
     async def process_direct(
-        self,
-        content: str,
-        session_key: str = "cli:direct",
-        channel: str = "cli",
-        chat_id: str = "direct",
+            self,
+            content: str,
+            session_key: str = "cli:direct",
+            channel: str = "cli",
+            chat_id: str = "direct",
     ) -> str:
         """
         Process a message directly (for CLI or cron usage).
@@ -373,6 +481,6 @@ class AgentLoop:
             chat_id=chat_id,
             content=content
         )
-        
+
         response = await self._process_message(msg)
         return response.content if response else ""

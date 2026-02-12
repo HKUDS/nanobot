@@ -100,3 +100,10 @@ class Tool(ABC):
                 "parameters": self.parameters,
             }
         }
+
+    def to_simple_schema(self) -> str:
+        """Convert tool to simple JSON schema format."""
+        return f"""
+            name: {self.name},
+            description: {self.description},
+        """

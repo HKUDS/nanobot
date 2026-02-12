@@ -34,6 +34,10 @@ class ToolRegistry:
     def get_definitions(self) -> list[dict[str, Any]]:
         """Get all tool definitions in OpenAI format."""
         return [tool.to_schema() for tool in self._tools.values()]
+
+    def get_simple_definitions(self) -> list[str]:
+        """Get simple tool definitions in OpenAI format."""
+        return [tool.to_simple_schema() for tool in self._tools.values()]
     
     async def execute(self, name: str, params: dict[str, Any]) -> str:
         """
