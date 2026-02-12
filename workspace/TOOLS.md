@@ -140,6 +140,43 @@ write_file(
 )
 ```
 
+## Session History
+
+### session_reader
+Read and filter conversation history from session files.
+```
+session_reader(action: str, session_key: str = None, offset: int = 0, limit: int = 50, roles: str = "user,assistant", date_from: str = None, date_to: str = None) -> str
+```
+
+**Actions:**
+- `list` — List all available sessions with message counts
+- `stats` — Get message count and date range for a session (no content loaded)
+- `read` — Read messages in chunks with optional filters
+
+**Examples:**
+```python
+# List all sessions
+session_reader(action="list")
+
+# Get stats for a session
+session_reader(action="stats", session_key="telegram:12345")
+
+# Read first 50 user/assistant messages
+session_reader(action="read", session_key="telegram:12345")
+
+# Read messages 100-150
+session_reader(action="read", session_key="telegram:12345", offset=100, limit=50)
+
+# Read all messages (including tool calls) from a specific date range
+session_reader(action="read", session_key="telegram:12345", roles="all", date_from="2025-01-15", date_to="2025-01-20")
+```
+
+**Notes:**
+- Messages are filtered before offset/limit is applied
+- Default roles filter: `user,assistant` (use `all` to include tool calls)
+- Long messages are truncated at 2000 characters
+- Maximum limit per read: 200 messages
+
 ---
 
 ## Adding Custom Tools
