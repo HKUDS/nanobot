@@ -4,7 +4,7 @@ import asyncio
 import json
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from loguru import logger
 
@@ -15,7 +15,10 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
+from nanobot.agent.tools.memory import MemoryTool
 
+if TYPE_CHECKING:
+    from nanobot.agent.tools.smriti_lite import MemoryStore
 
 class SubagentManager:
     """
@@ -35,6 +38,7 @@ class SubagentManager:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        memory: "MemoryStore | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.provider = provider
@@ -44,6 +48,7 @@ class SubagentManager:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.memory = memory
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
     
     async def spawn(
@@ -109,6 +114,8 @@ class SubagentManager:
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
+            if self.memory:
+                tools.register(MemoryTool(self.memory))
             
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)
