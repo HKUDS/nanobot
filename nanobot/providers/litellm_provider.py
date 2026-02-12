@@ -39,7 +39,26 @@ class LiteLLMProvider(LLMProvider):
         
         # Configure environment variables
         if api_key:
-            self._setup_env(api_key, api_base, default_model)
+            if self.is_openrouter:
+                # OpenRouter mode - set key
+                os.environ["OPENROUTER_API_KEY"] = api_key
+            elif self.is_vllm:
+                # vLLM/custom endpoint - uses OpenAI-compatible API
+                os.environ["OPENAI_API_KEY"] = api_key
+            elif "deepseek" in default_model:
+                os.environ.setdefault("DEEPSEEK_API_KEY", api_key)
+            elif "anthropic" in default_model:
+                os.environ.setdefault("ANTHROPIC_API_KEY", api_key)
+            elif "openai" in default_model or "gpt" in default_model:
+                os.environ.setdefault("OPENAI_API_KEY", api_key)
+            elif "gemini" in default_model.lower():
+                os.environ.setdefault("GEMINI_API_KEY", api_key)
+            elif "zhipu" in default_model or "glm" in default_model or "zai" in default_model:
+                # Zhipu/Zai requires specific env vars
+                os.environ["ZHIPUAI_API_KEY"] = api_key
+                os.environ["ZAI_API_KEY"] = api_key
+            elif "groq" in default_model:
+                os.environ.setdefault("GROQ_API_KEY", api_key)
         
         if api_base:
             litellm.api_base = api_base
