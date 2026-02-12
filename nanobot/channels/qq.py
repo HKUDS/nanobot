@@ -75,12 +75,15 @@ class QQChannel(BaseChannel):
         logger.info("QQ bot started (C2C private message)")
 
     async def _run_bot(self) -> None:
-        """Run the bot connection."""
-        try:
-            await self._client.start(appid=self.config.app_id, secret=self.config.secret)
-        except Exception as e:
-            logger.error(f"QQ auth failed, check AppID/Secret at q.qq.com: {e}")
-            self._running = False
+        """Run the bot connection with auto-reconnect."""
+        while self._running:
+            try:
+                await self._client.start(appid=self.config.app_id, secret=self.config.secret)
+            except Exception as e:
+                logger.warning(f"QQ bot error: {e}")
+            if self._running:
+                logger.info("Reconnecting QQ bot in 5 seconds...")
+                await asyncio.sleep(5)
 
     async def stop(self) -> None:
         """Stop the QQ bot."""
