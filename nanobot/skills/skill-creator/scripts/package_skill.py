@@ -3,16 +3,18 @@
 Skill Packager - Creates a distributable .skill file of a skill folder
 
 Usage:
-    python utils/package_skill.py <path/to/skill-folder> [output-directory]
+    python nanobot/skills/skill-creator/scripts/package_skill.py <path/to/skill-folder> [output-directory]
 
 Example:
-    python utils/package_skill.py skills/public/my-skill
-    python utils/package_skill.py skills/public/my-skill ./dist
+    python nanobot/skills/skill-creator/scripts/package_skill.py skills/public/my-skill
+    python nanobot/skills/skill-creator/scripts/package_skill.py skills/public/my-skill ./dist
 """
 
+import argparse
 import sys
 import zipfile
 from pathlib import Path
+
 from quick_validate import validate_skill
 
 
@@ -65,9 +67,9 @@ def package_skill(skill_path, output_dir=None):
 
     # Create the .skill file (zip format)
     try:
-        with zipfile.ZipFile(skill_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        with zipfile.ZipFile(skill_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
             # Walk through the skill directory
-            for file_path in skill_path.rglob('*'):
+            for file_path in skill_path.rglob("*"):
                 if file_path.is_file():
                     # Calculate the relative path within the zip
                     arcname = file_path.relative_to(skill_path.parent)
@@ -83,15 +85,24 @@ def package_skill(skill_path, output_dir=None):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python utils/package_skill.py <path/to/skill-folder> [output-directory]")
-        print("\nExample:")
-        print("  python utils/package_skill.py skills/public/my-skill")
-        print("  python utils/package_skill.py skills/public/my-skill ./dist")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Skill Packager - Creates a distributable .skill file of a skill folder",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Example:
+    python nanobot/skills/skill-creator/scripts/package_skill.py skills/public/my-skill
+    python nanobot/skills/skill-creator/scripts/package_skill.py skills/public/my-skill ./dist
+""",
+    )
+    parser.add_argument("skill_path", help="Path to the skill folder")
+    parser.add_argument(
+        "output_dir", nargs="?", help="Optional output directory for the .skill file"
+    )
 
-    skill_path = sys.argv[1]
-    output_dir = sys.argv[2] if len(sys.argv) > 2 else None
+    args = parser.parse_args()
+
+    skill_path = args.skill_path
+    output_dir = args.output_dir
 
     print(f"📦 Packaging skill: {skill_path}")
     if output_dir:
