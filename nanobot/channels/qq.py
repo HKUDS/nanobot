@@ -113,7 +113,7 @@ class QQChannel(BaseChannel):
                 await self._client.api.post_c2c_message(
                     openid=msg.chat_id,
                     msg_type=0,
-                    content=msg.content},
+                    content=msg.content,
                 )
         except Exception as e:
             logger.error(f"Error sending QQ message: {e}")
