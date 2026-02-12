@@ -11,7 +11,19 @@ from nanobot.agent.tools.base import Tool
 
 class ExecTool(Tool):
     """Tool to execute shell commands."""
-    
+
+    _SENSITIVE_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_CREDENTIALS")
+    _SENSITIVE_EXACT = {"DATABASE_URL", "DSN"}
+
+    @staticmethod
+    def _is_sensitive_env(name: str) -> bool:
+        """Check if an environment variable name likely contains a secret."""
+        upper = name.upper()
+        return (
+            any(upper.endswith(s) for s in ExecTool._SENSITIVE_SUFFIXES)
+            or upper in ExecTool._SENSITIVE_EXACT
+        )
+
     def __init__(
         self,
         timeout: int = 60,
@@ -67,11 +79,15 @@ class ExecTool(Tool):
             return guard_error
         
         try:
+            env = {k: v for k, v in os.environ.items()
+                   if not self._is_sensitive_env(k)}
+
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
+                env=env,
             )
             
             try:

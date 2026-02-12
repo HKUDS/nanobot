@@ -45,6 +45,7 @@ class AgentLoop:
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
+        safeish_search: bool = False,
         session_manager: SessionManager | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
@@ -58,8 +59,9 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
-        
-        self.context = ContextBuilder(workspace)
+        self.safeish_search = safeish_search
+
+        self.context = ContextBuilder(workspace, safeish_search=safeish_search)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -70,6 +72,7 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            safeish_search=safeish_search,
         )
         
         self._running = False
