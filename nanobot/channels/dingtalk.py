@@ -137,15 +137,8 @@ class DingTalkChannel(BaseChannel):
 
             logger.info("DingTalk bot started with Stream Mode")
 
-            # Reconnect loop: restart stream if SDK exits or crashes
-            while self._running:
-                try:
-                    await self._client.start()
-                except Exception as e:
-                    logger.warning(f"DingTalk stream error: {e}")
-                if self._running:
-                    logger.info("Reconnecting DingTalk stream in 5 seconds...")
-                    await asyncio.sleep(5)
+            # client.start() is an async infinite loop handling the websocket connection
+            await self._client.start()
 
         except Exception as e:
             logger.exception(f"Failed to start DingTalk channel: {e}")
