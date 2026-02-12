@@ -292,9 +292,45 @@ def _make_provider(config):
 # ============================================================================
 
 
+async def _start_health_check(port: int):
+    """Start a minimal HTTP server for health checks (required by Render)."""
+    from loguru import logger
+    async def handle_ping(reader, writer):
+        try:
+            # Read request (just to consume it)
+            await asyncio.wait_for(reader.read(1024), timeout=1.0)
+
+            response = (
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/plain\r\n"
+                "Content-Length: 2\r\n"
+                "Connection: close\r\n"
+                "\r\n"
+                "OK"
+            )
+            writer.write(response.encode())
+            await writer.drain()
+        except Exception:
+            pass
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+    try:
+        server = await asyncio.start_server(handle_ping, '0.0.0.0', port)
+        logger.info(f"Health check server listening on 0.0.0.0:{port}")
+        async with server:
+            await server.serve_forever()
+    except Exception as e:
+        logger.error(f"Failed to start health check server: {e}")
+
+
 @app.command()
 def gateway(
-    port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    port: int = typer.Option(int(os.environ.get("PORT", 18790)), "--port", "-p", help="Gateway port"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the nanobot gateway."""
@@ -389,6 +425,7 @@ def gateway(
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
+                _start_health_check(port),
             )
         except KeyboardInterrupt:
             console.print("\nShutting down...")

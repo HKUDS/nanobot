@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: nanobot
+    runtime: docker
+    plan: free
+    region: oregon
+    envVars:
+      - key: NANOBOT_PROVIDERS__GEMINI__API_KEY
+        value: "REPLACE_WITH_YOUR_GEMINI_API_KEY"
+      - key: NANOBOT_CHANNELS__TELEGRAM__TOKEN
+        value: "REPLACE_WITH_YOUR_TELEGRAM_BOT_TOKEN"
+      - key: NANOBOT_CHANNELS__TELEGRAM__ENABLED
+        value: "true"
+      - key: NANOBOT_CHANNELS__TELEGRAM__ALLOW_FROM
+        value: '["8181163397"]'
+      - key: NANOBOT_AGENTS__DEFAULTS__MODEL
+        value: "gemini/gemini-2.0-flash"
+    dockerCommand: gateway
