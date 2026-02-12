@@ -700,6 +700,94 @@ nanobot cron remove <job_id>
 
 </details>
 
+## 🔄 Run as Daemon (Autostart on Boot)
+
+### macOS (launchd)
+
+**Start before login** (LaunchDaemon):
+
+Create `/Library/LaunchDaemons/com.nanobot.gateway.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nanobot.gateway</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/YOUR_USER/.local/bin/nanobot</string>
+        <string>gateway</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>UserName</key>
+    <string>YOUR_USER</string>
+    <key>StandardOutPath</key>
+    <string>/tmp/nanobot.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/nanobot.error.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/YOUR_USER/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/YOUR_USER</string>
+    </dict>
+</dict>
+</plist>
+```
+
+```bash
+sudo chown root:wheel /Library/LaunchDaemons/com.nanobot.gateway.plist
+sudo launchctl load /Library/LaunchDaemons/com.nanobot.gateway.plist
+```
+
+**Start after login** (LaunchAgent) — use `~/Library/LaunchAgents/` instead and remove `UserName` key.
+
+### Linux (systemd)
+
+Create `/etc/systemd/system/nanobot.service`:
+
+```ini
+[Unit]
+Description=Nanobot Gateway
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER
+ExecStart=/home/YOUR_USER/.local/bin/nanobot gateway
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/nanobot.log
+StandardError=append:/var/log/nanobot.error.log
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable nanobot
+sudo systemctl start nanobot
+```
+
+### Update and Restart
+
+After `uv tool install --force .` from source:
+
+```bash
+# macOS
+sudo launchctl kickstart system/com.nanobot.gateway
+
+# Linux
+sudo systemctl restart nanobot
+```
+
 ## 🐳 Docker
 
 > [!TIP]
