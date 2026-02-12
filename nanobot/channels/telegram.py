@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from telegram import BotCommand, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -121,11 +122,13 @@ class TelegramChannel(BaseChannel):
         
         self._running = True
         
-        # Build the application
-        builder = Application.builder().token(self.config.token)
+        # Build the application with larger connection pool to avoid pool-timeout on long runs
+        req = HTTPXRequest(connection_pool_size=16, pool_timeout=5.0, connect_timeout=30.0, read_timeout=30.0)
+        builder = Application.builder().token(self.config.token).request(req).get_updates_request(req)
         if self.config.proxy:
             builder = builder.proxy(self.config.proxy).get_updates_proxy(self.config.proxy)
         self._app = builder.build()
+        self._app.add_error_handler(self._on_error)
         
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
@@ -386,6 +389,10 @@ class TelegramChannel(BaseChannel):
         except Exception as e:
             logger.debug(f"Typing indicator stopped for {chat_id}: {e}")
     
+    async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Log polling / handler errors instead of silently swallowing them."""
+        logger.error(f"Telegram error: {context.error}")
+
     def _get_extension(self, media_type: str, mime_type: str | None) -> str:
         """Get file extension based on media type."""
         if mime_type:
