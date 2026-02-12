@@ -39,16 +39,16 @@ class Session:
     def get_history(self, max_messages: int = 50) -> list[dict[str, Any]]:
         """
         Get message history for LLM context.
-        
+
         Args:
             max_messages: Maximum messages to return.
-        
+
         Returns:
             List of messages in LLM format.
         """
         # Get recent messages
         recent = self.messages[-max_messages:] if len(self.messages) > max_messages else self.messages
-        
+
         # Convert to LLM format (role, content, and optional tool_calls / tool_call_id)
         history = []
         for m in recent:

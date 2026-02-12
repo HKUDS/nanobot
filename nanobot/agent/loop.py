@@ -188,6 +188,7 @@ class AgentLoop:
             for i, (name, args, result) in enumerate(tool_use_log, 1):
                 lines.append(f"{i}. {name}({args}) -> {result}")
             summary_text = "\n".join(lines)
+            logger.info(f"Tool use summary:\n{summary_text}")
             # Save as a virtual tool call so it doesn't pollute assistant content
             call_id = f"toolsum_{uuid.uuid4().hex[:12]}"
             session.add_message("assistant", final_content, tool_calls=[{
