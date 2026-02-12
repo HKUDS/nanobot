@@ -359,13 +359,9 @@ The user asks the agent to process conversations. Simplest, no automation needed
 
 ### 4.4 JSONL management after processing
 
-Once messages are processed into knowledge files, options for the JSONL:
+**Note:** Upstream now handles session trimming automatically via auto-consolidation (when session exceeds `memory_window`, old messages are summarized into HISTORY.md and the session is trimmed). The knowledge extractor is complementary — it extracts *structured* knowledge that auto-consolidation doesn't capture.
 
-- **Keep as-is**: Simplest. JSONL remains as audit log. No data loss risk.
-- **Truncate to window**: Keep only the last 50 messages in the active JSONL. Archive the rest to a dated file. Requires a small change to `SessionManager`.
-- **Rotate**: After processing, move the JSONL to an archive directory and start fresh.
-
-Recommendation: start with **keep as-is**, add truncation later once the pipeline is proven reliable.
+The session_reader tool remains useful for initial bootstrapping (processing existing history before auto-consolidation was active) and for deeper re-processing when needed.
 
 ### Deliverable
 A pipeline that processes conversation history into structured knowledge entries, runs on a local model, and can be triggered automatically or manually.

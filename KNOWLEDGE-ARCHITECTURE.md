@@ -204,17 +204,27 @@ Knowledge files can capture how understanding evolves over time:
 - `updated` timestamp in frontmatter tracks when knowledge last changed
 - Dated sections within files record how decisions or understanding shifted
 - Git history provides full versioning if the workspace is a repository
-- Daily notes continue to serve as a chronological journal alongside the topic-based knowledge
+- HISTORY.md serves as a grep-searchable chronological log alongside the topic-based knowledge
 
-### 3.7 Integration with Existing Systems
+### 3.7 Upstream Memory Redesign (February 2025)
+
+After this document was originally written, the upstream nanobot project redesigned its memory system:
+
+- **Daily notes removed** — replaced by `HISTORY.md`, an append-only grep-searchable event log
+- **Auto-consolidation** — when sessions exceed `memory_window` (default 50), old messages are automatically summarized by the LLM, appended to HISTORY.md, and extracted to MEMORY.md
+- **Session trimming** — sessions are trimmed after consolidation, solving the unbounded JSONL growth problem
+
+This change is complementary to the knowledge base. The upstream system handles the flat memory layer (MEMORY.md + HISTORY.md) while the knowledge base adds the structured, topic-organized layer on top.
+
+### 3.8 Integration with Current Systems
 
 The knowledge base works alongside, not replacing, existing mechanisms:
 
 | Component | Role | Changes |
 |-----------|------|---------|
 | MEMORY.md | Quick-access critical facts | Stays, but can be leaner since knowledge/ handles depth |
-| Daily notes | Chronological journal | Continue as-is, now supplemented by structured knowledge |
-| JSONL sessions | Conversation audit log | Processed and optionally truncated instead of growing forever |
+| HISTORY.md | Grep-searchable event log | Auto-populated by consolidation; extractor can also append |
+| JSONL sessions | Conversation history | Auto-trimmed by consolidation after memory_window |
 | INDEX.md (new) | Knowledge directory loaded each turn | Replaces some of MEMORY.md's burden |
 | Knowledge files (new) | Deep, structured, cross-referenced knowledge | Loaded on demand via read_file |
 | Skills | Domain-specific instructions | A skill teaches the agent how to manage the knowledge base |

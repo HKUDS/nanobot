@@ -7,7 +7,7 @@ metadata: {"nanobot":{"emoji":"🧠"}}
 # Knowledge Base Management
 
 The knowledge base is a structured collection of files at `workspace/knowledge/`.
-It is the agent's long-term, topic-organized memory — complementing the flat `MEMORY.md` and date-indexed daily notes.
+It is the agent's long-term, topic-organized memory — complementing `MEMORY.md` (quick-access facts) and `HISTORY.md` (grep-searchable event log).
 
 ## Structure
 

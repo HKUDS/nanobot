@@ -1,6 +1,6 @@
 ---
 name: knowledge-extractor
-description: Extract knowledge from conversation history and populate the knowledge base, memory, and daily notes.
+description: Extract knowledge from conversation history and populate the knowledge base, memory, and history log.
 metadata: {"nanobot":{"emoji":"🔍"}}
 ---
 
@@ -9,7 +9,7 @@ metadata: {"nanobot":{"emoji":"🔍"}}
 Process conversation history and extract structured information into three outputs:
 - **Knowledge base** (`workspace/knowledge/`) — structured, topic-organized entries
 - **Long-term memory** (`workspace/memory/MEMORY.md`) — critical quick-access facts
-- **Daily notes** (`workspace/memory/YYYY-MM-DD.md`) — date-specific summaries
+- **History log** (`workspace/memory/HISTORY.md`) — append-only, grep-searchable event log
 
 This skill is typically run as a subagent task spawned by the main agent.
 
@@ -74,12 +74,13 @@ Before creating a new entry:
 - Append to or update `workspace/memory/MEMORY.md`
 - Keep this file concise — it's loaded every turn
 
-**Daily notes** — for date-specific summaries of what happened:
+**History log** — for timestamped event summaries (grep-searchable):
 - Key conversations and their outcomes
 - Tasks completed or started
-- Decisions made on that date
-- Write to `workspace/memory/YYYY-MM-DD.md` using the date from the messages
-- Group by the actual date of the conversation, not today's date
+- Decisions made with context
+- Append to `workspace/memory/HISTORY.md`
+- Each entry starts with a timestamp: `[YYYY-MM-DD HH:MM]`
+- Include enough detail to be useful when found by grep later
 
 ### Step 6: Update processing state
 
@@ -114,7 +115,7 @@ If done, provide a summary of what was extracted.
 - Don't duplicate information across outputs — use the right one:
   - Knowledge base for structured, topic-organized, long-lived information
   - MEMORY.md for facts the agent needs every turn (keep it small)
-  - Daily notes for chronological record of what happened when
+  - HISTORY.md for chronological, grep-searchable event log
 - When in doubt about knowledge category, prefer `topics/` as the default
 
 ## Spawning This Task
