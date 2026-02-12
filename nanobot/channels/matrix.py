@@ -491,7 +491,21 @@ class MatrixChannel(BaseChannel):
             return 0
         return min(local_limit, server_limit)
 
-    async def _upload_and_send_attachment(self, room_id: str, path: Path, limit_bytes: int) -> str | None:
+    def _configured_media_limit_bytes(self) -> int:
+        """Resolve the configured local media limit with backward compatibility."""
+        for name in ("max_inbound_media_bytes", "max_media_bytes"):
+            value = getattr(self.config, name, None)
+            if isinstance(value, int):
+                return value
+        return 0
+
+    async def _upload_and_send_attachment(
+        self,
+        room_id: str,
+        path: Path,
+        limit_bytes: int,
+        relates_to: dict[str, Any] | None = None,
+    ) -> str | None:
         """Upload one local file to Matrix and send it as a media message."""
         if not self.client:
             return MATRIX_ATTACHMENT_UPLOAD_FAILED_TEMPLATE.format(path.name or MATRIX_DEFAULT_ATTACHMENT_NAME)
@@ -585,6 +599,8 @@ class MatrixChannel(BaseChannel):
             mxc_url=mxc_url,
             encryption_info=encryption_info,
         )
+        if relates_to:
+            content["m.relates_to"] = relates_to
         try:
             await self._send_room_content(room_id, content)
         except Exception as e:
@@ -603,6 +619,7 @@ class MatrixChannel(BaseChannel):
 
         text = msg.content or ""
         candidates = self._collect_outbound_media_candidates(msg.media)
+        relates_to = self._build_thread_relates_to(msg.metadata)
 
         try:
             failures: list[str] = []
@@ -614,6 +631,7 @@ class MatrixChannel(BaseChannel):
                         room_id=msg.chat_id,
                         path=path,
                         limit_bytes=limit_bytes,
+                        relates_to=relates_to,
                     )
                     if failure_marker:
                         failures.append(failure_marker)
@@ -625,7 +643,10 @@ class MatrixChannel(BaseChannel):
                     text = "\n".join(failures)
 
             if text or not candidates:
-                await self._send_room_content(msg.chat_id, _build_matrix_text_content(text))
+                content = _build_matrix_text_content(text)
+                if relates_to:
+                    content["m.relates_to"] = relates_to
+                await self._send_room_content(msg.chat_id, content)
         finally:
             await self._stop_typing_keepalive(msg.chat_id, clear_typing=True)
 
@@ -799,6 +820,46 @@ class MatrixChannel(BaseChannel):
             return {}
         content = source.get("content")
         return content if isinstance(content, dict) else {}
+
+    def _event_thread_root_id(self, event: Any) -> str | None:
+        """Return thread root event_id if this message is inside a thread."""
+        content = self._event_source_content(event)
+        relates_to = content.get("m.relates_to")
+        if not isinstance(relates_to, dict):
+            return None
+        if relates_to.get("rel_type") != "m.thread":
+            return None
+        root_id = relates_to.get("event_id")
+        return root_id if isinstance(root_id, str) and root_id else None
+
+    def _thread_metadata(self, event: Any) -> dict[str, str] | None:
+        """Build metadata used to reply within a thread."""
+        root_id = self._event_thread_root_id(event)
+        if not root_id:
+            return None
+        reply_to = getattr(event, "event_id", None)
+        meta: dict[str, str] = {"thread_root_event_id": root_id}
+        if isinstance(reply_to, str) and reply_to:
+            meta["thread_reply_to_event_id"] = reply_to
+        return meta
+
+    @staticmethod
+    def _build_thread_relates_to(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Build m.relates_to payload for Matrix thread replies."""
+        if not metadata:
+            return None
+        root_id = metadata.get("thread_root_event_id")
+        if not isinstance(root_id, str) or not root_id:
+            return None
+        reply_to = metadata.get("thread_reply_to_event_id") or metadata.get("event_id")
+        if not isinstance(reply_to, str) or not reply_to:
+            return None
+        return {
+            "rel_type": "m.thread",
+            "event_id": root_id,
+            "m.in_reply_to": {"event_id": reply_to},
+            "is_falling_back": True,
+        }
 
     def _event_attachment_type(self, event: Any) -> str:
         """Map Matrix event payload/type to a stable attachment kind."""
@@ -1043,11 +1104,20 @@ class MatrixChannel(BaseChannel):
 
         await self._start_typing_keepalive(room.room_id)
         try:
+            metadata: dict[str, Any] = {
+                "room": getattr(room, "display_name", room.room_id),
+            }
+            event_id = getattr(event, "event_id", None)
+            if isinstance(event_id, str) and event_id:
+                metadata["event_id"] = event_id
+            thread_meta = self._thread_metadata(event)
+            if thread_meta:
+                metadata.update(thread_meta)
             await self._handle_message(
                 sender_id=event.sender,
                 chat_id=room.room_id,
                 content=event.body,
-                metadata={"room": getattr(room, "display_name", room.room_id)},
+                metadata=metadata,
             )
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
@@ -1077,15 +1147,22 @@ class MatrixChannel(BaseChannel):
 
         await self._start_typing_keepalive(room.room_id)
         try:
+            metadata: dict[str, Any] = {
+                "room": getattr(room, "display_name", room.room_id),
+                "attachments": attachments,
+            }
+            event_id = getattr(event, "event_id", None)
+            if isinstance(event_id, str) and event_id:
+                metadata["event_id"] = event_id
+            thread_meta = self._thread_metadata(event)
+            if thread_meta:
+                metadata.update(thread_meta)
             await self._handle_message(
                 sender_id=event.sender,
                 chat_id=room.room_id,
                 content="\n".join(content_parts),
                 media=media_paths,
-                metadata={
-                    "room": getattr(room, "display_name", room.room_id),
-                    "attachments": attachments,
-                },
+                metadata=metadata,
             )
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
