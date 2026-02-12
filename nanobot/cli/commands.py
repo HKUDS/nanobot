@@ -623,18 +623,29 @@ def _get_bridge_dir() -> Path:
     return user_bridge
 
 
+def _find_npm() -> str | None:
+    """Find npm executable path, including npm.cmd on Windows."""
+    import shutil
+    
+    return shutil.which("npm") or shutil.which("npm.cmd")
+
+
 @channels_app.command("login")
 def channels_login():
     """Link device via QR code."""
     import subprocess
     
     bridge_dir = _get_bridge_dir()
+    npm = _find_npm()
+    if not npm:
+        console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
+        raise typer.Exit(1)
     
     console.print(f"{__logo__} Starting bridge...")
     console.print("Scan the QR code to connect.\n")
     
     try:
-        subprocess.run(["npm", "start"], cwd=bridge_dir, check=True)
+        subprocess.run([npm, "start"], cwd=bridge_dir, check=True)
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Bridge failed: {e}[/red]")
     except FileNotFoundError:
