@@ -245,9 +245,14 @@ class DeleteFileTool(Tool):
         try:
             file_path = Path(os.path.abspath(str(Path(path).expanduser())))
             if self._allowed_dir:
-                allowed_resolved = self._allowed_dir.resolve()
-                if not file_path.is_relative_to(allowed_resolved):
+                allowed_alias = Path(os.path.abspath(str(self._allowed_dir.expanduser())))
+                allowed_resolved = allowed_alias.resolve()
+
+                in_alias = file_path.is_relative_to(allowed_alias)
+                in_resolved = file_path.is_relative_to(allowed_resolved)
+                if not (in_alias or in_resolved):
                     return f"Error: Path {path} is outside allowed directory {self._allowed_dir}"
+
                 parent_resolved = file_path.parent.resolve()
                 if not parent_resolved.is_relative_to(allowed_resolved):
                     return f"Error: Path {path} is outside allowed directory {self._allowed_dir}"

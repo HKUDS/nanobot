@@ -112,3 +112,24 @@ async def test_delete_file_blocks_symlinked_parent_escape(tmp_path: Path) -> Non
 
     assert result == f"Error: Path {escaped_path} is outside allowed directory {allowed_dir}"
     assert outside_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_file_allows_symlinked_allowed_dir(tmp_path: Path) -> None:
+    real_workspace = tmp_path / "real_workspace"
+    real_workspace.mkdir()
+
+    allowed_link = tmp_path / "workspace_link"
+    try:
+        allowed_link.symlink_to(real_workspace, target_is_directory=True)
+    except OSError:
+        pytest.skip("Symlinks are not supported in this environment")
+
+    file_via_link = allowed_link / "inside.txt"
+    file_via_link.write_text("data", encoding="utf-8")
+
+    tool = DeleteFileTool(allowed_dir=allowed_link)
+    result = await tool.execute(path=str(file_via_link))
+
+    assert result == f"Successfully deleted {file_via_link}"
+    assert not file_via_link.exists()
