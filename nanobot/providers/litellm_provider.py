@@ -27,10 +27,12 @@ class LiteLLMProvider(LLMProvider):
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
+        api_version: str | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self.api_version = api_version
         
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -62,13 +64,17 @@ class LiteLLMProvider(LLMProvider):
             os.environ.setdefault(spec.env_key, api_key)
 
         # Resolve env_extras placeholders:
-        #   {api_key}  → user's API key
-        #   {api_base} → user's api_base, falling back to spec.default_api_base
+        #   {api_key}      → user's API key
+        #   {api_base}     → user's api_base, falling back to spec.default_api_base
+        #   {api_version}  → user's api_version (used by Azure OpenAI)
         effective_base = api_base or spec.default_api_base
+        effective_version = self.api_version or ""
         for env_name, env_val in spec.env_extras:
             resolved = env_val.replace("{api_key}", api_key)
             resolved = resolved.replace("{api_base}", effective_base)
-            os.environ.setdefault(env_name, resolved)
+            resolved = resolved.replace("{api_version}", effective_version)
+            if resolved:  # Only set if resolved to a non-empty value
+                os.environ.setdefault(env_name, resolved)
     
     def _resolve_model(self, model: str) -> str:
         """Resolve model name by applying provider/gateway prefixes."""
@@ -143,6 +149,10 @@ class LiteLLMProvider(LLMProvider):
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
+        
+        # Pass api_version for Azure OpenAI
+        if self.api_version and model.startswith("azure/"):
+            kwargs["api_version"] = self.api_version
         
         if tools:
             kwargs["tools"] = tools

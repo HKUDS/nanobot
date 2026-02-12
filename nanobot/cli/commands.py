@@ -279,6 +279,7 @@ def _make_provider(config):
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=config.get_provider_name(),
+        api_version=p.api_version if p else None,
     )
 
 

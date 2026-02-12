@@ -21,8 +21,9 @@ class ProviderSpec:
     """One LLM provider's metadata. See PROVIDERS below for real examples.
 
     Placeholders in env_extras values:
-      {api_key}  — the user's API key
-      {api_base} — api_base from config, or this spec's default_api_base
+      {api_key}      — the user's API key
+      {api_base}     — api_base from config, or this spec's default_api_base
+      {api_version}  — api_version from config (used by Azure OpenAI)
     """
 
     # identity
@@ -137,6 +138,28 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_key_prefix="",
         detect_by_base_keyword="",
         default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
+    # Azure OpenAI: uses "azure/" prefix for LiteLLM routing.
+    # Requires api_base (resource endpoint) and api_version.
+    ProviderSpec(
+        name="azure",
+        keywords=("azure",),
+        env_key="AZURE_API_KEY",
+        display_name="Azure OpenAI",
+        litellm_prefix="azure",             # gpt-4o → azure/gpt-4o
+        skip_prefixes=("azure/",),          # avoid double-prefix
+        env_extras=(
+            ("AZURE_API_BASE", "{api_base}"),
+            ("AZURE_API_VERSION", "{api_version}"),
+        ),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",                # user must provide in config
         strip_model_prefix=False,
         model_overrides=(),
     ),
