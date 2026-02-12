@@ -26,12 +26,16 @@ dependencies = [
     "readability-lxml>=0.8.0",
     "rich>=13.0.0",
     "croniter>=2.0.0",
-    "python-telegram-bot>=21.0",
-    "raganything",
-    "litellm>=1.81.10",
-    "fastapi>=0.100.0",
-    "uvicorn>=0.20.0",
-    "python-multipart>=0.0.6",
+    "dingtalk-stream>=0.4.0",
+    "python-telegram-bot[socks]>=21.0",
+    "lark-oapi>=1.0.0",
+    "socksio>=1.0.0",
+    "python-socketio>=5.11.0",
+    "msgpack>=1.0.8",
+    "slack-sdk>=3.26.0",
+    "qq-botpy>=1.0.0",
+    "python-socks[asyncio]>=2.4.0",
+    "prompt-toolkit>=3.0.0",
 ]
 
 [project.optional-dependencies]
