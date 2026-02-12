@@ -32,16 +32,16 @@ class SubagentManager:
         workspace: Path,
         bus: MessageBus,
         model: str | None = None,
-        brave_api_key: str | None = None,
+        web_config: "WebToolsConfig | None" = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, WebToolsConfig
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
-        self.brave_api_key = brave_api_key
+        self.web_config = web_config or WebToolsConfig()
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
@@ -108,8 +108,18 @@ class SubagentManager:
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
             ))
-            tools.register(WebSearchTool(api_key=self.brave_api_key))
-            tools.register(WebFetchTool())
+            tools.register(WebSearchTool(
+                provider=self.web_config.search.provider,
+                api_key=self.web_config.search.api_key or None,
+                max_results=self.web_config.search.max_results,
+                ollama_api_key=self.web_config.search.ollama_api_key or None,
+                ollama_api_base=self.web_config.search.ollama_api_base,
+            ))
+            tools.register(WebFetchTool(
+                provider=self.web_config.fetch.provider,
+                ollama_api_key=self.web_config.fetch.ollama_api_key or None,
+                ollama_api_base=self.web_config.fetch.ollama_api_base,
+            ))
             
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)

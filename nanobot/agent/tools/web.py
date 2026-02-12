@@ -57,16 +57,37 @@ class WebSearchTool(Tool):
         "required": ["query"]
     }
     
-    def __init__(self, api_key: str | None = None, max_results: int = 5):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        max_results: int = 5,
+        provider: str = "brave",
+        ollama_api_key: str | None = None,
+        ollama_api_base: str | None = None,
+    ):
+        self.provider = provider
         self.api_key = api_key or os.environ.get("BRAVE_API_KEY", "")
         self.max_results = max_results
+        self.ollama_api_key = ollama_api_key or os.environ.get("OLLAMA_API_KEY", "")
+        self.ollama_api_base = (ollama_api_base or "https://ollama.com").rstrip("/")
     
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
+        n = min(max(count or self.max_results, 1), 10)
+
+        if self.provider == "ollama":
+            return await self._ollama_search(query, n)
+        if self.provider == "hybrid":
+            result = await self._brave_search(query, n)
+            if not result.startswith("Error:") and not result.startswith("No results"):
+                return result
+            return await self._ollama_search(query, n)
+        return await self._brave_search(query, n)
+
+    async def _brave_search(self, query: str, n: int) -> str:
         if not self.api_key:
             return "Error: BRAVE_API_KEY not configured"
-        
+
         try:
-            n = min(max(count or self.max_results, 1), 10)
             async with httpx.AsyncClient() as client:
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
@@ -89,6 +110,34 @@ class WebSearchTool(Tool):
         except Exception as e:
             return f"Error: {e}"
 
+    async def _ollama_search(self, query: str, n: int) -> str:
+        if not self.ollama_api_key:
+            return "Error: OLLAMA_API_KEY not configured for Ollama web_search"
+
+        endpoint = f"{self.ollama_api_base}/api/web_search"
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    endpoint,
+                    json={"query": query, "max_results": n},
+                    headers={"Authorization": f"Bearer {self.ollama_api_key}"},
+                    timeout=15.0,
+                )
+                r.raise_for_status()
+
+            results = r.json().get("results", [])
+            if not results:
+                return f"No results for: {query}"
+
+            lines = [f"Results for: {query}\n"]
+            for i, item in enumerate(results[:n], 1):
+                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
+                if desc := item.get("content"):
+                    lines.append(f"   {desc}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Error: {e}"
+
 
 class WebFetchTool(Tool):
     """Fetch and extract content from a URL using Readability."""
@@ -105,10 +154,29 @@ class WebFetchTool(Tool):
         "required": ["url"]
     }
     
-    def __init__(self, max_chars: int = 50000):
+    def __init__(
+        self,
+        max_chars: int = 50000,
+        provider: str = "nanobot",
+        ollama_api_key: str | None = None,
+        ollama_api_base: str | None = None,
+    ):
         self.max_chars = max_chars
+        self.provider = provider
+        self.ollama_api_key = ollama_api_key or os.environ.get("OLLAMA_API_KEY", "")
+        self.ollama_api_base = (ollama_api_base or "https://ollama.com").rstrip("/")
     
     async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
+        if self.provider == "ollama":
+            return await self._ollama_fetch(url)
+        if self.provider == "hybrid":
+            result = await self._nanobot_fetch(url, extractMode, maxChars)
+            if not result.startswith('{"error"'):
+                return result
+            return await self._ollama_fetch(url)
+        return await self._nanobot_fetch(url, extractMode, maxChars)
+
+    async def _nanobot_fetch(self, url: str, extractMode: str = "markdown", maxChars: int | None = None) -> str:
         from readability import Document
 
         max_chars = maxChars or self.max_chars
@@ -147,6 +215,41 @@ class WebFetchTool(Tool):
             
             return json.dumps({"url": url, "finalUrl": str(r.url), "status": r.status_code,
                               "extractor": extractor, "truncated": truncated, "length": len(text), "text": text})
+        except Exception as e:
+            return json.dumps({"error": str(e), "url": url})
+
+    async def _ollama_fetch(self, url: str) -> str:
+        if not self.ollama_api_key:
+            return json.dumps({"error": "OLLAMA_API_KEY not configured for Ollama web_fetch", "url": url})
+
+        endpoint = f"{self.ollama_api_base}/api/web_fetch"
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    endpoint,
+                    json={"url": url},
+                    headers={
+                        "Authorization": f"Bearer {self.ollama_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=20.0,
+                )
+                r.raise_for_status()
+
+            payload = r.json()
+            content = payload.get("content", "")
+            if len(content) > self.max_chars:
+                content = content[: self.max_chars]
+            return json.dumps(
+                {
+                    "url": url,
+                    "extractor": "ollama_web_fetch",
+                    "title": payload.get("title", ""),
+                    "links": payload.get("links", []),
+                    "length": len(content),
+                    "text": content,
+                }
+            )
         except Exception as e:
             return json.dumps({"error": str(e), "url": url})
     

@@ -191,6 +191,8 @@ class ProvidersConfig(BaseModel):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
+    ollama_local: ProviderConfig = Field(default_factory=ProviderConfig)
+    ollama_cloud: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
 class GatewayConfig(BaseModel):
@@ -201,13 +203,24 @@ class GatewayConfig(BaseModel):
 
 class WebSearchConfig(BaseModel):
     """Web search tool configuration."""
+    provider: str = "brave"  # brave | ollama | hybrid
     api_key: str = ""  # Brave Search API key
+    ollama_api_key: str = ""  # Ollama web search API key
+    ollama_api_base: str = "https://ollama.com"
     max_results: int = 5
+
+
+class WebFetchConfig(BaseModel):
+    """Web fetch tool configuration."""
+    provider: str = "nanobot"  # nanobot | ollama | hybrid
+    ollama_api_key: str = ""  # Ollama web fetch API key
+    ollama_api_base: str = "https://ollama.com"
 
 
 class WebToolsConfig(BaseModel):
     """Web tools configuration."""
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    fetch: WebFetchConfig = Field(default_factory=WebFetchConfig)
 
 
 class ExecToolConfig(BaseModel):
@@ -240,16 +253,21 @@ class Config(BaseSettings):
         from nanobot.providers.registry import PROVIDERS
         model_lower = (model or self.agents.defaults.model).lower()
 
+        def _is_configured(spec, provider) -> bool:
+            if spec.is_local:
+                return bool(provider.api_base)
+            return bool(provider.api_key)
+
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
-            if p and any(kw in model_lower for kw in spec.keywords) and p.api_key:
+            if p and any(kw in model_lower for kw in spec.keywords) and _is_configured(spec, p):
                 return p, spec.name
 
         # Fallback: gateways first, then others (follows registry order)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
-            if p and p.api_key:
+            if p and _is_configured(spec, p):
                 return p, spec.name
         return None, None
 

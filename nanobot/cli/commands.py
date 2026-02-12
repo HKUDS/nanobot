@@ -7,6 +7,7 @@ from pathlib import Path
 import select
 import sys
 
+import httpx
 import typer
 from rich.console import Console
 from rich.markdown import Markdown
@@ -168,6 +169,7 @@ def onboard():
     
     # Create default config
     config = Config()
+    _interactive_onboard_setup(config)
     save_config(config)
     console.print(f"[green]✓[/green] Created config at {config_path}")
     
@@ -179,11 +181,338 @@ def onboard():
     _create_workspace_templates(workspace)
     
     console.print(f"\n{__logo__} nanobot is ready!")
+    provider_name = config.get_provider_name(config.agents.defaults.model)
+    if provider_name:
+        console.print(f"  Provider: [cyan]{provider_name}[/cyan]")
+    console.print(f"  Model: [cyan]{config.agents.defaults.model}[/cyan]")
+    if config.tools.web.search.api_key:
+        console.print("  Web search: [green]Brave enabled[/green]")
+    else:
+        console.print("  Web search: [yellow]Brave disabled[/yellow] (model-native search may still work)")
+
     console.print("\nNext steps:")
-    console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
-    console.print("     Get one at: https://openrouter.ai/keys")
-    console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
+    console.print("  1. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
+    console.print("  2. Start gateway: [cyan]nanobot gateway[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
+
+
+def _interactive_onboard_setup(config) -> None:
+    """Interactive setup for provider/model/search defaults."""
+    console.print("\n[bold]Interactive setup[/bold] (press Enter to accept defaults)")
+
+    provider_options = [
+        ("OpenRouter (recommended gateway)", "openrouter", "anthropic/claude-opus-4-5"),
+        ("Anthropic", "anthropic", "claude-opus-4-5"),
+        ("OpenAI", "openai", "gpt-4.1"),
+        ("DeepSeek", "deepseek", "deepseek-chat"),
+        ("Gemini", "gemini", "gemini-2.5-pro"),
+        ("Moonshot", "moonshot", "kimi-k2.5"),
+        ("DashScope (Qwen)", "dashscope", "qwen-max"),
+        ("Zhipu", "zhipu", "glm-4"),
+        ("MiniMax", "minimax", "MiniMax-M2.1"),
+        ("AiHubMix", "aihubmix", "claude-opus-4.1"),
+        ("vLLM / local OpenAI-compatible", "vllm", "meta-llama/Llama-3.1-8B-Instruct"),
+        ("Ollama Local", "ollama_local", "llama3.2"),
+        ("Ollama Cloud", "ollama_cloud", "gpt-oss:20b-cloud"),
+    ]
+
+    console.print("\n[bold]1) Choose your primary LLM provider[/bold]")
+    for idx, (label, _, _) in enumerate(provider_options, start=1):
+        console.print(f"  {idx}. {label}")
+
+    selected = typer.prompt(
+        "Provider number",
+        type=int,
+        default=1,
+        show_default=True,
+    )
+    if selected < 1 or selected > len(provider_options):
+        selected = 1
+
+    provider_label, provider_key, default_model = provider_options[selected - 1]
+    console.print(f"Selected: [cyan]{provider_label}[/cyan]")
+
+    provider_cfg = getattr(config.providers, provider_key)
+    if provider_key == "ollama_local":
+        provider_cfg.api_base = typer.prompt(
+            "Ollama local base URL",
+            default="http://localhost:11434",
+            show_default=True,
+        ).strip()
+        provider_cfg.api_key = ""
+        model = typer.prompt(
+            "Model name",
+            default=default_model,
+            show_default=True,
+        ).strip()
+        config.agents.defaults.model = model or default_model
+    elif provider_key == "vllm":
+        provider_cfg.api_base = typer.prompt(
+            "Local OpenAI-compatible base URL",
+            default="http://localhost:8000/v1",
+            show_default=True,
+        ).strip()
+        provider_cfg.api_key = typer.prompt(
+            "API key (optional for local)",
+            default="",
+            show_default=False,
+        ).strip()
+        model = typer.prompt(
+            "Model name",
+            default=default_model,
+            show_default=True,
+        ).strip()
+        config.agents.defaults.model = model or default_model
+    elif provider_key == "ollama_cloud":
+        provider_cfg.api_base = typer.prompt(
+            "Ollama cloud base URL",
+            default="https://ollama.com",
+            show_default=True,
+        ).strip()
+        while True:
+            key = typer.prompt("Ollama cloud API key", default="", show_default=False).strip()
+            if key:
+                provider_cfg.api_key = key
+                break
+            console.print("[yellow]API key is required for Ollama Cloud.[/yellow]")
+
+        console.print("\n[bold]Model selection for Ollama Cloud[/bold]")
+        console.print("  1. Manual model input")
+        console.print("  2. Fetch model list from Ollama Cloud (recommended)")
+        cloud_model_mode = typer.prompt("Mode", type=int, default=2, show_default=True)
+
+        if cloud_model_mode == 2:
+            models, error = _fetch_ollama_cloud_models(
+                api_base=provider_cfg.api_base,
+                api_key=provider_cfg.api_key,
+            )
+            if models:
+                keyword = typer.prompt(
+                    "Filter keyword (optional)",
+                    default="",
+                    show_default=False,
+                ).strip().lower()
+                if keyword:
+                    filtered_models = [model_name for model_name in models if keyword in model_name.lower()]
+                    if filtered_models:
+                        models = filtered_models
+                    else:
+                        console.print("[yellow]No models matched filter, showing full list.[/yellow]")
+
+                max_display = min(len(models), 30)
+                console.print(f"Found {len(models)} model(s). Showing first {max_display}:")
+                for index, model_name in enumerate(models[:max_display], start=1):
+                    console.print(f"  {index}. {model_name}")
+
+                selected_model = typer.prompt(
+                    "Model number",
+                    type=int,
+                    default=1,
+                    show_default=True,
+                )
+                if selected_model < 1:
+                    selected_model = 1
+                if selected_model > max_display:
+                    selected_model = max_display
+                config.agents.defaults.model = models[selected_model - 1]
+                console.print(f"Selected model: [cyan]{config.agents.defaults.model}[/cyan]")
+            else:
+                console.print("[yellow]Failed to fetch model list; falling back to manual input.[/yellow]")
+                if error:
+                    console.print(f"[dim]{error}[/dim]")
+                model = typer.prompt(
+                    "Model name",
+                    default=default_model,
+                    show_default=True,
+                ).strip()
+                config.agents.defaults.model = model or default_model
+        else:
+            model = typer.prompt(
+                "Model name",
+                default=default_model,
+                show_default=True,
+            ).strip()
+            config.agents.defaults.model = model or default_model
+    else:
+        while True:
+            key = typer.prompt(f"{provider_label} API key", default="", show_default=False).strip()
+            if key:
+                provider_cfg.api_key = key
+                break
+            console.print("[yellow]API key is required.[/yellow]")
+        if typer.confirm("Set custom API base URL?", default=False):
+            provider_cfg.api_base = typer.prompt("Custom API base URL", default="", show_default=False).strip() or None
+        model = typer.prompt(
+            "Model name",
+            default=default_model,
+            show_default=True,
+        ).strip()
+        config.agents.defaults.model = model or default_model
+
+    console.print("\n[bold]2) Configure web search & fetch tools[/bold]")
+    console.print("  Search provider options:")
+    console.print("    1. Brave")
+    console.print("    2. Ollama web_search")
+    console.print("    3. Hybrid (Brave first, fallback to Ollama)")
+    search_mode = typer.prompt("Search mode", type=int, default=1, show_default=True)
+
+    if search_mode == 2:
+        config.tools.web.search.provider = "ollama"
+    elif search_mode == 3:
+        config.tools.web.search.provider = "hybrid"
+    else:
+        config.tools.web.search.provider = "brave"
+
+    if config.tools.web.search.provider in {"brave", "hybrid"}:
+        brave_key = typer.prompt("Brave Search API key", default="", show_default=False).strip()
+        config.tools.web.search.api_key = brave_key
+        if not brave_key:
+            console.print("[yellow]Brave key not set: Brave search may be unavailable.[/yellow]")
+    else:
+        config.tools.web.search.api_key = ""
+
+    if config.tools.web.search.provider in {"ollama", "hybrid"}:
+        default_ollama_base = (
+            config.providers.ollama_cloud.api_base
+            if config.providers.ollama_cloud.api_base
+            else "https://ollama.com"
+        )
+        default_ollama_key = config.providers.ollama_cloud.api_key or ""
+
+        config.tools.web.search.ollama_api_base = typer.prompt(
+            "Ollama web_search base URL",
+            default=default_ollama_base,
+            show_default=True,
+        ).strip()
+
+        if default_ollama_key:
+            use_provider_key = typer.confirm(
+                "Reuse providers.ollamaCloud.apiKey for Ollama web_search?",
+                default=True,
+            )
+            if use_provider_key:
+                config.tools.web.search.ollama_api_key = default_ollama_key
+            else:
+                config.tools.web.search.ollama_api_key = typer.prompt(
+                    "Ollama web_search API key",
+                    default="",
+                    show_default=False,
+                ).strip()
+        else:
+            config.tools.web.search.ollama_api_key = typer.prompt(
+                "Ollama web_search API key",
+                default="",
+                show_default=False,
+            ).strip()
+
+        if not config.tools.web.search.ollama_api_key:
+            console.print("[yellow]Ollama API key not set: Ollama web_search may be unavailable.[/yellow]")
+    else:
+        config.tools.web.search.ollama_api_key = ""
+
+    console.print("\n  Fetch provider options:")
+    console.print("    1. nanobot web_fetch (default)")
+    console.print("    2. Ollama web_fetch")
+    console.print("    3. Hybrid (nanobot first, fallback to Ollama)")
+    fetch_mode = typer.prompt("Fetch mode", type=int, default=1, show_default=True)
+
+    if fetch_mode == 2:
+        config.tools.web.fetch.provider = "ollama"
+    elif fetch_mode == 3:
+        config.tools.web.fetch.provider = "hybrid"
+    else:
+        config.tools.web.fetch.provider = "nanobot"
+
+    if config.tools.web.fetch.provider in {"ollama", "hybrid"}:
+        default_fetch_base = config.tools.web.search.ollama_api_base or "https://ollama.com"
+        default_fetch_key = config.tools.web.search.ollama_api_key or ""
+        config.tools.web.fetch.ollama_api_base = typer.prompt(
+            "Ollama web_fetch base URL",
+            default=default_fetch_base,
+            show_default=True,
+        ).strip()
+
+        if default_fetch_key:
+            use_search_key = typer.confirm(
+                "Reuse Ollama web_search API key for web_fetch?",
+                default=True,
+            )
+            if use_search_key:
+                config.tools.web.fetch.ollama_api_key = default_fetch_key
+            else:
+                config.tools.web.fetch.ollama_api_key = typer.prompt(
+                    "Ollama web_fetch API key",
+                    default="",
+                    show_default=False,
+                ).strip()
+        else:
+            config.tools.web.fetch.ollama_api_key = typer.prompt(
+                "Ollama web_fetch API key",
+                default="",
+                show_default=False,
+            ).strip()
+
+        if not config.tools.web.fetch.ollama_api_key:
+            console.print("[yellow]Ollama API key not set: Ollama web_fetch may be unavailable.[/yellow]")
+    else:
+        config.tools.web.fetch.ollama_api_key = ""
+
+
+def _fetch_ollama_cloud_models(api_base: str, api_key: str) -> tuple[list[str], str | None]:
+    """Fetch available model names from Ollama cloud endpoints.
+
+    Tries Ollama native endpoint first (/api/tags), then OpenAI-compatible
+    endpoint (/v1/models) as fallback.
+    """
+    base = (api_base or "").rstrip("/")
+    if not base:
+        return [], "Missing apiBase"
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json",
+    }
+
+    endpoint_candidates: list[str] = []
+    if base.endswith("/api"):
+        endpoint_candidates.append(f"{base}/tags")
+    else:
+        endpoint_candidates.append(f"{base}/api/tags")
+
+    if base.endswith("/v1"):
+        endpoint_candidates.append(f"{base}/models")
+    else:
+        endpoint_candidates.append(f"{base}/v1/models")
+
+    errors: list[str] = []
+    for endpoint in endpoint_candidates:
+        try:
+            response = httpx.get(endpoint, headers=headers, timeout=10.0)
+            response.raise_for_status()
+            payload = response.json()
+
+            models: list[str] = []
+            if isinstance(payload.get("models"), list):
+                for item in payload["models"]:
+                    if isinstance(item, dict):
+                        name = item.get("name") or item.get("model")
+                        if isinstance(name, str) and name:
+                            models.append(name)
+            if isinstance(payload.get("data"), list):
+                for item in payload["data"]:
+                    if isinstance(item, dict):
+                        name = item.get("id")
+                        if isinstance(name, str) and name:
+                            models.append(name)
+
+            uniq_models = sorted(set(models))
+            if uniq_models:
+                return uniq_models, None
+            errors.append(f"{endpoint}: empty model list")
+        except Exception as exc:
+            errors.append(f"{endpoint}: {exc}")
+
+    return [], "; ".join(errors)
 
 
 
@@ -270,20 +599,41 @@ This file stores important information that should persist across sessions.
 
 
 def _make_provider(config):
-    """Create LiteLLMProvider from config. Exits if no API key found."""
+    """Create LiteLLMProvider from config. Validates required provider fields."""
+    from nanobot.providers.registry import find_by_name
     from nanobot.providers.litellm_provider import LiteLLMProvider
     p = config.get_provider()
+    provider_name = config.get_provider_name()
+    spec = find_by_name(provider_name) if provider_name else None
     model = config.agents.defaults.model
-    if not (p and p.api_key) and not model.startswith("bedrock/"):
-        console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers section")
+
+    has_valid_provider = False
+    if p:
+        if spec and spec.is_local:
+            has_valid_provider = bool(p.api_base)
+        elif provider_name == "ollama_cloud":
+            has_valid_provider = bool(p.api_key and p.api_base)
+        else:
+            has_valid_provider = bool(p.api_key)
+
+    if not has_valid_provider and not model.startswith("bedrock/"):
+        if spec and spec.is_local:
+            console.print("[red]Error: Local provider requires apiBase.[/red]")
+            console.print("Set providers.<name>.apiBase in ~/.nanobot/config.json")
+        elif provider_name == "ollama_cloud":
+            console.print("[red]Error: Ollama Cloud requires both apiKey and apiBase.[/red]")
+            console.print("Set providers.ollamaCloud.apiKey and providers.ollamaCloud.apiBase")
+        else:
+            console.print("[red]Error: No API key configured.[/red]")
+            console.print("Set one in ~/.nanobot/config.json under providers section")
         raise typer.Exit(1)
+
     return LiteLLMProvider(
         api_key=p.api_key if p else None,
         api_base=config.get_api_base(),
         default_model=model,
         extra_headers=p.extra_headers if p else None,
-        provider_name=config.get_provider_name(),
+        provider_name=provider_name,
     )
 
 
@@ -329,8 +679,7 @@ def gateway(
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
-        brave_api_key=config.tools.web.search.api_key or None,
+        web_config=config.tools.web,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -436,8 +785,7 @@ def agent(
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
-        brave_api_key=config.tools.web.search.api_key or None,
+        web_config=config.tools.web,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
     )
@@ -836,21 +1184,26 @@ def status():
         from nanobot.providers.registry import PROVIDERS
 
         console.print(f"Model: {config.agents.defaults.model}")
+        active_provider = config.get_provider_name(config.agents.defaults.model)
         
         # Check API keys from registry
         for spec in PROVIDERS:
             p = getattr(config.providers, spec.name, None)
             if p is None:
                 continue
+            active_badge = " [cyan](active)[/cyan]" if spec.name == active_provider else ""
             if spec.is_local:
                 # Local deployments show api_base instead of api_key
                 if p.api_base:
-                    console.print(f"{spec.label}: [green]✓ {p.api_base}[/green]")
+                    console.print(f"{spec.label}{active_badge}: [green]✓ {p.api_base}[/green]")
                 else:
-                    console.print(f"{spec.label}: [dim]not set[/dim]")
+                    console.print(f"{spec.label}{active_badge}: [dim]not set[/dim]")
             else:
                 has_key = bool(p.api_key)
-                console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+                if has_key and p.api_base:
+                    console.print(f"{spec.label}{active_badge}: [green]✓[/green] ({p.api_base})")
+                else:
+                    console.print(f"{spec.label}{active_badge}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
 
 
 if __name__ == "__main__":

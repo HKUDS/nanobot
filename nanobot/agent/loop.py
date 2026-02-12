@@ -42,22 +42,20 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         max_iterations: int = 20,
-        memory_window: int = 50,
-        brave_api_key: str | None = None,
+        web_config: "WebToolsConfig | None" = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, WebToolsConfig
         from nanobot.cron.service import CronService
         self.bus = bus
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
-        self.memory_window = memory_window
-        self.brave_api_key = brave_api_key
+        self.web_config = web_config or WebToolsConfig()
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -70,7 +68,7 @@ class AgentLoop:
             workspace=workspace,
             bus=bus,
             model=self.model,
-            brave_api_key=brave_api_key,
+            web_config=self.web_config,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
@@ -95,8 +93,18 @@ class AgentLoop:
         ))
         
         # Web tools
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key))
-        self.tools.register(WebFetchTool())
+        self.tools.register(WebSearchTool(
+            provider=self.web_config.search.provider,
+            api_key=self.web_config.search.api_key or None,
+            max_results=self.web_config.search.max_results,
+            ollama_api_key=self.web_config.search.ollama_api_key or None,
+            ollama_api_base=self.web_config.search.ollama_api_base,
+        ))
+        self.tools.register(WebFetchTool(
+            provider=self.web_config.fetch.provider,
+            ollama_api_key=self.web_config.fetch.ollama_api_key or None,
+            ollama_api_base=self.web_config.fetch.ollama_api_base,
+        ))
         
         # Message tool
         message_tool = MessageTool(send_callback=self.bus.publish_outbound)

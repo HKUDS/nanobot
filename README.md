@@ -96,8 +96,8 @@ pip install nanobot-ai
 ## 🚀 Quick Start
 
 > [!TIP]
-> Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
+> `nanobot onboard` now includes an interactive menu to choose provider, model, API base URL, API key, and search mode.
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search) · [Ollama Cloud](https://ollama.com/settings/keys)
 
 **1. Initialize**
 
@@ -105,23 +105,15 @@ pip install nanobot-ai
 nanobot onboard
 ```
 
-**2. Configure** (`~/.nanobot/config.json`)
+**2. Follow the interactive setup**
 
-For OpenRouter - recommended for global users:
-```json
-{
-  "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": "anthropic/claude-opus-4-5"
-    }
-  }
-}
-```
+During onboarding, choose your provider and enter required fields:
+- Cloud providers: API key (+ optional custom base URL)
+- `ollama_cloud`: API key + base URL + model
+- Local providers (`vllm`, `ollama_local`): base URL (API key optional/unused)
+- Web search/fetch provider menu:
+  - Search: `Brave` / `Ollama web_search` / `Hybrid (Brave -> Ollama fallback)`
+  - Fetch: `nanobot web_fetch` / `Ollama web_fetch` / `Hybrid (nanobot -> Ollama fallback)`
 
 **3. Chat**
 
@@ -131,7 +123,7 @@ nanobot agent -m "What is 2+2?"
 
 That's it! You have a working AI assistant in 2 minutes.
 
-## 🖥️ Local Models (vLLM)
+## 🖥️ Local Models (vLLM / Ollama)
 
 Run nanobot with your own local models using vLLM or any OpenAI-compatible server.
 
@@ -165,8 +157,40 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
 nanobot agent -m "Hello from my local LLM!"
 ```
 
-> [!TIP]
-> The `apiKey` can be any non-empty string for local servers that don't require authentication.
+### Ollama Local
+
+```json
+{
+  "providers": {
+    "ollamaLocal": {
+      "apiBase": "http://localhost:11434"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "llama3.2"
+    }
+  }
+}
+```
+
+### Ollama Cloud
+
+```json
+{
+  "providers": {
+    "ollamaCloud": {
+      "apiKey": "ollama_xxx",
+      "apiBase": "https://ollama.com"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "gpt-oss:20b-cloud"
+    }
+  }
+}
+```
 
 ## 💬 Chat Apps
 
@@ -611,6 +635,8 @@ Config file: `~/.nanobot/config.json`
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
+| `ollama_local` | LLM (Ollama localhost) | — |
+| `ollama_cloud` | LLM (Ollama cloud) | [ollama.com/settings/keys](https://ollama.com/settings/keys) |
 
 <details>
 <summary><b>Adding a New Provider (Developer Guide)</b></summary>
