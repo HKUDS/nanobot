@@ -75,6 +75,8 @@ class AgentLoop:
             restrict_to_workspace=restrict_to_workspace,
         )
         
+        self._active_consolidations = set()
+        self._background_tasks = set()
         self._running = False
         self._register_default_tools()
     
@@ -166,9 +168,13 @@ class AgentLoop:
         # Get or create session
         session = self.sessions.get_or_create(session_key or msg.session_key)
         
-        # Consolidate memory before processing if session is too large
+        # Consolidate memory in background if session is too large and not already consolidating
         if len(session.messages) > self.memory_window:
-            await self._consolidate_memory(session)
+            if session.key not in self._active_consolidations:
+                self._active_consolidations.add(session.key)
+                task = asyncio.create_task(self._consolidate_memory(session))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
         
         # Update tool contexts
         message_tool = self.tools.get("message")
@@ -365,24 +371,25 @@ class AgentLoop:
     
     async def _consolidate_memory(self, session) -> None:
         """Consolidate old messages into MEMORY.md + HISTORY.md, then trim session."""
-        memory = MemoryStore(self.workspace)
-        keep_count = min(10, max(2, self.memory_window // 2))
-        old_messages = session.messages[:-keep_count]  # Everything except recent ones
-        if not old_messages:
-            return
-        logger.info(f"Memory consolidation started: {len(session.messages)} messages, archiving {len(old_messages)}, keeping {keep_count}")
+        try:
+            memory = MemoryStore(self.workspace)
+            keep_count = min(10, max(2, self.memory_window // 2))
+            old_messages = session.messages[:-keep_count]  # Everything except recent ones
+            if not old_messages:
+                return
+            logger.info(f"Memory consolidation started: {len(session.messages)} messages, archiving {len(old_messages)}, keeping {keep_count}")
 
-        # Format messages for LLM (include tool names when available)
-        lines = []
-        for m in old_messages:
-            if not m.get("content"):
-                continue
-            tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
-            lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
-        conversation = "\n".join(lines)
-        current_memory = memory.read_long_term()
+            # Format messages for LLM (include tool names when available)
+            lines = []
+            for m in old_messages:
+                if not m.get("content"):
+                    continue
+                tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
+                lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
+            conversation = "\n".join(lines)
+            current_memory = memory.read_long_term()
 
-        prompt = f"""You are a memory consolidation agent. Process this conversation and return a JSON object with exactly two keys:
+            prompt = f"""You are a memory consolidation agent. Process this conversation and return a JSON object with exactly two keys:
 
 1. "history_entry": A paragraph (2-5 sentences) summarizing the key events/decisions/topics. Start with a timestamp like [YYYY-MM-DD HH:MM]. Include enough detail to be useful when found by grep search later.
 
@@ -396,7 +403,6 @@ class AgentLoop:
 
 Respond with ONLY valid JSON, no markdown fences."""
 
-        try:
             response = await self.provider.chat(
                 messages=[
                     {"role": "system", "content": "You are a memory consolidation agent. Respond only with valid JSON."},
@@ -417,12 +423,20 @@ Respond with ONLY valid JSON, no markdown fences."""
                 if update != current_memory:
                     memory.write_long_term(update)
 
-            # Trim session to recent messages
-            session.messages = session.messages[-keep_count:]
-            self.sessions.save(session)
-            logger.info(f"Memory consolidation done, session trimmed to {len(session.messages)} messages")
+            # Trim session safely (messages are append-only)
+            # We remove the exact number of messages we archived
+            n_removed = len(old_messages)
+            if n_removed <= len(session.messages):
+                session.messages = session.messages[n_removed:]
+                self.sessions.save(session)
+                logger.info(f"Memory consolidation done, session trimmed to {len(session.messages)} messages")
+            else:
+                logger.warning("Session was cleared or modified during consolidation, skipping trim")
+
         except Exception as e:
             logger.error(f"Memory consolidation failed: {e}")
+        finally:
+            self._active_consolidations.discard(session.key)
 
     async def process_direct(
         self,
