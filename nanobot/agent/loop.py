@@ -234,16 +234,32 @@ class AgentLoop:
         
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
-        
+
+        # Check for silent response markers - don't send if agent wants to stay quiet
+        silent_markers = ["[NO_RESPONSE]", "[SILENT]", "[SKIP]"]
+        if any(marker in final_content for marker in silent_markers):
+            logger.info(f"Silent response for {msg.channel}:{msg.sender_id} (agent chose not to respond)")
+            # Still save to session so context is preserved
+            session.add_message("user", msg.content)
+            session.add_message("assistant", f"(silent: {final_content})")
+            self.sessions.save(session)
+            # Return a silent message to trigger channel cleanup (e.g., stop typing indicator)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="",
+                silent=True,
+            )
+
         # Log response preview
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
-        
+
         # Save to session
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
-        
+
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,

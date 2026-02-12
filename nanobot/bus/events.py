@@ -33,5 +33,6 @@ class OutboundMessage:
     reply_to: str | None = None
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    silent: bool = False  # If True, don't send content but still trigger channel cleanup (e.g., stop typing)
 
 

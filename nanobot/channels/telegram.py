@@ -193,7 +193,12 @@ class TelegramChannel(BaseChannel):
         
         # Stop typing indicator for this chat
         self._stop_typing(msg.chat_id)
-        
+
+        # If silent, just stop typing and don't send anything
+        if msg.silent:
+            logger.info(f"Silent response for chat {msg.chat_id}, not sending")
+            return
+
         try:
             # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
@@ -343,11 +348,18 @@ class TelegramChannel(BaseChannel):
                 content_parts.append(f"[{media_type}: download failed]")
         
         content = "\n".join(content_parts) if content_parts else "[empty message]"
-        
+
+        # Add sender info prefix for group chats
+        if message.chat.type != "private":
+            display_name = user.first_name or user.username or str(user.id)
+            if user.username:
+                display_name = f"{display_name} (@{user.username})"
+            content = f"[From: {display_name}]\n{content}"
+
         logger.debug(f"Telegram message from {sender_id}: {content[:50]}...")
-        
+
         str_chat_id = str(chat_id)
-        
+
         # Start typing indicator before processing
         self._start_typing(str_chat_id)
         
