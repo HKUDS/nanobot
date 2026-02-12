@@ -221,6 +221,7 @@ class AgentLoop:
         iteration = 0
         final_content = None
         last_finish_reason = "unknown"
+        tool_use_log: list[tuple[str, str, str]] = []  # (name, args_summary, result_summary)
         
         while iteration < self.max_iterations:
             iteration += 1
@@ -263,6 +264,12 @@ class AgentLoop:
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+                    # Record for session summary
+                    tool_use_log.append((
+                        tool_call.name,
+                        args_str[:100] + ("..." if len(args_str) > 100 else ""),
+                        (result[:200] + "...(truncated)") if len(result) > 200 else result,
+                    ))
             else:
                 # No tool calls, we're done
                 if response.content is None or response.content.strip() == "":
@@ -294,9 +301,15 @@ class AgentLoop:
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
         
-        # Save to session
+        # Save to session (prepend tool use summary if any tools were called)
         session.add_message("user", msg.content)
-        session.add_message("assistant", final_content)
+        saved_content = final_content
+        if tool_use_log:
+            lines = []
+            for i, (name, args, result) in enumerate(tool_use_log, 1):
+                lines.append(f"{i}. {name}({args}) -> {result}")
+            saved_content = "<tool_use_summary>\n" + "\n".join(lines) + "\n</tool_use_summary>\n\n" + final_content
+        session.add_message("assistant", saved_content)
         self.sessions.save(session)
         
         return OutboundMessage(
