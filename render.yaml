@@ -1,3 +1,6 @@
+# nanobot Render Deployment Blueprint
+# Note: API keys are included here as requested by the user.
+# For better security, consider using Render's Secret Files or Environment Groups.
 services:
   - type: web
     name: nanobot
@@ -6,13 +9,13 @@ services:
     region: oregon
     envVars:
       - key: NANOBOT_PROVIDERS__GEMINI__API_KEY
-        value: "REPLACE_WITH_YOUR_GEMINI_API_KEY"
+        value: "AIzaSyBrsqMw20gxmjRtO7B2_YspT5IStSQvi3Q"
       - key: NANOBOT_CHANNELS__TELEGRAM__TOKEN
-        value: "REPLACE_WITH_YOUR_TELEGRAM_BOT_TOKEN"
+        value: "8406112058:AAEE8OTgH3l_b8llj7FqmJ4xYtGux20mNQo"
       - key: NANOBOT_CHANNELS__TELEGRAM__ENABLED
         value: "true"
       - key: NANOBOT_CHANNELS__TELEGRAM__ALLOW_FROM
-        value: '["8181163397"]'
+        value: "8181163397"
       - key: NANOBOT_AGENTS__DEFAULTS__MODEL
-        value: "gemini/gemini-2.0-flash"
+        value: "gemini/gemini-3-flash"
     dockerCommand: gateway

@@ -1,8 +1,20 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from pydantic_settings import BaseSettings
+
+
+def _ensure_list(v: Any) -> list[str]:
+    """Helper to ensure value is a list of strings, wrapping single values."""
+    if v is None:
+        return []
+    if isinstance(v, (str, int, float)):
+        return [str(v)]
+    if isinstance(v, list):
+        return [str(x) for x in v]
+    return v
 
 
 class WhatsAppConfig(BaseModel):
@@ -11,6 +23,11 @@ class WhatsAppConfig(BaseModel):
     bridge_url: str = "ws://localhost:3001"
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
 
+    @field_validator("allow_from", mode="before")
+    @classmethod
+    def validate_allow_from(cls, v):
+        return _ensure_list(v)
+
 
 class TelegramConfig(BaseModel):
     """Telegram channel configuration."""
@@ -18,6 +35,11 @@ class TelegramConfig(BaseModel):
     token: str = ""  # Bot token from @BotFather
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
+
+    @field_validator("allow_from", mode="before")
+    @classmethod
+    def validate_allow_from(cls, v):
+        return _ensure_list(v)
 
 
 class FeishuConfig(BaseModel):
@@ -29,6 +51,11 @@ class FeishuConfig(BaseModel):
     verification_token: str = ""  # Verification Token for event subscription (optional)
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
 
+    @field_validator("allow_from", mode="before")
+    @classmethod
+    def validate_allow_from(cls, v):
+        return _ensure_list(v)
+
 
 class DingTalkConfig(BaseModel):
     """DingTalk channel configuration using Stream mode."""
@@ -37,12 +64,22 @@ class DingTalkConfig(BaseModel):
     client_secret: str = ""  # AppSecret
     allow_from: list[str] = Field(default_factory=list)  # Allowed staff_ids
 
+    @field_validator("allow_from", mode="before")
+    @classmethod
+    def validate_allow_from(cls, v):
+        return _ensure_list(v)
+
 
 class DiscordConfig(BaseModel):
     """Discord channel configuration."""
     enabled: bool = False
     token: str = ""  # Bot token from Discord Developer Portal
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
+
+    @field_validator("allow_from", mode="before")
+    @classmethod
+    def validate_allow_from(cls, v):
+        return _ensure_list(v)
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 
@@ -76,6 +113,11 @@ class EmailConfig(BaseModel):
     subject_prefix: str = "Re: "
     allow_from: list[str] = Field(default_factory=list)  # Allowed sender email addresses
 
+    @field_validator("allow_from", mode="before")
+    @classmethod
+    def validate_allow_from(cls, v):
+        return _ensure_list(v)
+
 
 class MochatMentionConfig(BaseModel):
     """Mochat mention behavior configuration."""
@@ -107,6 +149,11 @@ class MochatConfig(BaseModel):
     sessions: list[str] = Field(default_factory=list)
     panels: list[str] = Field(default_factory=list)
     allow_from: list[str] = Field(default_factory=list)
+
+    @field_validator("allow_from", mode="before")
+    @classmethod
+    def validate_allow_from(cls, v):
+        return _ensure_list(v)
     mention: MochatMentionConfig = Field(default_factory=MochatMentionConfig)
     groups: dict[str, MochatGroupRule] = Field(default_factory=dict)
     reply_delay_mode: str = "non-mention"  # off | non-mention
@@ -118,6 +165,11 @@ class SlackDMConfig(BaseModel):
     enabled: bool = True
     policy: str = "open"  # "open" or "allowlist"
     allow_from: list[str] = Field(default_factory=list)  # Allowed Slack user IDs
+
+    @field_validator("allow_from", mode="before")
+    @classmethod
+    def validate_allow_from(cls, v):
+        return _ensure_list(v)
 
 
 class SlackConfig(BaseModel):
@@ -132,6 +184,11 @@ class SlackConfig(BaseModel):
     group_allow_from: list[str] = Field(default_factory=list)  # Allowed channel IDs if allowlist
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
 
+    @field_validator("group_allow_from", mode="before")
+    @classmethod
+    def validate_group_allow_from(cls, v):
+        return _ensure_list(v)
+
 
 class QQConfig(BaseModel):
     """QQ channel configuration using botpy SDK."""
@@ -139,6 +196,11 @@ class QQConfig(BaseModel):
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
+
+    @field_validator("allow_from", mode="before")
+    @classmethod
+    def validate_allow_from(cls, v):
+        return _ensure_list(v)
 
 
 class ChannelsConfig(BaseModel):
