@@ -19,7 +19,6 @@ from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.memory import MemoryStore
-from nanobot.agent.tools.session_reader import SessionReaderTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
 
@@ -103,9 +102,6 @@ class AgentLoop:
         message_tool = MessageTool(send_callback=self.bus.publish_outbound)
         self.tools.register(message_tool)
         
-        # Session reader tool
-        self.tools.register(SessionReaderTool())
-
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
@@ -368,7 +364,7 @@ class AgentLoop:
         )
     
     async def _consolidate_memory(self, session) -> None:
-        """Consolidate old messages into MEMORY.md + HISTORY.md, then trim session."""
+        """Consolidate old messages into MEMORY.md + HISTORY.md + knowledge base, then trim session."""
         memory = MemoryStore(self.workspace)
         keep_count = min(10, max(2, self.memory_window // 2))
         old_messages = session.messages[:-keep_count]  # Everything except recent ones
@@ -386,14 +382,37 @@ class AgentLoop:
         conversation = "\n".join(lines)
         current_memory = memory.read_long_term()
 
-        prompt = f"""You are a memory consolidation agent. Process this conversation and return a JSON object with exactly two keys:
+        # Load knowledge index for context
+        knowledge_index = ""
+        index_path = self.workspace / "knowledge" / "INDEX.md"
+        if index_path.exists():
+            try:
+                knowledge_index = index_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+
+        prompt = f"""You are a memory consolidation agent. Process this conversation and return a JSON object with exactly three keys:
 
 1. "history_entry": A paragraph (2-5 sentences) summarizing the key events/decisions/topics. Start with a timestamp like [YYYY-MM-DD HH:MM]. Include enough detail to be useful when found by grep search later.
 
 2. "memory_update": The updated long-term memory content. Add any new facts: user location, preferences, personal info, habits, project context, technical decisions, tools/services used. If nothing new, return the existing content unchanged.
 
+3. "knowledge_entries": A list of knowledge items worth extracting for the structured knowledge base. Each entry is an object with:
+   - "category": one of "topics", "people", "decisions", "facts", "preferences", "projects", "references"
+   - "filename": descriptive kebab-case filename (without .md extension)
+   - "title": human-readable title
+   - "summary": 1-2 sentence summary for the index
+   - "content": the full markdown content for the entry (without frontmatter — that will be added automatically)
+   - "tags": list of freeform tags
+
+   Only include items that deserve a standalone knowledge entry — subjects discussed in depth, key decisions with reasoning, people with meaningful context, concrete facts worth retaining, expressed preferences, ongoing projects, or notable references (books, articles, laws, etc.).
+   Return an empty list if nothing warrants a knowledge entry.
+
 ## Current Long-term Memory
 {current_memory or "(empty)"}
+
+## Current Knowledge Index
+{knowledge_index or "(empty — no entries yet)"}
 
 ## Conversation to Process
 {conversation}
@@ -421,12 +440,117 @@ Respond with ONLY valid JSON, no markdown fences."""
                 if update != current_memory:
                     memory.write_long_term(update)
 
+            # Process knowledge entries
+            knowledge_entries = result.get("knowledge_entries", [])
+            if knowledge_entries:
+                await self._write_knowledge_entries(knowledge_entries)
+
             # Trim session to recent messages
             session.messages = session.messages[-keep_count:]
             self.sessions.save(session)
             logger.info(f"Memory consolidation done, session trimmed to {len(session.messages)} messages")
         except Exception as e:
             logger.error(f"Memory consolidation failed: {e}")
+
+    async def _write_knowledge_entries(self, entries: list[dict]) -> None:
+        """Write extracted knowledge entries to the knowledge base."""
+        from datetime import datetime
+
+        knowledge_dir = self.workspace / "knowledge"
+        index_path = knowledge_dir / "INDEX.md"
+
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # Read current index
+        index_content = ""
+        if index_path.exists():
+            index_content = index_path.read_text(encoding="utf-8")
+
+        for entry in entries:
+            try:
+                category = entry.get("category", "topics")
+                filename = entry.get("filename", "untitled")
+                title = entry.get("title", filename)
+                summary = entry.get("summary", "")
+                content = entry.get("content", "")
+                tags = entry.get("tags", [])
+
+                # Validate category
+                valid_categories = {"topics", "people", "decisions", "facts", "preferences", "projects", "references"}
+                if category not in valid_categories:
+                    category = "topics"
+
+                # Build file path
+                cat_dir = knowledge_dir / category
+                cat_dir.mkdir(parents=True, exist_ok=True)
+                file_path = cat_dir / f"{filename}.md"
+
+                if file_path.exists():
+                    # Update existing entry: append to Evolution section and update content
+                    existing = file_path.read_text(encoding="utf-8")
+                    # Update the 'updated' date in frontmatter
+                    if "updated:" in existing:
+                        import re
+                        existing = re.sub(r"updated: \d{4}-\d{2}-\d{2}", f"updated: {today}", existing)
+                    # Append to Evolution section if it exists
+                    if "## Evolution" in existing:
+                        existing = existing.rstrip() + f"\n- {today}: Updated during memory consolidation\n"
+                    file_path.write_text(existing, encoding="utf-8")
+                    logger.info(f"Knowledge entry updated: {category}/{filename}")
+                else:
+                    # Create new entry with frontmatter
+                    tags_str = json.dumps(tags) if tags else "[]"
+                    entry_type = category.rstrip("s")  # topics -> topic, etc.
+                    if entry_type == "reference":
+                        entry_type = "reference"  # already correct
+
+                    file_content = f"""---
+type: {entry_type}
+created: {today}
+updated: {today}
+related: []
+tags: {tags_str}
+---
+# {title}
+
+## Summary
+{summary}
+
+## Details
+{content}
+
+## Evolution
+- {today}: Initial creation during memory consolidation
+"""
+                    file_path.write_text(file_content, encoding="utf-8")
+                    logger.info(f"Knowledge entry created: {category}/{filename}")
+
+                # Update INDEX.md — add entry if not already present
+                index_line = f"- {filename}: {summary}"
+                if filename not in index_content:
+                    # Find the section header for this category
+                    section = f"## {category.capitalize()}"
+                    if section not in index_content:
+                        # Try exact match (e.g. "## Topics", "## References")
+                        section = f"## {category[0].upper()}{category[1:]}"
+                    if section in index_content:
+                        index_content = index_content.replace(
+                            section,
+                            f"{section}\n{index_line}"
+                        )
+                    else:
+                        # Append new section
+                        index_content = index_content.rstrip() + f"\n\n{section}\n{index_line}\n"
+
+            except Exception as e:
+                logger.error(f"Failed to write knowledge entry '{entry.get('filename', '?')}': {e}")
+
+        # Write updated index
+        try:
+            index_path.write_text(index_content, encoding="utf-8")
+            logger.info(f"Knowledge index updated with {len(entries)} entries")
+        except Exception as e:
+            logger.error(f"Failed to update knowledge index: {e}")
 
     async def process_direct(
         self,

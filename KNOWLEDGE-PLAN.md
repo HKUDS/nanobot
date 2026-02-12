@@ -154,79 +154,30 @@ The agent can create, read, update, and cross-reference knowledge entries using 
 
 ---
 
-## Phase 2: Session Reader Tool
+## Phase 2: Knowledge Extraction During Consolidation
 
-**Goal:** Build a tool that reads and chunks JSONL session files efficiently, so a subagent can process conversation history without wasting tokens on raw parsing.
+**Goal:** Extend the memory consolidation process to also extract structured knowledge entries.
 
-### 2.1 Create the session_reader tool
+### 2.1 Extend `_consolidate_memory()` in loop.py
 
-**File:** `nanobot/agent/tools/session_reader.py`
+**File:** `nanobot/agent/loop.py`
 
-```python
-class SessionReaderTool(Tool):
-    """Read and filter conversation history from session files."""
+The existing consolidation prompt already processes old messages to produce a history entry and memory update. We extend it with a third output: `knowledge_entries` — a list of structured items to write to the knowledge base.
 
-    name = "session_reader"
-    description = "Read conversation messages from session files with filtering and chunking"
-    parameters = {
-        "type": "object",
-        "properties": {
-            "session_key": {
-                "type": "string",
-                "description": "Session key (channel:chat_id) or 'current' for active session"
-            },
-            "offset": {
-                "type": "integer",
-                "description": "Start reading from this message number (0-indexed)",
-                "default": 0
-            },
-            "limit": {
-                "type": "integer",
-                "description": "Maximum number of messages to return",
-                "default": 50
-            },
-            "roles": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Filter by role: ['user', 'assistant', 'tool']. Default: ['user', 'assistant']"
-            },
-            "date_from": {
-                "type": "string",
-                "description": "ISO date to start from (e.g. '2025-01-15')"
-            },
-            "date_to": {
-                "type": "string",
-                "description": "ISO date to end at (e.g. '2025-01-20')"
-            },
-            "stats_only": {
-                "type": "boolean",
-                "description": "Return only message count and date range, not content",
-                "default": false
-            }
-        },
-        "required": ["session_key"]
-    }
-```
+Each entry includes: category, filename, title, summary, content, and tags. The LLM decides what's worth extracting based on the conversation content and the current knowledge index (passed as context).
 
-**Capabilities:**
-- Read messages by offset/limit (chunked pagination)
-- Filter by role (skip tool call noise)
-- Filter by date range
-- Stats-only mode: return message count, date range, and size without content
-- Strip tool call metadata, return clean user/assistant dialogue
-- Return messages as formatted text, not raw JSON
+### 2.2 Add `_write_knowledge_entries()` helper
 
-### 2.2 Register the tool
+**File:** `nanobot/agent/loop.py`
 
-**File:** `nanobot/agent/loop.py` — add to `_register_default_tools()`
-**File:** `nanobot/agent/subagent.py` — add to subagent tool registry
-
-### 2.3 Update TOOLS.md
-
-Document the new tool with usage examples.
+A new method that takes the extracted entries and:
+1. Creates or updates files in `workspace/knowledge/<category>/`
+2. Adds YAML frontmatter (type, dates, tags)
+3. Updates `INDEX.md` with new entries
+4. Handles updates to existing entries (appends to Evolution section)
 
 ### Deliverable
-The agent and subagents can read conversation history in manageable chunks, filter out noise, and get statistics about sessions — all without consuming tokens on JSONL parsing.
+Knowledge extraction runs automatically during memory consolidation. No separate tools or pipeline needed — it piggybacks on the existing process that already sees old messages before they're trimmed.
 
 ---
 
@@ -296,75 +247,27 @@ The main agent can spawn subagents that run on a local Ollama model, enabling co
 
 ---
 
-## Phase 4: Conversation Processing Pipeline
+## Phase 4: Knowledge Extractor Skill
 
-**Goal:** Automatically extract knowledge from conversations and populate the knowledge base.
+**Goal:** Document the automated knowledge extraction process for the agent and users.
 
-### 4.1 Processing subagent task
+### 4.1 Update the knowledge-extractor skill
 
-Create a skill or template prompt that the main agent uses when spawning a conversation-processing subagent:
+**File:** `workspace/skills/knowledge-extractor/SKILL.md`
 
-```
-Read the session file for [session_key] using session_reader.
-Start from message [offset], process in chunks of 50 messages.
+The skill now describes how knowledge extraction works during consolidation rather than as a separate pipeline. It explains:
+- When extraction is triggered (session exceeds memory_window)
+- What gets extracted (topics, people, decisions, facts, preferences, projects, references)
+- How entries are formatted (following the knowledge skill conventions)
+- Guidelines for what's worth extracting
+- How to manually create entries outside of consolidation
 
-For each chunk, extract:
-- Topics discussed in depth
-- Decisions made (with reasoning)
-- Facts stated or discovered
-- People mentioned (with context)
-- Preferences expressed
-- Insights or observations
+### 4.2 No separate trigger needed
 
-For each extracted item:
-1. Check if a knowledge entry already exists (read INDEX.md, then the relevant file)
-2. If yes, update it with new information and set the updated date
-3. If no, create a new file in the appropriate subdirectory with frontmatter
-4. Update INDEX.md with any new entries
-
-After processing, record the last processed message offset in
-workspace/knowledge/.processing-state.json so the next run continues from there.
-```
-
-### 4.2 Processing state tracking
-
-**File:** `workspace/knowledge/.processing-state.json`
-
-```json
-{
-    "sessions": {
-        "telegram:12345": {
-            "last_offset": 250,
-            "last_processed": "2025-02-12T10:30:00",
-            "total_messages": 300
-        }
-    }
-}
-```
-
-This allows incremental processing — each run picks up where the last one left off.
-
-### 4.3 Trigger mechanisms
-
-Three options, all using existing infrastructure:
-
-**A. Cron-based (recommended to start):**
-Add a heartbeat task or cron job that triggers processing daily or every N hours.
-
-**B. Threshold-based:**
-Modify `SessionManager.save()` to check message count and auto-trigger when messages exceed a threshold (e.g., every 100 new messages).
-
-**C. Manual:**
-The user asks the agent to process conversations. Simplest, no automation needed.
-
-### 4.4 JSONL management after processing
-
-**Note:** Upstream now handles session trimming automatically via auto-consolidation (when session exceeds `memory_window`, old messages are summarized into HISTORY.md and the session is trimmed). The knowledge extractor is complementary — it extracts *structured* knowledge that auto-consolidation doesn't capture.
-
-The session_reader tool remains useful for initial bootstrapping (processing existing history before auto-consolidation was active) and for deeper re-processing when needed.
+Knowledge extraction is automatic — it runs every time memory consolidation fires. No cron jobs, heartbeat tasks, or manual triggers required. The agent can also create entries manually during conversations.
 
 ### Deliverable
-A pipeline that processes conversation history into structured knowledge entries, runs on a local model, and can be triggered automatically or manually.
+A documented, automated knowledge extraction process that runs alongside memory consolidation with zero manual intervention.
 
 ---
 
@@ -377,8 +280,8 @@ A pipeline that processes conversation history into structured knowledge entries
 Write a Python script (not a tool — this is a one-time operation) that:
 1. Reads the Claude.ai JSON export file
 2. Groups messages by conversation/date
-3. Writes them as temporary files in a format the session_reader tool can process
-4. Or directly chunks and feeds them to Ollama via the LiteLLM provider
+3. Chunks conversations by date or topic
+4. Feeds them to the LLM (or a local Ollama model) for extraction
 
 ### 5.2 Process through the same pipeline
 
@@ -396,24 +299,24 @@ Historical conversations become structured knowledge, giving the agent a rich st
 ## Implementation Order and Dependencies
 
 ```
-Phase 1 (Knowledge structure + skill)     <- No code changes needed (except small context.py tweak)
+Phase 1 (Knowledge structure + skill)     <- Small context.py tweak + workspace files
     |
-Phase 2 (Session reader tool)             <- Requires Python tool class + registration
+Phase 2 (Extraction during consolidation) <- Extends _consolidate_memory() in loop.py
     |
-Phase 3 (Local model for subagents)       <- Requires spawn tool + subagent changes
+Phase 3 (Local model for subagents)       <- Independent, requires spawn tool + subagent changes
     |
-Phase 4 (Processing pipeline)             <- Uses Phase 2 tool + Phase 3 local model
+Phase 4 (Extractor skill docs)            <- Documents Phase 2, no code changes
     |
-Phase 5 (Historical import)               <- Uses Phase 4 pipeline
+Phase 5 (Historical import)               <- One-time script
 ```
 
-**Phase 1 can be done immediately** and provides value on its own — the agent can start building knowledge manually.
+**Phases 1 and 2 are the core feature** — together they provide a structured knowledge base that populates automatically.
 
-**Phases 2 and 3 are independent** of each other and can be done in parallel.
+**Phase 3 is independent** and optional — useful for cost optimization but not required for knowledge extraction.
 
-**Phase 4 combines them** into the automated pipeline.
+**Phase 4 is documentation only.**
 
-**Phase 5 is a one-time operation** that can happen whenever the pipeline is ready.
+**Phase 5 is a one-time operation** that can happen whenever desired.
 
 ---
 
@@ -422,9 +325,9 @@ Phase 5 (Historical import)               <- Uses Phase 4 pipeline
 | Phase | Scope | Code Changes |
 |-------|-------|-------------|
 | 1 | Knowledge structure + skill | Minimal: one addition to `context.py`, new workspace files |
-| 2 | Session reader tool | New tool class (~150 lines), registration in 2 files |
+| 2 | Extraction during consolidation | Extend `_consolidate_memory()` prompt + new `_write_knowledge_entries()` (~80 lines) |
 | 3 | Local model support | Modify `spawn.py` params, `subagent.py` provider logic (~100 lines) |
-| 4 | Processing pipeline | Skill/prompt template, state tracking, trigger setup |
+| 4 | Extractor skill docs | Workspace skill file only, no code changes |
 | 5 | Historical import | One-time script (~200 lines) |
 
 ---

@@ -176,18 +176,18 @@ The agent scans this index, identifies relevant entries, and reads the full file
 
 ### 3.4 Conversation Processing Pipeline
 
-Address the JSONL dead-data problem by processing conversations before they fall off the window:
+Knowledge extraction runs alongside the existing memory consolidation process in `_consolidate_memory()`. When the session exceeds `memory_window` messages:
 
-1. **Trigger** — cron job, message count threshold, or end-of-day schedule
-2. **Subagent** (running on a local model like Ollama) reads the JSONL session file in chunks via a dedicated `session_reader` tool
-3. **Extracts** topics, decisions, facts, preferences, people, projects, references
-4. **Creates or updates** knowledge files in the appropriate categories
-5. **Updates** `INDEX.md` with new entries
-6. **Optionally truncates** the processed portion of the JSONL file
+1. **Trigger** — automatic, when session length exceeds `memory_window` (default 50)
+2. **The LLM processes old messages** before they are trimmed, extracting three things in a single call:
+   - A **history entry** for HISTORY.md (grep-searchable event log)
+   - Updated **long-term memory** for MEMORY.md (quick-access facts)
+   - Zero or more **knowledge entries** for the structured knowledge base
+3. **Knowledge entries** are written to the appropriate category directories with YAML frontmatter
+4. **INDEX.md** is updated with new entries
+5. **The session is trimmed** to recent messages
 
-This requires two codebase changes:
-- A `session_reader` tool that reads and chunks the JSONL without consuming LLM tokens on raw parsing
-- Model routing so the subagent can use a local model (Ollama) instead of the main provider
+This approach ensures knowledge extraction sees the full conversation before messages are lost, with no additional tools or separate processing pipeline needed.
 
 ### 3.5 Bootstrapping from Historical Conversations
 

@@ -1,127 +1,61 @@
 ---
 name: knowledge-extractor
-description: Extract knowledge from conversation history and populate the knowledge base, memory, and history log.
+description: Automatic knowledge extraction during memory consolidation.
 metadata: {"nanobot":{"emoji":"🔍"}}
 ---
 
 # Knowledge Extractor
 
-Process conversation history and extract structured information into three outputs:
-- **Knowledge base** (`workspace/knowledge/`) — structured, topic-organized entries
-- **Long-term memory** (`workspace/memory/MEMORY.md`) — critical quick-access facts
-- **History log** (`workspace/memory/HISTORY.md`) — append-only, grep-searchable event log
+Knowledge extraction runs automatically during memory consolidation — the same process that writes to MEMORY.md and HISTORY.md.
 
-This skill is typically run as a subagent task spawned by the main agent.
+When the conversation session exceeds the memory window, old messages are processed by the LLM. Alongside the history summary and memory update, the LLM also identifies knowledge entries worth extracting into the structured knowledge base.
 
-## Prerequisites
+## How It Works
 
-Before extracting knowledge, read the knowledge management skill for conventions on file format, categories, and cross-references:
+1. **Trigger**: Memory consolidation runs automatically when the session exceeds `memory_window` messages (default: 50)
+2. **Input**: The old messages that are about to be trimmed from the session — the LLM sees the full conversation before it's lost
+3. **Output**: Three things are produced in a single LLM call:
+   - A **history entry** appended to `workspace/memory/HISTORY.md`
+   - An updated **long-term memory** in `workspace/memory/MEMORY.md`
+   - Zero or more **knowledge entries** written to `workspace/knowledge/`
+
+## What Gets Extracted
+
+Knowledge entries are created for information that deserves a standalone, structured entry in the knowledge base:
+
+- **Topics** — subjects discussed in depth or repeatedly (includes concepts, ideas, frameworks)
+- **People** — individuals mentioned with meaningful context
+- **Decisions** — choices made with reasoning, insights, or lessons learned
+- **Facts** — concrete, stable information worth retaining (configurations, setups, accounts)
+- **Preferences** — user preferences for tools, styles, approaches
+- **Projects** — ongoing work spanning multiple topics, people, or decisions
+- **References** — books, articles, laws, theorems, films, music, art, websites
+
+## Knowledge Entry Format
+
+All entries follow the conventions defined in the knowledge management skill:
 ```
 read_file(path="workspace/skills/knowledge/SKILL.md")
 ```
 
-All knowledge entries must follow the conventions defined there.
-
-## Processing Workflow
-
-### Step 1: Read prerequisites
-
-Read the knowledge skill to understand entry format and categories:
-```
-read_file(path="workspace/skills/knowledge/SKILL.md")
-```
-
-### Step 2: Check processing state
-
-Read the processing state file to know where to resume:
-```
-read_file(path="workspace/knowledge/.processing-state.json")
-```
-
-If the file doesn't exist or the session is not listed, start from offset 0.
-
-### Step 3: Get session stats
-
-```
-session_reader(action="stats", session_key="<key>")
-```
-
-This tells you total message count so you know how much to process.
-
-### Step 4: Read a chunk of messages
-
-```
-session_reader(action="read", session_key="<key>", offset=<last_offset>, limit=50)
-```
-
-Process in chunks of 50 messages. Only user and assistant messages are included by default.
-
-### Step 5: Extract and write
-
-For each chunk, extract information and write to the appropriate outputs:
-
-**Knowledge base entries** — for topics, people, decisions, facts, preferences, projects, and references that deserve structured, standalone entries. Follow the conventions in the knowledge skill.
-
-Before creating a new entry:
-1. Read `workspace/knowledge/INDEX.md` to check if an entry already exists
-2. If it does, read the full file and update it rather than creating a duplicate
-3. After creating or updating, update `INDEX.md`
-
-**Long-term memory** — for critical facts the agent should always have quick access to:
-- User identity and context (name, role, location, timezone)
-- Key configuration details (server IPs, account names, API endpoints)
-- Standing instructions or preferences that apply broadly
-- Append to or update `workspace/memory/MEMORY.md`
-- Keep this file concise — it's loaded every turn
-
-**History log** — for timestamped event summaries (grep-searchable):
-- Key conversations and their outcomes
-- Tasks completed or started
-- Decisions made with context
-- Append to `workspace/memory/HISTORY.md`
-- Each entry starts with a timestamp: `[YYYY-MM-DD HH:MM]`
-- Include enough detail to be useful when found by grep later
-
-### Step 6: Update processing state
-
-After processing each chunk, update the state file:
-```
-write_file(path="workspace/knowledge/.processing-state.json", content=<updated_state>)
-```
-
-State format:
-```json
-{
-  "sessions": {
-    "telegram:12345": {
-      "last_offset": 150,
-      "last_processed": "2025-02-12T10:30:00",
-      "total_at_last_run": 300
-    }
-  }
-}
-```
-
-### Step 7: Continue or stop
-
-If there are more messages to process (remaining > 0), continue with the next chunk.
-If done, provide a summary of what was extracted.
+Each entry gets:
+- YAML frontmatter with type, dates, related links, and tags
+- A Summary section (also added to INDEX.md)
+- A Details section with full content
+- An Evolution section tracking changes over time
 
 ## Guidelines
 
-- Be selective: not every message contains knowledge worth extracting
-- Merge related information into single, comprehensive entries
-- Prefer updating existing entries over creating near-duplicates
-- Don't duplicate information across outputs — use the right one:
-  - Knowledge base for structured, topic-organized, long-lived information
-  - MEMORY.md for facts the agent needs every turn (keep it small)
-  - HISTORY.md for chronological, grep-searchable event log
-- When in doubt about knowledge category, prefer `topics/` as the default
+- Not every conversation contains knowledge worth extracting — many will produce zero entries
+- Existing entries are updated rather than duplicated (checked against INDEX.md)
+- Knowledge base is for structured, topic-organized, long-lived information
+- MEMORY.md is for facts the agent needs every turn (keep it small)
+- HISTORY.md is for chronological, grep-searchable event log
+- Don't duplicate information across these three outputs — use the right one
 
-## Spawning This Task
+## Manual Extraction
 
-The main agent can trigger processing by spawning a subagent:
-
-```
-spawn(task="Process conversation history for session <session_key>. Read the knowledge-extractor skill at workspace/skills/knowledge-extractor/SKILL.md and follow the workflow.", label="knowledge extraction")
-```
+The agent can also create knowledge entries manually during conversations by following the knowledge skill conventions. This is useful for:
+- Extracting knowledge from conversations that haven't triggered consolidation yet
+- Creating entries the user explicitly asks for
+- Organizing information shared by the user outside of normal conversation flow
