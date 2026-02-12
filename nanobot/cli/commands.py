@@ -305,7 +305,11 @@ def gateway(
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
-    
+
+    # Always write logs to file for troubleshooting
+    from nanobot.utils.helpers import setup_file_logging
+    setup_file_logging()
+
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     
     config = load_config()
@@ -428,9 +432,13 @@ def agent(
     from loguru import logger
     
     config = load_config()
-    
+
     bus = MessageBus()
     provider = _make_provider(config)
+
+    # Always write logs to file for troubleshooting
+    from nanobot.utils.helpers import setup_file_logging
+    setup_file_logging()
 
     if logs:
         logger.enable("nanobot")

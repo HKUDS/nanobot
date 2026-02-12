@@ -76,9 +76,10 @@ Skills with available="false" need dependencies installed first - you can try in
         from datetime import datetime
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         workspace_path = str(self.workspace.expanduser().resolve())
+        data_dir = str(Path.home() / ".nanobot")
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
-        
+
         daily_path = f"{workspace_path}/memory/{self.memory_daily_subdir}" if self.memory_daily_subdir else f"{workspace_path}/memory"
 
         return f"""# Kaguya 🐈
@@ -97,6 +98,8 @@ Your workspace is at: {workspace_path}
 - Memory files: {workspace_path}/memory/MEMORY.md
 - Daily notes: {daily_path}/YYYY-MM-DD.md
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
+- Logs: {data_dir}/logs/nanobot_YYYY-MM-DD.log
+    - 排查自身运行问题时，使用 exec_command tool 搜索日志（grep, tail 等）
 
 Powered by nanobot. 身份见 SOUL.md，用户信息见 USER.md，行为规则见 AGENTS.md。
 

@@ -75,6 +75,28 @@ def safe_filename(name: str) -> str:
     return name.strip()
 
 
+def get_logs_path() -> Path:
+    """Get the logs directory (~/.nanobot/logs)."""
+    return ensure_dir(get_data_path() / "logs")
+
+
+def setup_file_logging() -> Path:
+    """Add a file sink to loguru. Returns the log directory path."""
+    from loguru import logger
+
+    log_dir = get_logs_path()
+    logger.add(
+        log_dir / "nanobot_{time:YYYY-MM-DD}.log",
+        rotation="00:00",
+        retention="7 days",
+        compression="gz",
+        encoding="utf-8",
+        enqueue=True,
+        level="DEBUG",
+    )
+    return log_dir
+
+
 def parse_session_key(key: str) -> tuple[str, str]:
     """
     Parse a session key into channel and chat_id.
