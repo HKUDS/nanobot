@@ -241,7 +241,10 @@ class AgentLoop:
         
         # Save to session
         session.add_message("user", msg.content)
-        session.add_message("assistant", final_content)
+        # Preserve reasoning_content for reasoning models (Kimi K2.5, DeepSeek-R1, etc.)
+        # These models require reasoning_content in assistant messages when thinking is enabled
+        reasoning_content = getattr(response, 'reasoning_content', None)
+        session.add_message("assistant", final_content, reasoning_content=reasoning_content)
         self.sessions.save(session)
         
         return OutboundMessage(
@@ -343,7 +346,9 @@ class AgentLoop:
         
         # Save to session (mark as system message in history)
         session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
-        session.add_message("assistant", final_content)
+        # Preserve reasoning_content for reasoning models
+        reasoning_content = getattr(response, 'reasoning_content', None)
+        session.add_message("assistant", final_content, reasoning_content=reasoning_content)
         self.sessions.save(session)
         
         return OutboundMessage(

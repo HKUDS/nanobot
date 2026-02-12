@@ -49,8 +49,30 @@ class Session:
         # Get recent messages
         recent = self.messages[-max_messages:] if len(self.messages) > max_messages else self.messages
         
-        # Convert to LLM format (just role and content)
-        return [{"role": m["role"], "content": m["content"]} for m in recent]
+        # Convert to LLM format while preserving tool_calls and reasoning_content
+        # needed by reasoning models (Kimi K2.5, DeepSeek-R1, etc.)
+        history = []
+        for m in recent:
+            msg: dict[str, Any] = {"role": m["role"], "content": m["content"]}
+            
+            # Preserve tool_calls if present (for assistant messages with tool use)
+            if "tool_calls" in m:
+                msg["tool_calls"] = m["tool_calls"]
+            
+            # Preserve reasoning_content if present (for reasoning models)
+            if "reasoning_content" in m:
+                msg["reasoning_content"] = m["reasoning_content"]
+            
+            # Preserve tool_call_id and name for tool messages
+            if m.get("role") == "tool":
+                if "tool_call_id" in m:
+                    msg["tool_call_id"] = m["tool_call_id"]
+                if "name" in m:
+                    msg["name"] = m["name"]
+            
+            history.append(msg)
+        
+        return history
     
     def clear(self) -> None:
         """Clear all messages in the session."""
