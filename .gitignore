@@ -19,3 +19,5 @@ poetry.lock
 .pytest_cache/
 tests/
 botpy.log
+uv.lock
+.vscode/
