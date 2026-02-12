@@ -244,11 +244,16 @@ class AgentLoop:
         session.add_message("assistant", final_content)
         self.sessions.save(session)
         
+        # Determine if we should reply with voice
+        reply_voice = False
+        if msg.metadata and msg.metadata.get("is_voice"):
+             reply_voice = True
+
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
-            metadata=msg.metadata or {},  # Pass through for channel-specific needs (e.g. Slack thread_ts)
+            metadata={**(msg.metadata or {}), "reply_voice": reply_voice},  # Pass through for channel-specific needs
         )
     
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:

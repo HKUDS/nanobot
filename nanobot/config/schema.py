@@ -189,6 +189,27 @@ class ProvidersConfig(BaseModel):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
+    # TTS Providers
+    openai_tts: ProviderConfig = Field(default_factory=ProviderConfig)
+    edge_tts: ProviderConfig = Field(default_factory=ProviderConfig)
+
+
+class TTSDefaultConfig(BaseModel):
+    """Default TTS configuration."""
+    provider: str = "openai_tts"  # "openai_tts" or "edge_tts"
+    voice: str = "alloy"  # OpenAI: alloy, echo, fable, onyx, nova, shimmer
+    speed: float = 1.0
+
+
+class TTSConfig(BaseModel):
+    """Text-to-Speech configuration."""
+    defaults: TTSDefaultConfig = Field(default_factory=TTSDefaultConfig)
+
+
+class AudioConfig(BaseModel):
+    """Audio configuration (STT/TTS)."""
+    tts: TTSConfig = Field(default_factory=TTSConfig)
+
 
 
 class GatewayConfig(BaseModel):
@@ -227,6 +248,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    audio: AudioConfig = Field(default_factory=AudioConfig)
     
     @property
     def workspace_path(self) -> Path:
