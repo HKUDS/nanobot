@@ -584,7 +584,45 @@ nanobot gateway
 
 Simply send the command above to your nanobot (via CLI or any chat channel), and it will handle the rest.
 
+ 
+## 🔌 MCP Support
+
+nanobot supports the Model Context Protocol (MCP), allowing you to indefinitely extend its capabilities with external tools.
+
+**1. Create Config File**
+
+Create `~/.nanobot/mcp.json`.
+
+**2. Add Servers**
+
+Add your servers to the `mcpServers` object. nanobot supports `stdio`, `sse`, and `streamable-http`.
+
+```json
+{
+  "mcpServers": {
+    "sqlite": {
+      "command": "uvx",
+      "args": ["mcp-server-sqlite", "--db-path", "test.db"]
+    },
+    "weather": {
+      "transport": "sse",
+      "url": "http://localhost:3000/sse"
+    },
+    "xiaohongshu": {
+      "transport": "streamable-http",
+      "url": "http://localhost:18060/mcp", 
+      "headers": {"X-Custom-Header": "value"}
+    }
+  }
+}
+```
+
+**3. Restart**
+
+Restart `nanobot gateway` or `nanobot agent`. The new tools will be automatically registered.
+
 ## ⚙️ Configuration
+
 
 Config file: `~/.nanobot/config.json`
 
