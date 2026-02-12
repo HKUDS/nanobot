@@ -6,6 +6,11 @@ Adding a new provider:
   2. Add a field to ProvidersConfig in config/schema.py.
   Done. Env vars, prefixing, config matching, status display all derive from here.
 
+Adding a custom provider:
+  1. Add a CustomProviderConfig to providers.custom_providers in config.
+  2. The custom provider will be automatically registered and available for use.
+  Done. Custom providers support all the same features as built-in providers.
+
 Order matters — it controls match priority and fallback. Gateways first.
 Every entry writes out all fields so you can copy-paste as a template.
 """
@@ -59,6 +64,9 @@ class ProviderSpec:
 # ---------------------------------------------------------------------------
 # PROVIDERS — the registry. Order = priority. Copy any entry as template.
 # ---------------------------------------------------------------------------
+
+# Global list to hold dynamically registered custom providers
+_CUSTOM_PROVIDERS: list[ProviderSpec] = []
 
 PROVIDERS: tuple[ProviderSpec, ...] = (
 
@@ -312,7 +320,14 @@ def find_by_model(model: str) -> ProviderSpec | None:
     """Match a standard provider by model-name keyword (case-insensitive).
     Skips gateways/local — those are matched by api_key/api_base instead."""
     model_lower = model.lower()
+    # Check built-in providers first
     for spec in PROVIDERS:
+        if spec.is_gateway or spec.is_local:
+            continue
+        if any(kw in model_lower for kw in spec.keywords):
+            return spec
+    # Check custom providers
+    for spec in _CUSTOM_PROVIDERS:
         if spec.is_gateway or spec.is_local:
             continue
         if any(kw in model_lower for kw in spec.keywords):
@@ -341,8 +356,15 @@ def find_gateway(
         if spec and (spec.is_gateway or spec.is_local):
             return spec
 
-    # 2. Auto-detect by api_key prefix / api_base keyword
+    # 2. Auto-detect by api_key prefix / api_base keyword (built-in providers)
     for spec in PROVIDERS:
+        if spec.detect_by_key_prefix and api_key and api_key.startswith(spec.detect_by_key_prefix):
+            return spec
+        if spec.detect_by_base_keyword and api_base and spec.detect_by_base_keyword in api_base:
+            return spec
+
+    # 3. Auto-detect by api_key prefix / api_base keyword (custom providers)
+    for spec in _CUSTOM_PROVIDERS:
         if spec.detect_by_key_prefix and api_key and api_key.startswith(spec.detect_by_key_prefix):
             return spec
         if spec.detect_by_base_keyword and api_base and spec.detect_by_base_keyword in api_base:
@@ -356,4 +378,76 @@ def find_by_name(name: str) -> ProviderSpec | None:
     for spec in PROVIDERS:
         if spec.name == name:
             return spec
+    # Check custom providers
+    for spec in _CUSTOM_PROVIDERS:
+        if spec.name == name:
+            return spec
     return None
+
+
+def register_custom_provider(
+    name: str,
+    display_name: str = "",
+    keywords: tuple[str, ...] = (),
+    env_key: str = "",
+    litellm_prefix: str = "",
+    skip_prefixes: tuple[str, ...] = (),
+    env_extras: tuple[tuple[str, str], ...] = (),
+    is_gateway: bool = False,
+    is_local: bool = False,
+    detect_by_key_prefix: str = "",
+    detect_by_base_keyword: str = "",
+    default_api_base: str = "",
+    strip_model_prefix: bool = False,
+    model_overrides: tuple[tuple[str, dict[str, Any]], ...] = (),
+) -> ProviderSpec:
+    """
+    Register a custom provider dynamically.
+
+    Args:
+        name: Unique identifier for this provider (config field name)
+        display_name: Display name for UI
+        keywords: Model-name keywords for matching (lowercase)
+        env_key: LiteLLM env var, e.g. "CUSTOM_API_KEY"
+        litellm_prefix: LiteLLM prefix, e.g. "custom"
+        skip_prefixes: Don't prefix if model already starts with these
+        env_extras: Extra env vars, e.g. (("CUSTOM_API_BASE", "{api_base}"),)
+        is_gateway: Whether this is a gateway provider
+        is_local: Whether this is a local deployment
+        detect_by_key_prefix: Match api_key prefix, e.g. "sk-custom-"
+        detect_by_base_keyword: Match substring in api_base URL
+        default_api_base: Fallback base URL
+        strip_model_prefix: Strip "provider/" before re-prefixing
+        model_overrides: Per-model param overrides
+
+    Returns:
+        The registered ProviderSpec
+    """
+    spec = ProviderSpec(
+        name=name,
+        keywords=keywords,
+        env_key=env_key,
+        display_name=display_name,
+        litellm_prefix=litellm_prefix,
+        skip_prefixes=skip_prefixes,
+        env_extras=env_extras,
+        is_gateway=is_gateway,
+        is_local=is_local,
+        detect_by_key_prefix=detect_by_key_prefix,
+        detect_by_base_keyword=detect_by_base_keyword,
+        default_api_base=default_api_base,
+        strip_model_prefix=strip_model_prefix,
+        model_overrides=model_overrides,
+    )
+    _CUSTOM_PROVIDERS.append(spec)
+    return spec
+
+
+def get_all_providers() -> tuple[ProviderSpec, ...]:
+    """Get all providers including custom ones."""
+    return PROVIDERS + tuple(_CUSTOM_PROVIDERS)
+
+
+def clear_custom_providers() -> None:
+    """Clear all registered custom providers. Useful for testing."""
+    _CUSTOM_PROVIDERS.clear()

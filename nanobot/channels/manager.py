@@ -79,7 +79,9 @@ class ChannelManager:
             try:
                 from nanobot.channels.feishu import FeishuChannel
                 self.channels["feishu"] = FeishuChannel(
-                    self.config.channels.feishu, self.bus
+                    self.config.channels.feishu,
+                    self.bus,
+                    workspace=self.config.workspace_path
                 )
                 logger.info("Feishu channel enabled")
             except ImportError as e:
