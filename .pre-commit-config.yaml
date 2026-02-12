@@ -7,3 +7,11 @@ repos:
         args: [--fix]
       # Run the formatter
       - id: ruff-format
+  - repo: local
+    hooks:
+      - id: update-line-count
+        name: update README line count
+        entry: python update_line_count.py
+        language: system
+        pass_filenames: false
+        always_run: true

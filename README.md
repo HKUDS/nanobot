@@ -16,7 +16,29 @@
 
 ⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
 
-📏 Real-time line count: **3,578 lines** (run `bash core_agent_lines.sh` to verify anytime)
+<!-- LINE_COUNT_START -->
+📏 Real-time line count: **3,622 lines** (run `bash core_agent_lines.sh` to verify anytime)
+
+<details>
+<summary>📊 Line count breakdown</summary>
+
+| Module | Lines |
+|--------|-------|
+| agent/ | 1,222 |
+| agent/tools/ | 963 |
+| config/ | 438 |
+| cron/ | 422 |
+| session/ | 210 |
+| heartbeat/ | 135 |
+| bus/ | 122 |
+| utils/ | 96 |
+| (root) | 14 |
+| **Core total** | **3,622** |
+
+*(excludes: channels/, cli/, providers/)*
+
+</details>
+<!-- LINE_COUNT_END -->
 
 ## 📢 News
 
