@@ -34,7 +34,12 @@ class ExecTool(Tool):
             ),                               # disk operations
             r"\bdd\s+if=",                   # dd
             r">\s*/dev/sd",                  # write to disk
-            r"\b(shutdown|reboot|poweroff)\b",  # system power
+            (
+                r"(?im)(?:^|;\s*|&&\s*|\|\|\s*|\|\s*)\s*"
+                r"(?:(?:sudo|doas)\s+|cmd(?:\.exe)?\s+/c\s+|(?:/usr/bin/)?env\s+)*"
+                r"(?:[\w.:/\\-]+[/\\])?"
+                r"(?:shutdown(?:\.\w+)?|reboot|poweroff)\b(?!\s*=)"
+            ),                               # system power
             r":\(\)\s*\{.*\};\s*:",          # fork bomb
         ]
         self.allow_patterns = allow_patterns or []
