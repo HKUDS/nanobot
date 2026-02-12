@@ -15,5 +15,7 @@ docs/
 *.pyzz
 .venv/
 __pycache__/
-config.json
-cron/
+poetry.lock
+.pytest_cache/
+tests/
+botpy.log

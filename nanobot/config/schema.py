@@ -1,7 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from pydantic_settings import BaseSettings
 
 
@@ -30,6 +30,14 @@ class FeishuConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
 
 
+class DingTalkConfig(BaseModel):
+    """DingTalk channel configuration using Stream mode."""
+    enabled: bool = False
+    client_id: str = ""  # AppKey
+    client_secret: str = ""  # AppSecret
+    allow_from: list[str] = Field(default_factory=list)  # Allowed staff_ids
+
+
 class DiscordConfig(BaseModel):
     """Discord channel configuration."""
     enabled: bool = False
@@ -38,6 +46,100 @@ class DiscordConfig(BaseModel):
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 
+class EmailConfig(BaseModel):
+    """Email channel configuration (IMAP inbound + SMTP outbound)."""
+    enabled: bool = False
+    consent_granted: bool = False  # Explicit owner permission to access mailbox data
+
+    # IMAP (receive)
+    imap_host: str = ""
+    imap_port: int = 993
+    imap_username: str = ""
+    imap_password: str = ""
+    imap_mailbox: str = "INBOX"
+    imap_use_ssl: bool = True
+
+    # SMTP (send)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
+    from_address: str = ""
+
+    # Behavior
+    auto_reply_enabled: bool = True  # If false, inbound email is read but no automatic reply is sent
+    poll_interval_seconds: int = 30
+    mark_seen: bool = True
+    max_body_chars: int = 12000
+    subject_prefix: str = "Re: "
+    allow_from: list[str] = Field(default_factory=list)  # Allowed sender email addresses
+
+
+class MochatMentionConfig(BaseModel):
+    """Mochat mention behavior configuration."""
+    require_in_groups: bool = False
+
+
+class MochatGroupRule(BaseModel):
+    """Mochat per-group mention requirement."""
+    require_mention: bool = False
+
+
+class MochatConfig(BaseModel):
+    """Mochat channel configuration."""
+    enabled: bool = False
+    base_url: str = "https://mochat.io"
+    socket_url: str = ""
+    socket_path: str = "/socket.io"
+    socket_disable_msgpack: bool = False
+    socket_reconnect_delay_ms: int = 1000
+    socket_max_reconnect_delay_ms: int = 10000
+    socket_connect_timeout_ms: int = 10000
+    refresh_interval_ms: int = 30000
+    watch_timeout_ms: int = 25000
+    watch_limit: int = 100
+    retry_delay_ms: int = 500
+    max_retry_attempts: int = 0  # 0 means unlimited retries
+    claw_token: str = ""
+    agent_user_id: str = ""
+    sessions: list[str] = Field(default_factory=list)
+    panels: list[str] = Field(default_factory=list)
+    allow_from: list[str] = Field(default_factory=list)
+    mention: MochatMentionConfig = Field(default_factory=MochatMentionConfig)
+    groups: dict[str, MochatGroupRule] = Field(default_factory=dict)
+    reply_delay_mode: str = "non-mention"  # off | non-mention
+    reply_delay_ms: int = 120000
+
+
+class SlackDMConfig(BaseModel):
+    """Slack DM policy configuration."""
+    enabled: bool = True
+    policy: str = "open"  # "open" or "allowlist"
+    allow_from: list[str] = Field(default_factory=list)  # Allowed Slack user IDs
+
+
+class SlackConfig(BaseModel):
+    """Slack channel configuration."""
+    enabled: bool = False
+    mode: str = "socket"  # "socket" supported
+    webhook_path: str = "/slack/events"
+    bot_token: str = ""  # xoxb-...
+    app_token: str = ""  # xapp-...
+    user_token_read_only: bool = True
+    group_policy: str = "mention"  # "mention", "open", "allowlist"
+    group_allow_from: list[str] = Field(default_factory=list)  # Allowed channel IDs if allowlist
+    dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
+
+
+class QQConfig(BaseModel):
+    """QQ channel configuration using botpy SDK."""
+    enabled: bool = False
+    app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
+    secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
+
 
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
@@ -45,6 +147,11 @@ class ChannelsConfig(BaseModel):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    mochat: MochatConfig = Field(default_factory=MochatConfig)
+    dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
+    email: EmailConfig = Field(default_factory=EmailConfig)
+    slack: SlackConfig = Field(default_factory=SlackConfig)
+    qq: QQConfig = Field(default_factory=QQConfig)
 
 
 class AgentDefaults(BaseModel):
@@ -65,6 +172,7 @@ class ProviderConfig(BaseModel):
     """LLM provider configuration."""
     api_key: str = ""
     api_base: str | None = None
+    extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
 class ProvidersConfig(BaseModel):
@@ -75,9 +183,12 @@ class ProvidersConfig(BaseModel):
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
+    dashscope: ProviderConfig = Field(default_factory=ProviderConfig)  # 阿里云通义千问
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
+    minimax: ProviderConfig = Field(default_factory=ProviderConfig)
+    aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
 
 
 class GatewayConfig(BaseModel):
@@ -100,13 +211,13 @@ class WebToolsConfig(BaseModel):
 class ExecToolConfig(BaseModel):
     """Shell exec tool configuration."""
     timeout: int = 60
-    restrict_to_workspace: bool = False  # If true, block commands accessing paths outside workspace
 
 
 class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
 
 
 class Config(BaseSettings):
@@ -122,60 +233,55 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
     
-    def _match_provider(self, model: str | None = None) -> ProviderConfig | None:
-        """Match a provider based on model name."""
-        model = (model or self.agents.defaults.model).lower()
-        # Map of keywords to provider configs
-        providers = {
-            "openrouter": self.providers.openrouter,
-            "deepseek": self.providers.deepseek,
-            "anthropic": self.providers.anthropic,
-            "claude": self.providers.anthropic,
-            "openai": self.providers.openai,
-            "gpt": self.providers.openai,
-            "gemini": self.providers.gemini,
-            "zhipu": self.providers.zhipu,
-            "glm": self.providers.zhipu,
-            "zai": self.providers.zhipu,
-            "groq": self.providers.groq,
-            "moonshot": self.providers.moonshot,
-            "kimi": self.providers.moonshot,
-            "vllm": self.providers.vllm,
-        }
-        for keyword, provider in providers.items():
-            if keyword in model and provider.api_key:
-                return provider
-        return None
+    def _match_provider(self, model: str | None = None) -> tuple["ProviderConfig | None", str | None]:
+        """Match provider config and its registry name. Returns (config, spec_name)."""
+        from nanobot.providers.registry import PROVIDERS
+        model_lower = (model or self.agents.defaults.model).lower()
+
+        # Match by keyword (order follows PROVIDERS registry)
+        for spec in PROVIDERS:
+            p = getattr(self.providers, spec.name, None)
+            if p and any(kw in model_lower for kw in spec.keywords) and p.api_key:
+                return p, spec.name
+
+        # Fallback: gateways first, then others (follows registry order)
+        for spec in PROVIDERS:
+            p = getattr(self.providers, spec.name, None)
+            if p and p.api_key:
+                return p, spec.name
+        return None, None
+
+    def get_provider(self, model: str | None = None) -> ProviderConfig | None:
+        """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
+        p, _ = self._match_provider(model)
+        return p
+
+    def get_provider_name(self, model: str | None = None) -> str | None:
+        """Get the registry name of the matched provider (e.g. "deepseek", "openrouter")."""
+        _, name = self._match_provider(model)
+        return name
 
     def get_api_key(self, model: str | None = None) -> str | None:
-        """Get API key for the given model (or default model). Falls back to first available key."""
-        # Try matching by model name first
-        matched = self._match_provider(model)
-        if matched:
-            return matched.api_key
-        # Fallback: return first available key
-        for provider in [
-            self.providers.openrouter, self.providers.deepseek,
-            self.providers.anthropic, self.providers.openai,
-            self.providers.gemini, self.providers.zhipu,
-            self.providers.moonshot, self.providers.vllm,
-            self.providers.groq,
-        ]:
-            if provider.api_key:
-                return provider.api_key
-        return None
+        """Get API key for the given model. Falls back to first available key."""
+        p = self.get_provider(model)
+        return p.api_key if p else None
     
     def get_api_base(self, model: str | None = None) -> str | None:
-        """Get API base URL based on model name."""
-        model = (model or self.agents.defaults.model).lower()
-        if "openrouter" in model:
-            return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
-        if any(k in model for k in ("zhipu", "glm", "zai")):
-            return self.providers.zhipu.api_base
-        if "vllm" in model:
-            return self.providers.vllm.api_base
+        """Get API base URL for the given model. Applies default URLs for known gateways."""
+        from nanobot.providers.registry import find_by_name
+        p, name = self._match_provider(model)
+        if p and p.api_base:
+            return p.api_base
+        # Only gateways get a default api_base here. Standard providers
+        # (like Moonshot) set their base URL via env vars in _setup_env
+        # to avoid polluting the global litellm.api_base.
+        if name:
+            spec = find_by_name(name)
+            if spec and spec.is_gateway and spec.default_api_base:
+                return spec.default_api_base
         return None
     
-    class Config:
-        env_prefix = "NANOBOT_"
-        env_nested_delimiter = "__"
+    model_config = ConfigDict(
+        env_prefix="NANOBOT_",
+        env_nested_delimiter="__"
+    )
