@@ -303,6 +303,28 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     # === Auxiliary (not a primary LLM provider) ============================
 
 
+    # NVIDIA: AI platform with various models
+    ProviderSpec(
+        name="nvidia",
+        keywords=("nvidia",),
+        env_key="NVIDIA_API_KEY",
+        display_name="NVIDIA",
+        litellm_prefix="nvidia",            # Custom models can use "nvidia/" prefix
+        skip_prefixes=("nvidia/",),         # avoid double-prefix
+        env_extras=(
+            ("NVIDIA_API_BASE", "{api_base}"),
+        ),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="nvidia",
+        default_api_base="https://integrate.api.nvidia.com/v1",
+        strip_model_prefix=False,
+        model_overrides=(
+            ("kimi-k2.5", {"temperature": 1.0}),  # Kimi K2.5 requires temperature ≥ 1.0
+        ),
+    ),
+
     # Groq: mainly used for Whisper voice transcription, also usable for LLM.
     # Needs "groq/" prefix for LiteLLM routing. Placed last — it rarely wins fallback.
     ProviderSpec(
@@ -321,6 +343,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+
 )
 
 
