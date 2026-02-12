@@ -1,6 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
+from typing import Literal
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic_settings import BaseSettings
 
@@ -218,6 +219,18 @@ class ToolsConfig(BaseModel):
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
+
+
+class MCPServerConfig(BaseModel):
+    """Configuration for a single MCP server."""
+    transport: Literal["stdio", "sse", "streamable-http"] = "stdio"
+    # stdio fields
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    # sse / streamable-http fields
+    url: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
 
 
 class Config(BaseSettings):

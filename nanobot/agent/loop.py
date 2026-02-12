@@ -46,6 +46,7 @@ class AgentLoop:
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
+        mcp_manager: "MCPManager | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
@@ -58,6 +59,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.mcp_manager = mcp_manager
         
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -106,6 +108,12 @@ class AgentLoop:
         # Cron tool (for scheduling)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+    def register_mcp_tools(self) -> None:
+        """Register MCP tools. Call after MCPManager.start()."""
+        if self.mcp_manager:
+            for tool in self.mcp_manager.list_tools():
+                self.tools.register(tool)
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""

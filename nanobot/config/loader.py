@@ -4,12 +4,17 @@ import json
 from pathlib import Path
 from typing import Any
 
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, MCPServerConfig
 
 
 def get_config_path() -> Path:
     """Get the default configuration file path."""
     return Path.home() / ".nanobot" / "config.json"
+
+
+def get_mcp_config_path() -> Path:
+    """Get the MCP configuration file path."""
+    return Path.home() / ".nanobot" / "mcp.json"
 
 
 def get_data_dir() -> Path:
@@ -104,3 +109,31 @@ def snake_to_camel(name: str) -> str:
     """Convert snake_case to camelCase."""
     components = name.split("_")
     return components[0] + "".join(x.title() for x in components[1:])
+
+
+def load_mcp_config(config_path: Path | None = None) -> dict[str, MCPServerConfig]:
+    """
+    Load MCP server configuration from mcp.json.
+
+    Args:
+        config_path: Optional path to mcp.json. Uses default if not provided.
+
+    Returns:
+        Dict mapping server name to its configuration. Empty if file not found.
+    """
+    path = config_path or get_mcp_config_path()
+
+    if not path.exists():
+        return {}
+
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        servers_raw = data.get("mcpServers", {})
+        return {
+            name: MCPServerConfig.model_validate(convert_keys(cfg))
+            for name, cfg in servers_raw.items()
+        }
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"Warning: Failed to load MCP config from {path}: {e}")
+        return {}
