@@ -81,6 +81,68 @@ spawn(task: str, label: str = None) -> str
 
 Use for complex or time-consuming tasks that can run independently. The subagent will complete the task and report back when done.
 
+## Task Management (Todoist)
+
+### todoist
+Manage Todoist tasks and projects. Requires `tools.todoist.api_token` in config.
+
+**Configuration:**
+```json
+{
+  "tools": {
+    "todoist": {
+      "api_token": "your_todoist_api_token"
+    }
+  }
+}
+```
+
+Get your API token from: https://app.todoist.com/prefs/integrations
+
+**Actions:**
+
+#### get_tasks
+List tasks with optional filtering.
+```
+todoist(action="get_tasks", filter="today", limit=10)
+```
+
+#### create_task
+Create a new task.
+```
+todoist(action="create_task", content="Buy groceries", due_string="tomorrow", priority=3)
+```
+
+#### update_task
+Update an existing task.
+```
+todoist(action="update_task", task_id="123", content="Updated task", priority=4)
+```
+
+#### complete_task
+Mark a task as complete.
+```
+todoist(action="complete_task", task_id="123")
+```
+
+#### delete_task
+Delete a task.
+```
+todoist(action="delete_task", task_id="123")
+```
+
+#### get_projects
+List all projects.
+```
+todoist(action="get_projects")
+```
+
+#### create_project
+Create a new project.
+```
+todoist(action="create_project", project_name="Work")
+```
+
 ## Scheduled Reminders (Cron)
 
 Use the `exec` tool to create scheduled reminders with `nanobot cron add`:

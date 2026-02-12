@@ -213,10 +213,16 @@ class ExecToolConfig(BaseModel):
     timeout: int = 60
 
 
+class TodoistConfig(BaseModel):
+    """Todoist integration configuration."""
+    api_token: str = ""  # Personal API token from https://app.todoist.com/prefs/integrations
+
+
 class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    todoist: TodoistConfig = Field(default_factory=TodoistConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
 
 
