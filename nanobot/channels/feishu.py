@@ -98,12 +98,15 @@ class FeishuChannel(BaseChannel):
             log_level=lark.LogLevel.INFO
         )
         
-        # Start WebSocket client in a separate thread
+        # Start WebSocket client in a separate thread with reconnect loop
         def run_ws():
-            try:
-                self._ws_client.start()
-            except Exception as e:
-                logger.error(f"Feishu WebSocket error: {e}")
+            while self._running:
+                try:
+                    self._ws_client.start()
+                except Exception as e:
+                    logger.warning(f"Feishu WebSocket error: {e}")
+                if self._running:
+                    import time; time.sleep(5)
         
         self._ws_thread = threading.Thread(target=run_ws, daemon=True)
         self._ws_thread.start()
