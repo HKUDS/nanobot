@@ -85,6 +85,18 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning(f"Feishu channel not available: {e}")
 
+        # Mochat channel
+        if self.config.channels.mochat.enabled:
+            try:
+                from nanobot.channels.mochat import MochatChannel
+
+                self.channels["mochat"] = MochatChannel(
+                    self.config.channels.mochat, self.bus
+                )
+                logger.info("Mochat channel enabled")
+            except ImportError as e:
+                logger.warning(f"Mochat channel not available: {e}")
+
         # DingTalk channel
         if self.config.channels.dingtalk.enabled:
             try:
