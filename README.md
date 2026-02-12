@@ -117,9 +117,16 @@ For OpenRouter - recommended for global users:
     "defaults": {
       "model": "anthropic/claude-opus-4-5"
     }
+  },
+  "tools": {
+    "enabled": []
   }
 }
 ```
+
+> `tools.enabled` is optional. Leave it empty (default) to enable all built-in tools.
+> Set a non-empty list to allow only selected tools.
+> Example allowlist: `"tools": { "enabled": ["read_file", "write_file", "message"] }`
 
 **3. Chat**
 
@@ -661,6 +668,7 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `tools.enabled` | `[]` (enable all) | Tool allowlist. Empty list keeps all built-in tools enabled. Non-empty list registers only named tools. Available names: `read_file`, `write_file`, `edit_file`, `list_dir`, `exec`, `web_search`, `web_fetch`, `message`, `spawn`, `cron` (only when cron service is active). |
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
 | `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
 

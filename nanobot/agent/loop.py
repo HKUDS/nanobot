@@ -11,6 +11,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
@@ -45,6 +46,7 @@ class AgentLoop:
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
+        enabled_tools: list[str] | None = None,
         session_manager: SessionManager | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
@@ -58,6 +60,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.enabled_tools = set(enabled_tools or [])
         
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -70,42 +73,85 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            enabled_tools=enabled_tools,
         )
         
         self._running = False
-        self._register_default_tools()
+        self._register_tools()
     
-    def _register_default_tools(self) -> None:
-        """Register the default set of tools."""
+    def _should_register(self, name: str) -> bool:
+        """Return True when a tool should be registered based on enabled_tools."""
+        if not self.enabled_tools:
+            return True
+        return name in self.enabled_tools
+
+    def _register_if_enabled(self, tool: Tool) -> None:
+        """Register a tool if it is enabled by configuration."""
+        if self._should_register(tool.name):
+            self.tools.register(tool)
+
+    def _warn_unknown_enabled_tools(self, available_names: set[str]) -> None:
+        """Warn when config references unknown/unavailable tools."""
+        if not self.enabled_tools:
+            return
+        unknown = sorted(name for name in self.enabled_tools if name not in available_names)
+        if unknown:
+            logger.warning(
+                "Configured tools are unknown or unavailable in this mode: {}. Available: {}",
+                ", ".join(unknown),
+                ", ".join(sorted(available_names)),
+            )
+
+    def _register_tools(self) -> None:
+        """Register tools based on current runtime and config."""
+        available_names: set[str] = set()
+
         # File tools (restrict to workspace if configured)
         allowed_dir = self.workspace if self.restrict_to_workspace else None
-        self.tools.register(ReadFileTool(allowed_dir=allowed_dir))
-        self.tools.register(WriteFileTool(allowed_dir=allowed_dir))
-        self.tools.register(EditFileTool(allowed_dir=allowed_dir))
-        self.tools.register(ListDirTool(allowed_dir=allowed_dir))
+        file_tools = [
+            ReadFileTool(allowed_dir=allowed_dir),
+            WriteFileTool(allowed_dir=allowed_dir),
+            EditFileTool(allowed_dir=allowed_dir),
+            ListDirTool(allowed_dir=allowed_dir),
+        ]
+        for tool in file_tools:
+            available_names.add(tool.name)
+            self._register_if_enabled(tool)
         
         # Shell tool
-        self.tools.register(ExecTool(
+        exec_tool = ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
-        ))
+        )
+        available_names.add(exec_tool.name)
+        self._register_if_enabled(exec_tool)
         
         # Web tools
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key))
-        self.tools.register(WebFetchTool())
+        web_search_tool = WebSearchTool(api_key=self.brave_api_key)
+        web_fetch_tool = WebFetchTool()
+        available_names.add(web_search_tool.name)
+        available_names.add(web_fetch_tool.name)
+        self._register_if_enabled(web_search_tool)
+        self._register_if_enabled(web_fetch_tool)
         
         # Message tool
         message_tool = MessageTool(send_callback=self.bus.publish_outbound)
-        self.tools.register(message_tool)
+        available_names.add(message_tool.name)
+        self._register_if_enabled(message_tool)
         
         # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
-        self.tools.register(spawn_tool)
+        available_names.add(spawn_tool.name)
+        self._register_if_enabled(spawn_tool)
         
         # Cron tool (for scheduling)
         if self.cron_service:
-            self.tools.register(CronTool(self.cron_service))
+            cron_tool = CronTool(self.cron_service)
+            available_names.add(cron_tool.name)
+            self._register_if_enabled(cron_tool)
+
+        self._warn_unknown_enabled_tools(available_names)
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
