@@ -98,14 +98,12 @@ Your workspace is at: {workspace_path}
 - Memory files: {workspace_path}/memory/MEMORY.md
 - Daily notes: {daily_path}/YYYY-MM-DD.md
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
-- Logs: {data_dir}/logs/nanobot_YYYY-MM-DD.log
-    - 排查自身运行问题时，使用 exec_command tool 搜索日志（grep, tail 等）
+- Logs(用于排查自身问题)
+    - 通用日志: {data_dir}/logs/nanobot_YYYY-MM-DD.log
+    - 重启日志: {data_dir}/restart.log
 
-Powered by nanobot. 身份见 SOUL.md，用户信息见 USER.md，行为规则见 AGENTS.md。
-
-你可以：读写文件、执行命令、搜索网页、发送消息、派生子任务。
-
-当需要记住什么时，写入 {workspace_path}/memory/MEMORY.md"""
+当需要记住什么时，exec_command tool update {workspace_path}/memory/MEMORY.md。
+IMPORTANT: 你的代码决定了每次对话只会带上 50 条消息，所以不要只说记住了、知道了，而是更新你的记忆文件帮助你自己记住重要信息。"""
     
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""

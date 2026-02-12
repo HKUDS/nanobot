@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -173,7 +174,31 @@ class AgentLoop:
                 if name.startswith("mcp__"):
                     self.tools.unregister(name)
             await self._mcp_manager.stop()
-    
+
+    @staticmethod
+    def _save_session_with_tools(
+        session, user_content: str, final_content: str,
+        tool_use_log: list[tuple[str, str, str]],
+    ) -> None:
+        """Save user + assistant messages, with tool_use_log as a virtual tool call."""
+        session.add_message("user", user_content)
+        if tool_use_log:
+            # Format summary text
+            lines = []
+            for i, (name, args, result) in enumerate(tool_use_log, 1):
+                lines.append(f"{i}. {name}({args}) -> {result}")
+            summary_text = "\n".join(lines)
+            # Save as a virtual tool call so it doesn't pollute assistant content
+            call_id = f"toolsum_{uuid.uuid4().hex[:12]}"
+            session.add_message("assistant", final_content, tool_calls=[{
+                "id": call_id,
+                "type": "function",
+                "function": {"name": "_tool_use_summary", "arguments": "{}"},
+            }])
+            session.add_message("tool", summary_text, tool_call_id=call_id, name="_tool_use_summary")
+        else:
+            session.add_message("assistant", final_content)
+
     async def _process_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
         Process a single inbound message.
@@ -273,15 +298,25 @@ class AgentLoop:
             else:
                 # No tool calls, we're done
                 if response.content is None or response.content.strip() == "":
-                    logger.warning(
-                        "Model returned empty/blank content without tool calls "
-                        f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations})"
-                    )
-                    final_content = (
-                        "I could not produce a final response because the model returned empty/blank content "
-                        f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations}). "
-                        "Please retry."
-                    )
+                    # Check if we already sent a message via the message tool
+                    sent_message = any(name == "message" for name, _, _ in tool_use_log)
+                    if sent_message:
+                        # Normal: model has nothing more to say after sending via tool
+                        logger.info(
+                            "Model returned empty content after message tool call — treating as normal completion "
+                            f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations})"
+                        )
+                        final_content = ""  # Empty = no extra message to send
+                    else:
+                        logger.warning(
+                            "Model returned empty/blank content without tool calls "
+                            f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations})"
+                        )
+                        final_content = (
+                            "I could not produce a final response because the model returned empty/blank content "
+                            f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations}). "
+                            "Please retry."
+                        )
                 else:
                     final_content = response.content
                 break
@@ -297,20 +332,18 @@ class AgentLoop:
                 "Please retry with a narrower request or increase agents.defaults.max_tool_iterations."
             )
         
+        # Save to session (tool_use_log stored as virtual tool call)
+        self._save_session_with_tools(session, msg.content, final_content, tool_use_log)
+        self.sessions.save(session)
+        
+        # If final_content is empty (message already sent via tool), don't send another message
+        if not final_content:
+            logger.info(f"No outbound message needed for {msg.channel}:{msg.sender_id} (already sent via tool)")
+            return None
+        
         # Log response preview
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
-        
-        # Save to session (prepend tool use summary if any tools were called)
-        session.add_message("user", msg.content)
-        saved_content = final_content
-        if tool_use_log:
-            lines = []
-            for i, (name, args, result) in enumerate(tool_use_log, 1):
-                lines.append(f"{i}. {name}({args}) -> {result}")
-            saved_content = "<tool_use_summary>\n" + "\n".join(lines) + "\n</tool_use_summary>\n\n" + final_content
-        session.add_message("assistant", saved_content)
-        self.sessions.save(session)
         
         return OutboundMessage(
             channel=msg.channel,
@@ -367,6 +400,7 @@ class AgentLoop:
         iteration = 0
         final_content = None
         last_finish_reason = "unknown"
+        tool_use_log: list[tuple[str, str, str]] = []  # Track tool calls for empty-response detection
         
         while iteration < self.max_iterations:
             iteration += 1
@@ -405,16 +439,30 @@ class AgentLoop:
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+                    tool_use_log.append((
+                        tool_call.name,
+                        args_str[:100] + ("..." if len(args_str) > 100 else ""),
+                        (result[:200] + "...(truncated)") if len(result) > 200 else result,
+                    ))
             else:
                 if response.content is None or response.content.strip() == "":
-                    logger.warning(
-                        "System-message summarization returned empty/blank content without tool calls "
-                        f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations})"
-                    )
-                    final_content = (
-                        "Background task completed, but no summary text was generated "
-                        f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations})."
-                    )
+                    # Check if we already sent a message via the message tool
+                    sent_message = any(name == "message" for name, _, _ in tool_use_log)
+                    if sent_message:
+                        logger.info(
+                            "System-message: empty content after message tool call — normal completion "
+                            f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations})"
+                        )
+                        final_content = ""
+                    else:
+                        logger.warning(
+                            "System-message summarization returned empty/blank content without tool calls "
+                            f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations})"
+                        )
+                        final_content = (
+                            "Background task completed, but no summary text was generated "
+                            f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations})."
+                        )
                 else:
                     final_content = response.content
                 break
@@ -429,10 +477,16 @@ class AgentLoop:
                 f"({self.max_iterations}). Last finish_reason={last_finish_reason}."
             )
         
-        # Save to session (mark as system message in history)
-        session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
-        session.add_message("assistant", final_content)
+        # Save to session (tool_use_log stored as virtual tool call)
+        self._save_session_with_tools(
+            session, f"[System: {msg.sender_id}] {msg.content}", final_content, tool_use_log,
+        )
         self.sessions.save(session)
+        
+        # If final_content is empty (message already sent via tool), don't send another message
+        if not final_content:
+            logger.info(f"No outbound message needed for system message from {msg.sender_id} (already sent via tool)")
+            return None
         
         return OutboundMessage(
             channel=origin_channel,

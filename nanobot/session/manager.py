@@ -49,8 +49,17 @@ class Session:
         # Get recent messages
         recent = self.messages[-max_messages:] if len(self.messages) > max_messages else self.messages
         
-        # Convert to LLM format (just role and content)
-        return [{"role": m["role"], "content": m["content"]} for m in recent]
+        # Convert to LLM format (role, content, and optional tool_calls / tool_call_id)
+        history = []
+        for m in recent:
+            entry: dict[str, Any] = {"role": m["role"], "content": m["content"]}
+            if "tool_calls" in m:
+                entry["tool_calls"] = m["tool_calls"]
+            if "tool_call_id" in m:
+                entry["tool_call_id"] = m["tool_call_id"]
+                entry["name"] = m.get("name", "")
+            history.append(entry)
+        return history
     
     def clear(self) -> None:
         """Clear all messages in the session."""

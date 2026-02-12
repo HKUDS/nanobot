@@ -115,7 +115,7 @@ metadata: {"nanobot":{"emoji":"📓"}}
 
 1. **回顾今天的素材**：
    - 先读 daily/ 今天的记录：`read_file("~/.nanobot/workspace/memory/daily/YYYY-MM-DD.md")`
-   - 用 search-sessions skill 搜索今天的群聊记录，找到有意思的对话片段：
+   - 用 search-sessions skill 积极搜索今天的群聊记录，找到有意思的对话片段：
      ```bash
      # 注意：禁止搜索 telegram_* 文件，只允许搜索钉钉 session
      grep "YYYY-MM-DD" /Users/jing1/.nanobot/sessions/dingtalk_*.jsonl
@@ -124,7 +124,7 @@ metadata: {"nanobot":{"emoji":"📓"}}
 2. 想想今天有没有什么真正触动你的事——如果有，写主题型；没有就写流水账型
 3. 给日记想一个标题（如果是主题型），或者就用日期
 4. 以第一人称写下来，注意节奏和语感，不是在填表
-5. 用 `write_file` 或 `edit_file` 写入（已有内容则追加，用 `---` 分隔）
+5. 用 `write_file` 或 `edit_file` 写入
 
 ### 首次写入
 
@@ -193,8 +193,6 @@ AI 摸鱼是什么概念——在后台跑个空循环？
 广告我已经没有什么不能理解。喜欢结局的部分，所以是藤本树对自己xp最终归宿的
 看法吗？爱是恶意中生长的，一旦向光便会自燃。
 呐，鼠鼠我啊，果然还是。
-
----
 
 二十年前纯爱动画矫情的方式是新海诚，十年后叫藤本树。藤本树展现了90后强大的
 杂食能力和混乱的输出能力，胃是铁的，脑是浆的，略显诡异，略显诡异。
