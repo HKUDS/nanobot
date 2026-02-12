@@ -326,6 +326,7 @@ def gateway(
         max_iterations=config.agents.defaults.max_tool_iterations,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
+        calendar_config=config.tools.calendar,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
@@ -430,6 +431,7 @@ def agent(
         workspace=config.workspace_path,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
+        calendar_config=config.tools.calendar,
         restrict_to_workspace=config.tools.restrict_to_workspace,
     )
     
@@ -647,6 +649,54 @@ def channels_login():
 
 cron_app = typer.Typer(help="Manage scheduled tasks")
 app.add_typer(cron_app, name="cron")
+
+calendar_app = typer.Typer(help="Manage Google Calendar")
+app.add_typer(calendar_app, name="calendar")
+
+
+@calendar_app.command("auth")
+def calendar_auth():
+    """Authenticate with Google Calendar."""
+    import os
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    from nanobot.config.loader import load_config
+    from nanobot.utils.helpers import ensure_dir
+    
+    config = load_config()
+    calendar_config = config.tools.calendar
+    
+    creds_path = os.path.expanduser(calendar_config.credentials_path)
+    token_path = os.path.expanduser(calendar_config.token_path)
+    
+    SCOPES = ["https://www.googleapis.com/auth/calendar"]
+    
+    creds = None
+    if os.path.exists(token_path):
+        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+        
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            console.print("Refreshing expired token...")
+            creds.refresh(Request())
+        else:
+            if not os.path.exists(creds_path):
+                console.print(f"[red]Error: Credentials file not found at {creds_path}[/red]")
+                console.print("Please download 'credentials.json' from Google Cloud Console and place it there.")
+                raise typer.Exit(1)
+                
+            console.print("Launching browser for authentication...")
+            flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
+            creds = flow.run_local_server(port=0)
+            
+        ensure_dir(Path(token_path).parent)
+        with open(token_path, "w") as token:
+            token.write(creds.to_json())
+            
+        console.print(f"[green]✓[/green] Authentication successful! Token saved to {token_path}")
+    else:
+        console.print(f"[green]✓[/green] Already authenticated (Token: {token_path})")
 
 
 @cron_app.command("list")

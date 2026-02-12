@@ -213,10 +213,18 @@ class ExecToolConfig(BaseModel):
     timeout: int = 60
 
 
+class GoogleCalendarConfig(BaseModel):
+    """Google Calendar tool configuration."""
+    enabled: bool = False
+    credentials_path: str = "~/.nanobot/google_calendar_credentials.json"
+    token_path: str = "~/.nanobot/google_calendar_token.json"
+
+
 class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    calendar: GoogleCalendarConfig = Field(default_factory=GoogleCalendarConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
 
 

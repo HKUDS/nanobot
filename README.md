@@ -117,6 +117,16 @@ For OpenRouter - recommended for global users:
     "defaults": {
       "model": "anthropic/claude-opus-4-5"
     }
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "apiKey": "BSA-xxx"
+      }
+    },
+    "calendar": {
+      "enabled": true
+    }
   }
 }
 ```
@@ -163,8 +173,23 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
 nanobot agent -m "Hello from my local LLM!"
 ```
 
-> [!TIP]
 > The `apiKey` can be any non-empty string for local servers that don't require authentication.
+
+## 📅 Google Calendar
+
+1. **Download Credentials**
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)
+   - Create a project and enable **Google Calendar API**
+   - Create OAuth 2.0 Client ID (Desktop App)
+   - Download JSON and save to `~/.nanobot/google_calendar_credentials.json`
+
+2. **Authenticate**
+   ```bash
+   nanobot calendar auth
+   ```
+
+3. **Use**
+   Chat: "List my appointments for today" or "Schedule a meeting with...".
 
 ## 💬 Chat Apps
 
