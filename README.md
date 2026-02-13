@@ -291,13 +291,18 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 
 **4. Configure**
 
+By default, nanobot ignores all bot-originated messages. To consume other bots' messages, set `allowBotMessages` to `true`.
+Self-messages from this bot and webhook messages are always ignored to prevent loops.
+
 ```json
 {
   "channels": {
     "discord": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
+      "allowFrom": ["YOUR_USER_ID"],
+      "allowBotMessages": true,
+      "allowBotFrom": ["OTHER_BOT_USER_ID"]
     }
   }
 }
