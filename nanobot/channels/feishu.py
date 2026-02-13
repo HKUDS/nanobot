@@ -5,7 +5,7 @@ import json
 import re
 import threading
 from collections import OrderedDict
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -28,7 +28,12 @@ try:
 except ImportError:
     FEISHU_AVAILABLE = False
     lark = None
+    CreateMessageReactionRequest = None
+    CreateMessageReactionRequestBody = None
+    CreateMessageRequest = None
+    CreateMessageRequestBody = None
     Emoji = None
+    P2ImMessageReceiveV1 = Any
 
 # Message type display mapping
 MSG_TYPE_MAP = {
@@ -64,7 +69,7 @@ class FeishuChannel(BaseChannel):
     
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
-        if not FEISHU_AVAILABLE:
+        if not FEISHU_AVAILABLE or lark is None:
             logger.error("Feishu SDK not installed. Run: pip install lark-oapi")
             return
         
@@ -74,35 +79,37 @@ class FeishuChannel(BaseChannel):
         
         self._running = True
         self._loop = asyncio.get_running_loop()
-        
+        lark_sdk = cast(Any, lark)
+
         # Create Lark client for sending messages
-        self._client = lark.Client.builder() \
+        self._client = lark_sdk.Client.builder() \
             .app_id(self.config.app_id) \
             .app_secret(self.config.app_secret) \
-            .log_level(lark.LogLevel.INFO) \
+            .log_level(lark_sdk.LogLevel.INFO) \
             .build()
-        
+
         # Create event handler (only register message receive, ignore other events)
-        event_handler = lark.EventDispatcherHandler.builder(
+        event_handler = lark_sdk.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
             self.config.verification_token or "",
         ).register_p2_im_message_receive_v1(
             self._on_message_sync
         ).build()
-        
+
         # Create WebSocket client for long connection
-        self._ws_client = lark.ws.Client(
+        self._ws_client = lark_sdk.ws.Client(
             self.config.app_id,
             self.config.app_secret,
             event_handler=event_handler,
-            log_level=lark.LogLevel.INFO
+            log_level=lark_sdk.LogLevel.INFO
         )
-        
+        ws_client = self._ws_client
+
         # Start WebSocket client in a separate thread with reconnect loop
         def run_ws():
             while self._running:
                 try:
-                    self._ws_client.start()
+                    ws_client.start()
                 except Exception as e:
                     logger.warning(f"Feishu WebSocket error: {e}")
                 if self._running:
@@ -130,12 +137,24 @@ class FeishuChannel(BaseChannel):
     
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
+        if (
+            self._client is None
+            or CreateMessageReactionRequest is None
+            or CreateMessageReactionRequestBody is None
+            or Emoji is None
+        ):
+            return
+
+        create_reaction_request = cast(Any, CreateMessageReactionRequest)
+        create_reaction_body = cast(Any, CreateMessageReactionRequestBody)
+        emoji_cls = cast(Any, Emoji)
+
         try:
-            request = CreateMessageReactionRequest.builder() \
+            request = create_reaction_request.builder() \
                 .message_id(message_id) \
                 .request_body(
-                    CreateMessageReactionRequestBody.builder()
-                    .reaction_type(Emoji.builder().emoji_type(emoji_type).build())
+                    create_reaction_body.builder()
+                    .reaction_type(emoji_cls.builder().emoji_type(emoji_type).build())
                     .build()
                 ).build()
             
@@ -239,10 +258,13 @@ class FeishuChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu."""
-        if not self._client:
+        if self._client is None or CreateMessageRequest is None or CreateMessageRequestBody is None:
             logger.warning("Feishu client not initialized")
             return
-        
+
+        create_message_request = cast(Any, CreateMessageRequest)
+        create_message_body = cast(Any, CreateMessageRequestBody)
+
         try:
             # Determine receive_id_type based on chat_id format
             # open_id starts with "ou_", chat_id starts with "oc_"
@@ -259,10 +281,10 @@ class FeishuChannel(BaseChannel):
             }
             content = json.dumps(card, ensure_ascii=False)
             
-            request = CreateMessageRequest.builder() \
+            request = create_message_request.builder() \
                 .receive_id_type(receive_id_type) \
                 .request_body(
-                    CreateMessageRequestBody.builder()
+                    create_message_body.builder()
                     .receive_id(msg.chat_id)
                     .msg_type("interactive")
                     .content(content)
@@ -282,7 +304,7 @@ class FeishuChannel(BaseChannel):
         except Exception as e:
             logger.error(f"Error sending Feishu message: {e}")
     
-    def _on_message_sync(self, data: "P2ImMessageReceiveV1") -> None:
+    def _on_message_sync(self, data: Any) -> None:
         """
         Sync handler for incoming messages (called from WebSocket thread).
         Schedules async handling in the main event loop.
@@ -290,15 +312,22 @@ class FeishuChannel(BaseChannel):
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self._on_message(data), self._loop)
     
-    async def _on_message(self, data: "P2ImMessageReceiveV1") -> None:
+    async def _on_message(self, data: Any) -> None:
         """Handle incoming message from Feishu."""
         try:
-            event = data.event
-            message = event.message
-            sender = event.sender
-            
+            event = getattr(data, "event", None)
+            if event is None:
+                return
+            message = getattr(event, "message", None)
+            sender = getattr(event, "sender", None)
+            if message is None or sender is None:
+                return
+
             # Deduplication check
-            message_id = message.message_id
+            message_id_raw = getattr(message, "message_id", None)
+            if not isinstance(message_id_raw, str) or not message_id_raw:
+                return
+            message_id = message_id_raw
             if message_id in self._processed_message_ids:
                 return
             self._processed_message_ids[message_id] = None
@@ -308,24 +337,46 @@ class FeishuChannel(BaseChannel):
                 self._processed_message_ids.popitem(last=False)
             
             # Skip bot messages
-            sender_type = sender.sender_type
+            sender_type = getattr(sender, "sender_type", None)
             if sender_type == "bot":
                 return
-            
-            sender_id = sender.sender_id.open_id if sender.sender_id else "unknown"
-            chat_id = message.chat_id
-            chat_type = message.chat_type  # "p2p" or "group"
-            msg_type = message.message_type
-            
+
+            sender_id_obj = getattr(sender, "sender_id", None)
+            sender_open_id = getattr(sender_id_obj, "open_id", None)
+            sender_id = (
+                sender_open_id if isinstance(sender_open_id, str) and sender_open_id else "unknown"
+            )
+
+            chat_id_raw = getattr(message, "chat_id", None)
+            if not isinstance(chat_id_raw, str) or not chat_id_raw:
+                return
+            chat_id = chat_id_raw
+
+            chat_type_raw = getattr(message, "chat_type", None)
+            chat_type = (
+                chat_type_raw if isinstance(chat_type_raw, str) and chat_type_raw else "unknown"
+            )
+
+            msg_type_raw = getattr(message, "message_type", None)
+            msg_type = msg_type_raw if isinstance(msg_type_raw, str) and msg_type_raw else "unknown"
+
             # Add reaction to indicate "seen"
             await self._add_reaction(message_id, "THUMBSUP")
             
             # Parse message content
+            raw_content = getattr(message, "content", None)
             if msg_type == "text":
-                try:
-                    content = json.loads(message.content).get("text", "")
-                except json.JSONDecodeError:
-                    content = message.content or ""
+                if isinstance(raw_content, (str, bytes, bytearray)):
+                    try:
+                        decoded = json.loads(raw_content)
+                        content = decoded.get("text", "") if isinstance(decoded, dict) else ""
+                    except json.JSONDecodeError:
+                        if isinstance(raw_content, str):
+                            content = raw_content
+                        else:
+                            content = raw_content.decode("utf-8", errors="replace")
+                else:
+                    content = ""
             else:
                 content = MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]")
             

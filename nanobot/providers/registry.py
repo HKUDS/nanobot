@@ -260,6 +260,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # Ollama Cloud: hosted Ollama API, requires API key.
+    # Uses Ollama native API base (https://ollama.com/api) with LiteLLM's ollama/ prefix.
+    ProviderSpec(
+        name="ollama_cloud",
+        keywords=("ollama_cloud", "ollama-cloud", "-cloud", ":cloud"),
+        env_key="OLLAMA_API_KEY",
+        display_name="Ollama Cloud",
+        litellm_prefix="ollama",
+        skip_prefixes=("ollama/", "ollama_chat/"),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://ollama.com/api",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # === Local deployment (matched by config key, NOT by api_base) =========
 
     # vLLM / any OpenAI-compatible local server.
@@ -277,6 +296,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_key_prefix="",
         detect_by_base_keyword="",
         default_api_base="",                # user must provide in config
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
+    # Ollama local server.
+    # Detected when config key is "ollama_local" (provider_name="ollama_local").
+    ProviderSpec(
+        name="ollama_local",
+        keywords=("ollama_local", "ollama-local", "ollama"),
+        env_key="OLLAMA_API_KEY",
+        display_name="Ollama Local",
+        litellm_prefix="ollama",          # llama3.2 -> ollama/llama3.2
+        skip_prefixes=("ollama/", "ollama_chat/"),
+        env_extras=(),
+        is_gateway=False,
+        is_local=True,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="http://localhost:11434",
         strip_model_prefix=False,
         model_overrides=(),
     ),

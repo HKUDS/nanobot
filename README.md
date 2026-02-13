@@ -96,8 +96,8 @@ pip install nanobot-ai
 ## 🚀 Quick Start
 
 > [!TIP]
-> Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
+> `nanobot onboard` now includes an interactive menu to choose provider, model, API base URL, API key, web mode, assistant name, and soul preset.
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search) · [Ollama Cloud](https://ollama.com/settings/keys)
 
 **1. Initialize**
 
@@ -105,23 +105,18 @@ pip install nanobot-ai
 nanobot onboard
 ```
 
-**2. Configure** (`~/.nanobot/config.json`)
+**2. Follow the interactive setup**
 
-For OpenRouter - recommended for global users:
-```json
-{
-  "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": "anthropic/claude-opus-4-5"
-    }
-  }
-}
-```
+During onboarding, choose your provider and enter required fields:
+- Cloud providers: API key (+ optional custom base URL)
+- `ollama_cloud`: API key + base URL + model
+- Local providers (`vllm`, `ollama_local`): base URL (API key optional/unused)
+- Web search/fetch provider menu:
+  - Search: `Brave` / `Ollama web_search` / `Hybrid (Brave -> Ollama fallback)`
+  - Fetch: `nanobot web_fetch` / `Ollama web_fetch` / `Hybrid (nanobot -> Ollama fallback)`
+- Identity menu:
+  - Assistant name (saved to `agents.defaults.name`)
+  - Soul preset: `Balanced` / `Concise Operator` / `Mentor Guide` / `Builder Partner`
 
 **3. Chat**
 
@@ -131,7 +126,7 @@ nanobot agent -m "What is 2+2?"
 
 That's it! You have a working AI assistant in 2 minutes.
 
-## 🖥️ Local Models (vLLM)
+## 🖥️ Local Models (vLLM / Ollama)
 
 Run nanobot with your own local models using vLLM or any OpenAI-compatible server.
 
@@ -165,8 +160,40 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
 nanobot agent -m "Hello from my local LLM!"
 ```
 
-> [!TIP]
-> The `apiKey` can be any non-empty string for local servers that don't require authentication.
+### Ollama Local
+
+```json
+{
+  "providers": {
+    "ollamaLocal": {
+      "apiBase": "http://localhost:11434"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "llama3.2"
+    }
+  }
+}
+```
+
+### Ollama Cloud
+
+```json
+{
+  "providers": {
+    "ollamaCloud": {
+      "apiKey": "ollama_xxx",
+      "apiBase": "https://ollama.com"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "gpt-oss:20b-cloud"
+    }
+  }
+}
+```
 
 ## 💬 Chat Apps
 
@@ -592,7 +619,7 @@ Config file: `~/.nanobot/config.json`
 
 ### Providers
 
-> [!TIP]
+
 > - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
@@ -611,6 +638,8 @@ Config file: `~/.nanobot/config.json`
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
+| `ollama_local` | LLM (Ollama localhost) | — |
+| `ollama_cloud` | LLM (Ollama cloud) | [ollama.com/settings/keys](https://ollama.com/settings/keys) |
 
 <details>
 <summary><b>Adding a New Provider (Developer Guide)</b></summary>
@@ -666,6 +695,40 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
 | `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
 
+### Memory Runtime (RAM-first Checkpoint)
+
+nanobot uses a RAM-first memory path:
+- Long-term memory snapshot: `workspace/memory/LTM_SNAPSHOT.json`
+- Long-term memory audit log: `workspace/memory/LTM_AUDIT.jsonl`
+- Self-improvement lessons: `workspace/memory/LESSONS.jsonl`
+- Self-improvement lesson audit: `workspace/memory/LESSONS_AUDIT.jsonl`
+- Human-readable notes: `workspace/memory/MEMORY.md`
+
+Session storage is append-only by default, then compacted periodically.
+Design notes: `docs/RAM_FIRST_MEMORY_CHECKPOINT.md`
+Self-development notes: `docs/SELF_DEVELOPMENT.md`
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.memory.flushEveryUpdates` | `8` | Flush long-term memory snapshot after N updates |
+| `agents.memory.flushIntervalSeconds` | `120` | Flush long-term memory snapshot at least every N seconds |
+| `agents.memory.shortTermTurns` | `12` | In-memory short-term turn window per session |
+| `agents.memory.pendingLimit` | `20` | Max pending items tracked per session |
+| `agents.defaults.reflectAfterToolCalls` | `true` | Insert reflection prompt after each tool round (disable to reduce token usage) |
+| `agents.sessions.compactThresholdMessages` | `400` | Compact session file when messages exceed threshold |
+| `agents.sessions.compactThresholdBytes` | `2000000` | Compact session file when file size exceeds threshold |
+| `agents.sessions.compactKeepMessages` | `300` | Keep recent N messages after compaction |
+| `agents.selfImprovement.enabled` | `true` | Enable feedback-to-lesson self-development |
+| `agents.selfImprovement.maxLessonsInPrompt` | `5` | Max lessons injected into prompt |
+| `agents.selfImprovement.minLessonConfidence` | `1` | Minimum lesson confidence to be injected |
+| `agents.selfImprovement.maxLessons` | `200` | Maximum lessons retained after compaction |
+| `agents.selfImprovement.lessonConfidenceDecayHours` | `168` | Confidence decay window for stale lessons |
+| `agents.selfImprovement.feedbackMaxMessageChars` | `220` | Ignore feedback learning for overly long user messages |
+| `agents.selfImprovement.feedbackRequirePrefix` | `true` | Require correction prefix (e.g. "不对", "wrong") before learning from user feedback |
+| `agents.selfImprovement.promotionEnabled` | `true` | Promote repeated session lessons to global lessons |
+| `agents.selfImprovement.promotionMinUsers` | `3` | Minimum distinct users required for auto-promotion |
+| `agents.selfImprovement.promotionTriggers` | `["response:length","response:language"]` | Trigger allowlist for auto-promotion |
+
 
 ## CLI Reference
 
@@ -678,6 +741,19 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 | `nanobot agent --logs` | Show runtime logs during chat |
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
+| `nanobot memory status` | Show memory snapshot/runtime status |
+| `nanobot memory list` | List long-term snapshot items |
+| `nanobot memory delete <id>` | Delete one snapshot item |
+| `nanobot memory flush` | Force memory checkpoint flush |
+| `nanobot memory compact` | Compact long-term memory snapshot |
+| `nanobot memory lessons status` | Show lesson status |
+| `nanobot memory lessons list` | List lessons |
+| `nanobot memory lessons disable <id>` | Disable one lesson |
+| `nanobot memory lessons enable <id>` | Enable one lesson |
+| `nanobot memory lessons delete <id>` | Delete one lesson |
+| `nanobot memory lessons compact` | Compact lessons |
+| `nanobot memory lessons reset` | Reset all lessons |
+| `nanobot session compact` | Compact session files |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
 
@@ -696,6 +772,53 @@ nanobot cron list
 
 # Remove a job
 nanobot cron remove <job_id>
+```
+
+</details>
+
+<details>
+<summary><b>Memory Maintenance</b></summary>
+
+```bash
+# Show memory status
+nanobot memory status
+
+# List snapshot memory items
+nanobot memory list --limit 20
+
+# Delete one snapshot item
+nanobot memory delete ltm_1739443200123_1 --yes
+
+# Force memory checkpoint flush
+nanobot memory flush
+
+# Compact long-term snapshot memory
+nanobot memory compact --max-items 300
+
+# Show lesson status
+nanobot memory lessons status
+
+# List lessons
+nanobot memory lessons list --scope all --limit 20
+
+# Disable/enable one lesson
+nanobot memory lessons disable lesson_1739443200123_1
+nanobot memory lessons enable lesson_1739443200123_1
+
+# Delete one lesson
+nanobot memory lessons delete lesson_1739443200123_1 --yes
+
+# Compact lessons
+nanobot memory lessons compact --max-lessons 200
+
+# Reset all lessons
+nanobot memory lessons reset --yes
+
+# Compact one session
+nanobot session compact --session "telegram:123456"
+
+# Compact all session files
+nanobot session compact --all
 ```
 
 </details>

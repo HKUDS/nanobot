@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,7 +21,7 @@ async def test_read_interactive_input_async_returns_input(mock_prompt_session):
     mock_prompt_session.prompt_async.return_value = "hello world"
 
     result = await commands._read_interactive_input_async()
-    
+
     assert result == "hello world"
     mock_prompt_session.prompt_async.assert_called_once()
     args, _ = mock_prompt_session.prompt_async.call_args
@@ -42,17 +41,85 @@ def test_init_prompt_session_creates_session():
     """Test that _init_prompt_session initializes the global session."""
     # Ensure global is None before test
     commands._PROMPT_SESSION = None
-    
-    with patch("nanobot.cli.commands.PromptSession") as MockSession, \
-         patch("nanobot.cli.commands.FileHistory") as MockHistory, \
-         patch("pathlib.Path.home") as mock_home:
-        
+
+    with (
+        patch("nanobot.cli.commands.PromptSession") as mock_session_cls,
+        patch("nanobot.cli.commands.FileHistory"),
+        patch("pathlib.Path.home") as mock_home,
+    ):
         mock_home.return_value = MagicMock()
-        
+
         commands._init_prompt_session()
-        
+
         assert commands._PROMPT_SESSION is not None
-        MockSession.assert_called_once()
-        _, kwargs = MockSession.call_args
+        mock_session_cls.assert_called_once()
+        _, kwargs = mock_session_cls.call_args
         assert kwargs["multiline"] is False
         assert kwargs["enable_open_in_editor"] is False
+
+
+def test_fetch_ollama_cloud_models_from_tags() -> None:
+    """Should parse model names from Ollama native /api/tags response."""
+    response = MagicMock()
+    response.json.return_value = {
+        "models": [
+            {"name": "kimi-k2.5:cloud"},
+            {"name": "qwen3-coder-next:cloud"},
+        ]
+    }
+    response.raise_for_status.return_value = None
+
+    with patch("nanobot.cli.commands.httpx.get", return_value=response) as mock_get:
+        models, error = commands._fetch_ollama_cloud_models(
+            api_base="https://ollama.com/api",
+            api_key="test_key",
+        )
+
+    assert error is None
+    assert "kimi-k2.5:cloud" in models
+    assert "qwen3-coder-next:cloud" in models
+    assert mock_get.call_count == 1
+
+
+def test_fetch_ollama_cloud_models_fallback_to_v1_models() -> None:
+    """Should fallback to /v1/models when /api/tags fails."""
+    first_response = MagicMock()
+    first_response.raise_for_status.side_effect = RuntimeError("boom")
+
+    second_response = MagicMock()
+    second_response.raise_for_status.return_value = None
+    second_response.json.return_value = {
+        "data": [
+            {"id": "gpt-oss:20b-cloud"},
+            {"id": "glm-5"},
+        ]
+    }
+
+    with patch("nanobot.cli.commands.httpx.get", side_effect=[first_response, second_response]) as mock_get:
+        models, error = commands._fetch_ollama_cloud_models(
+            api_base="https://ollama.com",
+            api_key="test_key",
+        )
+
+    assert error is None
+    assert models == ["glm-5", "gpt-oss:20b-cloud"]
+    assert mock_get.call_count == 2
+
+
+def test_build_soul_template_uses_selected_preset() -> None:
+    content = commands._build_soul_template("Mochi", "builder")
+
+    assert "I am Mochi, a lightweight AI assistant." in content
+    assert "- Pragmatic and engineering-focused" in content
+    assert "- Ship reliable results quickly" in content
+
+
+def test_create_workspace_templates_with_custom_identity(tmp_path) -> None:
+    commands._create_workspace_templates(tmp_path, agent_name="Mochi Bot", soul_preset="mentor")
+
+    soul_text = (tmp_path / "SOUL.md").read_text(encoding="utf-8")
+    identity_text = (tmp_path / "IDENTITY.md").read_text(encoding="utf-8")
+
+    assert "I am Mochi Bot, a lightweight AI assistant." in soul_text
+    assert "- Patient and structured" in soul_text
+    assert "- Name: Mochi Bot" in identity_text

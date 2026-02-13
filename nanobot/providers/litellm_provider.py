@@ -1,5 +1,6 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import asyncio
 import json
 import os
 from typing import Any
@@ -8,7 +9,7 @@ import litellm
 from litellm import acompletion
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-from nanobot.providers.registry import find_by_model, find_gateway
+from nanobot.providers.registry import find_by_model, find_by_name, find_gateway
 
 
 class LiteLLMProvider(LLMProvider):
@@ -28,6 +29,8 @@ class LiteLLMProvider(LLMProvider):
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
     ):
+        self._selected_spec = find_by_name(provider_name) if provider_name else None
+        api_base = self._normalize_api_base(api_base)
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
@@ -48,10 +51,22 @@ class LiteLLMProvider(LLMProvider):
         litellm.suppress_debug_info = True
         # Drop unsupported parameters for providers (e.g., gpt-5 rejects some params)
         litellm.drop_params = True
+
+    def _normalize_api_base(self, api_base: str | None) -> str | None:
+        """Normalize provider-specific base URLs before passing to LiteLLM."""
+        if not api_base:
+            return api_base
+        if self._selected_spec and self._selected_spec.name in {"ollama_local", "ollama_cloud"}:
+            # LiteLLM Ollama provider expects host base and appends /api/* internally.
+            if api_base.endswith("/api"):
+                return api_base[:-4]
+            if api_base.endswith("/api/"):
+                return api_base[:-5]
+        return api_base
     
     def _setup_env(self, api_key: str, api_base: str | None, model: str) -> None:
         """Set environment variables based on detected provider."""
-        spec = self._gateway or find_by_model(model)
+        spec = self._gateway or self._selected_spec or find_by_model(model)
         if not spec:
             return
 
@@ -82,7 +97,7 @@ class LiteLLMProvider(LLMProvider):
             return model
         
         # Standard mode: auto-prefix for known providers
-        spec = find_by_model(model)
+        spec = self._selected_spec or find_by_model(model)
         if spec and spec.litellm_prefix:
             if not any(model.startswith(s) for s in spec.skip_prefixes):
                 model = f"{spec.litellm_prefix}/{model}"
@@ -92,7 +107,7 @@ class LiteLLMProvider(LLMProvider):
     def _apply_model_overrides(self, model: str, kwargs: dict[str, Any]) -> None:
         """Apply model-specific parameter overrides from the registry."""
         model_lower = model.lower()
-        spec = find_by_model(model)
+        spec = self._selected_spec or find_by_model(model)
         if spec:
             for pattern, overrides in spec.model_overrides:
                 if pattern in model_lower:
@@ -148,15 +163,43 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
         
-        try:
-            response = await acompletion(**kwargs)
-            return self._parse_response(response)
-        except Exception as e:
-            # Return error as content for graceful handling
-            return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
-                finish_reason="error",
-            )
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await acompletion(**kwargs)
+                return self._parse_response(response)
+            except Exception as e:
+                if attempt < max_attempts and self._is_transient_network_error(e):
+                    await asyncio.sleep(0.5 * attempt)
+                    continue
+                # Return error as content for graceful handling
+                return LLMResponse(
+                    content=f"Error calling LLM: {str(e)}",
+                    finish_reason="error",
+                )
+
+        return LLMResponse(
+            content="Error calling LLM: retries exhausted",
+            finish_reason="error",
+        )
+
+    def _is_transient_network_error(self, error: Exception) -> bool:
+        """Detect retryable transient network/provider gateway errors."""
+        msg = str(error).lower()
+        retry_signals = (
+            "apiconnectionerror",
+            "connection reset",
+            "connection aborted",
+            "temporary failure",
+            "timed out",
+            "timeout",
+            "502",
+            "503",
+            "504",
+            "bad gateway",
+            "service unavailable",
+        )
+        return any(signal in msg for signal in retry_signals)
     
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
@@ -179,6 +222,11 @@ class LiteLLMProvider(LLMProvider):
                     name=tc.function.name,
                     arguments=args,
                 ))
+
+        if not tool_calls and isinstance(message.content, str):
+            fallback_call = self._parse_tool_call_from_content(message.content)
+            if fallback_call:
+                tool_calls.append(fallback_call)
         
         usage = {}
         if hasattr(response, "usage") and response.usage:
@@ -197,6 +245,51 @@ class LiteLLMProvider(LLMProvider):
             usage=usage,
             reasoning_content=reasoning_content,
         )
+
+    def _parse_tool_call_from_content(self, content: str) -> ToolCallRequest | None:
+        """Best-effort parser for models that emit tool calls as plain JSON text."""
+        decoder = json.JSONDecoder()
+
+        for idx, char in enumerate(content):
+            if char != "{":
+                continue
+            try:
+                obj, _ = decoder.raw_decode(content[idx:])
+            except Exception:
+                continue
+
+            if not isinstance(obj, dict):
+                continue
+
+            # format A: {"name": "web_search", "arguments": {...}}
+            name = obj.get("name")
+            arguments = obj.get("arguments")
+            if isinstance(name, str) and isinstance(arguments, dict):
+                return ToolCallRequest(
+                    id="tool_call_fallback_1",
+                    name=name,
+                    arguments=arguments,
+                )
+
+            # format B: {"function": {"name": "...", "arguments": {...}}}
+            function = obj.get("function")
+            if isinstance(function, dict):
+                func_name = function.get("name")
+                func_args = function.get("arguments")
+                if isinstance(func_name, str):
+                    if isinstance(func_args, str):
+                        try:
+                            func_args = json.loads(func_args)
+                        except Exception:
+                            func_args = {"raw": func_args}
+                    if isinstance(func_args, dict):
+                        return ToolCallRequest(
+                            id="tool_call_fallback_1",
+                            name=func_name,
+                            arguments=func_args,
+                        )
+
+        return None
     
     def get_default_model(self) -> str:
         """Get the default model."""

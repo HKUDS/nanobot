@@ -20,8 +20,11 @@ You have access to:
 
 ## Memory
 
-- `memory/MEMORY.md` — long-term facts (preferences, context, relationships)
-- `memory/HISTORY.md` — append-only event log, search with grep to recall past events
+- Use `memory/` directory for daily notes
+- Use `MEMORY.md` for human-readable long-term notes
+- Runtime long-term snapshot is stored in `LTM_SNAPSHOT.json`
+- Self-improvement lessons are stored in `LESSONS.jsonl`
+- When user gives explicit correction, convert it into a concise actionable lesson
 
 ## Scheduled Reminders
 

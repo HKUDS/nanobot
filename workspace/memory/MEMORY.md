@@ -20,4 +20,4 @@ This file stores important information that should persist across sessions.
 
 ---
 
-*This file is automatically updated by nanobot when important information should be remembered.*
+*This file is a human-readable memory note. Runtime long-term snapshot is stored in `memory/LTM_SNAPSHOT.json`; self-improvement lessons are stored in `memory/LESSONS.jsonl`.*

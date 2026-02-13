@@ -48,6 +48,11 @@ def timestamp() -> str:
     return datetime.now().isoformat()
 
 
+def today_date() -> str:
+    """Get current date in YYYY-MM-DD format."""
+    return datetime.now().strftime("%Y-%m-%d")
+
+
 def truncate_string(s: str, max_len: int = 100, suffix: str = "...") -> str:
     """Truncate a string to max length, adding suffix if truncated."""
     if len(s) <= max_len:
