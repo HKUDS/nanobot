@@ -8,6 +8,7 @@ import litellm
 from litellm import acompletion
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.rate_limiter import RateLimiter
 from nanobot.providers.registry import find_by_model, find_gateway
 
 
@@ -27,10 +28,26 @@ class LiteLLMProvider(LLMProvider):
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
+        rate_limit: int | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        
+        # Initialize rate limiter if rate_limit is specified
+        # For NVIDIA free tier and similar providers with burst limits:
+        # Use burst-aware rate limiting (max 4 calls per 60s window)
+        if rate_limit:
+            # Interpret rate_limit as burst_size for burst-aware limiting
+            # Conservative default: 4 calls per 60s (NVIDIA free tier observed behavior)
+            self.rate_limiter = RateLimiter(
+                burst_size=min(rate_limit, 4),  # Cap at 4 for safety
+                window_seconds=60.0,
+                min_delay_seconds=2.0,  # Still enforce 2s spacing within burst
+                provider=provider_name,
+            )
+        else:
+            self.rate_limiter = None
         
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -149,6 +166,10 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tool_choice"] = "auto"
         
         try:
+            # Apply rate limiting if configured
+            if self.rate_limiter:
+                await self.rate_limiter.acquire()
+            
             response = await acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
