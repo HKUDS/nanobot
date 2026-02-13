@@ -860,29 +860,37 @@ def status():
 # OAuth Login
 # ============================================================================
 
+provider_app = typer.Typer(help="Manage providers")
+app.add_typer(provider_app, name="provider")
 
-@app.command()
-def login(
+
+@provider_app.command("login")
+def provider_login(
     provider: str = typer.Argument(..., help="OAuth provider to authenticate with (e.g., 'openai-codex')"),
 ):
     """Authenticate with an OAuth provider."""
     console.print(f"{__logo__} OAuth Login - {provider}\n")
-    
+
     if provider == "openai-codex":
         try:
-            from oauth_cli_kit import get_token as get_codex_token
-            
-            console.print("[cyan]Starting OpenAI Codex authentication...[/cyan]")
-            console.print("A browser window will open for you to authenticate.\n")
-            
-            token = get_codex_token()
-            
-            if token and token.access:
-                console.print(f"[green]✓ Successfully authenticated with OpenAI Codex![/green]")
-                console.print(f"[dim]Account ID: {token.account_id}[/dim]")
-            else:
+            from oauth_cli_kit import get_token, login_oauth_interactive
+            token = None
+            try:
+                token = get_token()
+            except Exception:
+                token = None
+            if not (token and token.access):
+                console.print("[cyan]No valid token found. Starting interactive OAuth login...[/cyan]")
+                console.print("A browser window may open for you to authenticate.\n")
+                token = login_oauth_interactive(
+                    print_fn=lambda s: console.print(s),
+                    prompt_fn=lambda s: typer.prompt(s),
+                )
+            if not (token and token.access):
                 console.print("[red]✗ Authentication failed[/red]")
                 raise typer.Exit(1)
+            console.print("[green]✓ Successfully authenticated with OpenAI Codex![/green]")
+            console.print(f"[dim]Account ID: {token.account_id}[/dim]")
         except ImportError:
             console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
             raise typer.Exit(1)
