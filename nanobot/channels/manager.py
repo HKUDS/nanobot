@@ -136,6 +136,18 @@ class ChannelManager:
                 logger.info("QQ channel enabled")
             except ImportError as e:
                 logger.warning(f"QQ channel not available: {e}")
+
+        # Serverchan channel
+        if self.config.channels.serverchan.enabled:
+            try:
+                from nanobot.channels.serverchan import ServerchanChannel
+                self.channels["serverchan"] = ServerchanChannel(
+                    self.config.channels.serverchan,
+                    self.bus,
+                )
+                logger.info("Server酱³ channel enabled")
+            except ImportError as e:
+                logger.warning(f"Server酱³ channel not available: {e}")
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
