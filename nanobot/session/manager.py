@@ -54,7 +54,7 @@ class Session:
         """Clear all messages in the session."""
         self.messages = []
         self.updated_at = datetime.now()
-        self.saved_count = 0
+        # Keep saved_count so save() can detect history shrink and rewrite the file.
 
 
 class SessionManager:
@@ -145,6 +145,7 @@ class SessionManager:
                             try:
                                 updated_at = datetime.fromisoformat(msg_ts)
                             except Exception:
+                                # Keep loading even if a single message timestamp is malformed.
                                 pass
 
             return Session(
@@ -163,9 +164,9 @@ class SessionManager:
         """Persist session changes using append-only writes."""
         path = self._get_session_path(session.key)
         path.parent.mkdir(parents=True, exist_ok=True)
-        new_messages = session.messages[session.saved_count :]
+        should_rewrite = not path.exists() or len(session.messages) < session.saved_count
 
-        if not path.exists():
+        if should_rewrite:
             with open(path, "w", encoding="utf-8") as f:
                 metadata_line = {
                     "_type": "metadata",
@@ -174,12 +175,16 @@ class SessionManager:
                     "metadata": session.metadata,
                 }
                 f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
-
-        if new_messages:
-            with open(path, "a", encoding="utf-8") as f:
-                for msg in new_messages:
+                for msg in session.messages:
                     f.write(json.dumps(msg, ensure_ascii=False) + "\n")
             session.saved_count = len(session.messages)
+        else:
+            new_messages = session.messages[session.saved_count :]
+            if new_messages:
+                with open(path, "a", encoding="utf-8") as f:
+                    for msg in new_messages:
+                        f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+                session.saved_count = len(session.messages)
 
         self._cache[session.key] = session
         self.compact_if_needed(session.key)

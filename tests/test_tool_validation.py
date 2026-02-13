@@ -5,6 +5,7 @@ from typing import Any
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.web import WebFetchTool
 from nanobot.bus.events import InboundMessage
 from nanobot.session.manager import SessionManager
 
@@ -191,6 +192,66 @@ def test_session_compact_keeps_recent_messages(tmp_path) -> None:
 
     # 1 metadata + 4 kept messages
     assert len(lines) == 5
+
+
+def test_session_clear_persists_to_disk(tmp_path) -> None:
+    manager = SessionManager(
+        workspace=tmp_path,
+        compact_threshold_messages=1000,
+        compact_threshold_bytes=10_000_000,
+        compact_keep_messages=500,
+    )
+
+    session_key = f"cli:clear-{tmp_path.name}"
+    session = manager.get_or_create(session_key)
+    session.add_message("user", "hello")
+    session.add_message("assistant", "hi")
+    manager.save(session)
+
+    session.clear()
+    manager.save(session)
+
+    reloaded = SessionManager(
+        workspace=tmp_path,
+        compact_threshold_messages=1000,
+        compact_threshold_bytes=10_000_000,
+        compact_keep_messages=500,
+    ).get_or_create(session_key)
+    assert reloaded.messages == []
+
+    session_path = manager._get_session_path(session_key)
+    lines = [line for line in session_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(lines) == 1
+    assert json.loads(lines[0])["_type"] == "metadata"
+
+
+async def test_web_fetch_ollama_respects_per_call_max_chars(monkeypatch) -> None:
+    tool = WebFetchTool(provider="ollama", max_chars=1000, ollama_api_key="test_key")
+
+    class DummyResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, Any]:
+            return {"content": "x" * 240, "title": "Example", "links": []}
+
+    class DummyClient:
+        async def __aenter__(self) -> "DummyClient":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        async def post(self, *args: Any, **kwargs: Any) -> DummyResponse:
+            return DummyResponse()
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda: DummyClient())
+
+    result = await tool.execute(url="https://example.com", maxChars=120)
+    payload = json.loads(result)
+    assert payload["truncated"] is True
+    assert payload["length"] == 120
+    assert payload["text"] == "x" * 120
 
 
 def test_inbound_message_session_key_override() -> None:
