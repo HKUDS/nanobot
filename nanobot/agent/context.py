@@ -8,9 +8,10 @@ from typing import Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.agent.context_factory import ContextBuilderProtocol
 
 
-class ContextBuilder:
+class ContextBuilder(ContextBuilderProtocol):
     """
     Builds the context (system prompt + messages) for the agent.
     
