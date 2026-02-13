@@ -163,12 +163,11 @@ def onboard():
     
     if config_path.exists():
         console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
-        if typer.confirm("Overwrite?"):
-            # Create default config
-            config = Config()
-            save_config(config)
-            console.print(f"[green]✓[/green] Created config at {config_path}")
-    else:
+        if not typer.confirm("Overwrite?"):
+            console.print("[dim]Skipping config creation[/dim]")
+            config_path = None  # Sentinel to skip creation
+
+    if config_path:
         # Create default config
         config = Config()
         save_config(config)
