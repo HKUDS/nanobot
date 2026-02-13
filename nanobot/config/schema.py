@@ -142,6 +142,14 @@ class QQConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
 
+class ServerchanConfig(BaseModel):
+    """Server酱³ Bot channel configuration."""
+    enabled: bool = False
+    bot_token: str = ""  # Bot token from Server酱³
+    polling_interval_ms: int = 3000  # Polling interval (ms)
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
+    
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
@@ -153,6 +161,7 @@ class ChannelsConfig(BaseModel):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    serverchan: ServerchanConfig = Field(default_factory=ServerchanConfig)
 
 
 class AgentDefaults(BaseModel):
@@ -215,11 +224,16 @@ class ExecToolConfig(BaseModel):
     """Shell exec tool configuration."""
     timeout: int = 60
 
+class ServerchanToolConfig(BaseModel):
+    """Serverchan push tool configuratison"""
+    send_key: str = ""
+    timeout: int = 30
 
 class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    serverchan: ServerchanToolConfig = Field(default_factory=ServerchanToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
 
 
