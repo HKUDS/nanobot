@@ -123,6 +123,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # OpenAI Codex: uses OpenAI-compatible models with OAuth token.
+    # Keep before regular OpenAI so codex model names resolve here first.
+    ProviderSpec(
+        name="openai_codex",
+        keywords=("openai-codex", "codex"),
+        env_key="OPENAI_API_KEY",
+        display_name="OpenAI Codex",
+        litellm_prefix="",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # OpenAI: LiteLLM recognizes "gpt-*" natively, no prefix needed.
     ProviderSpec(
         name="openai",

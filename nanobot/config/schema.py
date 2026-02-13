@@ -175,11 +175,18 @@ class ProviderConfig(BaseModel):
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    oauth_enabled: bool = False
+
+
+class CodexProviderConfig(ProviderConfig):
+    """OpenAI Codex provider configuration."""
+    oauth_enabled: bool = True
 
 
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
+    openai_codex: CodexProviderConfig = Field(default_factory=CodexProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -235,6 +242,15 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
     
+    @staticmethod
+    def _provider_has_auth(provider: "ProviderConfig", spec_name: str) -> bool:
+        if provider.api_key:
+            return True
+        if spec_name == "openai_codex" and getattr(provider, "oauth_enabled", False):
+            from nanobot.providers.codex_oauth import has_codex_oauth_token
+            return has_codex_oauth_token()
+        return False
+
     def _match_provider(self, model: str | None = None) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import PROVIDERS
@@ -243,13 +259,13 @@ class Config(BaseSettings):
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
-            if p and any(kw in model_lower for kw in spec.keywords) and p.api_key:
+            if p and any(kw in model_lower for kw in spec.keywords) and self._provider_has_auth(p, spec.name):
                 return p, spec.name
 
         # Fallback: gateways first, then others (follows registry order)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
-            if p and p.api_key:
+            if p and self._provider_has_auth(p, spec.name):
                 return p, spec.name
         return None, None
 
@@ -265,8 +281,15 @@ class Config(BaseSettings):
 
     def get_api_key(self, model: str | None = None) -> str | None:
         """Get API key for the given model. Falls back to first available key."""
-        p = self.get_provider(model)
-        return p.api_key if p else None
+        p, name = self._match_provider(model)
+        if not p:
+            return None
+        if p.api_key:
+            return p.api_key
+        if name == "openai_codex" and getattr(p, "oauth_enabled", False):
+            from nanobot.providers.codex_oauth import read_codex_access_token
+            return read_codex_access_token()
+        return None
     
     def get_api_base(self, model: str | None = None) -> str | None:
         """Get API base URL for the given model. Applies default URLs for known gateways."""

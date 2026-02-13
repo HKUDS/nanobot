@@ -8,6 +8,7 @@ import litellm
 from litellm import acompletion
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.codex_oauth import read_codex_access_token
 from nanobot.providers.registry import find_by_model, find_gateway
 
 
@@ -31,6 +32,7 @@ class LiteLLMProvider(LLMProvider):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self.provider_name = provider_name
         
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -83,6 +85,14 @@ class LiteLLMProvider(LLMProvider):
         
         # Standard mode: auto-prefix for known providers
         spec = find_by_model(model)
+        # Codex OAuth uses OpenAI auth but onboarding defaults to `openai-codex/...`.
+        # LiteLLM doesn't recognize `openai-codex` as a provider id, so normalize it.
+        if spec and spec.name == "openai_codex":
+            if model.startswith("openai-codex/"):
+                model = model.split("/", 1)[1]
+            if not model.startswith("openai/"):
+                model = f"openai/{model}"
+            return model
         if spec and spec.litellm_prefix:
             if not any(model.startswith(s) for s in spec.skip_prefixes):
                 model = f"{spec.litellm_prefix}/{model}"
@@ -98,6 +108,18 @@ class LiteLLMProvider(LLMProvider):
                 if pattern in model_lower:
                     kwargs.update(overrides)
                     return
+
+    @staticmethod
+    def _codex_fallback_model(model: str) -> str | None:
+        """Return a lower-tier Codex model fallback if available."""
+        normalized = model.strip().lower()
+        fallbacks = {
+            "openai/gpt-5.3-codex": "openai/gpt-5.2-codex",
+            "openai/gpt-5.2-codex": "openai/gpt-5.1-codex",
+            "openai-codex/gpt-5.3-codex": "openai/gpt-5.2-codex",
+            "openai-codex/gpt-5.2-codex": "openai/gpt-5.1-codex",
+        }
+        return fallbacks.get(normalized)
     
     async def chat(
         self,
@@ -133,8 +155,12 @@ class LiteLLMProvider(LLMProvider):
         self._apply_model_overrides(model, kwargs)
         
         # Pass api_key directly — more reliable than env vars alone
-        if self.api_key:
-            kwargs["api_key"] = self.api_key
+        # For Codex OAuth, re-read token per request so refreshed logins are picked up.
+        resolved_api_key = self.api_key
+        if self.provider_name == "openai_codex":
+            resolved_api_key = read_codex_access_token() or resolved_api_key
+        if resolved_api_key:
+            kwargs["api_key"] = resolved_api_key
         
         # Pass api_base for custom endpoints
         if self.api_base:
@@ -148,15 +174,42 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
         
-        try:
-            response = await acompletion(**kwargs)
-            return self._parse_response(response)
-        except Exception as e:
-            # Return error as content for graceful handling
-            return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
-                finish_reason="error",
-            )
+        attempt_model = model
+        attempt_kwargs = dict(kwargs)
+        seen_models: set[str] = set()
+        last_error: Exception | None = None
+
+        while True:
+            attempt_kwargs["model"] = attempt_model
+            seen_models.add(attempt_model)
+            try:
+                response = await acompletion(**attempt_kwargs)
+                return self._parse_response(response)
+            except Exception as e:
+                last_error = e
+
+                if self.provider_name != "openai_codex":
+                    break
+
+                err_text = str(e).lower()
+                unavailable = (
+                    "does not exist" in err_text
+                    or "do not have access" in err_text
+                    or "model_not_found" in err_text
+                )
+                if not unavailable:
+                    break
+
+                fallback_model = self._codex_fallback_model(attempt_model)
+                if not fallback_model or fallback_model in seen_models:
+                    break
+                attempt_model = fallback_model
+
+        # Return error as content for graceful handling
+        return LLMResponse(
+            content=f"Error calling LLM: {str(last_error) if last_error else 'unknown error'}",
+            finish_reason="error",
+        )
     
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""

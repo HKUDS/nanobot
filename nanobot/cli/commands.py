@@ -3,6 +3,7 @@
 import asyncio
 import os
 import signal
+import subprocess
 from pathlib import Path
 import select
 import sys
@@ -152,41 +153,120 @@ def main(
 # ============================================================================
 
 
+def _launch_codex_oauth_login() -> bool:
+    """Run Codex OAuth login flow (opens browser/link via Codex CLI)."""
+    try:
+        completed = subprocess.run(["codex", "login"], check=False)
+        return completed.returncode == 0
+    except FileNotFoundError:
+        console.print(
+            "[yellow]codex CLI not found. Install Codex CLI, then run [cyan]codex login[/cyan].[/yellow]"
+        )
+        return False
+    except KeyboardInterrupt:
+        console.print("[yellow]Codex login cancelled.[/yellow]")
+        return False
+
+
+def _prompt_onboard_auth_mode() -> str:
+    """Interactive provider picker for onboarding."""
+    console.print("\nChoose provider setup:")
+    console.print("  1. API key (OpenRouter/OpenAI/etc.) (recommended)")
+    console.print("  2. OpenAI Codex OAuth")
+
+    while True:
+        choice = typer.prompt("Select provider", default="1").strip().lower()
+        if choice in {"1", "api", "api-key", "openrouter"}:
+            return "api-key"
+        if choice in {"2", "codex", "codex-oauth", "openai-codex"}:
+            return "codex-oauth"
+        console.print("[yellow]Invalid choice. Enter 1 or 2.[/yellow]")
+
+
 @app.command()
-def onboard():
+def onboard(
+    auth: str = typer.Option(
+        "interactive",
+        "--auth",
+        help="Auth bootstrap mode: interactive (default), api-key, or codex-oauth",
+    ),
+    launch_auth: bool = typer.Option(
+        True,
+        "--launch-auth/--no-launch-auth",
+        help="When using codex-oauth, launch `codex login` during onboarding",
+    ),
+):
     """Initialize nanobot configuration and workspace."""
     from nanobot.config.loader import get_config_path, save_config
     from nanobot.config.schema import Config
     from nanobot.utils.helpers import get_workspace_path
-    
+
     config_path = get_config_path()
-    
+
     if config_path.exists():
         console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
         if not typer.confirm("Overwrite?"):
             raise typer.Exit()
-    
+
+    auth_mode = auth.strip().lower()
+    if auth_mode in {"", "interactive", "ask"}:
+        if sys.stdin.isatty():
+            auth_mode = _prompt_onboard_auth_mode()
+        else:
+            auth_mode = "api-key"
+            console.print(
+                "[yellow]Non-interactive terminal detected; defaulting onboarding auth mode to api-key.[/yellow]"
+            )
+    elif auth_mode not in {"api-key", "codex-oauth"}:
+        console.print(f"[red]Unsupported auth mode: {auth}[/red]")
+        console.print("Supported values: interactive, api-key, codex-oauth")
+        raise typer.Exit(1)
+
     # Create default config
     config = Config()
+    if auth_mode == "codex-oauth":
+        config.agents.defaults.model = "openai-codex/gpt-5.3-codex"
+        config.providers.openai_codex.oauth_enabled = True
     save_config(config)
     console.print(f"[green]✓[/green] Created config at {config_path}")
-    
+
     # Create workspace
     workspace = get_workspace_path()
     console.print(f"[green]✓[/green] Created workspace at {workspace}")
-    
+
     # Create default bootstrap files
     _create_workspace_templates(workspace)
-    
+
+    codex_login_attempted = False
+    codex_login_ok = False
+    if auth_mode == "codex-oauth" and launch_auth:
+        if sys.stdin.isatty():
+            codex_login_attempted = True
+            console.print("\n[cyan]Launching Codex OAuth login...[/cyan]")
+            codex_login_ok = _launch_codex_oauth_login()
+        else:
+            console.print(
+                "\n[yellow]Skipping auto-launch of codex login (non-interactive terminal).[/yellow]"
+            )
+
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
-    console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
-    console.print("     Get one at: https://openrouter.ai/keys")
-    console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
+    if auth_mode == "codex-oauth":
+        from nanobot.providers.codex_oauth import get_codex_auth_path
+
+        if codex_login_attempted and codex_login_ok:
+            console.print("  1. [green]Codex OAuth login completed.[/green]")
+        else:
+            console.print("  1. Run [cyan]codex login[/cyan]")
+        console.print(f"     Token file: [cyan]{get_codex_auth_path()}[/cyan]")
+        console.print(
+            "  2. Chat with Codex: [cyan]nanobot agent -m \"Hello from Codex OAuth!\"[/cyan]"
+        )
+    else:
+        console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
+        console.print("     Get one at: https://openrouter.ai/keys")
+        console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
-
-
-
 
 def _create_workspace_templates(workspace: Path):
     """Create default workspace template files."""
@@ -272,18 +352,28 @@ This file stores important information that should persist across sessions.
 def _make_provider(config):
     """Create LiteLLMProvider from config. Exits if no API key found."""
     from nanobot.providers.litellm_provider import LiteLLMProvider
+    from nanobot.providers.codex_cli_provider import CodexCLIProvider
+    from nanobot.providers.codex_oauth import get_codex_auth_path
     p = config.get_provider()
     model = config.agents.defaults.model
-    if not (p and p.api_key) and not model.startswith("bedrock/"):
+    provider_name = config.get_provider_name(model)
+    if provider_name == "openai_codex":
+        return CodexCLIProvider(default_model=model)
+    resolved_api_key = config.get_api_key(model)
+    if not resolved_api_key and not model.startswith("bedrock/"):
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers section")
+        if "codex" in model.lower() or "openai-codex" in model.lower():
+            console.print(
+                f"[dim]Tip: run `codex login` first (expected token file: {get_codex_auth_path()})[/dim]"
+            )
         raise typer.Exit(1)
     return LiteLLMProvider(
-        api_key=p.api_key if p else None,
+        api_key=resolved_api_key,
         api_base=config.get_api_base(),
         default_model=model,
         extra_headers=p.extra_headers if p else None,
-        provider_name=config.get_provider_name(),
+        provider_name=provider_name,
     )
 
 
@@ -834,6 +924,7 @@ def status():
 
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS
+        from nanobot.providers.codex_oauth import has_codex_oauth_token
 
         console.print(f"Model: {config.agents.defaults.model}")
         
@@ -850,6 +941,8 @@ def status():
                     console.print(f"{spec.label}: [dim]not set[/dim]")
             else:
                 has_key = bool(p.api_key)
+                if spec.name == "openai_codex" and getattr(p, "oauth_enabled", False):
+                    has_key = has_key or has_codex_oauth_token()
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
 
 

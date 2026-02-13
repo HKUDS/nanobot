@@ -105,6 +105,16 @@ pip install nanobot-ai
 nanobot onboard
 ```
 
+`nanobot onboard` now asks you to choose a provider setup interactively (option `1` is API key / OpenRouter, recommended).
+
+Or initialize directly for Codex OAuth:
+```bash
+nanobot onboard --auth codex-oauth
+```
+
+`nanobot onboard --auth codex-oauth` will launch `codex login` automatically in interactive terminals.
+Use `--no-launch-auth` to skip auto-launch.
+
 **2. Configure** (`~/.nanobot/config.json`)
 
 For OpenRouter - recommended for global users:
@@ -601,6 +611,7 @@ Config file: `~/.nanobot/config.json`
 |----------|---------|-------------|
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
+| `openaiCodex` | LLM (Codex OAuth via ChatGPT login) | Run `codex login` |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
@@ -611,6 +622,22 @@ Config file: `~/.nanobot/config.json`
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
+
+> [!TIP]
+> To use Codex OAuth inference, run `codex login` first, then set your model to a Codex model (for example `openai-codex/gpt-5.3-codex`).  
+> nanobot routes Codex requests through `codex exec` (CLI backend), matching OpenClaw-style Codex execution.
+> Token discovery for provider selection uses `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`).
+>
+> Optional config:
+> ```json
+> {
+>   "providers": {
+>     "openaiCodex": {
+>       "oauthEnabled": true
+>     }
+>   }
+> }
+> ```
 
 <details>
 <summary><b>Adding a New Provider (Developer Guide)</b></summary>
