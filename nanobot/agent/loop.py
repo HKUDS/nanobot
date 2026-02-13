@@ -92,6 +92,7 @@ class AgentLoop:
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
+            command_wrapper=self.exec_config.command_wrapper,
         ))
         
         # Web tools
@@ -174,10 +175,10 @@ class AgentLoop:
             session.clear()
             self.sessions.save(session)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 New session started. Memory consolidated.")
+                                  content="\U0001f408 New session started. Memory consolidated.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+                                  content="\U0001f408 nanobot commands:\n/new \u2014 Start a new conversation\n/help \u2014 Show available commands")
         
         # Consolidate memory before processing if session is too large
         if len(session.messages) > self.memory_window:

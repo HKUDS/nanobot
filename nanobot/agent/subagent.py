@@ -107,6 +107,7 @@ class SubagentManager:
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
+                command_wrapper=self.exec_config.command_wrapper,
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())

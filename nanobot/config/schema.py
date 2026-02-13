@@ -214,6 +214,7 @@ class WebToolsConfig(BaseModel):
 class ExecToolConfig(BaseModel):
     """Shell exec tool configuration."""
     timeout: int = 60
+    command_wrapper: str = ""  # Optional prefix for sandboxed execution (e.g. "bwrap --ro-bind / / --dev /dev --proc /proc --")
 
 
 class ToolsConfig(BaseModel):
