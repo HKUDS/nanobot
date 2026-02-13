@@ -21,7 +21,7 @@ from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import SessionManager
-
+from nanobot.io.commands import CommandHandler
 
 class AgentLoop:
     """
@@ -63,7 +63,8 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         
         self.context = ContextBuilder(workspace)
-        self.sessions = session_manager or SessionManager(workspace)
+        self.sessions = session_manager or SessionManager(workspace, model=[self.model], provider=provider)
+        self.command_handler = CommandHandler(self.sessions)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
             provider=provider,
@@ -169,15 +170,16 @@ class AgentLoop:
         
         # Handle slash commands
         cmd = msg.content.strip().lower()
-        if cmd == "/new":
-            await self._consolidate_memory(session, archive_all=True)
-            session.clear()
-            self.sessions.save(session)
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 New session started. Memory consolidated.")
-        if cmd == "/help":
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+        if cmd.startswith("/"):
+            logger.info(f"IOSystem: Processing system command: {msg.content[:50]} from {msg.channel}:{msg.chat_id}")
+            content = await self.command_handler.process(msg,key)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=content,
+                metadata=msg.metadata or {},
+            )
+            
         
         # Consolidate memory before processing if session is too large
         if len(session.messages) > self.memory_window:
