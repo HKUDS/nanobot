@@ -146,7 +146,7 @@ class SignalConfig(BaseModel):
     enabled: bool = False
     phone_number: str = ""  # Registered Signal phone number (e.g. "+1234567890")
     signal_cli_path: str = "signal-cli"  # Path to signal-cli binary
-    allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
+    allow_from: list[str] = Field(default_factory=list)  # Phone numbers or UUIDs (linked devices may need UUIDs)
 
 
 class ChannelsConfig(BaseModel):
