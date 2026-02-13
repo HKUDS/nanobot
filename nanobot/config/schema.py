@@ -29,6 +29,7 @@ class FeishuConfig(BaseModel):
     encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
     verification_token: str = ""  # Verification Token for event subscription (optional)
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
+    reaction_emoji: str = "THUMBSUP"  # Emoji reaction on received messages (e.g. THUMBSUP, OK, DONE, OnIt, HEART; empty to disable). Full list: https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message-reaction/emojis-introduce
 
 
 class DingTalkConfig(BaseModel):
