@@ -139,12 +139,17 @@ def version_callback(value: bool):
 
 @app.callback()
 def main(
+    root: str = typer.Option(
+        None, "--root", help="Custom root directory for nanobot data"
+    ),
     version: bool = typer.Option(
         None, "--version", "-v", callback=version_callback, is_eager=True
     ),
 ):
     """nanobot - Personal AI Assistant."""
-    pass
+    if root:
+        from nanobot.utils.helpers import set_root_path
+        set_root_path(root)
 
 
 # ============================================================================
@@ -310,9 +315,12 @@ def gateway(
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
-    
+
+    from nanobot.utils.helpers import get_root_path
+    root_dir = get_root_path()
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    
+    console.print(f"[dim]Root: {root_dir}[/dim]")
+
     config = load_config()
     bus = MessageBus()
     provider = _make_provider(config)
@@ -578,9 +586,10 @@ def _get_bridge_dir() -> Path:
     """Get the bridge directory, setting it up if needed."""
     import shutil
     import subprocess
-    
+    from nanobot.utils.helpers import get_data_path
+
     # User's bridge location
-    user_bridge = Path.home() / ".nanobot" / "bridge"
+    user_bridge = get_data_path() / "bridge"
     
     # Check if already built
     if (user_bridge / "dist" / "index.js").exists():

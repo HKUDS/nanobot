@@ -3,6 +3,20 @@
 from pathlib import Path
 from datetime import datetime
 
+# Global root path override
+_root_path: Path | None = None
+
+
+def set_root_path(path: str | Path) -> None:
+    """Set a custom root path for nanobot data."""
+    global _root_path
+    _root_path = Path(path).expanduser().resolve()
+
+
+def get_root_path() -> Path:
+    """Get the current root path for nanobot data."""
+    return _root_path if _root_path else Path.home()
+
 
 def ensure_dir(path: Path) -> Path:
     """Ensure a directory exists, creating it if necessary."""
@@ -11,24 +25,24 @@ def ensure_dir(path: Path) -> Path:
 
 
 def get_data_path() -> Path:
-    """Get the nanobot data directory (~/.nanobot)."""
-    return ensure_dir(Path.home() / ".nanobot")
+    """Get the nanobot data directory (~/.nanobot or custom root)."""
+    return ensure_dir(get_root_path() / ".nanobot")
 
 
 def get_workspace_path(workspace: str | None = None) -> Path:
     """
     Get the workspace path.
-    
+
     Args:
         workspace: Optional workspace path. Defaults to ~/.nanobot/workspace.
-    
+
     Returns:
         Expanded and ensured workspace path.
     """
     if workspace:
         path = Path(workspace).expanduser()
     else:
-        path = Path.home() / ".nanobot" / "workspace"
+        path = get_root_path() / ".nanobot" / "workspace"
     return ensure_dir(path)
 
 
