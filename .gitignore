@@ -3,7 +3,6 @@
 *.pyc
 dist/
 build/
-docs/
 *.egg-info/
 *.egg
 *.pyc
@@ -21,3 +20,4 @@ poetry.lock
 .ruff_cache/
 tests/
 botpy.log
+PR_DESCRIPTION.md
