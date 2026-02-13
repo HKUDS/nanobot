@@ -8,8 +8,9 @@ from nanobot.config.schema import Config
 
 
 def get_config_path() -> Path:
-    """Get the default configuration file path."""
-    return Path.home() / ".nanobot" / "config.json"
+    """Get the configuration file path."""
+    from nanobot.utils.helpers import get_data_path
+    return get_data_path() / "config.json"
 
 
 def get_data_dir() -> Path:
@@ -21,26 +22,36 @@ def get_data_dir() -> Path:
 def load_config(config_path: Path | None = None) -> Config:
     """
     Load configuration from file or create default.
-    
+
     Args:
         config_path: Optional path to config file. Uses default if not provided.
-    
+
     Returns:
         Loaded configuration object.
     """
     path = config_path or get_config_path()
-    
+
     if path.exists():
         try:
             with open(path) as f:
                 data = json.load(f)
             data = _migrate_config(data)
-            return Config.model_validate(convert_keys(data))
+            config = Config.model_validate(convert_keys(data))
         except (json.JSONDecodeError, ValueError) as e:
             print(f"Warning: Failed to load config from {path}: {e}")
             print("Using default configuration.")
-    
-    return Config()
+            config = Config()
+    else:
+        config = Config()
+
+    # If using a custom data path, update workspace to use it
+    # (unless user has explicitly set a custom workspace in config)
+    from nanobot.utils.helpers import _data_path_override, get_data_path
+    if _data_path_override is not None:
+        # Update workspace to use the custom data path
+        config.agents.defaults.workspace = str(get_data_path() / "workspace")
+
+    return config
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
