@@ -396,6 +396,8 @@ class SignalChannel(BaseChannel):
 
         # Handle attachments
         if attachments:
+            import shutil
+
             media_dir = Path.home() / ".nanobot" / "media"
             media_dir.mkdir(parents=True, exist_ok=True)
 
@@ -408,45 +410,31 @@ class SignalChannel(BaseChannel):
                     continue
 
                 try:
-                    # Download attachment using getAttachment command
-                    file_path = media_dir / f"signal_{attachment_id}_{filename}"
+                    # signal-cli stores attachments in ~/.local/share/signal-cli/attachments/
+                    source_path = (
+                        Path.home() / ".local/share/signal-cli/attachments" / attachment_id
+                    )
 
-                    # Request attachment download
-                    params_attach: dict[str, Any] = {"id": attachment_id}
+                    if source_path.exists():
+                        # Copy to media directory with sanitized filename
+                        safe_filename = "".join(c for c in filename if c.isalnum() or c in "._-")
+                        dest_path = media_dir / f"signal_{safe_filename}"
+                        shutil.copy2(source_path, dest_path)
+                        media_paths.append(str(dest_path))
 
-                    result = await self._send_request("getAttachment", params_attach)
-
-                    if "result" in result:
-                        # Attachment path from signal-cli
-                        attachment_path = result["result"]
-
-                        # Copy to our media directory
-                        import shutil
-
-                        if Path(attachment_path).exists():
-                            shutil.copy2(attachment_path, file_path)
-                            media_paths.append(str(file_path))
-
-                            # Determine media type
+                        # Determine media type from content type
+                        media_type = content_type.split("/")[0] if "/" in content_type else "file"
+                        if media_type not in ("image", "audio", "video"):
                             media_type = "file"
-                            if content_type.startswith("image/"):
-                                media_type = "image"
-                            elif content_type.startswith("audio/"):
-                                media_type = "audio"
-                            elif content_type.startswith("video/"):
-                                media_type = "video"
 
-                            content_parts.append(f"[{media_type}: {file_path}]")
-                            logger.debug(f"Downloaded Signal attachment to {file_path}")
-                        else:
-                            logger.warning(f"Attachment file not found: {attachment_path}")
-                            content_parts.append(f"[attachment: {filename} - not found]")
+                        content_parts.append(f"[{media_type}: {dest_path}]")
+                        logger.debug(f"Downloaded attachment: {filename} -> {dest_path}")
                     else:
-                        logger.warning(f"Failed to get attachment {attachment_id}")
-                        content_parts.append(f"[attachment: {filename} - download failed]")
+                        logger.warning(f"Attachment not found: {source_path}")
+                        content_parts.append(f"[attachment: {filename} - not found]")
 
                 except Exception as e:
-                    logger.warning(f"Failed to download attachment {attachment_id}: {e}")
+                    logger.warning(f"Failed to process attachment {filename}: {e}")
                     content_parts.append(f"[attachment: {filename} - error]")
 
         content = "\n".join(content_parts) if content_parts else "[empty message]"
