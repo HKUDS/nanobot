@@ -73,12 +73,10 @@
 
 ## 📦 Install
 
-**Install from source** (latest features, recommended for development)
+**Install from PyPI** (stable)
 
 ```bash
-git clone https://github.com/HKUDS/nanobot.git
-cd nanobot
-pip install -e .
+pip install nanobot-ai
 ```
 
 **Install with [uv](https://github.com/astral-sh/uv)** (stable, fast)
@@ -87,10 +85,47 @@ pip install -e .
 uv tool install nanobot-ai
 ```
 
-**Install from PyPI** (stable)
+## 🧑‍💻 Developer Installation
 
 ```bash
-pip install nanobot-ai
+git clone https://github.com/HKUDS/nanobot.git
+cd nanobot
+```
+
+**Editable install (pip)**
+
+```bash
+pip install -e .
+```
+
+**Install with uv**
+
+```bash
+uv venv
+uv sync
+```
+
+**Run without activating**
+
+```bash
+uv run nanobot --help
+```
+
+**Or activate the venv once**
+
+```bash
+# macOS / Linux
+source .venv/bin/activate
+
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+
+# Windows cmd
+.venv\Scripts\activate.bat
+```
+
+```bash
+nanobot --help
 ```
 
 ## 🚀 Quick Start

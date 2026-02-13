@@ -9,10 +9,6 @@ docs/
 *.pyc
 *.pyo
 *.pyd
-*.pyw
-*.pyz
-*.pywz
-*.pyzz
 .venv/
 venv/
 __pycache__/
@@ -20,3 +16,15 @@ poetry.lock
 .pytest_cache/
 tests/
 botpy.log
+uv.lock
+!CONTRIBUTING_GUIDE.md
+uv.lock 
+!CONTRIBUTING_GUIDE.md
+=======
+.venv/
+__pycache__/
+poetry.lock
+.pytest_cache/
+tests/
+botpy.log
+>>>>>>> upstream/main
