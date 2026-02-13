@@ -162,22 +162,49 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
+        """Build user message content with optional base64-encoded images and file references."""
         if not media:
             return text
         
         images = []
+        file_references = []
+        
         for path in media:
             p = Path(path)
-            mime, _ = mimetypes.guess_type(path)
-            if not p.is_file() or not mime or not mime.startswith("image/"):
+            if not p.is_file():
                 continue
-            b64 = base64.b64encode(p.read_bytes()).decode()
-            images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+            
+            mime, _ = mimetypes.guess_type(path)
+            
+            # Handle images: convert to base64 for LLM vision analysis
+            if mime and mime.startswith("image/"):
+                try:
+                    b64 = base64.b64encode(p.read_bytes()).decode()
+                    images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+                except Exception as e:
+                    logger.warning(f"Failed to encode image {path}: {e}")
+                    file_references.append(f"[image: {path}]")
+            # Handle non-image files: add file path reference for AI to use with file tools
+            else:
+                file_type = mime.split("/")[-1] if mime else "file"
+                file_references.append(f"[{file_type}: {path}]")
         
-        if not images:
+        # Build final content
+        if images and not file_references:
+            # Only images, return image list with text
+            return images + [{"type": "text", "text": text}]
+        elif images and file_references:
+            # Both images and files, combine them
+            file_text = "\n".join(file_references)
+            combined_text = f"{text}\n\n{file_text}" if text else file_text
+            return images + [{"type": "text", "text": combined_text}]
+        elif file_references:
+            # Only files, add file references to text
+            file_text = "\n".join(file_references)
+            return f"{text}\n\n{file_text}" if text else file_text
+        else:
+            # No valid media
             return text
-        return images + [{"type": "text", "text": text}]
     
     def add_tool_result(
         self,

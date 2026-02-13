@@ -35,12 +35,18 @@ def load_config(config_path: Path | None = None) -> Config:
             with open(path) as f:
                 data = json.load(f)
             data = _migrate_config(data)
-            return Config.model_validate(convert_keys(data))
+            config = Config.model_validate(convert_keys(data))
+            # Register custom providers from config
+            _register_custom_providers(config)
+            return config
         except (json.JSONDecodeError, ValueError) as e:
             print(f"Warning: Failed to load config from {path}: {e}")
             print("Using default configuration.")
     
-    return Config()
+    config = Config()
+    # Register custom providers from default config
+    _register_custom_providers(config)
+    return config
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
@@ -104,3 +110,41 @@ def snake_to_camel(name: str) -> str:
     """Convert snake_case to camelCase."""
     components = name.split("_")
     return components[0] + "".join(x.title() for x in components[1:])
+
+
+def _register_custom_providers(config: Config) -> None:
+    """
+    Register custom providers from configuration to the provider registry.
+    
+    This function is called automatically when config is loaded.
+    """
+    from nanobot.providers.registry import register_custom_provider, clear_custom_providers
+    
+    # Clear any previously registered custom providers
+    clear_custom_providers()
+    
+    # Register each custom provider from config
+    for custom_provider in config.providers.custom_providers:
+        # Generate keywords from models if not provided
+        keywords = tuple(custom_provider.models) if custom_provider.models else (custom_provider.name,)
+        
+        # Generate env_key if not provided
+        env_key = custom_provider.env_key or f"{custom_provider.name.upper()}_API_KEY"
+        
+        # Register the custom provider
+        register_custom_provider(
+            name=custom_provider.name,
+            display_name=custom_provider.display_name or custom_provider.name.title(),
+            keywords=keywords,
+            env_key=env_key,
+            litellm_prefix=custom_provider.litellm_prefix,
+            skip_prefixes=(),
+            env_extras=tuple(custom_provider.env_extras),
+            is_gateway=custom_provider.is_gateway,
+            is_local=False,
+            detect_by_key_prefix="",
+            detect_by_base_keyword="",
+            default_api_base=custom_provider.default_api_base,
+            strip_model_prefix=False,
+            model_overrides=(),
+        )

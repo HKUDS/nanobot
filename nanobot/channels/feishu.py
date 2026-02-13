@@ -5,6 +5,7 @@ import json
 import re
 import threading
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -22,6 +23,7 @@ try:
         CreateMessageReactionRequest,
         CreateMessageReactionRequestBody,
         Emoji,
+        GetMessageResourceRequest,
         P2ImMessageReceiveV1,
     )
     FEISHU_AVAILABLE = True
@@ -29,6 +31,7 @@ except ImportError:
     FEISHU_AVAILABLE = False
     lark = None
     Emoji = None
+    GetMessageResourceRequest = None
 
 # Message type display mapping
 MSG_TYPE_MAP = {
@@ -53,7 +56,7 @@ class FeishuChannel(BaseChannel):
     
     name = "feishu"
     
-    def __init__(self, config: FeishuConfig, bus: MessageBus):
+    def __init__(self, config: FeishuConfig, bus: MessageBus, workspace: Path | None = None):
         super().__init__(config, bus)
         self.config: FeishuConfig = config
         self._client: Any = None
@@ -61,6 +64,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._workspace = workspace or Path.cwd()  # Use provided workspace or current directory
     
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
@@ -159,6 +163,107 @@ class FeishuChannel(BaseChannel):
         
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
+    
+    def _get_extension(self, msg_type: str, mime_type: str | None = None) -> str:
+        """Get file extension based on message type and MIME type."""
+        if mime_type:
+            ext_map = {
+                "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
+                "image/webp": ".webp", "image/bmp": ".bmp",
+                "audio/mpeg": ".mp3", "audio/mp4": ".m4a", "audio/ogg": ".ogg",
+                "audio/wav": ".wav", "audio/x-wav": ".wav",
+                "video/mp4": ".mp4", "video/webm": ".webm",
+                "application/pdf": ".pdf",
+                "application/msword": ".doc",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+                "application/vnd.ms-excel": ".xls",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+                "application/vnd.ms-powerpoint": ".ppt",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+                "text/plain": ".txt",
+                "application/zip": ".zip",
+                "application/x-rar-compressed": ".rar",
+            }
+            if mime_type in ext_map:
+                return ext_map[mime_type]
+        
+        type_map = {
+            "image": ".jpg",
+            "file": "",
+            "audio": ".mp3",
+            "video": ".mp4",
+            "media": "",
+        }
+        return type_map.get(msg_type, "")
+    
+    async def _download_file(self, file_key: str, msg_type: str, message_id: str) -> str | None:
+        """
+        Download file from Feishu using file_key.
+        
+        Args:
+            file_key: The file key from Feishu message content
+            msg_type: The message type (image, file, audio, video)
+            message_id: The message ID for API request
+            
+        Returns:
+            Local file path if successful, None otherwise
+        """
+        if not self._client or not GetMessageResourceRequest:
+            logger.warning("Feishu client or GetMessageResourceRequest not available")
+            return None
+        
+        try:
+            # Build request to get file resource
+            request = GetMessageResourceRequest.builder() \
+                .message_id(message_id) \
+                .file_key(file_key) \
+                .type(msg_type) \
+                .build()
+            
+            # Execute request in thread pool (blocking I/O)
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(None, self._client.im.v1.message_resource.get, request)
+            
+            if not response.success():
+                logger.warning(
+                    f"Failed to get file resource: code={response.code}, "
+                    f"msg={response.msg}, log_id={response.get_log_id()}"
+                )
+                return None
+            
+            # Get file content
+            file_content = response.file
+            if not file_content:
+                logger.warning("File content is empty")
+                return None
+            
+            # Read bytes from BytesIO object
+            if hasattr(file_content, 'read'):
+                file_bytes = file_content.read()
+            else:
+                file_bytes = file_content
+            
+            # Determine file extension
+            mime_type = getattr(response, 'mime_type', None)
+            ext = self._get_extension(msg_type, mime_type)
+            
+            # Create media directory in workspace (so AI can access it even with restrict_to_workspace)
+            media_dir = self._workspace / "media"
+            media_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate file path
+            file_path = media_dir / f"{file_key[:16]}{ext}"
+            
+            # Write file content
+            with open(file_path, 'wb') as f:
+                f.write(file_bytes)
+            
+            logger.info(f"Downloaded {msg_type} file to {file_path}")
+            return str(file_path)
+            
+        except Exception as e:
+            logger.error(f"Error downloading file from Feishu: {e}")
+            return None
     
     # Regex to match markdown tables (header + separator + data rows)
     _TABLE_RE = re.compile(
@@ -318,19 +423,52 @@ class FeishuChannel(BaseChannel):
             msg_type = message.message_type
             
             # Add reaction to indicate "seen"
-            await self._add_reaction(message_id, "THUMBSUP")
+            await self._add_reaction(message_id, "OK")
             
-            # Parse message content
+            # Parse message content and handle media files
+            content_parts = []
+            media_paths = []
+            
             if msg_type == "text":
                 try:
                     content = json.loads(message.content).get("text", "")
+                    if content:
+                        content_parts.append(content)
                 except json.JSONDecodeError:
                     content = message.content or ""
+                    if content:
+                        content_parts.append(content)
             else:
-                content = MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]")
+                # Handle media files (image, file, audio, video)
+                try:
+                    content_data = json.loads(message.content)
+                    file_key = content_data.get("file_key")
+                    
+                    if file_key:
+                        # Download the file
+                        file_path = await self._download_file(file_key, msg_type, message_id)
+                        if file_path:
+                            media_paths.append(file_path)
+                            content_parts.append(f"[{msg_type}: {file_path}]")
+                        else:
+                            content_parts.append(f"[{msg_type}: download failed]")
+                    else:
+                        # No file_key, just use placeholder
+                        content_parts.append(MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]"))
+                except json.JSONDecodeError:
+                    content_parts.append(MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]"))
             
-            if not content:
-                return
+            # Check for caption or additional text
+            if hasattr(message, 'content') and msg_type != "text":
+                try:
+                    content_data = json.loads(message.content)
+                    # Some media types might have additional text fields
+                    if "text" in content_data:
+                        content_parts.append(content_data["text"])
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+            
+            content = "\n".join(content_parts) if content_parts else "[empty message]"
             
             # Forward to message bus
             reply_to = chat_id if chat_type == "group" else sender_id
@@ -338,6 +476,7 @@ class FeishuChannel(BaseChannel):
                 sender_id=sender_id,
                 chat_id=reply_to,
                 content=content,
+                media=media_paths if media_paths else None,
                 metadata={
                     "message_id": message_id,
                     "chat_type": chat_type,

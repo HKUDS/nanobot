@@ -175,6 +175,22 @@ class ProviderConfig(BaseModel):
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    models: list[str] | None = None  # Supported models for this provider (for custom providers)
+
+
+class CustomProviderConfig(BaseModel):
+    """Custom LLM provider configuration for user-defined providers."""
+    name: str  # Unique identifier for this custom provider
+    display_name: str = ""  # Display name for UI
+    api_key: str = ""
+    api_base: str | None = None
+    extra_headers: dict[str, str] | None = None
+    models: list[str] = Field(default_factory=list)  # List of supported models
+    litellm_prefix: str = ""  # LiteLLM prefix (e.g., "custom/")
+    is_gateway: bool = False  # Whether this is a gateway provider
+    default_api_base: str = ""  # Default API base URL
+    env_key: str = ""  # Environment variable name for API key
+    env_extras: list[tuple[str, str]] = Field(default_factory=list)  # Extra env vars
 
 
 class ProvidersConfig(BaseModel):
@@ -192,6 +208,7 @@ class ProvidersConfig(BaseModel):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
+    custom_providers: list[CustomProviderConfig] = Field(default_factory=list)  # User-defined custom providers
 
 
 class GatewayConfig(BaseModel):
@@ -240,6 +257,32 @@ class Config(BaseSettings):
         """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import PROVIDERS
         model_lower = (model or self.agents.defaults.model).lower()
+
+        # First, check custom providers
+        for custom_provider in self.providers.custom_providers:
+            if not custom_provider.api_key:
+                continue
+            # Check if model matches any of the custom provider's models
+            if custom_provider.models:
+                for custom_model in custom_provider.models:
+                    if custom_model.lower() in model_lower or model_lower in custom_model.lower():
+                        # Create a ProviderConfig from CustomProviderConfig
+                        provider_config = ProviderConfig(
+                            api_key=custom_provider.api_key,
+                            api_base=custom_provider.api_base,
+                            extra_headers=custom_provider.extra_headers,
+                            models=custom_provider.models
+                        )
+                        return provider_config, custom_provider.name
+            # If no models specified, check if provider name is in model string
+            elif custom_provider.name.lower() in model_lower:
+                provider_config = ProviderConfig(
+                    api_key=custom_provider.api_key,
+                    api_base=custom_provider.api_base,
+                    extra_headers=custom_provider.extra_headers,
+                    models=custom_provider.models
+                )
+                return provider_config, custom_provider.name
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:

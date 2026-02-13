@@ -1,0 +1,152 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.nanobot/workspace",
+      "model": "custom/my-custom-model",
+      "maxTokens": 8192,
+      "temperature": 0.7,
+      "maxToolIterations": 20
+    }
+  },
+  "providers": {
+    "anthropic": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "openai": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "openrouter": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "deepseek": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "groq": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "zhipu": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "dashscope": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "vllm": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "gemini": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "moonshot": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "aihubmix": {
+      "apiKey": "",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "customProviders": [
+      {
+        "name": "my-custom-provider",
+        "displayName": "My Custom LLM Provider",
+        "apiKey": "your-api-key-here",
+        "apiBase": "https://api.example.com/v1",
+        "extraHeaders": {
+          "X-Custom-Header": "custom-value"
+        },
+        "models": [
+          "my-custom-model",
+          "my-custom-model-v2",
+          "my-custom-model-pro"
+        ],
+        "litellmPrefix": "custom",
+        "isGateway": false,
+        "defaultApiBase": "https://api.example.com/v1",
+        "envKey": "MY_CUSTOM_PROVIDER_API_KEY",
+        "envExtras": []
+      },
+      {
+        "name": "my-gateway",
+        "displayName": "My Custom Gateway",
+        "apiKey": "your-gateway-key-here",
+        "apiBase": "https://gateway.example.com/v1",
+        "extraHeaders": null,
+        "models": [],
+        "litellmPrefix": "mygateway",
+        "isGateway": true,
+        "defaultApiBase": "https://gateway.example.com/v1",
+        "envKey": "MY_GATEWAY_API_KEY",
+        "envExtras": []
+      }
+    ]
+  },
+  "channels": {
+    "whatsapp": {
+      "enabled": false,
+      "bridgeUrl": "ws://localhost:3001",
+      "allowFrom": []
+    },
+    "telegram": {
+      "enabled": false,
+      "token": "",
+      "allowFrom": [],
+      "proxy": null
+    },
+    "discord": {
+      "enabled": false,
+      "token": "",
+      "allowFrom": [],
+      "gatewayUrl": "wss://gateway.discord.gg/?v=10&encoding=json",
+      "intents": 37377
+    },
+    "feishu": {
+      "enabled": false,
+      "appId": "",
+      "appSecret": "",
+      "encryptKey": "",
+      "verificationToken": "",
+      "allowFrom": []
+    },
+    "dingtalk": {
+      "enabled": false,
+      "clientId": "",
+      "clientSecret": "",
+      "allowFrom": []
+    }
+  },
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 18790
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "apiKey": "",
+        "maxResults": 5
+      }
+    },
+    "exec": {
+      "timeout": 60
+    },
+    "restrictToWorkspace": false
+  }
+}
