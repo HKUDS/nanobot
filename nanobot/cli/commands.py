@@ -287,6 +287,14 @@ def _make_provider(config):
     )
 
 
+def _load_mcp_manager():
+    """Load MCP config and create manager. Returns None if no servers configured."""
+    from nanobot.config.loader import load_mcp_config
+    from nanobot.agent.mcp import MCPManager
+    servers = load_mcp_config()
+    return MCPManager(servers) if servers else None
+
+
 # ============================================================================
 # Gateway / Server
 # ============================================================================
@@ -317,6 +325,7 @@ def gateway(
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
+    mcp_manager = _load_mcp_manager()
     
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
@@ -335,6 +344,7 @@ def gateway(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
+        mcp_manager=mcp_manager,
     )
     
     # Set cron callback (needs agent)
@@ -380,10 +390,16 @@ def gateway(
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
     
+    if mcp_manager:
+        console.print(f"[green]✓[/green] MCP: enabled")
+    
     console.print(f"[green]✓[/green] Heartbeat: every 30m")
     
     async def run():
         try:
+            if mcp_manager:
+                await mcp_manager.start()
+                agent.register_mcp_tools()
             await cron.start()
             await heartbeat.start()
             await asyncio.gather(
@@ -392,10 +408,13 @@ def gateway(
             )
         except KeyboardInterrupt:
             console.print("\nShutting down...")
+        finally:
             heartbeat.stop()
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            if mcp_manager:
+                await mcp_manager.stop()
     
     asyncio.run(run())
 
@@ -429,6 +448,8 @@ def agent(
         logger.enable("nanobot")
     else:
         logger.disable("nanobot")
+
+    mcp_manager = _load_mcp_manager()
     
     agent_loop = AgentLoop(
         bus=bus,
@@ -440,6 +461,7 @@ def agent(
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        mcp_manager=mcp_manager,
     )
     
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -453,9 +475,16 @@ def agent(
     if message:
         # Single message mode
         async def run_once():
-            with _thinking_ctx():
-                response = await agent_loop.process_direct(message, session_id)
-            _print_agent_response(response, render_markdown=markdown)
+            if mcp_manager:
+                await mcp_manager.start()
+                agent_loop.register_mcp_tools()
+            try:
+                with _thinking_ctx():
+                    response = await agent_loop.process_direct(message, session_id)
+                _print_agent_response(response, render_markdown=markdown)
+            finally:
+                if mcp_manager:
+                    await mcp_manager.stop()
         
         asyncio.run(run_once())
     else:
@@ -471,30 +500,37 @@ def agent(
         signal.signal(signal.SIGINT, _exit_on_sigint)
         
         async def run_interactive():
-            while True:
-                try:
-                    _flush_pending_tty_input()
-                    user_input = await _read_interactive_input_async()
-                    command = user_input.strip()
-                    if not command:
-                        continue
+            if mcp_manager:
+                await mcp_manager.start()
+                agent_loop.register_mcp_tools()
+            try:
+                while True:
+                    try:
+                        _flush_pending_tty_input()
+                        user_input = await _read_interactive_input_async()
+                        command = user_input.strip()
+                        if not command:
+                            continue
 
-                    if _is_exit_command(command):
+                        if _is_exit_command(command):
+                            _restore_terminal()
+                            console.print("\nGoodbye!")
+                            break
+                        
+                        with _thinking_ctx():
+                            response = await agent_loop.process_direct(user_input, session_id)
+                        _print_agent_response(response, render_markdown=markdown)
+                    except KeyboardInterrupt:
                         _restore_terminal()
                         console.print("\nGoodbye!")
                         break
-                    
-                    with _thinking_ctx():
-                        response = await agent_loop.process_direct(user_input, session_id)
-                    _print_agent_response(response, render_markdown=markdown)
-                except KeyboardInterrupt:
-                    _restore_terminal()
-                    console.print("\nGoodbye!")
-                    break
-                except EOFError:
-                    _restore_terminal()
-                    console.print("\nGoodbye!")
-                    break
+                    except EOFError:
+                        _restore_terminal()
+                        console.print("\nGoodbye!")
+                        break
+            finally:
+                if mcp_manager:
+                    await mcp_manager.stop()
         
         asyncio.run(run_interactive())
 
