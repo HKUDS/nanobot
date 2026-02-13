@@ -48,6 +48,7 @@ class AgentLoop:
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
+        minimalist: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
@@ -61,7 +62,8 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
-        
+        self.minimalist = minimalist
+
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
@@ -196,6 +198,8 @@ class AgentLoop:
         if isinstance(cron_tool, CronTool):
             cron_tool.set_context(msg.channel, msg.chat_id)
         
+        is_minimalist = getattr(self, "minimalist", False)
+
         # Build initial messages (use get_history for LLM-formatted messages)
         messages = self.context.build_messages(
             history=session.get_history(),
@@ -203,6 +207,7 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
+            minimalist=is_minimalist,
         )
         
         # Agent loop
@@ -212,11 +217,15 @@ class AgentLoop:
         
         while iteration < self.max_iterations:
             iteration += 1
-            
+
+            # Check exactly what we are about to send to the provider
+            current_tools = None if self.minimalist else self.tools.get_definitions()
+
             # Call LLM
             response = await self.provider.chat(
                 messages=messages,
-                tools=self.tools.get_definitions(),
+                # ONLY send tools if NOT in minimalist mode
+                tools=current_tools,
                 model=self.model
             )
             
