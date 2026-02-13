@@ -184,7 +184,7 @@ class AgentLoop:
         
         # Agent loop
         iteration = 0
-        final_content = None
+        final_content = ""
         
         while iteration < self.max_iterations:
             iteration += 1
@@ -196,6 +196,8 @@ class AgentLoop:
                 model=self.model
             )
             
+            
+            logger.debug(f"has_tool_calls: {response.tool_calls}")
             # Handle tool calls
             if response.has_tool_calls:
                 # Add assistant message with tool calls
@@ -222,14 +224,18 @@ class AgentLoop:
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+                
+                #logger.info(f" message {messages}")
+                #final_content += messages
             else:
                 # No tool calls, we're done
-                final_content = response.content
+                final_content += response.content
                 break
         
-        if final_content is None:
+        if final_content == "":
             final_content = "I've completed processing but have no response to give."
         
+        logger.info(f" final_content {final_content}")
         # Save to session
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
@@ -287,7 +293,7 @@ class AgentLoop:
         
         # Agent loop (limited for announce handling)
         iteration = 0
-        final_content = None
+        final_content = ""
         
         while iteration < self.max_iterations:
             iteration += 1
@@ -321,11 +327,12 @@ class AgentLoop:
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+                #final_content += messages
             else:
-                final_content = response.content
+                final_content += response.content
                 break
         
-        if final_content is None:
+        if final_content == "":
             final_content = "Background task completed."
         
         # Save to session (mark as system message in history)

@@ -17,6 +17,7 @@ from nanobot.config.schema import DiscordConfig
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
+MAX_MESSAGE_LENGTH = 2000  # Discord message limit
 
 
 class DiscordChannel(BaseChannel):
@@ -73,39 +74,101 @@ class DiscordChannel(BaseChannel):
             self._http = None
 
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Discord REST API."""
+        """Send a message through Discord REST API, splitting if too long."""
         if not self._http:
             logger.warning("Discord HTTP client not initialized")
             return
-
-        url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
-        payload: dict[str, Any] = {"content": msg.content}
-
-        if msg.reply_to:
-            payload["message_reference"] = {"message_id": msg.reply_to}
-            payload["allowed_mentions"] = {"replied_user": False}
+        # Split message if too long
+        message_parts = self._split_message(msg.content)
 
         headers = {"Authorization": f"Bot {self.config.token}"}
 
-        try:
-            for attempt in range(3):
-                try:
-                    response = await self._http.post(url, headers=headers, json=payload)
-                    if response.status_code == 429:
-                        data = response.json()
-                        retry_after = float(data.get("retry_after", 1.0))
-                        logger.warning(f"Discord rate limited, retrying in {retry_after}s")
-                        await asyncio.sleep(retry_after)
-                        continue
-                    response.raise_for_status()
-                    return
-                except Exception as e:
-                    if attempt == 2:
-                        logger.error(f"Error sending Discord message: {e}")
-                    else:
-                        await asyncio.sleep(1)
-        finally:
-            await self._stop_typing(msg.chat_id)
+        for i, part in enumerate(message_parts):
+            url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
+            payload: dict[str, Any] = {"content": part}
+
+            # Only add reply_to to the first message
+            if i == 0 and msg.reply_to:
+                payload["message_reference"] = {"message_id": msg.reply_to}
+                payload["allowed_mentions"] = {"replied_user": False}
+
+            try:
+                for attempt in range(3):
+                    try:
+                        #logger.info(f"Discord header {headers} : payload {payload}")
+                        response = await self._http.post(url, headers=headers, json=payload)
+                        if response.status_code == 429:
+                            data = response.json()
+                            retry_after = float(data.get("retry_after", 1.0))
+                            logger.warning(f"Discord rate limited, retrying in {retry_after}s")
+                            await asyncio.sleep(retry_after)
+                            continue
+                        response.raise_for_status()
+                        break
+                    except Exception as e:
+                        if attempt == 2:
+                            logger.error(f"Error sending Discord message part {i+1}/{len(message_parts)}: {e}")
+                        else:
+                            await asyncio.sleep(1)
+                # Small delay between messages to avoid rate limits
+                if i < len(message_parts) - 1:
+                    await asyncio.sleep(0.5)
+            finally:
+                if i == len(message_parts) - 1:  # Last message
+                    await self._stop_typing(msg.chat_id)
+
+    def _split_message(self, content: str) -> list[str]:
+        """Split a message into chunks that fit within Discord's limits.
+        
+        Tries to split at newlines or other natural boundaries first.
+        """
+        if len(content) <= MAX_MESSAGE_LENGTH:
+            return [content]
+
+        chunks = []
+        remaining = content
+
+        while remaining:
+            if len(remaining) <= MAX_MESSAGE_LENGTH:
+                chunks.append(remaining)
+                break
+
+            # Try to find a good split point
+            split_index = MAX_MESSAGE_LENGTH
+
+            # First try to split at a double newline
+            double_newline = remaining.rfind('\n\n', 0, MAX_MESSAGE_LENGTH)
+            if double_newline > MAX_MESSAGE_LENGTH * 0.5:  # Only use if we get a decent chunk
+                split_index = double_newline + 2  # Include both newlines
+            # Then try a single newline
+            elif double_newline == -1:
+                newline = remaining.rfind('\n', 0, MAX_MESSAGE_LENGTH)
+                if newline > MAX_MESSAGE_LENGTH * 0.5:
+                    split_index = newline + 1
+            # Then try a period followed by space
+            elif double_newline == -1 and newline == -1:
+                period = remaining.rfind('. ', 0, MAX_MESSAGE_LENGTH)
+                if period > MAX_MESSAGE_LENGTH * 0.5:
+                    split_index = period + 2
+            # Then try any whitespace
+            elif double_newline == -1 and newline == -1 and period == -1:
+                whitespace = remaining.rfind(' ', 0, MAX_MESSAGE_LENGTH)
+                if whitespace > MAX_MESSAGE_LENGTH * 0.5:
+                    split_index = whitespace + 1
+            # Last resort: hard split
+            elif split_index == MAX_MESSAGE_LENGTH:
+                split_index = MAX_MESSAGE_LENGTH - 3  # Leave room for "..."
+                remaining = remaining[:split_index] + "..."
+
+            chunk = remaining[:split_index]
+            chunks.append(chunk)
+            remaining = remaining[split_index:].lstrip()
+
+            # Add continuation indicator if needed
+            if remaining:
+                chunks[-1] += " (continued...)"
+
+        return chunks
 
     async def _gateway_loop(self) -> None:
         """Main gateway loop: identify, heartbeat, dispatch events."""
