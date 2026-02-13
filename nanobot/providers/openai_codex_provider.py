@@ -43,6 +43,7 @@ class OpenAICodexProvider(LLMProvider):
             "stream": True,
             "instructions": system_prompt,
             "input": input_items,
+            "max_output_tokens": max_tokens,
             "text": {"verbosity": "medium"},
             "include": ["reasoning.encrypted_content"],
             "prompt_cache_key": _prompt_cache_key(messages),

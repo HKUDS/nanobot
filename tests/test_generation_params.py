@@ -6,6 +6,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.agent.subagent import SubagentManager
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults
+from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.session.manager import Session
@@ -126,3 +127,40 @@ async def test_litellm_chat_uses_passed_generation_parameters(monkeypatch) -> No
 def test_agent_defaults_max_tokens_default_is_4096() -> None:
     defaults = AgentDefaults()
     assert defaults.max_tokens == 4096
+
+
+@pytest.mark.asyncio
+async def test_codex_chat_uses_max_output_tokens_and_ignores_temperature(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def _fake_request_codex(
+        url: str, headers: dict[str, str], body: dict[str, object], verify: bool
+    ):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["body"] = body
+        captured["verify"] = verify
+        return "ok", [], "stop"
+
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider.get_codex_token",
+        lambda: SimpleNamespace(account_id="acc", access="tok"),
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.openai_codex_provider._request_codex",
+        _fake_request_codex,
+    )
+
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.1-codex")
+    response = await provider.chat(
+        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=777,
+        temperature=0.19,
+    )
+
+    assert response.content == "ok"
+    assert captured["verify"] is True
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["max_output_tokens"] == 777
+    assert "temperature" not in body
