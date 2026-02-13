@@ -11,6 +11,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import SignalConfig
+from nanobot.utils.helpers import get_extension_from_mime
 
 
 class SignalChannel(BaseChannel):
@@ -356,7 +357,7 @@ class SignalChannel(BaseChannel):
 
             # Determine file extension
             content_type = attachment.get("contentType", "application/octet-stream")
-            ext = self._get_extension_from_mime(content_type)
+            ext = get_extension_from_mime(content_type)
 
             # Generate filename
             filename = f"signal_{attachment_id}{ext}"
@@ -379,20 +380,4 @@ class SignalChannel(BaseChannel):
             logger.error(f"Error downloading attachment: {e}")
             return None
 
-    def _get_extension_from_mime(self, mime_type: str) -> str:
-        """Get file extension from MIME type."""
-        mime_map = {
-            "image/jpeg": ".jpg",
-            "image/png": ".png",
-            "image/gif": ".gif",
-            "image/webp": ".webp",
-            "audio/mpeg": ".mp3",
-            "audio/ogg": ".ogg",
-            "audio/aac": ".aac",
-            "audio/mp4": ".m4a",
-            "video/mp4": ".mp4",
-            "video/webm": ".webm",
-            "text/plain": ".txt",
-            "application/pdf": ".pdf",
-        }
-        return mime_map.get(mime_type, "")
+
