@@ -208,6 +208,7 @@ class AgentLoop:
         # Agent loop
         iteration = 0
         final_content = None
+        finish_reason = None
         tools_used: list[str] = []
         
         while iteration < self.max_iterations:
@@ -253,20 +254,23 @@ class AgentLoop:
             else:
                 # No tool calls, we're done
                 final_content = response.content
+                finish_reason = response.finish_reason
                 break
         
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
-        
+
         # Log response preview
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
         
-        # Save to session (include tool names so consolidation sees what happened)
-        session.add_message("user", msg.content)
-        session.add_message("assistant", final_content,
+        # Save to session
+        if  finish_reason is None or finish_reason != "error" or not final_content.startswith("Error calling LLM:"):
+            # Save to session (include tool names so consolidation sees what happened)
+            session.add_message("user", msg.content)
+            session.add_message("assistant", final_content,
                             tools_used=tools_used if tools_used else None)
-        self.sessions.save(session)
+            self.sessions.save(session)
         
         return OutboundMessage(
             channel=msg.channel,
