@@ -24,6 +24,8 @@ class ExecTool(Tool):
         self.working_dir = working_dir
         self.deny_patterns = deny_patterns or [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
+            r"\brm\s+(--recursive|--force)\b",
+            r"\bfind\s+.+\s+-delete\b",
             r"\bdel\s+/[fq]\b",              # del /f, del /q
             r"\brmdir\s+/s\b",               # rmdir /s
             r"\b(format|mkfs|diskpart)\b",   # disk operations
@@ -31,6 +33,11 @@ class ExecTool(Tool):
             r">\s*/dev/sd",                  # write to disk
             r"\b(shutdown|reboot|poweroff)\b",  # system power
             r":\(\)\s*\{.*\};\s*:",          # fork bomb
+            r"\b(curl|wget|fetch)\s+.*\|(bash|sh|python|node)\b", # remote code execute
+            r"/dev/tcp/[^\s]+:[0-9]+", # reverse shell
+            r"\bnc\s+.*-e\s+/(bin/bash|bin/sh)",
+            r"\b(sudo|pkexec|doas)\b", # Privilege escalation
+            r"\bchmod\s+4[75]00\b",
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
