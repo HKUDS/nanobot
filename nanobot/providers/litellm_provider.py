@@ -83,9 +83,17 @@ class LiteLLMProvider(LLMProvider):
         
         # Standard mode: auto-prefix for known providers
         spec = find_by_model(model)
-        if spec and spec.litellm_prefix:
-            if not any(model.startswith(s) for s in spec.skip_prefixes):
-                model = f"{spec.litellm_prefix}/{model}"
+        if spec:
+            # Support stripping prefix for standard providers (e.g. doubao/ep-xxx -> ep-xxx)
+            if spec.strip_model_prefix and "/" in model:
+                # Only strip if the prefix matches one of the provider's keywords or name
+                prefix, rest = model.split("/", 1)
+                if prefix.lower() == spec.name or prefix.lower() in spec.keywords:
+                    model = rest
+
+            if spec.litellm_prefix:
+                if not any(model.startswith(s) for s in spec.skip_prefixes):
+                    model = f"{spec.litellm_prefix}/{model}"
         
         return model
     

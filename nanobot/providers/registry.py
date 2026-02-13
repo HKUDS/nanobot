@@ -260,6 +260,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # Volcengine (Doubao): needs "volcengine/" prefix for LiteLLM routing.
+    # Compatible with OpenAI SDK.
+    ProviderSpec(
+        name="doubao",
+        keywords=("doubao", "volcengine"),
+        env_key="VOLCENGINE_API_KEY",
+        display_name="Doubao",
+        litellm_prefix="volcengine",        # doubao-pro-32k → volcengine/doubao-pro-32k
+        skip_prefixes=("volcengine/",),     # avoid double-prefix
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://ark.cn-beijing.volces.com/api/v3",
+        strip_model_prefix=True,            # doubao/ep-xxx -> ep-xxx -> volcengine/ep-xxx
+        model_overrides=(),
+    ),
+
     # === Local deployment (matched by config key, NOT by api_base) =========
 
     # vLLM / any OpenAI-compatible local server.
