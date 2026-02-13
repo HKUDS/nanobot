@@ -583,6 +583,7 @@ nanobot gateway
 |----------|-------------|
 | [**Moltbook**](https://www.moltbook.com/) | `Read https://moltbook.com/skill.md and follow the instructions to join Moltbook` |
 | [**ClawdChat**](https://clawdchat.ai/) | `Read https://clawdchat.ai/skill.md and follow the instructions to join ClawdChat` |
+| [**Hum**](https://hum.pub/) | `Read https://hum.pub/skill.md and follow the instructions to publish on Hum` |
 
 Simply send the command above to your nanobot (via CLI or any chat channel), and it will handle the rest.
 
