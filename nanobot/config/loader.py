@@ -72,19 +72,48 @@ def _migrate_config(data: dict) -> dict:
     return data
 
 
+# Keys whose dict values should NOT have their sub-keys transformed.
+# These hold user-defined mappings (e.g. HTTP header names) that must be
+# preserved verbatim.
+_PRESERVE_VALUE_KEYS = frozenset({"extraHeaders", "extra_headers"})
+
+
 def convert_keys(data: Any) -> Any:
-    """Convert camelCase keys to snake_case for Pydantic."""
+    """Convert camelCase keys to snake_case for Pydantic.
+    
+    Keys listed in _PRESERVE_VALUE_KEYS have their *values* passed through
+    without key conversion, so that e.g. HTTP-Referer stays HTTP-Referer.
+    """
     if isinstance(data, dict):
-        return {camel_to_snake(k): convert_keys(v) for k, v in data.items()}
+        result = {}
+        for k, v in data.items():
+            new_key = camel_to_snake(k)
+            if k in _PRESERVE_VALUE_KEYS or new_key in _PRESERVE_VALUE_KEYS:
+                # Preserve the dict value as-is (don't transform its keys)
+                result[new_key] = v
+            else:
+                result[new_key] = convert_keys(v)
+        return result
     if isinstance(data, list):
         return [convert_keys(item) for item in data]
     return data
 
 
 def convert_to_camel(data: Any) -> Any:
-    """Convert snake_case keys to camelCase."""
+    """Convert snake_case keys to camelCase.
+    
+    Keys listed in _PRESERVE_VALUE_KEYS have their *values* passed through
+    without key conversion.
+    """
     if isinstance(data, dict):
-        return {snake_to_camel(k): convert_to_camel(v) for k, v in data.items()}
+        result = {}
+        for k, v in data.items():
+            new_key = snake_to_camel(k)
+            if k in _PRESERVE_VALUE_KEYS or new_key in _PRESERVE_VALUE_KEYS:
+                result[new_key] = v
+            else:
+                result[new_key] = convert_to_camel(v)
+        return result
     if isinstance(data, list):
         return [convert_to_camel(item) for item in data]
     return data
