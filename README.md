@@ -123,6 +123,8 @@ For OpenRouter - recommended for global users:
 }
 ```
 
+`nanobot onboard` seeds OpenRouter attribution headers by default; set `providers.openrouter.extraHeaders` to `{}` to opt out.
+
 **3. Chat**
 
 ```bash
