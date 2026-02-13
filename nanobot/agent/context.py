@@ -73,7 +73,9 @@ Skills with available="false" need dependencies installed first - you can try in
     def _get_identity(self) -> str:
         """Get the core identity section."""
         from datetime import datetime
+        import time as _time
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        tz = _time.strftime("%Z") or "UTC"
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
@@ -88,23 +90,24 @@ You are nanobot, a helpful AI assistant. You have access to tools that allow you
 - Spawn subagents for complex background tasks
 
 ## Current Time
-{now}
+{now} ({tz})
 
 ## Runtime
 {runtime}
 
 ## Workspace
 Your workspace is at: {workspace_path}
-- Memory files: {workspace_path}/memory/MEMORY.md
-- Daily notes: {workspace_path}/memory/YYYY-MM-DD.md
+- Long-term memory: {workspace_path}/memory/MEMORY.md
+- History log: {workspace_path}/memory/HISTORY.md (grep-searchable)
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
 IMPORTANT: When responding to direct questions or conversations, reply directly with your text response.
 Only use the 'message' tool when you need to send a message to a specific chat channel (like WhatsApp).
 For normal conversation, just respond with text - do not call the message tool.
 
-Always be helpful, accurate, and concise. When using tools, explain what you're doing.
-When remembering something, write to {workspace_path}/memory/MEMORY.md"""
+Always be helpful, accurate, and concise. When using tools, think step by step: what you know, what you need, and why you chose this tool.
+When remembering something important, write to {workspace_path}/memory/MEMORY.md
+To recall past events, grep {workspace_path}/memory/HISTORY.md"""
     
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
