@@ -197,38 +197,51 @@ def onboard(
     ),
 ):
     """Initialize nanobot configuration and workspace."""
-    from nanobot.config.loader import get_config_path, save_config
+    from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
     from nanobot.utils.helpers import get_workspace_path
 
     config_path = get_config_path()
 
-    if config_path.exists():
+    overwrite_config = False
+    config_exists = config_path.exists()
+    if config_exists:
         console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
-        if not typer.confirm("Overwrite?"):
-            raise typer.Exit()
+        overwrite_config = typer.confirm("Overwrite?", default=False)
 
-    auth_mode = auth.strip().lower()
-    if auth_mode in {"", "interactive", "ask"}:
-        if sys.stdin.isatty():
-            auth_mode = _prompt_onboard_auth_mode()
-        else:
-            auth_mode = "api-key"
-            console.print(
-                "[yellow]Non-interactive terminal detected; defaulting onboarding auth mode to api-key.[/yellow]"
-            )
-    elif auth_mode not in {"api-key", "codex-oauth"}:
-        console.print(f"[red]Unsupported auth mode: {auth}[/red]")
-        console.print("Supported values: interactive, api-key, codex-oauth")
-        raise typer.Exit(1)
+    if config_exists and not overwrite_config:
+        # Refresh existing config while preserving user values.
+        config = load_config()
+        save_config(config)
+        console.print(
+            f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)"
+        )
+        auth_mode = (
+            "codex-oauth" if getattr(config.providers.openai_codex, "oauth_enabled", False) else "api-key"
+        )
+        launch_auth = False
+    else:
+        auth_mode = auth.strip().lower()
+        if auth_mode in {"", "interactive", "ask"}:
+            if sys.stdin.isatty():
+                auth_mode = _prompt_onboard_auth_mode()
+            else:
+                auth_mode = "api-key"
+                console.print(
+                    "[yellow]Non-interactive terminal detected; defaulting onboarding auth mode to api-key.[/yellow]"
+                )
+        elif auth_mode not in {"api-key", "codex-oauth"}:
+            console.print(f"[red]Unsupported auth mode: {auth}[/red]")
+            console.print("Supported values: interactive, api-key, codex-oauth")
+            raise typer.Exit(1)
 
-    # Create default config
-    config = Config()
-    if auth_mode == "codex-oauth":
-        config.agents.defaults.model = "openai-codex/gpt-5.3-codex"
-        config.providers.openai_codex.oauth_enabled = True
-    save_config(config)
-    console.print(f"[green]✓[/green] Created config at {config_path}")
+        # Create default config
+        config = Config()
+        if auth_mode == "codex-oauth":
+            config.agents.defaults.model = "openai-codex/gpt-5.3-codex"
+            config.providers.openai_codex.oauth_enabled = True
+        save_config(config)
+        console.print(f"[green]✓[/green] Created config at {config_path}")
 
     # Create workspace
     workspace = get_workspace_path()
