@@ -13,6 +13,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import DiscordConfig
+from nanobot.utils.message import split_discord_message
 
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
@@ -78,34 +79,41 @@ class DiscordChannel(BaseChannel):
             logger.warning("Discord HTTP client not initialized")
             return
 
-        url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
-        payload: dict[str, Any] = {"content": msg.content}
+        # Split message if it exceeds Discord's 2000 character limit
+        chunks = split_discord_message(msg.content, limit=2000)
 
-        if msg.reply_to:
-            payload["message_reference"] = {"message_id": msg.reply_to}
-            payload["allowed_mentions"] = {"replied_user": False}
+        for i, chunk in enumerate(chunks):
+            url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
+            payload: dict[str, Any] = {"content": chunk}
 
-        headers = {"Authorization": f"Bot {self.config.token}"}
+            # Only include reply reference on the first chunk
+            if i == 0 and msg.reply_to:
+                payload["message_reference"] = {"message_id": msg.reply_to}
+                payload["allowed_mentions"] = {"replied_user": False}
 
-        try:
-            for attempt in range(3):
-                try:
-                    response = await self._http.post(url, headers=headers, json=payload)
-                    if response.status_code == 429:
-                        data = response.json()
-                        retry_after = float(data.get("retry_after", 1.0))
-                        logger.warning(f"Discord rate limited, retrying in {retry_after}s")
-                        await asyncio.sleep(retry_after)
-                        continue
-                    response.raise_for_status()
-                    return
-                except Exception as e:
-                    if attempt == 2:
-                        logger.error(f"Error sending Discord message: {e}")
-                    else:
-                        await asyncio.sleep(1)
-        finally:
-            await self._stop_typing(msg.chat_id)
+            headers = {"Authorization": f"Bot {self.config.token}"}
+
+            try:
+                for attempt in range(3):
+                    try:
+                        response = await self._http.post(url, headers=headers, json=payload)
+                        if response.status_code == 429:
+                            data = response.json()
+                            retry_after = float(data.get("retry_after", 1.0))
+                            logger.warning(f"Discord rate limited, retrying in {retry_after}s")
+                            await asyncio.sleep(retry_after)
+                            continue
+                        response.raise_for_status()
+                        break
+                    except Exception as e:
+                        if attempt == 2:
+                            logger.error(f"Error sending Discord message: {e}")
+                        else:
+                            await asyncio.sleep(1)
+            finally:
+                # Stop typing after the last chunk
+                if i == len(chunks) - 1:
+                    await self._stop_typing(msg.chat_id)
 
     async def _gateway_loop(self) -> None:
         """Main gateway loop: identify, heartbeat, dispatch events."""
