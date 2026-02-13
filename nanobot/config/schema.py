@@ -141,6 +141,14 @@ class QQConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
 
+class SignalConfig(BaseModel):
+    """Signal channel configuration using signal-cli."""
+    enabled: bool = False
+    phone_number: str = ""  # Registered Signal phone number (e.g. "+1234567890")
+    signal_cli_path: str = "signal-cli"  # Path to signal-cli binary
+    allow_from: list[str] = Field(default_factory=list)  # Phone numbers or UUIDs (linked devices may need UUIDs)
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
@@ -152,6 +160,7 @@ class ChannelsConfig(BaseModel):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    signal: SignalConfig = Field(default_factory=SignalConfig)
 
 
 class AgentDefaults(BaseModel):

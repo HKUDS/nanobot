@@ -636,18 +636,95 @@ def _get_bridge_dir() -> Path:
 def channels_login():
     """Link device via QR code."""
     import subprocess
-    
+
     bridge_dir = _get_bridge_dir()
-    
+
     console.print(f"{__logo__} Starting bridge...")
     console.print("Scan the QR code to connect.\n")
-    
+
     try:
         subprocess.run(["npm", "start"], cwd=bridge_dir, check=True)
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Bridge failed: {e}[/red]")
     except FileNotFoundError:
         console.print("[red]npm not found. Please install Node.js.[/red]")
+
+
+@channels_app.command("signal-link")
+def channels_signal_link(
+    name: str = typer.Option("nanobot", "--name", "-n", help="Device name shown in Signal"),
+    signal_cli_path: str = typer.Option("signal-cli", "--signal-cli", help="Path to signal-cli binary"),
+):
+    """Link Signal as a secondary device via QR code.
+
+    Generates a QR code in the terminal. Scan it with Signal on your
+    phone (Settings → Linked Devices → '+') to link nanobot.
+    """
+    import shutil
+    import subprocess
+
+    if not shutil.which(signal_cli_path):
+        console.print(f"[red]signal-cli not found at '{signal_cli_path}'.[/red]")
+        console.print("Install: https://github.com/AsamK/signal-cli#installation")
+        raise typer.Exit(1)
+
+    if not shutil.which("qrencode"):
+        console.print("[red]qrencode not found.[/red]")
+        console.print("Install: [cyan]brew install qrencode[/cyan] (macOS) or [cyan]apt install qrencode[/cyan] (Linux)")
+        raise typer.Exit(1)
+
+    console.print(f"{__logo__} Linking Signal device as [cyan]{name}[/cyan]...")
+    console.print("Open Signal on your phone → Settings → Linked Devices → [bold]+[/bold]\n")
+
+    try:
+        # signal-cli link prints the tsdevice: URI to stdout, then blocks
+        # until the QR code is scanned. We stream stdout to grab the URI
+        # and render the QR while the process keeps waiting.
+        proc = subprocess.Popen(
+            [signal_cli_path, "link", "-n", name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        # Read the first line (the device link URI)
+        uri = (proc.stdout.readline() or "").strip()
+        if not uri.startswith(("tsdevice:", "sgnl://linkdevice")):
+            console.print("[red]Unexpected output from signal-cli link:[/red]")
+            console.print(f"[dim]{uri}[/dim]")
+            proc.terminate()
+            raise typer.Exit(1)
+
+        # Render QR code in terminal
+        qr = subprocess.run(
+            ["qrencode", "-t", "ANSIUTF8", uri],
+            capture_output=True,
+            text=True,
+        )
+        console.print(qr.stdout)
+        console.print("[green]Scan the QR code above with Signal on your phone.[/green]")
+        console.print("[dim]Waiting for link to complete...[/dim]\n")
+
+        # Block until signal-cli finishes (scan completed or timeout)
+        try:
+            proc.wait(timeout=120)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            console.print("[yellow]Timed out waiting for QR scan (2 min). Try again.[/yellow]")
+            raise typer.Exit(1)
+
+        if proc.returncode == 0:
+            console.print(f"[green]✓[/green] Device linked successfully!")
+            console.print(f"\nAdd this to your [cyan]~/.nanobot/config.json[/cyan]:")
+            console.print(f'  [dim]"signal": {{"enabled": true, "phoneNumber": "<your-number>"}}[/dim]')
+        else:
+            stderr = (proc.stderr.read() or "").strip()
+            console.print(f"[red]Link failed (exit {proc.returncode})[/red]")
+            if stderr:
+                console.print(f"[dim]{stderr[:500]}[/dim]")
+
+    except FileNotFoundError as e:
+        console.print(f"[red]Command not found: {e}[/red]")
 
 
 # ============================================================================
