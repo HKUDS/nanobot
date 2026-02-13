@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
-from telegram import BotCommand, Update
+from telegram import BotCommand, InputMediaPhoto, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 from nanobot.bus.events import OutboundMessage
@@ -194,25 +195,100 @@ class TelegramChannel(BaseChannel):
         try:
             # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
-            # Convert markdown to Telegram HTML
-            html_content = _markdown_to_telegram_html(msg.content)
-            await self._app.bot.send_message(
-                chat_id=chat_id,
-                text=html_content,
-                parse_mode="HTML"
+            reply_to_message_id = self._resolve_reply_to_message_id(msg)
+            logger.debug(
+                "Sending Telegram message to chat_id={} reply_to_message_id={}",
+                chat_id,
+                reply_to_message_id,
             )
+
+            # Check for media (images)
+            valid_media = [p for p in (msg.media or []) if Path(p).is_file()]
+
+            if valid_media:
+                await self._send_with_media(chat_id, msg.content, valid_media, reply_to_message_id)
+            else:
+                await self._send_text(chat_id, msg.content, reply_to_message_id)
+
         except ValueError:
             logger.error(f"Invalid chat_id: {msg.chat_id}")
         except Exception as e:
+            logger.error(f"Error sending Telegram message: {e}")
+
+    async def _send_text(self, chat_id: int, content: str, reply_to_message_id: int | None) -> None:
+        """Send a text-only message."""
+        html_content = _markdown_to_telegram_html(content)
+        send_kwargs: dict = {
+            "chat_id": chat_id,
+            "text": html_content,
+            "parse_mode": "HTML",
+        }
+        if reply_to_message_id is not None:
+            send_kwargs["reply_to_message_id"] = reply_to_message_id
+            send_kwargs["allow_sending_without_reply"] = True
+        try:
+            await self._app.bot.send_message(**send_kwargs)
+        except Exception:
             # Fallback to plain text if HTML parsing fails
-            logger.warning(f"HTML parse failed, falling back to plain text: {e}")
-            try:
-                await self._app.bot.send_message(
-                    chat_id=int(msg.chat_id),
-                    text=msg.content
+            logger.warning("HTML parse failed, falling back to plain text")
+            fallback_kwargs: dict = {"chat_id": chat_id, "text": content}
+            if reply_to_message_id is not None:
+                fallback_kwargs["reply_to_message_id"] = reply_to_message_id
+                fallback_kwargs["allow_sending_without_reply"] = True
+            await self._app.bot.send_message(**fallback_kwargs)
+
+    async def _send_with_media(self, chat_id: int, content: str, media_paths: list[str], reply_to_message_id: int | None) -> None:
+        """Send message with photo(s)."""
+        html_caption = _markdown_to_telegram_html(content) if content else None
+        reply_kwargs: dict = {}
+        if reply_to_message_id is not None:
+            reply_kwargs["reply_to_message_id"] = reply_to_message_id
+            reply_kwargs["allow_sending_without_reply"] = True
+
+        if len(media_paths) == 1:
+            # Single photo
+            with open(media_paths[0], "rb") as f:
+                await self._app.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=f,
+                    caption=html_caption,
+                    parse_mode="HTML" if html_caption else None,
+                    **reply_kwargs,
                 )
-            except Exception as e2:
-                logger.error(f"Error sending Telegram message: {e2}")
+        else:
+            # Multiple photos as media group
+            media_group = []
+            for i, path in enumerate(media_paths):
+                media_group.append(
+                    InputMediaPhoto(
+                        media=open(path, "rb"),
+                        caption=html_caption if i == 0 else None,
+                        parse_mode="HTML" if (i == 0 and html_caption) else None,
+                    )
+                )
+            await self._app.bot.send_media_group(
+                chat_id=chat_id,
+                media=media_group,
+                **reply_kwargs,
+            )
+        logger.info(f"Sent {len(media_paths)} photo(s) to chat_id={chat_id}")
+
+    @staticmethod
+    def _resolve_reply_to_message_id(msg: OutboundMessage) -> int | None:
+        """
+        Resolve Telegram message ID for quote reply.
+        
+        Only use explicit OutboundMessage.reply_to to avoid automatic quote replies.
+        """
+        if msg.reply_to is None:
+            return None
+        try:
+            resolved = int(msg.reply_to)
+            logger.debug("Resolved explicit Telegram reply target message_id={}", resolved)
+            return resolved
+        except (TypeError, ValueError):
+            logger.debug("Invalid explicit Telegram reply target: {}", msg.reply_to)
+            return None
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -281,6 +357,21 @@ class TelegramChannel(BaseChannel):
         # Build content from text and/or media
         content_parts = []
         media_paths = []
+        is_group = message.chat.type != "private"
+        sender_context = self._build_sender_context(message, user)
+        if sender_context:
+            content_parts.append(sender_context)
+        reply_meta = self._extract_reply_metadata(message)
+        reply_context = self._build_reply_context(reply_meta)
+        if reply_context:
+            content_parts.append(reply_context)
+            logger.debug(
+                "Telegram inbound reply detected: source={} from_user_id={} reply_to_message_id={} reply_to_user_id={}",
+                reply_meta.get("reply_source"),
+                user.id,
+                reply_meta.get("reply_to_message_id"),
+                reply_meta.get("reply_to_user_id"),
+            )
         
         # Text content
         if message.text:
@@ -359,7 +450,10 @@ class TelegramChannel(BaseChannel):
                 "user_id": user.id,
                 "username": user.username,
                 "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
+                "sender_display": self._resolve_sender_display(user),
+                "chat_title": getattr(message.chat, "title", None),
+                "is_group": is_group,
+                **reply_meta,
             }
         )
     
@@ -398,3 +492,101 @@ class TelegramChannel(BaseChannel):
         
         type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
         return type_map.get(media_type, "")
+
+    @staticmethod
+    def _extract_reply_metadata(message) -> dict[str, object]:
+        """Extract reply target metadata from Telegram message."""
+        replied = message.reply_to_message
+        quote = getattr(message, "quote", None)
+
+        if replied:
+            replied_user = getattr(replied, "from_user", None)
+            replied_text = getattr(replied, "text", None) or getattr(replied, "caption", None)
+            if isinstance(replied_text, str):
+                replied_text = " ".join(replied_text.split())[:200]
+            else:
+                replied_text = None
+            if not replied_text and quote and isinstance(getattr(quote, "text", None), str):
+                replied_text = " ".join(quote.text.split())[:200]
+
+            return {
+                "is_reply": True,
+                "reply_source": "reply_to_message",
+                "reply_to_message_id": getattr(replied, "message_id", None),
+                "reply_to_user_id": getattr(replied_user, "id", None),
+                "reply_to_username": getattr(replied_user, "username", None),
+                "reply_to_first_name": getattr(replied_user, "first_name", None),
+                "reply_to_text": replied_text,
+            }
+
+        external = getattr(message, "external_reply", None)
+        if external:
+            origin = getattr(external, "origin", None)
+            user = getattr(origin, "sender_user", None)
+            sender_chat = getattr(origin, "sender_chat", None) or getattr(origin, "chat", None)
+            replied_text = None
+            if quote and isinstance(getattr(quote, "text", None), str):
+                replied_text = " ".join(quote.text.split())[:200]
+            return {
+                "is_reply": True,
+                "reply_source": "external_reply",
+                "reply_to_message_id": getattr(external, "message_id", None),
+                "reply_to_user_id": getattr(user, "id", None),
+                "reply_to_username": getattr(user, "username", None),
+                "reply_to_first_name": getattr(user, "first_name", None),
+                "reply_to_chat_title": getattr(sender_chat, "title", None),
+                "reply_to_text": replied_text,
+            }
+
+        if quote and isinstance(getattr(quote, "text", None), str):
+            return {
+                "is_reply": True,
+                "reply_source": "quote_only",
+                "reply_to_text": " ".join(quote.text.split())[:200],
+            }
+
+        return {}
+
+    @staticmethod
+    def _build_reply_context(reply_meta: dict[str, object]) -> str:
+        """Build a short text prefix so the agent can see who is being replied to."""
+        if not reply_meta:
+            return ""
+
+        target_name = (
+            reply_meta.get("reply_to_username")
+            or reply_meta.get("reply_to_first_name")
+            or reply_meta.get("reply_to_chat_title")
+            or reply_meta.get("reply_to_user_id")
+            or "unknown"
+        )
+        target_text = reply_meta.get("reply_to_text")
+        if target_text:
+            return f"[reply_to: {target_name}, text: {target_text}]"
+        return f"[reply_to: {target_name}]"
+
+    @staticmethod
+    def _resolve_sender_display(user) -> str:
+        """Resolve stable display name for current sender."""
+        if getattr(user, "username", None):
+            return f"@{user.username}"
+        if getattr(user, "full_name", None):
+            return user.full_name
+        if getattr(user, "first_name", None):
+            return user.first_name
+        return str(getattr(user, "id", "unknown"))
+
+    @classmethod
+    def _build_sender_context(cls, message, user) -> str:
+        """
+        Build sender prefix for inbound messages.
+        
+        Only prepend in group chats to help the agent identify who is speaking.
+        """
+        if message.chat.type == "private":
+            return ""
+        sender = cls._resolve_sender_display(user)
+        chat_title = getattr(message.chat, "title", None)
+        if chat_title:
+            return f"[from: {sender}, group: {chat_title}]"
+        return f"[from: {sender}]"
