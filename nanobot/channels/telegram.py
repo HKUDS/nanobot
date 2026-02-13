@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import TYPE_CHECKING
-
 from loguru import logger
 from telegram import BotCommand, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -15,9 +13,6 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
-
-if TYPE_CHECKING:
-    from nanobot.session.manager import SessionManager
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -95,7 +90,7 @@ class TelegramChannel(BaseChannel):
     # Commands registered with Telegram's command menu
     BOT_COMMANDS = [
         BotCommand("start", "Start the bot"),
-        BotCommand("reset", "Reset conversation history"),
+        BotCommand("new", "Start a new conversation"),
         BotCommand("help", "Show available commands"),
     ]
     
@@ -104,12 +99,10 @@ class TelegramChannel(BaseChannel):
         config: TelegramConfig,
         bus: MessageBus,
         groq_api_key: str = "",
-        session_manager: SessionManager | None = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
-        self.session_manager = session_manager
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -132,8 +125,8 @@ class TelegramChannel(BaseChannel):
         
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
-        self._app.add_handler(CommandHandler("reset", self._on_reset))
-        self._app.add_handler(CommandHandler("help", self._on_help))
+        self._app.add_handler(CommandHandler("new", self._forward_command))
+        self._app.add_handler(CommandHandler("help", self._forward_command))
         
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
@@ -229,40 +222,15 @@ class TelegramChannel(BaseChannel):
             "Type /help to see available commands."
         )
     
-    async def _on_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /reset command — clear conversation history."""
+    async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Forward slash commands to the bus for unified handling in AgentLoop."""
         if not update.message or not update.effective_user:
             return
-        
-        chat_id = str(update.message.chat_id)
-        session_key = f"{self.name}:{chat_id}"
-        
-        if self.session_manager is None:
-            logger.warning("/reset called but session_manager is not available")
-            await update.message.reply_text("⚠️ Session management is not available.")
-            return
-        
-        session = self.session_manager.get_or_create(session_key)
-        msg_count = len(session.messages)
-        session.clear()
-        self.session_manager.save(session)
-        
-        logger.info(f"Session reset for {session_key} (cleared {msg_count} messages)")
-        await update.message.reply_text("🔄 Conversation history cleared. Let's start fresh!")
-    
-    async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /help command — show available commands."""
-        if not update.message:
-            return
-        
-        help_text = (
-            "🐈 <b>nanobot commands</b>\n\n"
-            "/start — Start the bot\n"
-            "/reset — Reset conversation history\n"
-            "/help — Show this help message\n\n"
-            "Just send me a text message to chat!"
+        await self._handle_message(
+            sender_id=str(update.effective_user.id),
+            chat_id=str(update.message.chat_id),
+            content=update.message.text,
         )
-        await update.message.reply_text(help_text, parse_mode="HTML")
     
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
