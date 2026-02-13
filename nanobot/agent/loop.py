@@ -256,7 +256,10 @@ class AgentLoop:
                 break
         
         if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+            if iteration >= self.max_iterations:
+                final_content = f"Reached {self.max_iterations} iterations without completion."
+            else:
+                final_content = "I've completed processing but have no response to give."
         
         # Log response preview
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
