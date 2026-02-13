@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from collections import deque
@@ -29,6 +30,9 @@ class MemoryStore:
     DEFAULT_SHORT_TERM_TURNS = 12
     DEFAULT_PENDING_LIMIT = 20
     DEFAULT_MAX_LTM_ITEMS = 300
+    DEFAULT_MAX_LESSONS = 200
+    DEFAULT_MAX_LESSONS_IN_PROMPT = 5
+    DEFAULT_MIN_LESSON_CONFIDENCE = 1
 
     def __init__(
         self,
@@ -37,25 +41,39 @@ class MemoryStore:
         flush_interval_seconds: int = DEFAULT_FLUSH_INTERVAL_SECONDS,
         short_term_turns: int = DEFAULT_SHORT_TERM_TURNS,
         pending_limit: int = DEFAULT_PENDING_LIMIT,
+        self_improvement_enabled: bool = True,
+        max_lessons_in_prompt: int = DEFAULT_MAX_LESSONS_IN_PROMPT,
+        min_lesson_confidence: int = DEFAULT_MIN_LESSON_CONFIDENCE,
+        max_lessons: int = DEFAULT_MAX_LESSONS,
     ):
         self.workspace = workspace
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.snapshot_file = self.memory_dir / "LTM_SNAPSHOT.json"
         self.audit_file = self.memory_dir / "LTM_AUDIT.jsonl"
+        self.lessons_file = self.memory_dir / "LESSONS.jsonl"
+        self.lessons_audit_file = self.memory_dir / "LESSONS_AUDIT.jsonl"
 
         self.flush_every_updates = max(1, flush_every_updates)
         self.flush_interval_seconds = max(1, flush_interval_seconds)
         self.short_term_turns = max(1, short_term_turns)
         self.pending_limit = max(1, pending_limit)
+        self.self_improvement_enabled = self_improvement_enabled
+        self.max_lessons_in_prompt = max(1, max_lessons_in_prompt)
+        self.min_lesson_confidence = min_lesson_confidence
+        self.max_lessons = max(1, max_lessons)
 
         self._loaded = False
         self._snapshot: dict[str, Any] = {"version": 1, "updated_at": timestamp(), "items": []}
         self._short_term: dict[str, deque[dict[str, str]]] = {}
         self._pending: dict[str, deque[str]] = {}
+        self._lessons: list[dict[str, Any]] = []
         self._dirty_updates = 0
         self._last_flush_monotonic = time.monotonic()
         self._audit_buffer: list[dict[str, Any]] = []
+        self._lessons_audit_buffer: list[dict[str, Any]] = []
+        self._snapshot_dirty = False
+        self._lessons_dirty = False
 
     def get_today_file(self) -> Path:
         """Get path to today's memory file."""
@@ -187,6 +205,7 @@ class MemoryStore:
 
         self._snapshot["updated_at"] = now
         self._dirty_updates += 1
+        self._snapshot_dirty = True
         self.compact(max_items=self.DEFAULT_MAX_LTM_ITEMS, auto_flush=False)
 
         if immediate:
@@ -228,18 +247,198 @@ class MemoryStore:
 
         self.flush_if_needed()
 
+    def learn_lesson(
+        self,
+        trigger: str,
+        bad_action: str,
+        better_action: str,
+        session_key: str | None = None,
+        source: str = "unknown",
+        scope: str = "session",
+        confidence_delta: int = 1,
+        immediate: bool = False,
+    ) -> bool:
+        """
+        Add or update a self-improvement lesson.
+
+        Returns:
+            True if a lesson was added/updated.
+        """
+        self._load_once()
+        if not self.self_improvement_enabled:
+            return False
+
+        trigger = self._clean_text(trigger, max_len=120)
+        bad_action = self._clean_text(bad_action, max_len=260)
+        better_action = self._clean_text(better_action, max_len=260)
+        if not trigger or not better_action:
+            return False
+
+        now = timestamp()
+        scope = "session" if scope == "session" else "global"
+        lesson_key = self._lesson_key(trigger, better_action, scope, session_key)
+
+        existing = None
+        for lesson in self._lessons:
+            if lesson.get("key") == lesson_key:
+                existing = lesson
+                break
+
+        delta = max(1, confidence_delta)
+        if existing:
+            existing["updated_at"] = now
+            existing["bad_action"] = bad_action or existing.get("bad_action", "")
+            existing["better_action"] = better_action
+            existing["hits"] = int(existing.get("hits", 0)) + 1
+            existing["confidence"] = min(10, int(existing.get("confidence", 1)) + delta)
+            self._lessons_audit_buffer.append(
+                {
+                    "type": "lesson_update",
+                    "at": now,
+                    "id": existing.get("id", ""),
+                    "source": source,
+                    "confidence": existing["confidence"],
+                }
+            )
+        else:
+            lesson_id = f"lesson_{int(time.time() * 1000)}_{len(self._lessons) + 1}"
+            self._lessons.append(
+                {
+                    "id": lesson_id,
+                    "key": lesson_key,
+                    "trigger": trigger,
+                    "bad_action": bad_action,
+                    "better_action": better_action,
+                    "scope": scope,
+                    "session_key": session_key if scope == "session" else "",
+                    "source": source,
+                    "confidence": max(self.min_lesson_confidence, delta),
+                    "hits": 1,
+                    "enabled": True,
+                    "created_at": now,
+                    "updated_at": now,
+                    "last_applied_at": "",
+                }
+            )
+            self._lessons_audit_buffer.append(
+                {
+                    "type": "lesson_add",
+                    "at": now,
+                    "id": lesson_id,
+                    "source": source,
+                    "trigger": trigger,
+                }
+            )
+
+        self._lessons_dirty = True
+        self._dirty_updates += 1
+        self.compact_lessons(max_lessons=self.max_lessons, auto_flush=False)
+
+        if immediate:
+            self.flush(force=True)
+        else:
+            self.flush_if_needed()
+        return True
+
+    def record_tool_feedback(self, session_key: str, tool_name: str, result: str) -> bool:
+        """Learn lesson from a tool execution result."""
+        self._load_once()
+        if not self.self_improvement_enabled:
+            return False
+
+        if self._is_tool_error(result):
+            better_action = self._suggest_tool_better_action(tool_name, result)
+            return self.learn_lesson(
+                trigger=f"tool:{tool_name}:error",
+                bad_action=result,
+                better_action=better_action,
+                session_key=session_key,
+                source="tool_feedback",
+                scope="session",
+                confidence_delta=1,
+                immediate=False,
+            )
+
+        # If a tool succeeds after previous failures, slightly reinforce existing
+        # tool lessons for this session.
+        now = timestamp()
+        updated = False
+        for lesson in self._lessons:
+            if (
+                lesson.get("enabled", True)
+                and lesson.get("scope") == "session"
+                and lesson.get("session_key") == session_key
+                and lesson.get("trigger") == f"tool:{tool_name}:error"
+            ):
+                lesson["confidence"] = min(10, int(lesson.get("confidence", 1)) + 1)
+                lesson["updated_at"] = now
+                lesson["hits"] = int(lesson.get("hits", 0)) + 1
+                lesson["last_applied_at"] = now
+                updated = True
+                self._lessons_audit_buffer.append(
+                    {
+                        "type": "lesson_reinforced",
+                        "at": now,
+                        "id": lesson.get("id", ""),
+                        "source": "tool_success",
+                    }
+                )
+                break
+
+        if updated:
+            self._lessons_dirty = True
+            self._dirty_updates += 1
+            self.flush_if_needed()
+        return updated
+
+    def record_user_feedback(
+        self, session_key: str, user_message: str, previous_assistant: str | None = None
+    ) -> bool:
+        """Learn lesson from explicit user correction/feedback."""
+        self._load_once()
+        if not self.self_improvement_enabled:
+            return False
+
+        feedback = self._extract_feedback_signal(user_message)
+        if not feedback:
+            return False
+
+        trigger, better_action = feedback
+        bad_action = previous_assistant or "(No previous assistant content available.)"
+        return self.learn_lesson(
+            trigger=trigger,
+            bad_action=bad_action,
+            better_action=better_action,
+            session_key=session_key,
+            source="user_feedback",
+            scope="session",
+            confidence_delta=2,
+            immediate=True,
+        )
+
     def flush_if_needed(self, force: bool = False) -> bool:
         """Flush snapshot/audit to disk when thresholds are reached."""
         self._load_once()
+        has_pending = (
+            self._dirty_updates > 0
+            or self._snapshot_dirty
+            or self._lessons_dirty
+            or bool(self._audit_buffer)
+            or bool(self._lessons_audit_buffer)
+        )
+
+        if not has_pending:
+            return False
+
         if force:
             self._flush_to_disk()
             return True
 
-        if self._dirty_updates == 0 and not self._audit_buffer:
-            return False
-
         elapsed = time.monotonic() - self._last_flush_monotonic
-        should_flush = self._dirty_updates >= self.flush_every_updates or elapsed >= self.flush_interval_seconds
+        should_flush = (
+            self._dirty_updates >= self.flush_every_updates
+            or elapsed >= self.flush_interval_seconds
+        )
         if not should_flush:
             return False
 
@@ -277,6 +476,7 @@ class MemoryStore:
         self._snapshot["items"] = compacted
         self._snapshot["updated_at"] = timestamp()
         self._dirty_updates += 1
+        self._snapshot_dirty = True
         self._audit_buffer.append(
             {"type": "memory_compact", "at": timestamp(), "removed": removed, "kept": len(compacted)}
         )
@@ -284,6 +484,136 @@ class MemoryStore:
         if auto_flush:
             self.flush_if_needed()
         return removed
+
+    def compact_lessons(self, max_lessons: int | None = None, auto_flush: bool = True) -> int:
+        """
+        Compact lessons by deduplicating and capping size.
+
+        Returns:
+            Number of removed lessons.
+        """
+        self._load_once()
+        if not self.self_improvement_enabled:
+            return 0
+
+        max_keep = max(1, max_lessons or self.max_lessons)
+        original_count = len(self._lessons)
+        if original_count == 0:
+            return 0
+
+        dedup: dict[str, dict[str, Any]] = {}
+        sorted_lessons = sorted(
+            self._lessons,
+            key=lambda x: (
+                int(x.get("confidence", 0)),
+                int(x.get("hits", 0)),
+                x.get("updated_at", ""),
+            ),
+            reverse=True,
+        )
+        for lesson in sorted_lessons:
+            if not lesson.get("enabled", True):
+                continue
+            if int(lesson.get("confidence", 0)) < self.min_lesson_confidence:
+                continue
+            key = str(lesson.get("key", ""))
+            if key and key not in dedup:
+                dedup[key] = lesson
+
+        compacted = list(dedup.values())[:max_keep]
+        removed = original_count - len(compacted)
+        if removed <= 0:
+            return 0
+
+        self._lessons = compacted
+        self._lessons_dirty = True
+        self._dirty_updates += 1
+        self._lessons_audit_buffer.append(
+            {"type": "lesson_compact", "at": timestamp(), "removed": removed, "kept": len(compacted)}
+        )
+
+        if auto_flush:
+            self.flush_if_needed()
+        return removed
+
+    def reset_lessons(self) -> int:
+        """Reset all lessons and return removed count."""
+        self._load_once()
+        removed = len(self._lessons)
+        if removed == 0:
+            return 0
+
+        self._lessons = []
+        self._lessons_dirty = True
+        self._dirty_updates += 1
+        self._lessons_audit_buffer.append(
+            {"type": "lesson_reset", "at": timestamp(), "removed": removed}
+        )
+        self.flush(force=True)
+        return removed
+
+    def get_lessons_for_context(
+        self,
+        session_key: str | None = None,
+        current_message: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Select top lessons for prompt context."""
+        self._load_once()
+        if not self.self_improvement_enabled:
+            return []
+
+        max_items = max(1, limit or self.max_lessons_in_prompt)
+        lessons = []
+        for lesson in self._lessons:
+            if not lesson.get("enabled", True):
+                continue
+            confidence = int(lesson.get("confidence", 0))
+            if confidence < self.min_lesson_confidence:
+                continue
+            scope = lesson.get("scope", "session")
+            lesson_session = lesson.get("session_key", "")
+            if scope == "session" and session_key and lesson_session != session_key:
+                continue
+            if scope == "session" and not session_key:
+                continue
+            lessons.append(lesson)
+
+        if not lessons:
+            return []
+
+        query_tokens = self._tokenize(current_message or "")
+
+        def _score(item: dict[str, Any]) -> tuple[float, int, int, str]:
+            text = " ".join(
+                [
+                    str(item.get("trigger", "")),
+                    str(item.get("bad_action", "")),
+                    str(item.get("better_action", "")),
+                ]
+            )
+            lesson_tokens = self._tokenize(text)
+            overlap = len(query_tokens & lesson_tokens) if query_tokens else 0
+            overlap_score = float(overlap) if overlap > 0 else 0.0
+            # Mild recency bonus based on ISO timestamp year-month-day precision.
+            recency = item.get("updated_at", "")
+            recency_bonus = 0.0
+            if recency:
+                try:
+                    dt = datetime.fromisoformat(str(recency))
+                    age_hours = max(0.0, (datetime.now() - dt).total_seconds() / 3600)
+                    recency_bonus = 1.0 / (1.0 + math.log1p(age_hours))
+                except Exception:
+                    recency_bonus = 0.0
+            return (
+                overlap_score + recency_bonus,
+                int(item.get("confidence", 0)),
+                int(item.get("hits", 0)),
+                str(recency),
+            )
+
+        lessons.sort(key=_score, reverse=True)
+        return lessons[:max_items]
 
     def get_status(self) -> dict[str, Any]:
         """Get in-memory status and snapshot statistics."""
@@ -299,20 +629,43 @@ class MemoryStore:
             "flush_interval_seconds": self.flush_interval_seconds,
             "last_snapshot_at": self._snapshot.get("updated_at", ""),
             "snapshot_exists": self.snapshot_file.exists(),
+            "lessons_file": str(self.lessons_file),
+            "lessons_audit_file": str(self.lessons_audit_file),
+            "self_improvement_enabled": self.self_improvement_enabled,
+            "lessons_count": len(self._lessons),
+            "max_lessons_in_prompt": self.max_lessons_in_prompt,
+            "min_lesson_confidence": self.min_lesson_confidence,
+            "max_lessons": self.max_lessons,
         }
 
-    def get_memory_context(self, session_key: str | None = None) -> str:
+    def get_memory_context(
+        self, session_key: str | None = None, current_message: str | None = None
+    ) -> str:
         """
         Get memory context for the agent.
 
         Args:
             session_key: Optional session key for short-term/pending memory.
+            current_message: Optional current user message for lesson relevance.
 
         Returns:
             Formatted memory context including long-term and short-term memories.
         """
         self._load_once()
         parts: list[str] = []
+
+        lessons = self.get_lessons_for_context(
+            session_key=session_key,
+            current_message=current_message,
+            limit=self.max_lessons_in_prompt,
+        )
+        if lessons:
+            lesson_lines = [
+                f"- When {lesson['trigger']}: {lesson['better_action']} "
+                f"(confidence={lesson.get('confidence', 1)})"
+                for lesson in lessons
+            ]
+            parts.append("## Lessons\n" + "\n".join(lesson_lines))
 
         snapshot_items = self._select_snapshot_items(session_key=session_key, limit=8)
         if snapshot_items:
@@ -386,18 +739,30 @@ class MemoryStore:
             except Exception:
                 self._snapshot = {"version": 1, "updated_at": timestamp(), "items": []}
 
+        self._lessons = self._load_lessons()
         self._loaded = True
 
     def _flush_to_disk(self) -> None:
         """Persist snapshot and audit buffer to disk."""
-        data = {
-            "version": int(self._snapshot.get("version", 1)),
-            "updated_at": timestamp(),
-            "items": self._snapshot.get("items", []),
-        }
-        tmp = self.snapshot_file.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(self.snapshot_file)
+        now = timestamp()
+
+        if self._snapshot_dirty:
+            data = {
+                "version": int(self._snapshot.get("version", 1)),
+                "updated_at": now,
+                "items": self._snapshot.get("items", []),
+            }
+            tmp = self.snapshot_file.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(self.snapshot_file)
+            self._snapshot["updated_at"] = now
+
+        if self._lessons_dirty:
+            tmp = self.lessons_file.with_suffix(".jsonl.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                for lesson in self._lessons:
+                    f.write(json.dumps(lesson, ensure_ascii=False) + "\n")
+            tmp.replace(self.lessons_file)
 
         if self._audit_buffer:
             with open(self.audit_file, "a", encoding="utf-8") as f:
@@ -405,9 +770,16 @@ class MemoryStore:
                     f.write(json.dumps(event, ensure_ascii=False) + "\n")
             self._audit_buffer = []
 
+        if self._lessons_audit_buffer:
+            with open(self.lessons_audit_file, "a", encoding="utf-8") as f:
+                for event in self._lessons_audit_buffer:
+                    f.write(json.dumps(event, ensure_ascii=False) + "\n")
+            self._lessons_audit_buffer = []
+
         self._dirty_updates = 0
         self._last_flush_monotonic = time.monotonic()
-        self._snapshot["updated_at"] = data["updated_at"]
+        self._snapshot_dirty = False
+        self._lessons_dirty = False
 
     def _select_snapshot_items(
         self, session_key: str | None, limit: int
@@ -468,6 +840,133 @@ class MemoryStore:
         lower = message.lower()
         markers = ("done", "resolved", "cancel", "不用了", "已完成", "完成了", "取消")
         return any(marker in lower for marker in markers) or any(marker in message for marker in markers)
+
+    def _extract_feedback_signal(self, user_message: str) -> tuple[str, str] | None:
+        """Extract user correction into (trigger, better_action)."""
+        text = user_message.strip()
+        if not text:
+            return None
+
+        lower = text.lower()
+        correction_markers = (
+            "不对",
+            "不是这个意思",
+            "别这样",
+            "不要这样",
+            "太啰嗦",
+            "太长",
+            "wrong",
+            "incorrect",
+            "not what i meant",
+            "too verbose",
+            "too long",
+        )
+        if not any(marker in lower for marker in correction_markers) and not any(
+            marker in text for marker in correction_markers
+        ):
+            return None
+
+        if any(token in text for token in ("中文", "英文", "英语")) or any(
+            token in lower for token in ("chinese", "english", "language")
+        ):
+            trigger = "response:language"
+        elif any(token in text for token in ("简短", "简洁", "太长", "太啰嗦")) or any(
+            token in lower for token in ("concise", "shorter", "too verbose", "too long")
+        ):
+            trigger = "response:length"
+        elif any(token in text for token in ("错误", "不对", "事实")) or any(
+            token in lower for token in ("wrong", "incorrect", "factual")
+        ):
+            trigger = "response:accuracy"
+        else:
+            trigger = "response:alignment"
+
+        return trigger, self._clean_text(text, max_len=240)
+
+    def _load_lessons(self) -> list[dict[str, Any]]:
+        """Load lessons from LESSONS.jsonl."""
+        if not self.lessons_file.exists():
+            return []
+
+        lessons: list[dict[str, Any]] = []
+        try:
+            with open(self.lessons_file, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    if not isinstance(data, dict):
+                        continue
+                    trigger = self._clean_text(str(data.get("trigger", "")), max_len=120)
+                    better_action = self._clean_text(str(data.get("better_action", "")), max_len=260)
+                    if not trigger or not better_action:
+                        continue
+                    scope = "session" if data.get("scope") == "session" else "global"
+                    session_key = str(data.get("session_key", "")) if scope == "session" else ""
+                    key = self._lesson_key(trigger, better_action, scope, session_key)
+                    lessons.append(
+                        {
+                            "id": str(data.get("id", f"lesson_{len(lessons) + 1}")),
+                            "key": key,
+                            "trigger": trigger,
+                            "bad_action": self._clean_text(
+                                str(data.get("bad_action", "")), max_len=260
+                            ),
+                            "better_action": better_action,
+                            "scope": scope,
+                            "session_key": session_key,
+                            "source": str(data.get("source", "unknown")),
+                            "confidence": int(data.get("confidence", 1)),
+                            "hits": int(data.get("hits", 1)),
+                            "enabled": bool(data.get("enabled", True)),
+                            "created_at": str(data.get("created_at", timestamp())),
+                            "updated_at": str(data.get("updated_at", timestamp())),
+                            "last_applied_at": str(data.get("last_applied_at", "")),
+                        }
+                    )
+        except Exception:
+            return []
+        return lessons
+
+    def _lesson_key(
+        self, trigger: str, better_action: str, scope: str, session_key: str | None
+    ) -> str:
+        """Build a stable dedup key for lessons."""
+        normalized_scope = "session" if scope == "session" else "global"
+        normalized_session = session_key or "" if normalized_scope == "session" else ""
+        return "|".join(
+            [
+                self._normalize_text(trigger),
+                self._normalize_text(better_action),
+                normalized_scope,
+                normalized_session,
+            ]
+        )
+
+    def _suggest_tool_better_action(self, tool_name: str, result: str) -> str:
+        """Suggest a lightweight fix action for common tool failures."""
+        lower = result.lower()
+        if "invalid parameters" in lower:
+            return f"Validate `{tool_name}` arguments against its schema before calling."
+        if "not found" in lower:
+            return f"Check path/resource existence before calling `{tool_name}`."
+        if "permission" in lower or "outside allowed directory" in lower:
+            return f"Check permissions/workspace boundaries before `{tool_name}`."
+        if "timeout" in lower:
+            return f"Use smaller scope or lighter parameters when calling `{tool_name}`."
+        return f"Inspect `{tool_name}` result and adjust arguments before retrying once."
+
+    @staticmethod
+    def _is_tool_error(result: str) -> bool:
+        """Check whether tool result string indicates an error."""
+        return result.strip().lower().startswith("error:")
+
+    @staticmethod
+    def _tokenize(text: str) -> set[str]:
+        """Tokenize text into lowercase alnum/CJK terms."""
+        tokens = re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]+", text.lower())
+        return {token for token in tokens if len(token) >= 2}
 
     @staticmethod
     def _normalize_text(text: str) -> str:

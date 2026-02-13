@@ -20,4 +20,4 @@ This file stores important information that should persist across sessions.
 
 ---
 
-*This file is a human-readable memory note. Runtime long-term memory snapshot is stored in `memory/LTM_SNAPSHOT.json`.*
+*This file is a human-readable memory note. Runtime long-term snapshot is stored in `memory/LTM_SNAPSHOT.json`; self-improvement lessons are stored in `memory/LESSONS.jsonl`.*

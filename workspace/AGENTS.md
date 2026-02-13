@@ -23,6 +23,8 @@ You have access to:
 - Use `memory/` directory for daily notes
 - Use `MEMORY.md` for human-readable long-term notes
 - Runtime long-term snapshot is stored in `LTM_SNAPSHOT.json`
+- Self-improvement lessons are stored in `LESSONS.jsonl`
+- When user gives explicit correction, convert it into a concise actionable lesson
 
 ## Scheduled Reminders
 

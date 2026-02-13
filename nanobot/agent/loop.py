@@ -20,6 +20,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import (
     AgentMemoryConfig,
+    AgentSelfImprovementConfig,
     AgentSessionConfig,
     ExecToolConfig,
     WebToolsConfig,
@@ -51,6 +52,7 @@ class AgentLoop:
         web_config: WebToolsConfig | None = None,
         exec_config: ExecToolConfig | None = None,
         memory_config: AgentMemoryConfig | None = None,
+        self_improvement_config: AgentSelfImprovementConfig | None = None,
         session_config: AgentSessionConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
@@ -64,6 +66,7 @@ class AgentLoop:
         self.web_config = web_config or WebToolsConfig()
         self.exec_config = exec_config or ExecToolConfig()
         self.memory_config = memory_config or AgentMemoryConfig()
+        self.self_improvement_config = self_improvement_config or AgentSelfImprovementConfig()
         self.session_config = session_config or AgentSessionConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -74,6 +77,10 @@ class AgentLoop:
             flush_interval_seconds=self.memory_config.flush_interval_seconds,
             short_term_turns=self.memory_config.short_term_turns,
             pending_limit=self.memory_config.pending_limit,
+            self_improvement_enabled=self.self_improvement_config.enabled,
+            max_lessons_in_prompt=self.self_improvement_config.max_lessons_in_prompt,
+            min_lesson_confidence=self.self_improvement_config.min_lesson_confidence,
+            max_lessons=self.self_improvement_config.max_lessons,
         )
         self.context = ContextBuilder(workspace, memory_store=self.memory)
         self.sessions = session_manager or SessionManager(
@@ -198,6 +205,7 @@ class AgentLoop:
 
         # Get or create session
         session = self.sessions.get_or_create(msg.session_key)
+        previous_assistant = self._get_last_assistant_message(session)
 
         # Update tool contexts
         message_tool = self.tools.get("message")
@@ -262,6 +270,7 @@ class AgentLoop:
                     provider_tag = f" [provider={provider}]" if provider else ""
                     logger.info(f"Tool call: {tool_call.name}{provider_tag}({args_str[:200]})")
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    self.memory.record_tool_feedback(msg.session_key, tool_call.name, result)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -286,6 +295,11 @@ class AgentLoop:
             session_key=msg.session_key,
             user_message=msg.content,
             assistant_message=final_content,
+        )
+        self.memory.record_user_feedback(
+            session_key=msg.session_key,
+            user_message=msg.content,
+            previous_assistant=previous_assistant,
         )
         self.memory.flush_if_needed()
 
@@ -380,6 +394,7 @@ class AgentLoop:
                     provider_tag = f" [provider={provider}]" if provider else ""
                     logger.info(f"Tool call: {tool_call.name}{provider_tag}({args_str[:200]})")
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    self.memory.record_tool_feedback(session_key, tool_call.name, result)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -439,3 +454,11 @@ class AgentLoop:
 
         response = await self._process_message(msg)
         return response.content if response else ""
+
+    @staticmethod
+    def _get_last_assistant_message(session) -> str:
+        """Get the last assistant message from a session, if available."""
+        for item in reversed(session.messages):
+            if item.get("role") == "assistant":
+                return str(item.get("content", ""))
+        return ""

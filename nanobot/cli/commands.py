@@ -606,6 +606,7 @@ This file stores important information that should persist across sessions.
 ---
 
 This file is for human-readable notes. Runtime long-term snapshot memory lives in memory/LTM_SNAPSHOT.json.
+Self-improvement lessons live in memory/LESSONS.jsonl.
 """)
         console.print("  [dim]Created memory/MEMORY.md[/dim]")
 
@@ -705,6 +706,7 @@ def gateway(
         web_config=config.tools.web,
         exec_config=config.tools.exec,
         memory_config=config.agents.memory,
+        self_improvement_config=config.agents.self_improvement,
         session_config=config.agents.sessions,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -818,6 +820,7 @@ def agent(
         web_config=config.tools.web,
         exec_config=config.tools.exec,
         memory_config=config.agents.memory,
+        self_improvement_config=config.agents.self_improvement,
         session_config=config.agents.sessions,
         restrict_to_workspace=config.tools.restrict_to_workspace,
     )
@@ -1035,6 +1038,10 @@ def _new_memory_store(config):
         flush_interval_seconds=config.agents.memory.flush_interval_seconds,
         short_term_turns=config.agents.memory.short_term_turns,
         pending_limit=config.agents.memory.pending_limit,
+        self_improvement_enabled=config.agents.self_improvement.enabled,
+        max_lessons_in_prompt=config.agents.self_improvement.max_lessons_in_prompt,
+        min_lesson_confidence=config.agents.self_improvement.min_lesson_confidence,
+        max_lessons=config.agents.self_improvement.max_lessons,
     )
 
 
@@ -1062,6 +1069,13 @@ def memory_status():
         ("Flush Every Updates", str(status["flush_every_updates"])),
         ("Flush Interval Seconds", str(status["flush_interval_seconds"])),
         ("Last Snapshot At", status["last_snapshot_at"] or "-"),
+        ("Self Improvement Enabled", "yes" if status["self_improvement_enabled"] else "no"),
+        ("Lessons Count", str(status["lessons_count"])),
+        ("Lessons File", status["lessons_file"]),
+        ("Lessons Audit File", status["lessons_audit_file"]),
+        ("Max Lessons In Prompt", str(status["max_lessons_in_prompt"])),
+        ("Min Lesson Confidence", str(status["min_lesson_confidence"])),
+        ("Max Lessons", str(status["max_lessons"])),
     ]
 
     for name, value in fields:
@@ -1096,6 +1110,63 @@ def memory_compact(
     removed = memory.compact(max_items=max_items, auto_flush=False)
     memory.flush(force=True)
     console.print(f"[green]✓[/green] Memory compacted (removed {removed} items)")
+
+
+memory_lessons_app = typer.Typer(help="Manage self-improvement lessons")
+memory_app.add_typer(memory_lessons_app, name="lessons")
+
+
+@memory_lessons_app.command("status")
+def memory_lessons_status():
+    """Show self-improvement lesson status."""
+    from nanobot.config.loader import load_config
+
+    config = load_config()
+    memory = _new_memory_store(config)
+    status = memory.get_status()
+
+    table = Table(title="Lessons Status")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value")
+    table.add_row("Enabled", "yes" if status["self_improvement_enabled"] else "no")
+    table.add_row("Lessons Count", str(status["lessons_count"]))
+    table.add_row("Lessons File", status["lessons_file"])
+    table.add_row("Lessons Audit File", status["lessons_audit_file"])
+    table.add_row("Max Lessons In Prompt", str(status["max_lessons_in_prompt"]))
+    table.add_row("Min Lesson Confidence", str(status["min_lesson_confidence"]))
+    table.add_row("Max Lessons", str(status["max_lessons"]))
+    console.print(table)
+
+
+@memory_lessons_app.command("compact")
+def memory_lessons_compact(
+    max_lessons: int = typer.Option(200, "--max-lessons", help="Maximum lessons to keep"),
+):
+    """Compact self-improvement lessons."""
+    from nanobot.config.loader import load_config
+
+    config = load_config()
+    memory = _new_memory_store(config)
+    removed = memory.compact_lessons(max_lessons=max_lessons, auto_flush=False)
+    memory.flush(force=True)
+    console.print(f"[green]✓[/green] Lessons compacted (removed {removed} items)")
+
+
+@memory_lessons_app.command("reset")
+def memory_lessons_reset(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Reset without confirmation"),
+):
+    """Reset all self-improvement lessons."""
+    from nanobot.config.loader import load_config
+
+    if not yes and not typer.confirm("Reset all lessons?"):
+        console.print("[dim]Canceled[/dim]")
+        return
+
+    config = load_config()
+    memory = _new_memory_store(config)
+    removed = memory.reset_lessons()
+    console.print(f"[green]✓[/green] Lessons reset (removed {removed} items)")
 
 
 # ============================================================================

@@ -201,3 +201,70 @@ def test_inbound_message_session_key_override() -> None:
         session_key_override="cli:custom",
     )
     assert msg.session_key == "cli:custom"
+
+
+def test_memory_store_tool_feedback_learns_lessons(tmp_path) -> None:
+    store = MemoryStore(workspace=tmp_path, self_improvement_enabled=True)
+    changed = store.record_tool_feedback(
+        session_key="cli:lesson",
+        tool_name="read_file",
+        result="Error: File not found: /tmp/missing.txt",
+    )
+    assert changed is True
+
+    lessons = store.get_lessons_for_context(
+        session_key="cli:lesson",
+        current_message="read_file still fails",
+    )
+    assert lessons
+    assert lessons[0]["trigger"] == "tool:read_file:error"
+    assert "read_file" in lessons[0]["better_action"]
+
+    context = store.get_memory_context(
+        session_key="cli:lesson",
+        current_message="read_file still fails",
+    )
+    assert "## Lessons" in context
+
+
+def test_memory_store_user_feedback_learns_lessons(tmp_path) -> None:
+    store = MemoryStore(workspace=tmp_path, self_improvement_enabled=True)
+    changed = store.record_user_feedback(
+        session_key="cli:feedback",
+        user_message="不对，回答太长了，简短一点",
+        previous_assistant="这是一个非常非常长的回答...",
+    )
+    assert changed is True
+
+    lessons = store.get_lessons_for_context(
+        session_key="cli:feedback",
+        current_message="请给我更简短的回答",
+    )
+    assert lessons
+    assert lessons[0]["trigger"] == "response:length"
+    assert lessons[0]["confidence"] >= 2
+
+
+def test_memory_store_lessons_compact_and_reset(tmp_path) -> None:
+    store = MemoryStore(workspace=tmp_path, self_improvement_enabled=True, max_lessons=20)
+    for i in range(6):
+        store.learn_lesson(
+            trigger=f"response:alignment:{i}",
+            bad_action=f"bad{i}",
+            better_action=f"better{i}",
+            session_key="cli:compact",
+            source="test",
+            scope="session",
+            confidence_delta=1,
+            immediate=False,
+        )
+
+    removed = store.compact_lessons(max_lessons=3, auto_flush=False)
+    assert removed >= 3
+
+    status = store.get_status()
+    assert status["lessons_count"] <= 3
+
+    removed_all = store.reset_lessons()
+    assert removed_all >= 1
+    assert store.get_status()["lessons_count"] == 0

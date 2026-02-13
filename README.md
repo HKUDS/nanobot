@@ -616,7 +616,7 @@ Config file: `~/.nanobot/config.json`
 
 ### Providers
 
-> [!TIP]
+
 > - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
@@ -697,10 +697,13 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 nanobot uses a RAM-first memory path:
 - Long-term memory snapshot: `workspace/memory/LTM_SNAPSHOT.json`
 - Long-term memory audit log: `workspace/memory/LTM_AUDIT.jsonl`
+- Self-improvement lessons: `workspace/memory/LESSONS.jsonl`
+- Self-improvement lesson audit: `workspace/memory/LESSONS_AUDIT.jsonl`
 - Human-readable notes: `workspace/memory/MEMORY.md`
 
 Session storage is append-only by default, then compacted periodically.
 Design notes: `RAM_FIRST_MEMORY_CHECKPOINT.md`
+Self-development notes: `SELF_DEVELOPMENT.md`
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -711,6 +714,10 @@ Design notes: `RAM_FIRST_MEMORY_CHECKPOINT.md`
 | `agents.sessions.compactThresholdMessages` | `400` | Compact session file when messages exceed threshold |
 | `agents.sessions.compactThresholdBytes` | `2000000` | Compact session file when file size exceeds threshold |
 | `agents.sessions.compactKeepMessages` | `300` | Keep recent N messages after compaction |
+| `agents.selfImprovement.enabled` | `true` | Enable feedback-to-lesson self-development |
+| `agents.selfImprovement.maxLessonsInPrompt` | `5` | Max lessons injected into prompt |
+| `agents.selfImprovement.minLessonConfidence` | `1` | Minimum lesson confidence to be injected |
+| `agents.selfImprovement.maxLessons` | `200` | Maximum lessons retained after compaction |
 
 
 ## CLI Reference
@@ -727,6 +734,9 @@ Design notes: `RAM_FIRST_MEMORY_CHECKPOINT.md`
 | `nanobot memory status` | Show memory snapshot/runtime status |
 | `nanobot memory flush` | Force memory checkpoint flush |
 | `nanobot memory compact` | Compact long-term memory snapshot |
+| `nanobot memory lessons status` | Show lesson status |
+| `nanobot memory lessons compact` | Compact lessons |
+| `nanobot memory lessons reset` | Reset all lessons |
 | `nanobot session compact` | Compact session files |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
@@ -762,6 +772,15 @@ nanobot memory flush
 
 # Compact long-term snapshot memory
 nanobot memory compact --max-items 300
+
+# Show lesson status
+nanobot memory lessons status
+
+# Compact lessons
+nanobot memory lessons compact --max-lessons 200
+
+# Reset all lessons
+nanobot memory lessons reset --yes
 
 # Compact one session
 nanobot session compact --session "telegram:123456"

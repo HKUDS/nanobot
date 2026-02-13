@@ -31,6 +31,11 @@ The runtime is split into three layers:
 - Persisted to `memory/LTM_SNAPSHOT.json` on checkpoint
 - Optional audit append log at `memory/LTM_AUDIT.jsonl`
 
+2.5. Self-improvement lessons (RAM-first)
+- In-memory lessons are learned from tool failures and user corrections
+- Persisted to `memory/LESSONS.jsonl` on checkpoint
+- Optional lesson audit log at `memory/LESSONS_AUDIT.jsonl`
+
 3. Session log storage (append-only)
 - Conversation messages append to `~/.nanobot/sessions/*.jsonl`
 - Periodic compaction rewrites to keep only recent history
@@ -69,8 +74,9 @@ On each turn:
 During prompt build:
 
 1. Read long-term snapshot items from RAM
-2. Add legacy `MEMORY.md` notes (human-readable)
-3. Add short-term working memory and pending items for current session
+2. Read top self-improvement lessons from RAM
+3. Add legacy `MEMORY.md` notes (human-readable)
+4. Add short-term working memory and pending items for current session
 
 This keeps read latency constant and avoids per-turn disk reads for long-term state.
 
@@ -113,5 +119,8 @@ This design avoids embedding/vector systems to preserve nanobot's lightweight fo
 nanobot memory status
 nanobot memory flush
 nanobot memory compact --max-items 300
+nanobot memory lessons status
+nanobot memory lessons compact --max-lessons 200
+nanobot memory lessons reset --yes
 nanobot session compact --all
 ```

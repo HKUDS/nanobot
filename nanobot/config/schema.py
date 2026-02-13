@@ -182,11 +182,21 @@ class AgentSessionConfig(BaseModel):
     compact_keep_messages: int = 300
 
 
+class AgentSelfImprovementConfig(BaseModel):
+    """Self-improvement lesson configuration."""
+
+    enabled: bool = True
+    max_lessons_in_prompt: int = 5
+    min_lesson_confidence: int = 1
+    max_lessons: int = 200
+
+
 class AgentsConfig(BaseModel):
     """Agent configuration."""
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
     memory: AgentMemoryConfig = Field(default_factory=AgentMemoryConfig)
     sessions: AgentSessionConfig = Field(default_factory=AgentSessionConfig)
+    self_improvement: AgentSelfImprovementConfig = Field(default_factory=AgentSelfImprovementConfig)
 
 
 class ProviderConfig(BaseModel):

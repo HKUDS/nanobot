@@ -26,7 +26,10 @@ class ContextBuilder:
         self.skills = SkillsLoader(workspace)
 
     def build_system_prompt(
-        self, skill_names: list[str] | None = None, session_key: str | None = None
+        self,
+        skill_names: list[str] | None = None,
+        session_key: str | None = None,
+        current_message: str | None = None,
     ) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
@@ -48,7 +51,9 @@ class ContextBuilder:
             parts.append(bootstrap)
 
         # Memory context
-        memory = self.memory.get_memory_context(session_key=session_key)
+        memory = self.memory.get_memory_context(
+            session_key=session_key, current_message=current_message
+        )
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
@@ -102,6 +107,7 @@ You are nanobot, a helpful AI assistant. You have access to tools that allow you
 Your workspace is at: {workspace_path}
 - Memory files: {workspace_path}/memory/MEMORY.md
 - Runtime snapshot: {workspace_path}/memory/LTM_SNAPSHOT.json
+- Self-improvement lessons: {workspace_path}/memory/LESSONS.jsonl
 - Daily notes: {workspace_path}/memory/YYYY-MM-DD.md
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
@@ -151,7 +157,9 @@ When remembering something, use {workspace_path}/memory/LTM_SNAPSHOT.json for ru
 
         # System prompt
         session_key = f"{channel}:{chat_id}" if channel and chat_id else None
-        system_prompt = self.build_system_prompt(skill_names, session_key=session_key)
+        system_prompt = self.build_system_prompt(
+            skill_names, session_key=session_key, current_message=current_message
+        )
         if channel and chat_id:
             system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
         messages.append({"role": "system", "content": system_prompt})
