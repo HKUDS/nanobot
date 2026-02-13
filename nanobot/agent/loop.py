@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -210,14 +211,41 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
         
+        # Switch to multimodal model if media is present
+        current_model = self.model
+        current_provider = self.provider
+        
+        if msg.media:
+            # Use dashscope/qwen3-omni-flash for multimodal content as requested
+            # We use a dedicated provider instance to handle the compatible-mode endpoint
+            try:
+                from nanobot.config.loader import load_config
+                from nanobot.providers.litellm_provider import LiteLLMProvider
+                
+                cfg = load_config()
+                ds = cfg.providers.dashscope
+                if ds and ds.api_key:
+                    logger.info(f"Multimodal content detected ({len(msg.media)} files). Switching to DashScope provider.")
+                    # Use OpenAI protocol for compatible-mode endpoint
+                    current_provider = LiteLLMProvider(
+                        api_key=ds.api_key,
+                        api_base=ds.api_base,
+                        default_model="qwen3-omni-flash",
+                        provider_name="openai" 
+                    )
+                    # Force openai/ prefix so litellm uses the openai handler with our custom base
+                    current_model = "openai/qwen3-omni-flash"
+            except Exception as e:
+                logger.warning(f"Failed to setup DashScope provider: {e}. Falling back to default.")
+        
         while iteration < self.max_iterations:
             iteration += 1
             
             # Call LLM
-            response = await self.provider.chat(
+            response = await current_provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
-                model=self.model
+                model=current_model
             )
             
             # Handle tool calls

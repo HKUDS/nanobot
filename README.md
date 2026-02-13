@@ -586,6 +586,40 @@ nanobot gateway
 
 Simply send the command above to your nanobot (via CLI or any chat channel), and it will handle the rest.
 
+## 🖼️ Multimodal Support
+
+nanobot now supports multimodal interactions, allowing you to send images, audio, and video files for analysis.
+
+**Supported Media Types:**
+- **Images**: `.jpg`, `.jpeg`, `.png`, `.bmp`, `.webp`
+- **Audio**: `.mp3`, `.wav`, `.aac`, `.flac`, `.m4a`, `.ogg`
+- **Video**: `.mp4`, `.mov`, `.avi`, `.mkv`, `.webm`
+
+**How it works:**
+1.  **Model**: Uses `dashscope/qwen3-omni-flash` for high-performance multimodal understanding.
+2.  **Smart Compression**: Large files (>7.5MB) are automatically compressed locally before sending to the API to ensure fast processing and stay within limits.
+3.  **Usage**: Simply send a file (photo, voice message, video) to the bot via Telegram or other supported channels.
+
+**Configuration:**
+Ensure you have your DashScope API key and multimodal_model configured in `~/.nanobot/config.json`:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "multimodal_model": "dashscope/qwen3-omni-flash",
+    }
+  },
+  ...
+  "providers": {
+    "dashscope": {
+      "apiKey": "sk-xxx",
+      "apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    }
+  }
+}
+```
+
 ## ⚙️ Configuration
 
 Config file: `~/.nanobot/config.json`
@@ -754,7 +788,7 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 
 - [x] **Voice Transcription** — Support for Groq Whisper (Issue #13)
-- [ ] **Multi-modal** — See and hear (images, voice, video)
+- [x] **Multi-modal** — See and hear (images, voice, video)
 - [ ] **Long-term memory** — Never forget important context
 - [ ] **Better reasoning** — Multi-step planning and reflection
 - [ ] **More integrations** — Calendar and more

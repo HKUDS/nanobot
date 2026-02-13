@@ -8,6 +8,7 @@ from typing import Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.utils.media import encode_image_audio_video
 
 
 class ContextBuilder:
@@ -162,22 +163,64 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
+        """Build user message content with multimodal support (image/audio/video)."""
         if not media:
             return text
         
-        images = []
+        content_list = []
+        
         for path in media:
             p = Path(path)
-            mime, _ = mimetypes.guess_type(path)
-            if not p.is_file() or not mime or not mime.startswith("image/"):
+            if not p.is_file():
                 continue
-            b64 = base64.b64encode(p.read_bytes()).decode()
-            images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+                
+            mime, _ = mimetypes.guess_type(path)
+            if not mime:
+                # Fallback based on extension
+                ext = p.suffix.lower()
+                if ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
+                    mime = 'video/mp4'
+                elif ext in ['.mp3', '.wav', '.aac', '.flac', '.m4a', '.ogg']:
+                    mime = 'audio/mpeg'
+                else:
+                    continue
+
+            try:
+                # Use smart encoding/compression
+                b64 = encode_image_audio_video(str(p))
+                
+                if mime.startswith("image/"):
+                    content_list.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{b64}"}
+                    })
+                elif mime.startswith("video/"):
+                    # Qwen-Omni format for video
+                    content_list.append({
+                        "type": "video_url",
+                        "video_url": {"url": f"data:;base64,{b64}"}
+                    })
+                elif mime.startswith("audio/"):
+                    # Qwen-Omni format for audio
+                    ext = p.suffix.lstrip('.').lower()
+                    # Map some extensions to format if needed, but usually just ext
+                    content_list.append({
+                        "type": "input_audio",
+                        "input_audio": {
+                            "data": f"data:;base64,{b64}",
+                            "format": ext
+                        }
+                    })
+            except Exception as e:
+                # Log error but continue
+                print(f"Error processing media {path}: {e}")
+                continue
         
-        if not images:
+        if not content_list:
             return text
-        return images + [{"type": "text", "text": text}]
+            
+        content_list.append({"type": "text", "text": text})
+        return content_list
     
     def add_tool_result(
         self,
