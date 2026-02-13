@@ -96,7 +96,7 @@ pip install nanobot-ai
 ## 🚀 Quick Start
 
 > [!TIP]
-> `nanobot onboard` now includes an interactive menu to choose provider, model, API base URL, API key, and search mode.
+> `nanobot onboard` now includes an interactive menu to choose provider, model, API base URL, API key, web mode, assistant name, and soul preset.
 > Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search) · [Ollama Cloud](https://ollama.com/settings/keys)
 
 **1. Initialize**
@@ -114,6 +114,9 @@ During onboarding, choose your provider and enter required fields:
 - Web search/fetch provider menu:
   - Search: `Brave` / `Ollama web_search` / `Hybrid (Brave -> Ollama fallback)`
   - Fetch: `nanobot web_fetch` / `Ollama web_fetch` / `Hybrid (nanobot -> Ollama fallback)`
+- Identity menu:
+  - Assistant name (saved to `agents.defaults.name`)
+  - Soul preset: `Balanced` / `Concise Operator` / `Mentor Guide` / `Builder Partner`
 
 **3. Chat**
 

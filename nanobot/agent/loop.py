@@ -47,6 +47,7 @@ class AgentLoop:
         bus: MessageBus,
         provider: LLMProvider,
         workspace: Path,
+        agent_name: str = "nanobot",
         model: str | None = None,
         max_iterations: int = 20,
         web_config: WebToolsConfig | None = None,
@@ -61,6 +62,7 @@ class AgentLoop:
         self.bus = bus
         self.provider = provider
         self.workspace = workspace
+        self.agent_name = agent_name.strip() or "nanobot"
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.web_config = web_config or WebToolsConfig()
@@ -82,7 +84,11 @@ class AgentLoop:
             min_lesson_confidence=self.self_improvement_config.min_lesson_confidence,
             max_lessons=self.self_improvement_config.max_lessons,
         )
-        self.context = ContextBuilder(workspace, memory_store=self.memory)
+        self.context = ContextBuilder(
+            workspace,
+            memory_store=self.memory,
+            agent_name=self.agent_name,
+        )
         self.sessions = session_manager or SessionManager(
             workspace,
             compact_threshold_messages=self.session_config.compact_threshold_messages,

@@ -28,6 +28,40 @@ app = typer.Typer(
 
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
+SOUL_PRESETS: list[tuple[str, str, str, str, str, str]] = [
+    (
+        "Balanced (default)",
+        "balanced",
+        "Helpful and friendly",
+        "Concise and to the point",
+        "Curious and eager to learn",
+        "Accuracy over speed",
+    ),
+    (
+        "Concise Operator",
+        "concise",
+        "Direct and efficient",
+        "Action-first and practical",
+        "Calm and low-noise",
+        "Clear output with minimal overhead",
+    ),
+    (
+        "Mentor Guide",
+        "mentor",
+        "Patient and structured",
+        "Explains tradeoffs clearly",
+        "Supportive but honest",
+        "Teach the why, not only the what",
+    ),
+    (
+        "Builder Partner",
+        "builder",
+        "Pragmatic and engineering-focused",
+        "Prefers concrete execution",
+        "Strong ownership mindset",
+        "Ship reliable results quickly",
+    ),
+]
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -168,7 +202,7 @@ def onboard():
 
     # Create default config
     config = Config()
-    _interactive_onboard_setup(config)
+    agent_name, soul_preset = _interactive_onboard_setup(config)
     save_config(config)
     console.print(f"[green]✓[/green] Created config at {config_path}")
 
@@ -177,10 +211,15 @@ def onboard():
     console.print(f"[green]✓[/green] Created workspace at {workspace}")
 
     # Create default bootstrap files
-    _create_workspace_templates(workspace)
+    _create_workspace_templates(
+        workspace,
+        agent_name=agent_name,
+        soul_preset=soul_preset,
+    )
 
     console.print(f"\n{__logo__} nanobot is ready!")
     provider_name = config.get_provider_name(config.agents.defaults.model)
+    console.print(f"  Name: [cyan]{config.agents.defaults.name}[/cyan]")
     if provider_name:
         console.print(f"  Provider: [cyan]{provider_name}[/cyan]")
     console.print(f"  Model: [cyan]{config.agents.defaults.model}[/cyan]")
@@ -199,8 +238,8 @@ def onboard():
     )
 
 
-def _interactive_onboard_setup(config) -> None:
-    """Interactive setup for provider/model/search defaults."""
+def _interactive_onboard_setup(config) -> tuple[str, str]:
+    """Interactive setup for provider/model/search and identity defaults."""
     console.print("\n[bold]Interactive setup[/bold] (press Enter to accept defaults)")
 
     provider_options = [
@@ -476,6 +515,67 @@ def _interactive_onboard_setup(config) -> None:
     else:
         config.tools.web.fetch.ollama_api_key = ""
 
+    console.print("\n[bold]3) Customize assistant identity[/bold]")
+    agent_name = _normalize_agent_name(
+        typer.prompt(
+            "Assistant name",
+            default=config.agents.defaults.name,
+            show_default=True,
+        )
+    )
+    config.agents.defaults.name = agent_name
+
+    console.print("  Soul preset options:")
+    for idx, (label, _, _, _, _, _) in enumerate(SOUL_PRESETS, start=1):
+        console.print(f"    {idx}. {label}")
+    selected_soul = typer.prompt("Soul preset", type=int, default=1, show_default=True)
+    if selected_soul < 1 or selected_soul > len(SOUL_PRESETS):
+        selected_soul = 1
+    soul_label, soul_preset, *_ = SOUL_PRESETS[selected_soul - 1]
+    console.print(f"Selected soul: [cyan]{soul_label}[/cyan]")
+
+    return agent_name, soul_preset
+
+
+def _normalize_agent_name(name: str) -> str:
+    """Normalize agent name from user input."""
+    compact = " ".join(name.strip().split())
+    return compact or "nanobot"
+
+
+def _build_soul_template(agent_name: str, soul_preset: str) -> str:
+    """Build SOUL.md content from a preset."""
+    preset = next((item for item in SOUL_PRESETS if item[1] == soul_preset), SOUL_PRESETS[0])
+    _, _, trait_1, trait_2, trait_3, value_1 = preset
+
+    return f"""# Soul
+
+I am {agent_name}, a lightweight AI assistant.
+
+## Personality
+
+- {trait_1}
+- {trait_2}
+- {trait_3}
+
+## Values
+
+- {value_1}
+- User privacy and safety
+- Transparency in actions
+"""
+
+
+def _build_identity_template(agent_name: str) -> str:
+    """Build IDENTITY.md content."""
+    return f"""# Identity
+
+- Name: {agent_name}
+- Role: Personal AI assistant
+
+When introducing yourself, use this name naturally.
+"""
+
 
 def _fetch_ollama_cloud_models(api_base: str, api_key: str) -> tuple[list[str], str | None]:
     """Fetch available model names from Ollama cloud endpoints.
@@ -534,8 +634,13 @@ def _fetch_ollama_cloud_models(api_base: str, api_key: str) -> tuple[list[str], 
     return [], "; ".join(errors)
 
 
-def _create_workspace_templates(workspace: Path):
+def _create_workspace_templates(
+    workspace: Path,
+    agent_name: str = "nanobot",
+    soul_preset: str = "balanced",
+):
     """Create default workspace template files."""
+    agent_name = _normalize_agent_name(agent_name)
     templates = {
         "AGENTS.md": """# Agent Instructions
 
@@ -548,22 +653,8 @@ You are a helpful AI assistant. Be concise, accurate, and friendly.
 - Use tools to help accomplish tasks
 - Remember important information in your memory files
 """,
-        "SOUL.md": """# Soul
-
-I am nanobot, a lightweight AI assistant.
-
-## Personality
-
-- Helpful and friendly
-- Concise and to the point
-- Curious and eager to learn
-
-## Values
-
-- Accuracy over speed
-- User privacy and safety
-- Transparency in actions
-""",
+        "SOUL.md": _build_soul_template(agent_name, soul_preset),
+        "IDENTITY.md": _build_identity_template(agent_name),
         "USER.md": """# User
 
 Information about the user goes here.
@@ -701,6 +792,7 @@ def gateway(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
+        agent_name=config.agents.defaults.name,
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         web_config=config.tools.web,
@@ -817,6 +909,7 @@ def agent(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
+        agent_name=config.agents.defaults.name,
         web_config=config.tools.web,
         exec_config=config.tools.exec,
         memory_config=config.agents.memory,

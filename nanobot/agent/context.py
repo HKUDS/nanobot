@@ -20,10 +20,16 @@ class ContextBuilder:
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
 
-    def __init__(self, workspace: Path, memory_store: MemoryStore | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        memory_store: MemoryStore | None = None,
+        agent_name: str = "nanobot",
+    ):
         self.workspace = workspace
         self.memory = memory_store or MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self.agent_name = agent_name.strip() or "nanobot"
 
     def build_system_prompt(
         self,
@@ -87,10 +93,11 @@ Skills with available="false" need dependencies installed first - you can try in
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
+        agent_name = self.agent_name
 
-        return f"""# nanobot 🐈
+        return f"""# {agent_name} 🐈
 
-You are nanobot, a helpful AI assistant. You have access to tools that allow you to:
+You are {agent_name}, a helpful AI assistant. You have access to tools that allow you to:
 - Read, write, and edit files
 - Execute shell commands
 - Search the web and fetch web pages
