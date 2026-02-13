@@ -20,8 +20,8 @@ You have access to:
 
 ## Memory
 
-- Use `memory/` directory for daily notes
-- Use `MEMORY.md` for long-term information
+- `memory/MEMORY.md` — long-term facts (preferences, context, relationships)
+- `memory/HISTORY.md` — append-only event log, search with grep to recall past events
 
 ## Scheduled Reminders
 
