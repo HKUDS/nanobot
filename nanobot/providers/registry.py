@@ -62,6 +62,20 @@ class ProviderSpec:
 
 PROVIDERS: tuple[ProviderSpec, ...] = (
 
+    # === Custom (user-provided OpenAI-compatible endpoint) =================
+    # No auto-detection — only activates when user explicitly configures "custom".
+
+    ProviderSpec(
+        name="custom",
+        keywords=(),
+        env_key="OPENAI_API_KEY",
+        display_name="Custom",
+        litellm_prefix="openai",
+        skip_prefixes=("openai/",),
+        is_gateway=True,
+        strip_model_prefix=True,
+    ),
+
     # === Gateways (detected by api_key / api_base, not model name) =========
     # Gateways can route any model, so they win in fallback.
 

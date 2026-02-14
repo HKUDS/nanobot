@@ -155,7 +155,7 @@ def main(
 @app.command()
 def onboard():
     """Initialize nanobot configuration and workspace."""
-    from nanobot.config.loader import get_config_path, save_config
+    from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
     from nanobot.utils.helpers import get_workspace_path
     
@@ -163,17 +163,26 @@ def onboard():
     
     if config_path.exists():
         console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
-        if not typer.confirm("Overwrite?"):
-            raise typer.Exit()
-    
-    # Create default config
-    config = Config()
-    save_config(config)
-    console.print(f"[green]✓[/green] Created config at {config_path}")
+        console.print("  [bold]y[/bold] = overwrite with defaults (existing values will be lost)")
+        console.print("  [bold]N[/bold] = refresh config, keeping existing values and adding new fields")
+        if typer.confirm("Overwrite?"):
+            config = Config()
+            save_config(config)
+            console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
+        else:
+            config = load_config()
+            save_config(config)
+            console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
+    else:
+        save_config(Config())
+        console.print(f"[green]✓[/green] Created config at {config_path}")
     
     # Create workspace
     workspace = get_workspace_path()
-    console.print(f"[green]✓[/green] Created workspace at {workspace}")
+    
+    if not workspace.exists():
+        workspace.mkdir(parents=True, exist_ok=True)
+        console.print(f"[green]✓[/green] Created workspace at {workspace}")
     
     # Create default bootstrap files
     _create_workspace_templates(workspace)
@@ -638,14 +647,20 @@ def _get_bridge_dir() -> Path:
 def channels_login():
     """Link device via QR code."""
     import subprocess
+    from nanobot.config.loader import load_config
     
+    config = load_config()
     bridge_dir = _get_bridge_dir()
     
     console.print(f"{__logo__} Starting bridge...")
     console.print("Scan the QR code to connect.\n")
     
+    env = {**os.environ}
+    if config.channels.whatsapp.bridge_token:
+        env["BRIDGE_TOKEN"] = config.channels.whatsapp.bridge_token
+    
     try:
-        subprocess.run(["npm", "start"], cwd=bridge_dir, check=True)
+        subprocess.run(["npm", "start"], cwd=bridge_dir, check=True, env=env)
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Bridge failed: {e}[/red]")
     except FileNotFoundError:
