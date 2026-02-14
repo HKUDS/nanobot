@@ -97,7 +97,14 @@ pip install nanobot-ai
 
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
+> Get API keys:
+> - **Primary**: [OpenRouter](https://openrouter.ai/keys) (Global) - Access to 100+ LLMs
+> - **Optional for web search**: [Brave Search](https://brave.com/search/api/) - Web search API (optional)
+
+**Note**: nanobot now supports **free web search without any API key**:
+> - Uses **DuckDuckGo** by default (no API key needed)
+> - Or use **SearXNG** (free, privacy-focused metasearch engine) via `web_search(engine="searxng")`
+> - Or use **Wikipedia** (free, encyclopedic) via `wikipedia_search()`
 
 **1. Initialize**
 
@@ -762,6 +769,50 @@ nanobot gateway --agent researcher
 
 <details>
 <summary><b>Adding a New Provider (Developer Guide)</b></summary>
+
+<details>
+<summary><b>Free Search Providers (No API Key)</b></summary>
+
+nanobot includes multiple **free search providers** that don't require API keys:
+
+### DuckDuckGo (Default)
+
+- **Engine**: `ddg_search` or `web_search(engine="ddg")`
+- **No API key required**
+- **Best for**: General web search, privacy-focused
+
+### SearXNG
+
+- **Engine**: `web_search(engine="searxng")` or `searxng_search()`
+- **No API key required** (if self-hosted)
+- **Features**:
+  - Aggregates 70+ search engines (Google, Bing, Brave, etc.)
+  - Privacy-focused with no tracking
+  - JSON format
+- **Best for**: Comprehensive results, privacy, research
+
+### Wikipedia
+
+- **Engine**: `wikipedia_search()`
+- **No API key required**
+- **Features**:
+  - Full-text search of Wikipedia articles
+  - Encyclopedic, factual knowledge
+- **Best for**: Factual queries, definitions, research
+
+### Quick Comparison
+
+| Provider | API Key | Engine Name | Best For |
+|---|---|---|---|---|
+| **DuckDuckGo** | ❌ No | `ddg_search` | General web search |
+| **SearXNG** | ❌ No | `searxng_search` | Privacy, research |
+| **Wikipedia** | ❌ No | `wikipedia_search` | Facts, definitions |
+| **Brave** | ✅ Yes | `web_search(engine="brave")` | Fast, accurate |
+
+> 💡 **Tip**: Use `engine="auto"` (default) to automatically try paid APIs first, then fall back to free options!
+
+</details>
+
 
 nanobot uses a **Provider Registry** (`nanobot/providers/registry.py`) as the single source of truth.
 Adding a new provider only takes **2 steps** — no if-elif chains to touch.
