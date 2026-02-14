@@ -106,6 +106,7 @@ class LiteLLMProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        reasoning_effort: str | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -116,6 +117,7 @@ class LiteLLMProvider(LLMProvider):
             model: Model identifier (e.g., 'anthropic/claude-sonnet-4-5').
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
+            reasoning_effort: Thinking depth for reasoning models ("low", "medium", "high").
         
         Returns:
             LLMResponse with content and/or tool calls.
@@ -135,6 +137,10 @@ class LiteLLMProvider(LLMProvider):
         
         # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
         self._apply_model_overrides(model, kwargs)
+        
+        # Pass reasoning_effort for thinking models (e.g. gpt-5-mini, o1, o3)
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
         
         # Pass api_key directly — more reliable than env vars alone
         if self.api_key:
