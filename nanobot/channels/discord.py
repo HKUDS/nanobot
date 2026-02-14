@@ -212,7 +212,16 @@ class DiscordChannel(BaseChannel):
                 continue
             try:
                 media_dir.mkdir(parents=True, exist_ok=True)
-                file_path = media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
+                # Sanitize filename: strip traversal sequences, null bytes,
+                # and path separators to prevent writing outside media_dir.
+                safe_name = filename.replace("/", "_").replace("\\", "_").replace("\x00", "").replace("..", "")
+                if not safe_name:
+                    safe_name = "attachment"
+                file_path = (media_dir / f"{attachment.get('id', 'file')}_{safe_name}").resolve()
+                # Verify resolved path is still inside media_dir
+                if not file_path.is_relative_to(media_dir.resolve()):
+                    content_parts.append(f"[attachment: {filename} - rejected (path traversal)]")
+                    continue
                 resp = await self._http.get(url)
                 resp.raise_for_status()
                 file_path.write_bytes(resp.content)

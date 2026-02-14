@@ -11,7 +11,7 @@ from nanobot.agent.tools.base import Tool
 
 class ExecTool(Tool):
     """Tool to execute shell commands."""
-    
+
     def __init__(
         self,
         timeout: int = 60,
@@ -31,6 +31,12 @@ class ExecTool(Tool):
             r">\s*/dev/sd",                  # write to disk
             r"\b(shutdown|reboot|poweroff)\b",  # system power
             r":\(\)\s*\{.*\};\s*:",          # fork bomb
+            r"\bchmod\s+[0-7]*7[0-7]{0,2}\b",  # world-writable permissions
+            r"\bcurl\b.*\|\s*(ba)?sh\b",     # curl pipe to shell
+            r"\bwget\b.*\|\s*(ba)?sh\b",     # wget pipe to shell
+            r"\bnc\s+(-[a-z]*)?l",           # netcat listen (reverse shell)
+            r"\bmkfifo\b",                   # named pipe (reverse shell helper)
+            r"/dev/tcp/",                    # bash reverse shell
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
@@ -122,8 +128,19 @@ class ExecTool(Tool):
                 return "Error: Command blocked by safety guard (not in allowlist)"
 
         if self.restrict_to_workspace:
-            if "..\\" in cmd or "../" in cmd:
+            # Check for path traversal sequences including encoded variants
+            # (e.g. %2e%2e%2f, ..%2f, %2e%2e/) that could bypass literal checks
+            from urllib.parse import unquote
+            decoded_cmd = unquote(cmd)
+            if (
+                "..\\" in cmd or "../" in cmd
+                or "..\\" in decoded_cmd or "../" in decoded_cmd
+            ):
                 return "Error: Command blocked by safety guard (path traversal detected)"
+
+            # Reject null bytes which can truncate paths in C-based syscalls
+            if "\x00" in cmd or "%00" in lower:
+                return "Error: Command blocked by safety guard (null byte detected)"
 
             cwd_path = Path(cwd).resolve()
 
@@ -138,7 +155,7 @@ class ExecTool(Tool):
                     p = Path(raw.strip()).resolve()
                 except Exception:
                     continue
-                if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
+                if p.is_absolute() and not p.is_relative_to(cwd_path):
                     return "Error: Command blocked by safety guard (path outside working dir)"
 
         return None
