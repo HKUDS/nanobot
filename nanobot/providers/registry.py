@@ -315,6 +315,26 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+
+    # === Volcengine ============================
+
+    # Needs "volcengine/" prefix for LiteLLM routing. 
+    ProviderSpec(
+        name="volcengine",
+        keywords=("volcengine",),
+        env_key="VOLCENGINE_API_KEY",
+        display_name="VolcEngine",
+        litellm_prefix="volcengine",              
+        skip_prefixes=("volcengine/",),          
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
 )
 
 
