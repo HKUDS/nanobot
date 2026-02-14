@@ -331,6 +331,11 @@ def gateway(
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
     
+    # MCP servers status
+    mcp_servers = [n for n, s in config.mcp.servers.items() if s.enabled]
+    if mcp_servers:
+        console.print(f"[green]✓[/green] MCP servers: {', '.join(mcp_servers)}")
+
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
@@ -346,6 +351,7 @@ def gateway(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
+        mcp_config=config.mcp,
     )
     
     # Set cron callback (needs agent)
@@ -405,7 +411,7 @@ def gateway(
             console.print("\nShutting down...")
             heartbeat.stop()
             cron.stop()
-            agent.stop()
+            await agent.stop_async()
             await channels.stop_all()
     
     asyncio.run(run())
@@ -453,6 +459,7 @@ def agent(
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        mcp_config=config.mcp,
     )
     
     # Show spinner when logs are off (no output to miss); skip when logs are on

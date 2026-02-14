@@ -50,8 +50,9 @@ class AgentLoop:
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
+        mcp_config: "McpConfig | None" = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, McpConfig
         from nanobot.cron.service import CronService
         self.bus = bus
         self.provider = provider
@@ -80,6 +81,13 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
+
+        # MCP client manager (lazy-started on first message)
+        self._mcp_config = mcp_config
+        self._mcp_manager: "McpClientManager | None" = None
+        if mcp_config and mcp_config.servers:
+            from nanobot.mcp.client import McpClientManager
+            self._mcp_manager = McpClientManager(mcp_config)
         
         self._running = False
         self._register_default_tools()
@@ -116,6 +124,16 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
     
+    async def _ensure_mcp_started(self) -> None:
+        """Lazily connect to MCP servers and register their tools."""
+        if self._mcp_manager is None or self._mcp_manager.is_started:
+            return
+        tools = await self._mcp_manager.start()
+        for tool in tools:
+            self.tools.register(tool)
+        if tools:
+            logger.info(f"Registered {len(tools)} MCP tool(s)")
+
     def _set_tool_context(self, channel: str, chat_id: str) -> None:
         """Update context for all tools that need routing info."""
         if message_tool := self.tools.get("message"):
@@ -191,6 +209,7 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
         self._running = True
+        await self._ensure_mcp_started()
         logger.info("Agent loop started")
 
         while self._running:
@@ -217,6 +236,12 @@ class AgentLoop:
         """Stop the agent loop."""
         self._running = False
         logger.info("Agent loop stopping")
+
+    async def stop_async(self) -> None:
+        """Stop the agent loop and clean up async resources (MCP clients)."""
+        self.stop()
+        if self._mcp_manager and self._mcp_manager.is_started:
+            await self._mcp_manager.stop()
     
     async def _process_message(self, msg: InboundMessage, session_key: str | None = None) -> OutboundMessage | None:
         """
@@ -432,6 +457,7 @@ Respond with ONLY valid JSON, no markdown fences."""
         Returns:
             The agent's response.
         """
+        await self._ensure_mcp_started()
         msg = InboundMessage(
             channel=channel,
             sender_id="user",
