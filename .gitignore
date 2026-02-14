@@ -19,3 +19,4 @@ poetry.lock
 .pytest_cache/
 tests/
 botpy.log
+build.sh
