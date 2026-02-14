@@ -783,8 +783,8 @@ nanobot includes multiple **free search providers** that don't require API keys:
 
 ### SearXNG
 
-- **Engine**: `web_search(engine="searxng")` or `searxng_search()`
-- **No API key required** (if self-hosted)
+- **Engine**: `web_search(engine="searxng")` (not available as standalone tool)
+- **No API key required** (if using public instance)
 - **Features**:
   - Aggregates 70+ search engines (Google, Bing, Brave, etc.)
   - Privacy-focused with no tracking
@@ -793,21 +793,32 @@ nanobot includes multiple **free search providers** that don't require API keys:
 
 ### Wikipedia
 
-- **Engine**: `wikipedia_search()`
+- **Engine**: `web_search(engine="wikipedia")` (not available as standalone tool)
 - **No API key required**
 - **Features**:
   - Full-text search of Wikipedia articles
   - Encyclopedic, factual knowledge
 - **Best for**: Factual queries, definitions, research
 
+### Combine Mode (Search All Engines)
+
+- **Engine**: `web_search(combine=True)` or `web_search(engine="combine")`
+- **No API key required** for free engines (DuckDuckGo, SearXNG, Wikipedia)
+- **Features**:
+  - Searches all available engines simultaneously
+  - Combines results from all successful searches
+  - Best coverage and redundancy
+- **Best for**: Maximum results, research, comprehensive queries
+
 ### Quick Comparison
 
 | Provider | API Key | Engine Name | Best For |
 |---|---|---|---|---|
 | **DuckDuckGo** | ❌ No | `ddg_search` | General web search |
-| **SearXNG** | ❌ No | `searxng_search` | Privacy, research |
-| **Wikipedia** | ❌ No | `wikipedia_search` | Facts, definitions |
-| **Brave** | ✅ Yes | `web_search(engine="brave")` | Fast, accurate |
+| **SearXNG** | ❌ No | `engine="searxng"` | Privacy, research |
+| **Wikipedia** | ❌ No | `engine="wikipedia"` | Facts, definitions |
+| **Brave** | ✅ Yes | `engine="brave"` | Fast, accurate |
+| **Combine** | ❌ No (free) | `combine=True` | All engines at once |
 
 > 💡 **Tip**: Use `engine="auto"` (default) to automatically try paid APIs first, then fall back to free options!
 

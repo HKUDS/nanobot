@@ -14,7 +14,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebSearchTool, WebFetchTool, SearXNGSearchTool, WikipediaSearchTool
+from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 
 
 class SubagentManager:

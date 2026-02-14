@@ -1,4 +1,4 @@
-"""Web tools: web_search (Brave), ddg_search (DuckDuckGo), searxng_search (SearXNG), wikipedia_search, and web_fetch."""
+"""Web tools: web_search (Brave), ddg_search (DuckDuckGo), wikipedia_search, and web_fetch."""
 
 import html
 import json
@@ -52,7 +52,7 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API (primary) with DuckDuckGo fallback."""
+    """Search the web using multiple search engines. Combine mode searches all engines."""
 
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
@@ -65,17 +65,21 @@ class WebSearchTool(Tool):
         "required": ["query"]
     }
 
-    def __init__(self, api_key: str | None = None, max_results: int = 5, engine: str = "auto"):
+    def __init__(self, api_key: str | None = None, max_results: int = 5, engine: str = "auto", combine: bool = False):
         """
         Initialize web search tool.
 
         Args:
             api_key: Brave Search API key
             max_results: Maximum number of results to return
-            engine: Search engine to use - "auto", "brave", or "ddg"
-                   - "auto": Try Brave first, fallback to DDG (default)
-                   - "brave": Use Brave, fallback to DDG only on failure
+            engine: Search engine to use - "auto", "brave", "ddg", "searxng", "wikipedia", "combine"
+                   - "auto": Try Brave first, fallback to DDG/SearXNG/Wikipedia (default)
+                   - "brave": Use Brave only
                    - "ddg": Use DuckDuckGo only
+                   - "searxng": Use SearXNG only
+                   - "wikipedia": Use Wikipedia only
+                   - "combine": Search all available engines (Brave, DDG, SearXNG, Wikipedia)
+            combine: When True, search all engines and combine results
         """
         self.api_key = api_key or os.environ.get("BRAVE_API_KEY", "")
         self.max_results = max_results
@@ -131,11 +135,104 @@ class WebSearchTool(Tool):
         except Exception:
             return None
 
+    async def _search_searxng(self, query: str, n: int) -> str | None:
+        """Try searching with SearXNG."""
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(
+                    "https://searx.ng/search",
+                    params={
+                        "q": query,
+                        "format": "json",
+                        "engines": "google,bing,duckduckgo,brave"
+                    },
+                    timeout=10.0
+                )
+                r.raise_for_status()
+
+            results = r.json().get("results", [])
+            if not results:
+                return None
+
+            lines = [f"Results for: {query}\n"]
+            for i, item in enumerate(results[:n], 1):
+                title = item.get("title", "")
+                url = item.get("url", "")
+                snippet = item.get("content", "")[:100]
+                lines.append(f"{i}. {title}\n   {url}")
+                if snippet:
+                    lines.append(f"   {snippet}")
+            return "\n".join(lines)
+        except Exception:
+            return None
+
+    async def _search_wikipedia(self, query: str, n: int) -> str | None:
+        """Try searching with Wikipedia."""
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(
+                    "https://en.wikipedia.org/w/api.php",
+                    params={
+                        "action": "query",
+                        "list": "search",
+                        "srsearch": query,
+                        "srlimit": n,
+                        "format": "json"
+                    },
+                    timeout=10.0
+                )
+                r.raise_for_status()
+
+            results = r.json().get("query", {}).get("search", [])
+            if not results:
+                return None
+
+            lines = [f"Wikipedia results for: {query}\n"]
+            for i, item in enumerate(results[:n], 1):
+                title = item.get("title", "")
+                snippet = item.get("snippet", "")[:200]
+                lines.append(f"{i}. {title}\n   {snippet}")
+            return "\n".join(lines)
+        except Exception:
+            return None
+
+    async def _search_engine(self, engine: str, query: str, n: int) -> str | None:
+        """Search using specified engine."""
+        if engine == "brave":
+            return await self._search_brave(query, n)
+        elif engine == "ddg":
+            return await self._search_ddg(query, n)
+        elif engine == "searxng":
+            return await self._search_searxng(query, n)
+        elif engine == "wikipedia":
+            return await self._search_wikipedia(query, n)
+        return None
+
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         n = min(max(count or self.max_results, 1), 10)
 
         # Engine selection logic
-        if self.engine == "ddg":
+        if self.combine or self.engine == "combine":
+            # Combine mode: search all engines
+            results = {}
+            for engine in ["brave", "ddg", "searxng", "wikipedia"]:
+                engine_results[engine] = await self._search_engine(engine, query, n)
+            if any(engine_results.values()):
+                # At least one engine succeeded
+                combined = []
+                for eng, res in engine_results.items():
+                    combined.extend(res or [])
+                return "\n".join(combined)
+            return "Error: All search engines failed. Try installing duckduckgo-search or check your internet connection."
+        elif self.engine == "searxng":
+            if result := await self._search_searxng(query, n):
+                return result
+            return "Error: SearXNG search failed."
+        elif self.engine == "wikipedia":
+            if result := await self._search_wikipedia(query, n):
+                return result
+            return "Error: Wikipedia search failed."
+        elif self.engine == "ddg":
             # DuckDuckGo only
             if result := await self._search_ddg(query, n):
                 return result
@@ -151,14 +248,15 @@ class WebSearchTool(Tool):
             return "Error: Brave search failed and DuckDuckGo unavailable. Check API key or install duckduckgo-search."
 
         else:  # "auto" or any other value
-            # Auto: Try Brave if key exists, otherwise DDG
+            # Auto: Try Brave if key exists, otherwise DDG/SearXNG/Wikipedia
             if self.api_key:
                 if result := await self._search_brave(query, n):
                     return result
-            # Fallback to DDG
-            if result := await self._search_ddg(query, n):
-                return result
-            return "Error: Search failed. Configure Brave API key or install duckduckgo-search."
+            # Fallback to free engines
+            for engine in ["ddg", "searxng", "wikipedia"]:
+                if result := await self._search_engine(engine, query, n):
+                    return result
+            return "Error: All search engines failed. Try installing duckduckgo-search or check your internet connection."
 
 
 class DuckDuckGoSearchTool(Tool):
