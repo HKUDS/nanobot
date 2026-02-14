@@ -161,3 +161,98 @@ class WebFetchTool(Tool):
         text = re.sub(r'</(p|div|section|article)>', '\n\n', text, flags=re.I)
         text = re.sub(r'<(br|hr)\s*/?>', '\n', text, flags=re.I)
         return _normalize(_strip_tags(text))
+class OllamaWebSearchTool(Tool):
+    """Search the web using Ollama's Web Search API."""
+    
+    name = "ollama_web_search"
+    description = "Search the web using Ollama Cloud. Returns titles, URLs, and snippets."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query"},
+            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10}
+        },
+        "required": ["query"]
+    }
+    
+    def __init__(self, api_key: str | None = None, max_results: int = 5):
+        self.api_key = api_key
+        self.max_results = max_results
+    
+    async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
+        if not self.api_key:
+            return "Error: OLLAMA_API_KEY not configured"
+        
+        try:
+            n = min(max(count or self.max_results, 1), 10)
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    "https://ollama.com/api/web_search",
+                    json={"query": query, "max_results": n},
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    timeout=20.0
+                )
+                r.raise_for_status()
+            
+            data = r.json()
+            results = data.get("results", [])
+            if not results:
+                return f"No results for: {query}"
+            
+            lines = [f"Ollama Search Results for: {query}\n"]
+            for i, item in enumerate(results[:n], 1):
+                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
+                if content := item.get("content"):
+                    lines.append(f"   {content}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Error using Ollama Search: {e}"
+
+
+class OllamaWebFetchTool(Tool):
+    """Fetch content from a URL using Ollama's Web Fetch API."""
+    
+    name = "ollama_web_fetch"
+    description = "Fetch URL and extract content using Ollama Cloud."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "URL to fetch"}
+        },
+        "required": ["url"]
+    }
+    
+    def __init__(self, api_key: str | None = None):
+        self.api_key = api_key
+    
+    async def execute(self, url: str, **kwargs: Any) -> str:
+        if not self.api_key:
+            return json.dumps({"error": "OLLAMA_API_KEY not configured", "url": url})
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    "https://ollama.com/api/web_fetch",
+                    json={"url": url},
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    timeout=30.0
+                )
+                r.raise_for_status()
+            
+            data = r.json()
+            return json.dumps({
+                "url": url,
+                "title": data.get("title", ""),
+                "content": data.get("content", ""),
+                "links": data.get("links", []),
+                "status": r.status_code,
+                "extractor": "ollama"
+            })
+        except Exception as e:
+            return json.dumps({"error": str(e), "url": url})

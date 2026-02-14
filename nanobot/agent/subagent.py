@@ -35,6 +35,7 @@ class SubagentManager:
         temperature: float = 0.7,
         max_tokens: int = 4096,
         brave_api_key: str | None = None,
+        ollama_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
     ):
@@ -46,6 +47,7 @@ class SubagentManager:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.brave_api_key = brave_api_key
+        self.ollama_api_key = ollama_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
@@ -114,6 +116,11 @@ class SubagentManager:
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
+            
+            # Ollama Web tools
+            from nanobot.agent.tools.web import OllamaWebSearchTool, OllamaWebFetchTool
+            tools.register(OllamaWebSearchTool(api_key=self.ollama_api_key))
+            tools.register(OllamaWebFetchTool(api_key=self.ollama_api_key))
             
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)

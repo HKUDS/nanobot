@@ -37,6 +37,12 @@ class LiteLLMProvider(LLMProvider):
         # api_key / api_base are fallback for auto-detection.
         self._gateway = find_gateway(provider_name, api_key, api_base)
         
+        # Backwards-compatible flags (used by tests and possibly external code)
+        self.is_openrouter = bool(self._gateway and self._gateway.name == "openrouter")
+        self.is_aihubmix = bool(self._gateway and self._gateway.name == "aihubmix")
+        self.is_ollama_cloud = bool(self._gateway and self._gateway.name == "ollama_cloud")
+        self.is_vllm = bool(self._gateway and self._gateway.is_local)
+        
         # Configure environment variables
         if api_key:
             self._setup_env(api_key, api_base, default_model)
@@ -151,6 +157,12 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+            
+        # Inject auth header for Ollama Cloud if not handled by environment variable
+        if self.is_ollama_cloud and self.api_key:
+            if "extra_headers" not in kwargs:
+                kwargs["extra_headers"] = {}
+            kwargs["extra_headers"]["Authorization"] = f"Bearer {self.api_key}"
         
         try:
             response = await acompletion(**kwargs)
