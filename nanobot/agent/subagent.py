@@ -37,6 +37,7 @@ class SubagentManager:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        reasoning_effort: str | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.provider = provider
@@ -48,6 +49,7 @@ class SubagentManager:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.reasoning_effort = reasoning_effort
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
     
     async def spawn(
@@ -136,6 +138,7 @@ class SubagentManager:
                     model=self.model,
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
+                    reasoning_effort=self.reasoning_effort,
                 )
                 
                 if response.has_tool_calls:

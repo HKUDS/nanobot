@@ -51,6 +51,7 @@ class AgentLoop:
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_config: "McpConfig | None" = None,
+        reasoning_effort: str | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, McpConfig
         from nanobot.cron.service import CronService
@@ -66,6 +67,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.reasoning_effort = reasoning_effort
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -80,6 +82,7 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            reasoning_effort=self.reasoning_effort,
         )
 
         # MCP client manager (lazy-started on first message)
@@ -172,6 +175,7 @@ class AgentLoop:
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
+                reasoning_effort=self.reasoning_effort,
             )
 
             if response.has_tool_calls:
@@ -418,6 +422,7 @@ Respond with ONLY valid JSON, no markdown fences."""
                     {"role": "user", "content": prompt},
                 ],
                 model=self.model,
+                reasoning_effort=self.reasoning_effort,
             )
             text = (response.content or "").strip()
             if text.startswith("```"):
