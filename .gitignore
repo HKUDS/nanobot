@@ -14,7 +14,9 @@ docs/
 *.pywz
 *.pyzz
 .venv/
+venv/
 __pycache__/
 poetry.lock
 .pytest_cache/
 botpy.log
+tests/
