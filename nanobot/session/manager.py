@@ -42,23 +42,8 @@ class Session:
         self.updated_at = datetime.now()
     
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """
-        Get message history for LLM context.
-
-        Messages are returned in append-only order for cache efficiency.
-        Only the most recent max_messages are returned, but the order
-        is always stable for the same max_messages value.
-
-        Args:
-            max_messages: Maximum messages to return (most recent).
-
-        Returns:
-            List of messages in LLM format (role and content only).
-        """
-        recent = self.messages[-max_messages:]
-
-        # Convert to LLM format (just role and content)
-        return [{"role": m["role"], "content": m["content"]} for m in recent]
+        """Get recent messages in LLM format (role + content only)."""
+        return [{"role": m["role"], "content": m["content"]} for m in self.messages[-max_messages:]]
     
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
@@ -94,11 +79,9 @@ class SessionManager:
         Returns:
             The session.
         """
-        # Check cache
         if key in self._cache:
             return self._cache[key]
         
-        # Try to load from disk
         session = self._load(key)
         if session is None:
             session = Session(key=key)
@@ -150,7 +133,6 @@ class SessionManager:
         path = self._get_session_path(session.key)
 
         with open(path, "w") as f:
-            # Write metadata first
             metadata_line = {
                 "_type": "metadata",
                 "created_at": session.created_at.isoformat(),
@@ -159,12 +141,14 @@ class SessionManager:
                 "last_consolidated": session.last_consolidated
             }
             f.write(json.dumps(metadata_line) + "\n")
-
-            # Write messages
             for msg in session.messages:
                 f.write(json.dumps(msg) + "\n")
 
         self._cache[session.key] = session
+    
+    def invalidate(self, key: str) -> None:
+        """Remove a session from the in-memory cache."""
+        self._cache.pop(key, None)
     
     def list_sessions(self) -> list[dict[str, Any]]:
         """
