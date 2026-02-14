@@ -97,7 +97,7 @@ pip install nanobot-ai
 
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [DashScope](https://dashscope.console.aliyun.com) (Qwen) · [Brave Search](https://brave.com/search/api/) or [Tavily](https://tavily.com/) (optional, for web search). SearXNG is supported via a base URL.
 
 **1. Initialize**
 
@@ -118,6 +118,21 @@ For OpenRouter - recommended for global users:
   "agents": {
     "defaults": {
       "model": "anthropic/claude-opus-4-5"
+    }
+  }
+}
+```
+
+**Optional: Web search provider** — set `tools.web.search.provider` to `brave` (default), `duckduckgo`, `tavily`, or `searxng`. See [docs/web-search.md](docs/web-search.md) for full configuration.
+
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "tavily",
+        "apiKey": "tvly-..."
+      }
     }
   }
 }

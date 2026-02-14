@@ -340,7 +340,7 @@ def gateway(
         temperature=config.agents.defaults.temperature,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
-        brave_api_key=config.tools.web.search.api_key or None,
+        web_search_config=config.tools.web.search,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -448,7 +448,7 @@ def agent(
         max_iterations=config.agents.defaults.max_tool_iterations,
         temperature=config.agents.defaults.temperature,
         memory_window=config.agents.defaults.memory_window,
-        brave_api_key=config.tools.web.search.api_key or None,
+        web_search_config=config.tools.web.search,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
     )
