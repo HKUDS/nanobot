@@ -11,6 +11,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
+from nanobot.session.manager import SessionManager
 
 
 class ChannelManager:
@@ -22,10 +23,11 @@ class ChannelManager:
     - Start/stop channels
     - Route outbound messages
     """
-    
-    def __init__(self, config: Config, bus: MessageBus):
+
+    def __init__(self, config: Config, bus: MessageBus, session_manager: SessionManager | None = None):
         self.config = config
         self.bus = bus
+        self.session_manager = session_manager
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
         
