@@ -38,6 +38,7 @@ dependencies = [
     "qq-botpy>=1.0.0",
     "python-socks[asyncio]>=2.4.0",
     "prompt-toolkit>=3.0.0",
+    "tomli>=2.0.0; python_version<\"3.11\"",
 ]
 
 [project.optional-dependencies]
