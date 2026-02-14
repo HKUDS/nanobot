@@ -1,5 +1,6 @@
 """Session management for conversation history."""
 
+import hashlib
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -61,7 +62,8 @@ class SessionManager:
 
     def __init__(self, workspace: Path):
         self.workspace = workspace
-        self.sessions_dir = ensure_dir(Path.home() / ".nanobot" / "sessions")
+        ws_hash = hashlib.md5(str(workspace.resolve()).encode()).hexdigest()[:8]
+        self.sessions_dir = ensure_dir(Path.home() / ".nanobot" / "sessions" / ws_hash)
         self._cache: dict[str, Session] = {}
     
     def _get_session_path(self, key: str) -> Path:
