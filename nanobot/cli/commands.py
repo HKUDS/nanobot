@@ -155,20 +155,18 @@ def main(
 @app.command()
 def onboard():
     """Initialize nanobot configuration and workspace."""
-    from nanobot.config.loader import get_config_path, save_config
+    from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
     from nanobot.utils.helpers import get_workspace_path
     
     config_path = get_config_path()
     
     if config_path.exists():
-        console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
-        if not typer.confirm("Overwrite?"):
-            console.print("[dim]Skipping config creation[/dim]")
-            config_path = None  # Sentinel to skip creation
-
-    if config_path:
-        # Create default config
+        # Load existing config — Pydantic fills in defaults for any new fields
+        config = load_config()
+        save_config(config)
+        console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
+    else:
         config = Config()
         save_config(config)
         console.print(f"[green]✓[/green] Created config at {config_path}")
