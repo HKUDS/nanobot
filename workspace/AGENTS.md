@@ -25,12 +25,10 @@ You have access to:
 
 ## Scheduled Reminders
 
-When user asks for a reminder at a specific time, use `exec` to run:
-```
-nanobot cron add --name "reminder" --message "Your message" --at "YYYY-MM-DDTHH:MM:SS" --deliver --to "USER_ID" --channel "CHANNEL"
-```
-Get USER_ID and CHANNEL from the current session (e.g., `8281248569` and `telegram` from `telegram:8281248569`).
+When user asks for a reminder, use the `cron` tool directly (NOT `exec`/CLI).
+The current session context (channel, chat_id) is set automatically.
 
+**Do NOT use `nanobot cron add` via exec** — CLI commands create jobs outside the gateway's memory and they will not fire.
 **Do NOT just write reminders to MEMORY.md** — that won't trigger actual notifications.
 
 ## Heartbeat Tasks

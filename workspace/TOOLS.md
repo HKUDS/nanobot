@@ -83,27 +83,23 @@ Use for complex or time-consuming tasks that can run independently. The subagent
 
 ## Scheduled Reminders (Cron)
 
-Use the `exec` tool to create scheduled reminders with `nanobot cron add`:
+Use the `cron` tool directly to schedule reminders and tasks. **Do NOT use `exec` with `nanobot cron add`** — CLI commands create jobs outside the gateway's memory and they will not fire.
 
 ### Set a recurring reminder
-```bash
-# Every day at 9am
-nanobot cron add --name "morning" --message "Good morning! ☀️" --cron "0 9 * * *"
-
-# Every 2 hours
-nanobot cron add --name "water" --message "Drink water! 💧" --every 7200
+```
+cron(action="add", message="Good morning! ☀️", cron_expr="0 9 * * *")
+cron(action="add", message="Drink water! 💧", every_seconds=7200)
 ```
 
 ### Set a one-time reminder
-```bash
-# At a specific time (ISO format)
-nanobot cron add --name "meeting" --message "Meeting starts now!" --at "2025-01-31T15:00:00"
+```
+cron(action="add", message="Meeting starts now!", at="2026-02-14T15:00:00")
 ```
 
 ### Manage reminders
-```bash
-nanobot cron list              # List all jobs
-nanobot cron remove <job_id>   # Remove a job
+```
+cron(action="list")
+cron(action="remove", job_id="abc123")
 ```
 
 ## Heartbeat Task Management
