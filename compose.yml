@@ -1,0 +1,97 @@
+# Nanobot Compose Configuration
+# Compatible with Docker Compose v2+ and Podman Compose
+#
+# Usage:
+#   docker compose up -d            # or: podman compose up -d
+#   docker compose run --rm nanobot onboard   # first-time setup
+#   docker compose logs -f nanobot  # follow logs
+#
+# Podman notes:
+#   - Volume `:Z` labels handle SELinux relabeling (Fedora/RHEL).
+#     Remove `:Z` on macOS/non-SELinux systems if it causes issues.
+#   - Rootless podman maps container root to your UID automatically.
+
+services:
+  nanobot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NANOBOT_UID: ${NANOBOT_UID:-1000}
+        NANOBOT_GID: ${NANOBOT_GID:-1000}
+    image: nanobot:latest
+    container_name: nanobot
+    restart: unless-stopped
+    command: ["gateway"]
+    ports:
+      - "18790:18790"
+    volumes:
+      - ${NANOBOT_CONFIG_DIR:-~/.nanobot}:/home/nanobot/.nanobot:Z
+    env_file:
+      - path: .env
+        required: false
+    # Configure providers via .env file, env vars below,
+    # or directly in ~/.nanobot/config.json (mounted volume).
+    # Uncomment and set any variables you need.
+    #
+    # environment:
+    #   # -- LLM Providers --
+    #   OPENROUTER_API_KEY: ""
+    #   ANTHROPIC_API_KEY: ""
+    #   OPENAI_API_KEY: ""
+    #   DEEPSEEK_API_KEY: ""
+    #   GROQ_API_KEY: ""
+    #   GEMINI_API_KEY: ""
+    #   DASHSCOPE_API_KEY: ""
+    #   MOONSHOT_API_KEY: ""
+    #   MINIMAX_API_KEY: ""
+    #   ZAI_API_KEY: ""
+    #   HOSTED_VLLM_API_KEY: ""
+    #   # -- Web Search --
+    #   BRAVE_API_KEY: ""
+    #   # -- Nanobot overrides (prefix NANOBOT_, nested with __) --
+    #   NANOBOT_GATEWAY__HOST: "0.0.0.0"
+    #   NANOBOT_GATEWAY__PORT: "18790"
+    healthcheck:
+      test: ["CMD", "nanobot", "status"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    # Resource limits — adjust to taste
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
+
+  # Optional: local LLM via vLLM (activate with --profile local-llm)
+#   vllm:
+#     image: vllm/vllm-openai:latest
+#     profiles: ["local-llm"]
+#     container_name: nanobot-vllm
+#     restart: unless-stopped
+#     ports:
+#       - "8000:8000"
+#     volumes:
+#       - vllm-models:/root/.cache/huggingface:Z
+#     environment:
+#       HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+#     # GPU passthrough — works with Docker (nvidia-container-toolkit) and
+#     # Podman (--device nvidia.com/gpu=all via CDI).
+#     # Comment out the entire deploy block if running CPU-only.
+#     deploy:
+#       resources:
+#         reservations:
+#           devices:
+#             - driver: nvidia
+#               count: all
+#               capabilities: [gpu]
+#     command: >-
+#       --model ${VLLM_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
+#       --port 8000
+#       --host 0.0.0.0
+
+# volumes:
+#   vllm-models:
