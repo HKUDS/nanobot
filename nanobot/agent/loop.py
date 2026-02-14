@@ -98,6 +98,10 @@ class AgentLoop:
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
         
+        # System info tool
+        from nanobot.agent.tools.system import SystemInfoTool
+        self.tools.register(SystemInfoTool())
+        
         # Message tool
         message_tool = MessageTool(send_callback=self.bus.publish_outbound)
         self.tools.register(message_tool)
