@@ -416,7 +416,7 @@ Nanobot supports multiple **free search providers** that don't require API keys:
 
 ### SearXNG
 
-- **Engine**: `web_search(engine="searxng")` or `searxng_search()`
+- **Engine**: `web_search(engine="searxng")` (not available as standalone tool)
 - **No API key required** (if using public SearXNG instance)
 - **Features**:
   - Aggregates 70+ search engines (Google, Bing, Brave, DuckDuckGo, etc.)
@@ -429,7 +429,7 @@ Nanobot supports multiple **free search providers** that don't require API keys:
 
 ### Wikipedia
 
-- **Engine**: `wikipedia_search()`
+- **Engine**: `web_search(engine="wikipedia")` (not available as standalone tool)
 - **No API key required**
 - **Features**:
   - Full-text search of Wikipedia articles
@@ -439,15 +439,27 @@ Nanobot supports multiple **free search providers** that don't require API keys:
 - **Best for**: Factual queries, definitions, research, learning
 - **API**: [Wikipedia API](https://www.mediawiki.org/wiki/API:Main_page)
 
+### Combine Mode (Search All Engines)
+
+- **Engine**: `web_search(combine=True)` or `web_search(engine="combine")`
+- **No API key required** for free engines (DuckDuckGo, SearXNG, Wikipedia)
+- **Features**:
+  - Searches all available engines simultaneously
+  - Combines results from all successful searches
+  - Best coverage and redundancy
+  - Falls back gracefully if engines fail
+- **Best for**: Maximum results, research, comprehensive queries
+
 ### Quick Comparison
 
 | Provider | API Key | Engine Name | Best For |
 |---|---|---|---|---|
-| **DuckDuckGo** | ❌ No | `ddg_search` | General web search |
-| **SearXNG** | ❌ No | `searxng_search` | Privacy, research |
-| **Wikipedia** | ❌ No | `wikipedia_search` | Facts, definitions |
-| **Brave** | ✅ Yes | `web_search(engine="brave")` | Fast, accurate |
-| **Google CSE** | ✅ Yes | `web_search(engine="google")` | Google results |
+| **DuckDuckGo** | ❌ No | `ddg_search` or `engine="ddg"` | General web search |
+| **SearXNG** | ❌ No | `engine="searxng"` | Privacy, research |
+| **Wikipedia** | ❌ No | `engine="wikipedia"` | Facts, definitions |
+| **Brave** | ✅ Yes | `engine="brave"` | Fast, accurate |
+| **Combine** | ❌ No (free) | `combine=True` or `engine="combine"` | All engines at once |
+| **Google CSE** | ✅ Yes | `engine="google"` | Google results |
 
 ### Usage Examples
 
