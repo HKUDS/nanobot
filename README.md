@@ -131,11 +131,13 @@ nanobot agent -m "What is 2+2?"
 
 That's it! You have a working AI assistant in 2 minutes.
 
-## 🖥️ Local Models (vLLM)
+## 🖥️ Local Models & OpenAI-Compatible Endpoints
 
-Run nanobot with your own local models using vLLM or any OpenAI-compatible server.
+You have two options:
+- **Local model (vLLM):** run your own model server on your machine.
+- **Remote OpenAI-compatible endpoint:** use a hosted provider URL (no local vLLM process needed).
 
-**1. Start your vLLM server**
+**1. Start your vLLM server** (local models only)
 
 ```bash
 vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
@@ -167,6 +169,7 @@ nanobot agent -m "Hello from my local LLM!"
 
 > [!TIP]
 > The `apiKey` can be any non-empty string for local servers that don't require authentication.
+> For hosted endpoints, skip step 1. Keep the same fields in your config, but set `apiKey` to your real key and `apiBase` to the provider URL.
 
 ## 💬 Chat Apps
 
@@ -610,7 +613,20 @@ Config file: `~/.nanobot/config.json`
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
-| `vllm` | LLM (local, any OpenAI-compatible server) | — |
+| `vllm` | LLM (OpenAI-compatible endpoint, local or hosted) | — |
+
+#### OpenAI-Compatible Endpoints (Best Effort)
+
+If your provider supports the OpenAI API format, it may work without adding a new built-in provider.
+Use the same config pattern shown in **Local Models & OpenAI-Compatible Endpoints** above (`apiKey`, `apiBase`, model). You can also add `extraHeaders` if your provider requires them.
+
+"Best effort" means this is not guaranteed for every provider. Officially maintained providers above are still the recommended path.
+
+Before opening a new "please add provider X" issue, include:
+- Minimal redacted config (`apiBase`, model, provider block)
+- Exact model string used
+- Full error message from `nanobot agent --logs`
+- Whether the same request works in plain LiteLLM
 
 <details>
 <summary><b>Adding a New Provider (Developer Guide)</b></summary>
