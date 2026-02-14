@@ -39,6 +39,35 @@ MSG_TYPE_MAP = {
 }
 
 
+def _extract_post_text(content_json: dict) -> str:
+    """Extract plain text from Feishu post (rich text) message content."""
+    for lang_key in ("zh_cn", "en_us", "ja_jp"):
+        lang_content = content_json.get(lang_key)
+        if not isinstance(lang_content, dict):
+            continue
+        title = lang_content.get("title", "")
+        content_blocks = lang_content.get("content", [])
+        if not isinstance(content_blocks, list):
+            continue
+        text_parts = []
+        if title:
+            text_parts.append(title)
+        for block in content_blocks:
+            if not isinstance(block, list):
+                continue
+            for element in block:
+                if isinstance(element, dict):
+                    tag = element.get("tag")
+                    if tag == "text":
+                        text_parts.append(element.get("text", ""))
+                    elif tag == "a":
+                        text_parts.append(element.get("text", ""))
+                    elif tag == "at":
+                        text_parts.append(f"@{element.get('user_name', 'user')}")
+        return " ".join(text_parts).strip()
+    return ""
+
+
 class FeishuChannel(BaseChannel):
     """
     Feishu/Lark channel using WebSocket long connection.
@@ -325,6 +354,12 @@ class FeishuChannel(BaseChannel):
                 try:
                     content = json.loads(message.content).get("text", "")
                 except json.JSONDecodeError:
+                    content = message.content or ""
+            elif msg_type == "post":
+                try:
+                    content_json = json.loads(message.content)
+                    content = _extract_post_text(content_json)
+                except (json.JSONDecodeError, TypeError):
                     content = message.content or ""
             else:
                 content = MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]")
