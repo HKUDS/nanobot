@@ -730,6 +730,7 @@ def cron_add(
     message: str = typer.Option(..., "--message", "-m", help="Message for agent"),
     every: int = typer.Option(None, "--every", "-e", help="Run every N seconds"),
     cron_expr: str = typer.Option(None, "--cron", "-c", help="Cron expression (e.g. '0 9 * * *')"),
+    tz: str = typer.Option(None, "--tz", help="IANA timezone for cron (e.g. Asia/Yekaterinburg, Europe/Moscow)"),
     at: str = typer.Option(None, "--at", help="Run once at time (ISO format)"),
     deliver: bool = typer.Option(False, "--deliver", "-d", help="Deliver response to channel"),
     to: str = typer.Option(None, "--to", help="Recipient for delivery"),
@@ -739,12 +740,12 @@ def cron_add(
     from nanobot.config.loader import get_data_dir
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronSchedule
-    
+
     # Determine schedule type
     if every:
         schedule = CronSchedule(kind="every", every_ms=every * 1000)
     elif cron_expr:
-        schedule = CronSchedule(kind="cron", expr=cron_expr)
+        schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz or None)
     elif at:
         import datetime
         dt = datetime.datetime.fromisoformat(at)
@@ -803,6 +804,66 @@ def cron_enable(
         console.print(f"[green]✓[/green] Job '{job.name}' {status}")
     else:
         console.print(f"[red]Job {job_id} not found[/red]")
+
+
+@cron_app.command("edit")
+def cron_edit(
+    job_id: str = typer.Argument(..., help="Job ID to edit"),
+    name: str = typer.Option(None, "--name", "-n", help="Update job name"),
+    message: str = typer.Option(None, "--message", "-m", help="Update message for agent"),
+    every: int = typer.Option(None, "--every", "-e", help="Update to run every N seconds"),
+    cron_expr: str = typer.Option(None, "--cron", "-c", help="Update cron expression"),
+    tz: str = typer.Option(None, "--tz", help="Update IANA timezone for cron"),
+    at: str = typer.Option(None, "--at", help="Update to run once at time (ISO format)"),
+    deliver: bool = typer.Option(None, "--deliver", "-d", help="Enable delivery"),
+    no_deliver: bool = typer.Option(False, "--no-deliver", help="Disable delivery"),
+    to: str = typer.Option(None, "--to", help="Update recipient for delivery"),
+    channel: str = typer.Option(None, "--channel", help="Update channel for delivery"),
+):
+    """Edit an existing scheduled job."""
+    from nanobot.config.loader import get_data_dir
+    from nanobot.cron.service import CronService
+    from nanobot.cron.types import CronSchedule
+
+    store_path = get_data_dir() / "cron" / "jobs.json"
+    service = CronService(store_path)
+
+    schedule = None
+    if every:
+        schedule = CronSchedule(kind="every", every_ms=every * 1000)
+    elif cron_expr:
+        schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz or None)
+    elif at:
+        import datetime
+        dt = datetime.datetime.fromisoformat(at)
+        schedule = CronSchedule(kind="at", at_ms=int(dt.timestamp() * 1000))
+    elif tz:
+        jobs = service.list_jobs(include_disabled=True)
+        current_job = next((j for j in jobs if j.id == job_id), None)
+        if current_job and current_job.schedule.kind == "cron":
+            schedule = CronSchedule(kind="cron", expr=current_job.schedule.expr, tz=tz)
+
+    deliver_flag = None
+    if no_deliver:
+        deliver_flag = False
+    elif deliver:
+        deliver_flag = True
+
+    job = service.update_job(
+        job_id=job_id,
+        name=name,
+        message=message,
+        schedule=schedule,
+        deliver=deliver_flag,
+        channel=channel,
+        to=to,
+    )
+
+    if job:
+        console.print(f"[green]✓[/green] Updated job '{job.name}' ({job.id})")
+    else:
+        console.print(f"[red]Job {job_id} not found[/red]")
+        raise typer.Exit(1)
 
 
 @cron_app.command("run")
