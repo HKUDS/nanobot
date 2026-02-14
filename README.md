@@ -610,6 +610,7 @@ Config file: `~/.nanobot/config.json`
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
+| `novita` | LLM (Novita AI Platform) | [novita.ai](https://novita.ai) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 
 <details>
