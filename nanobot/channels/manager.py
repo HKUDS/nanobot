@@ -68,22 +68,57 @@ class ChannelManager:
                 logger.warning(f"Feishu channel not available: {e}")
     
     async def start_all(self) -> None:
-        """Start WhatsApp channel and the outbound dispatcher."""
+        """Start all channels and the outbound dispatcher."""
         if not self.channels:
             logger.warning("No channels enabled")
             return
-        
+
         # Start outbound dispatcher
         self._dispatch_task = asyncio.create_task(self._dispatch_outbound())
-        
-        # Start WhatsApp channel
+
+        # Start all channels with auto-restart on failure
         tasks = []
         for name, channel in self.channels.items():
             logger.info(f"Starting {name} channel...")
-            tasks.append(asyncio.create_task(channel.start()))
-        
+            tasks.append(asyncio.create_task(self._run_channel_with_restart(name, channel)))
+
         # Wait for all to complete (they should run forever)
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*tasks)
+
+    async def _run_channel_with_restart(self, name: str, channel: BaseChannel) -> None:
+        """Run a channel with automatic restart on failure."""
+        consecutive_failures = 0
+        max_consecutive_failures = 10
+
+        while True:
+            try:
+                logger.info(f"Starting {name} channel...")
+                await channel.start()
+
+                # If start() returns normally (not via exception), log it
+                logger.warning(f"{name} channel stopped unexpectedly, restarting...")
+                consecutive_failures += 1
+
+            except asyncio.CancelledError:
+                logger.info(f"{name} channel cancelled")
+                raise
+
+            except Exception as e:
+                consecutive_failures += 1
+                logger.error(f"{name} channel error (failure #{consecutive_failures}): {e}")
+
+            # Exponential backoff for restarts, capped at 5 minutes
+            if consecutive_failures > 0:
+                wait_time = min(2 ** min(consecutive_failures, 8), 300)
+
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.error(
+                        f"{name} channel has failed {consecutive_failures} times. "
+                        f"Continuing with {wait_time}s backoff..."
+                    )
+
+                logger.info(f"Restarting {name} channel in {wait_time}s...")
+                await asyncio.sleep(wait_time)
     
     async def stop_all(self) -> None:
         """Stop all channels and the dispatcher."""

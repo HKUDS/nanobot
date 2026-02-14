@@ -190,9 +190,16 @@ class TelegramChannel(BaseChannel):
                     allowed_updates=["message"],
                     drop_pending_updates=True
                 )
-                
-                # If we get here, polling was stopped normally
-                break
+
+                # If we get here, polling was stopped
+                if not self._running:
+                    # User requested shutdown
+                    logger.info("Telegram polling stopped by user request")
+                    break
+                else:
+                    # Unexpected stop, will retry
+                    logger.warning("Telegram polling stopped unexpectedly, will retry...")
+                    await asyncio.sleep(5)
                 
             except Conflict as e:
                 self._polling_started = False
