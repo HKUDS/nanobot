@@ -1,4 +1,4 @@
-"""Web tools: web_search, ddg_search, wikipedia_search, and web_fetch."""
+"""Web tools: web_search and web_fetch."""
 
 import html
 import json
@@ -228,96 +228,6 @@ class WebSearchTool(Tool):
         elif self.engine == "brave":
             return "Error: Brave search failed. Check your API key."
         return f"Error: {self.engine} search failed. Try installing duckduckgo-search or check your internet connection."
-
-
-class DuckDuckGoSearchTool(Tool):
-    """Search web using DuckDuckGo (no API key required)."""
-
-    name = "ddg_search"
-    description = "Search web using DuckDuckGo directly. Free, no API key needed."
-    parameters = {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "Search query"},
-            "count": {"type": "integer", "description": "Results (1-20)", "minimum": 1, "maximum": 20}
-        },
-        "required": ["query"]
-    }
-
-    def __init__(self, max_results: int = 5):
-        self.max_results = max_results
-
-    async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        if not DDG_AVAILABLE:
-            return "Error: duckduckgo-search library not installed. Install with: pip install duckduckgo-search"
-
-        try:
-            n = min(max(count or self.max_results, 1), 20)
-
-            # Use DDGS sync API
-            ddgs = DDGS()
-            results = ddgs.text(query, max_results=n)
-
-            if not results:
-                return f"No results for: {query}"
-
-            lines = [f"Results for: {query}\n"]
-            for i, item in enumerate(results[:n], 1):
-                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('link', '')}")
-                if body := item.get("body"):
-                    lines.append(f"   {body}")
-            return "\n".join(lines)
-        except Exception as e:
-            return f"Error: {e}"
-
-
-class WikipediaSearchTool(Tool):
-    """Search Wikipedia for factual information (free, no API key required)."""
-
-    name = "wikipedia_search"
-    description = "Search Wikipedia for factual information. Free, no API key needed."
-    parameters = {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "Search query"},
-            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10}
-        },
-        "required": ["query"]
-    }
-
-    def __init__(self, max_results: int = 5):
-        self.max_results = max_results
-
-    async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        try:
-            n = min(max(count or self.max_results, 1), 10)
-
-            async with httpx.AsyncClient() as client:
-                r = await client.get(
-                            "https://en.wikipedia.org/w/api.php",
-                            params={
-                                "action": "query",
-                                "list": "search",
-                                "srsearch": query,
-                                "srlimit": n,
-                                "format": "json"
-                            },
-                            timeout=10.0
-                        )
-                    r.raise_for_status()
-
-            results = r.json().get("query", {}).get("search", [])
-            if not results:
-                return f"No Wikipedia results for: {query}"
-
-            lines = [f"Wikipedia results for: {query}\n"]
-            for i, item in enumerate(results[:n], 1):
-                title = item.get("title", "")
-                snippet = item.get("snippet", "")[:200]
-                lines.append(f"{i}. {title}\n   {snippet}")
-            return "\n".join(lines)
-        except Exception as e:
-            return f"Error: {e}"
 
 
 class WebFetchTool(Tool):

@@ -121,10 +121,6 @@ class SubagentManager:
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
 
-            # Additional free search tools (no API key needed)
-            tools.register(SearXNGSearchTool())
-            tools.register(WikipediaSearchTool())
-
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task, profile=profile)
 
