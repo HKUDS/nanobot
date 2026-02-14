@@ -151,7 +151,7 @@ class CronService:
         self._recompute_next_runs()
         self._save_store()
         self._arm_timer()
-        logger.info(f"Cron service started with {len(self._store.jobs if self._store else [])} jobs")
+        logger.info(f"Cron service started with {len(self._store.jobs if self._store else [])} jobs, store id={id(self._store)}")
     
     def stop(self) -> None:
         """Stop the cron service."""
@@ -181,35 +181,56 @@ class CronService:
         """Schedule the next timer tick."""
         if self._timer_task:
             self._timer_task.cancel()
-        
+            logger.debug("Cron: cancelled existing timer task")
+
         next_wake = self._get_next_wake_ms()
         if not next_wake or not self._running:
+            logger.debug(f"Cron: _arm_timer skipped (next_wake={next_wake}, running={self._running})")
             return
-        
+
         delay_ms = max(0, next_wake - _now_ms())
         delay_s = delay_ms / 1000
-        
+
+        # Find which job this timer is for
+        if self._store:
+            due_job = next((j for j in self._store.jobs if j.enabled and j.state.next_run_at_ms == next_wake), None)
+            job_info = f"'{due_job.name}' ({due_job.id})" if due_job else "unknown"
+        else:
+            job_info = "no store"
+        logger.info(f"Cron: arming timer for {job_info} in {delay_s:.1f}s (jobs in store: {len(self._store.jobs) if self._store else 0})")
+
         async def tick():
-            await asyncio.sleep(delay_s)
-            if self._running:
-                await self._on_timer()
-        
+            try:
+                await asyncio.sleep(delay_s)
+                if self._running:
+                    await self._on_timer()
+            except asyncio.CancelledError:
+                logger.debug("Cron: timer task cancelled")
+            except Exception as e:
+                logger.error(f"Cron: timer task failed with exception: {e}", exc_info=True)
+                # Re-arm to keep the service alive
+                self._arm_timer()
+
         self._timer_task = asyncio.create_task(tick())
     
     async def _on_timer(self) -> None:
         """Handle timer tick - run due jobs."""
         if not self._store:
             return
-        
+
         now = _now_ms()
         due_jobs = [
             j for j in self._store.jobs
             if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
         ]
-        
+
+        job_ids = [f"'{j.name}' ({j.id})" for j in due_jobs]
+        logger.info(f"Cron: _on_timer firing, due={job_ids}, store id={id(self._store)}, total jobs={len(self._store.jobs)}")
+
         for job in due_jobs:
             await self._execute_job(job)
-        
+
+        logger.debug(f"Cron: _on_timer saving, total jobs={len(self._store.jobs)}")
         self._save_store()
         self._arm_timer()
     
@@ -288,9 +309,8 @@ class CronService:
         
         store.jobs.append(job)
         self._save_store()
+        logger.info(f"Cron: added job '{name}' ({job.id}), next_run={job.state.next_run_at_ms}, store id={id(store)}, jobs count={len(store.jobs)}")
         self._arm_timer()
-        
-        logger.info(f"Cron: added job '{name}' ({job.id})")
         return job
     
     def remove_job(self, job_id: str) -> bool:
