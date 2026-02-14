@@ -80,9 +80,18 @@ Skills with available="false" need dependencies installed first - you can try in
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
         
-        return f"""# nanobot 🐈
+        # Use custom identity from IDENTITY.md if present, otherwise default
+        identity_file = self.workspace / "IDENTITY.md"
+        if identity_file.exists():
+            header = "# Agent"
+            intro = "You are an AI agent. Your identity is defined in IDENTITY.md below. You have access to tools that allow you to:"
+        else:
+            header = "# nanobot 🐈"
+            intro = "You are nanobot, a helpful AI assistant. You have access to tools that allow you to:"
 
-You are nanobot, a helpful AI assistant. You have access to tools that allow you to:
+        return f"""{header}
+
+{intro}
 - Read, write, and edit files
 - Execute shell commands
 - Search the web and fetch web pages
