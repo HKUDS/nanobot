@@ -33,16 +33,11 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
             from croniter import croniter
             from zoneinfo import ZoneInfo
             base_time = time.time()
-            if schedule.tz:
-                tz = ZoneInfo(schedule.tz)
-                base_dt = datetime.fromtimestamp(base_time, tz=tz)
-                cron = croniter(schedule.expr, base_dt)
-                next_dt = cron.get_next(datetime)
-                return int(next_dt.timestamp() * 1000)
-            else:
-                cron = croniter(schedule.expr, base_time)
-                next_time = cron.get_next()
-                return int(next_time * 1000)
+            tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
+            base_dt = datetime.fromtimestamp(base_time, tz=tz)
+            cron = croniter(schedule.expr, base_dt)
+            next_dt = cron.get_next(datetime)
+            return int(next_dt.timestamp() * 1000)
         except Exception:
             return None
     
