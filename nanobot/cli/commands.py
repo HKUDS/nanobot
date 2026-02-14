@@ -155,7 +155,7 @@ def main(
 @app.command()
 def onboard():
     """Initialize nanobot configuration and workspace."""
-    from nanobot.config.loader import get_config_path, save_config
+    from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
     from nanobot.utils.helpers import get_workspace_path
     
@@ -163,17 +163,26 @@ def onboard():
     
     if config_path.exists():
         console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
-        if not typer.confirm("Overwrite?"):
-            raise typer.Exit()
-    
-    # Create default config
-    config = Config()
-    save_config(config)
-    console.print(f"[green]✓[/green] Created config at {config_path}")
+        console.print("  [bold]y[/bold] = overwrite with defaults (existing values will be lost)")
+        console.print("  [bold]N[/bold] = refresh config, keeping existing values and adding new fields")
+        if typer.confirm("Overwrite?"):
+            config = Config()
+            save_config(config)
+            console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
+        else:
+            config = load_config()
+            save_config(config)
+            console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
+    else:
+        save_config(Config())
+        console.print(f"[green]✓[/green] Created config at {config_path}")
     
     # Create workspace
     workspace = get_workspace_path()
-    console.print(f"[green]✓[/green] Created workspace at {workspace}")
+    
+    if not workspace.exists():
+        workspace.mkdir(parents=True, exist_ok=True)
+        console.print(f"[green]✓[/green] Created workspace at {workspace}")
     
     # Create default bootstrap files
     _create_workspace_templates(workspace)
@@ -328,6 +337,8 @@ def gateway(
         provider=provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
+        temperature=config.agents.defaults.temperature,
+        max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
         brave_api_key=config.tools.web.search.api_key or None,
@@ -435,6 +446,8 @@ def agent(
         provider=provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
+        temperature=config.agents.defaults.temperature,
+        max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
         brave_api_key=config.tools.web.search.api_key or None,
