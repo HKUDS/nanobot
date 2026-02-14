@@ -173,23 +173,33 @@ class TelegramChannel(BaseChannel):
                 self._app.add_handler(CommandHandler("start", self._on_start))
                 
                 logger.info("Starting Telegram bot (polling mode)...")
-                
+
                 # Initialize and start
                 await self._app.initialize()
                 await self._app.start()
-                
+
                 # Get bot info
                 bot_info = await self._app.bot.get_me()
                 logger.info(f"Telegram bot @{bot_info.username} connected")
-                
-                # Start polling - blocks here until stopped
+
+                # Start polling and wait for it to run
                 self._polling_started = True
                 consecutive_failures = 0  # Reset on successful connection
                 logger.info("Telegram polling active")
+
                 await self._app.updater.start_polling(
                     allowed_updates=["message"],
                     drop_pending_updates=True
                 )
+
+                # Keep running until stopped - polling runs in background
+                while self._running and self._polling_started:
+                    await asyncio.sleep(1)
+
+                    # Check if updater is still running
+                    if not self._app.updater.running:
+                        logger.warning("Updater stopped running")
+                        break
 
                 # If we get here, polling was stopped
                 if not self._running:
