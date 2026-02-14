@@ -384,6 +384,14 @@ class AgentLoop:
 ## Conversation to Process
 {conversation}
 
+**IMPORTANT**: Both values MUST be strings, not objects or arrays.
+
+Example:
+{{
+  "history_entry": "[2026-02-14 22:50] User asked about...",
+  "memory_update": "- Host: HARRYBOOK-T14P\n- Name: Nado"
+}}
+
 Respond with ONLY valid JSON, no markdown fences."""
 
         try:
@@ -400,8 +408,14 @@ Respond with ONLY valid JSON, no markdown fences."""
             result = json.loads(text)
 
             if entry := result.get("history_entry"):
+                # Defensive: ensure entry is a string (LLM may return dict)
+                if not isinstance(entry, str):
+                    entry = json.dumps(entry, ensure_ascii=False)
                 memory.append_history(entry)
             if update := result.get("memory_update"):
+                # Defensive: ensure update is a string
+                if not isinstance(update, str):
+                    update = json.dumps(update, ensure_ascii=False)
                 if update != current_memory:
                     memory.write_long_term(update)
 
