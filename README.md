@@ -596,6 +596,7 @@ Config file: `~/.nanobot/config.json`
 > - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
+> - **AWS Bedrock**: [Bedrock API key](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html) only (HTTP, no boto3). Set `apiKey` and `apiBase` (e.g. `https://bedrock-runtime.us-east-1.amazonaws.com`). Use model **with `bedrock/` prefix**, e.g. `bedrock/us.anthropic.claude-3-5-sonnet-20240620-v1:0` or `bedrock/us.amazon.nova-2-lite-v1:0`.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -610,6 +611,7 @@ Config file: `~/.nanobot/config.json`
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
+| `bedrock` | LLM (Bedrock API key, HTTP only; no boto3) | [AWS Console](https://console.aws.amazon.com/bedrock) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 
 <details>

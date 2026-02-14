@@ -119,6 +119,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
 
     # === Standard providers (matched by model-name keywords) ===============
 
+    # AWS Bedrock: HTTP Converse API, API key only (no boto3). Model must have "bedrock/" prefix.
+    ProviderSpec(
+        name="bedrock",
+        keywords=("bedrock",),               # only match e.g. bedrock/us.anthropic.claude-3-5-sonnet-...
+        env_key="",
+        display_name="AWS Bedrock",
+        litellm_prefix="bedrock",
+        skip_prefixes=("bedrock/",),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # Anthropic: LiteLLM recognizes "claude-*" natively, no prefix needed.
     ProviderSpec(
         name="anthropic",
