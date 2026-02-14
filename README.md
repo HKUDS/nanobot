@@ -170,7 +170,7 @@ nanobot agent -m "Hello from my local LLM!"
 
 ## 💬 Chat Apps
 
-Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, Mochat, DingTalk, Slack, Email, or QQ — anytime, anywhere.
+Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, Mochat, DingTalk, Slack, Email, QQ, or Matrix — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
@@ -183,6 +183,7 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, Mochat, DingTa
 | **Slack** | Medium (bot + app tokens) |
 | **Email** | Medium (IMAP/SMTP credentials) |
 | **QQ** | Easy (app credentials) |
+| **Matrix** | Easy (access token) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -572,6 +573,88 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 ```bash
 nanobot gateway
 ```
+
+</details>
+
+<details>
+<summary><b>Matrix</b></summary>
+
+Uses **matrix-nio** with E2EE support — decentralized and secure!
+
+**1. Create a Matrix bot**
+
+You can either:
+- **Option A**: Create a new bot account on your homeserver
+- **Option B**: Use an existing Matrix account
+
+For this guide, we'll create a bot account.
+
+**2. Get access token**
+
+- Log in to your Matrix account (e.g., Element web client)
+- Go to **Settings** → **Help & About** → **Advanced**
+- Click **Access Token** (or use Element's developer tools)
+- Copy the access token
+
+Alternatively, use the Matrix API directly:
+```bash
+curl -X POST https://your-homeserver.com/_matrix/client/v3/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "m.login.password",
+    "identifier": {
+      "type": "m.id.user",
+      "user": "your_bot_username"
+    },
+    "password": "your_password",
+    "store_device": false,
+    "refresh_token": true
+  }'
+```
+
+The response will contain an `access_token`.
+
+**3. Find your user ID**
+
+Your full Matrix user ID format is: `@username:server.com`
+
+**4. Configure**
+
+> - `allowFrom`: Leave empty for public access, or add Matrix user IDs to restrict. User IDs are in format `@user:server.com`
+> - `autoJoinInvites`: When `true`, bot automatically accepts room invites
+> - `autoJoinRooms`: Optional list of room IDs to auto-join on startup
+
+```json
+{
+  "channels": {
+    "matrix": {
+      "enabled": true,
+      "homeserver": "https://matrix.org",
+      "userId": "@your_bot:matrix.org",
+      "accessToken": "syt_your_access_token_here",
+      "deviceId": "",
+      "autoJoinInvites": true,
+      "autoJoinRooms": ["!room_id:server.com"],
+      "allowFrom": []
+    }
+  }
+}
+```
+
+> **Note**: Set `autoJoinInvites: false` if you want manual control over which rooms the bot joins.
+
+**5. Run**
+
+```bash
+nanobot gateway
+```
+
+**6. Invite to rooms**
+
+- Open your Matrix client (Element, etc.)
+- Create a new room or open an existing one
+- Invite your bot using its full user ID: `@your_bot:matrix.org`
+- Bot will automatically join if `autoJoinInvites: true`
 
 </details>
 

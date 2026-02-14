@@ -615,6 +615,15 @@ def channels_status():
         tg_config
     )
 
+    # Matrix
+    mx = config.channels.matrix
+    mx_config = f"{mx.homeserver}" if mx.homeserver else "[dim]not configured[/dim]"
+    table.add_row(
+        "Matrix",
+        "✓" if mx.enabled else "✗",
+        mx_config
+    )
+
     # Slack
     slack = config.channels.slack
     slack_config = "socket" if slack.app_token and slack.bot_token else "[dim]not configured[/dim]"
@@ -887,9 +896,49 @@ def status():
 
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS
+        from rich.table import Table
 
-        console.print(f"Model: {config.agents.defaults.model}")
-        
+        # Show default agent model
+        console.print(f"\n[bold]Default Agent:[/bold]")
+        console.print(f"  Model: {config.agents.defaults.model}")
+
+        # Show available agent profiles
+        if config.agents.profiles:
+            console.print(f"\n[bold]Available Agent Profiles:[/bold]")
+
+            profiles_table = Table(show_header=True, header_style="bold cyan")
+            profiles_table.add_column("Profile", style="cyan")
+            profiles_table.add_column("Model")
+            profiles_table.add_column("Temperature")
+            profiles_table.add_column("Workspace")
+            profiles_table.add_column("System Prompt")
+
+            for profile_name, profile in config.agents.profiles.items():
+                # Determine workspace display
+                ws_display = profile.workspace if profile.workspace else "[dim]shared[/dim]"
+
+                # Determine system prompt display
+                if profile.system_prompt:
+                    # Show first 50 chars of system prompt
+                    prompt_preview = profile.system_prompt[:50] + "..." if len(profile.system_prompt) > 50 else profile.system_prompt
+                    prompt_display = f"[dim]{prompt_preview}[/dim]"
+                else:
+                    prompt_display = "[dim]none[/dim]"
+
+                profiles_table.add_row(
+                    profile_name,
+                    profile.model,
+                    str(profile.temperature),
+                    ws_display,
+                    prompt_display
+                )
+
+            console.print(profiles_table)
+        else:
+            console.print("\n[dim]No agent profiles configured. Use --agent flag to specify profiles in config.json[/dim]")
+
+        console.print(f"\n[bold]Provider Status:[/bold]")
+
         # Check API keys from registry
         for spec in PROVIDERS:
             p = getattr(config.providers, spec.name, None)
