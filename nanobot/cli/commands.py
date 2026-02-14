@@ -287,6 +287,43 @@ def _make_provider(config):
     )
 
 
+def _get_agent_config(config, agent_name: str | None):
+    """
+    Get agent configuration and workspace for the given agent name.
+
+    Args:
+        config: The nanobot config object
+        agent_name: Optional agent profile name
+
+    Returns:
+        (agent_config, workspace_path) - The configuration and workspace to use
+
+    Raises:
+        typer.Exit: If the specified profile doesn't exist
+    """
+    from nanobot.config.schema import AgentDefaults
+
+    if agent_name:
+        if agent_name not in config.agents.profiles:
+            console.print(f"[red]Error: Agent profile '{agent_name}' not found[/red]")
+            available = ', '.join(config.agents.profiles.keys()) or 'none'
+            console.print(f"Available profiles: {available}")
+            raise typer.Exit(1)
+
+        profile = config.agents.profiles[agent_name]
+
+        # Resolve workspace
+        if profile.workspace:
+            workspace = Path(profile.workspace).expanduser()
+        else:
+            workspace = config.workspace_path
+
+        return profile, workspace
+
+    # Use defaults
+    return config.agents.defaults, config.workspace_path
+
+
 # ============================================================================
 # Gateway / Server
 # ============================================================================
@@ -296,6 +333,7 @@ def _make_provider(config):
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    agent_name: str = typer.Option(None, "--agent", "-a", help="Agent profile name to use"),
 ):
     """Start the nanobot gateway."""
     from nanobot.config.loader import load_config, get_data_dir
@@ -312,29 +350,36 @@ def gateway(
         logging.basicConfig(level=logging.DEBUG)
     
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    
+
     config = load_config()
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
-    
+
+    # Resolve agent configuration
+    agent_config, workspace = _get_agent_config(config, agent_name)
+    system_prompt = agent_config.system_prompt if hasattr(agent_config, 'system_prompt') else None
+
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
-    
+
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
         provider=provider,
-        workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
+        workspace=workspace,
+        model=agent_config.model,
+        max_iterations=agent_config.max_tool_iterations,
+        memory_window=agent_config.memory_window,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
+        web_search_config=config.tools.web.search,
+        system_prompt=system_prompt,
+        config=config,
     )
     
     # Set cron callback (needs agent)
@@ -413,6 +458,7 @@ def agent(
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    agent_name: str = typer.Option(None, "--agent", "-a", help="Agent profile name to use"),
 ):
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config
@@ -421,7 +467,7 @@ def agent(
     from loguru import logger
     
     config = load_config()
-    
+
     bus = MessageBus()
     provider = _make_provider(config)
 
@@ -429,17 +475,24 @@ def agent(
         logger.enable("nanobot")
     else:
         logger.disable("nanobot")
-    
+
+    # Resolve agent configuration
+    agent_config, workspace = _get_agent_config(config, agent_name)
+    system_prompt = agent_config.system_prompt if hasattr(agent_config, 'system_prompt') else None
+
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
-        workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
+        workspace=workspace,
+        model=agent_config.model,
+        max_iterations=agent_config.max_tool_iterations,
+        memory_window=agent_config.memory_window,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        web_search_config=config.tools.web.search,
+        system_prompt=system_prompt,
+        config=config,
     )
     
     # Show spinner when logs are off (no output to miss); skip when logs are on

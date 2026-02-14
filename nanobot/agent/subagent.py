@@ -35,8 +35,9 @@ class SubagentManager:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        config: "Config | None" = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, Config
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
@@ -44,6 +45,7 @@ class SubagentManager:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.config = config
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
     
     async def spawn(
@@ -52,6 +54,7 @@ class SubagentManager:
         label: str | None = None,
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
+        profile: "AgentProfile | None" = None,
     ) -> str:
         """
         Spawn a subagent to execute a task in the background.
@@ -75,7 +78,7 @@ class SubagentManager:
         
         # Create background task
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin)
+            self._run_subagent(task_id, task, display_label, origin, profile)
         )
         self._running_tasks[task_id] = bg_task
         
@@ -91,20 +94,27 @@ class SubagentManager:
         task: str,
         label: str,
         origin: dict[str, str],
+        profile: "AgentProfile | None" = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info(f"Subagent [{task_id}] starting task: {label}")
-        
+
+        # Resolve workspace (use profile-specific if provided)
+        workspace = Path(self.workspace)
+        if profile and profile.workspace:
+            workspace = Path(profile.workspace).expanduser()
+            workspace.mkdir(parents=True, exist_ok=True)
+
         try:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
-            allowed_dir = self.workspace if self.restrict_to_workspace else None
+            allowed_dir = workspace if self.restrict_to_workspace else None
             tools.register(ReadFileTool(allowed_dir=allowed_dir))
             tools.register(WriteFileTool(allowed_dir=allowed_dir))
             tools.register(EditFileTool(allowed_dir=allowed_dir))
             tools.register(ListDirTool(allowed_dir=allowed_dir))
             tools.register(ExecTool(
-                working_dir=str(self.workspace),
+                working_dir=str(workspace),
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
             ))
@@ -112,7 +122,11 @@ class SubagentManager:
             tools.register(WebFetchTool())
             
             # Build messages with subagent-specific prompt
-            system_prompt = self._build_subagent_prompt(task)
+            system_prompt = self._build_subagent_prompt(task, profile=profile)
+
+            # Use profile-specific model if provided
+            model = profile.model if profile and profile.model else self.model
+
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
@@ -129,7 +143,7 @@ class SubagentManager:
                 response = await self.provider.chat(
                     messages=messages,
                     tools=tools.get_definitions(),
-                    model=self.model,
+                    model=model,
                 )
                 
                 if response.has_tool_calls:
@@ -209,14 +223,54 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         await self.bus.publish_inbound(msg)
         logger.debug(f"Subagent [{task_id}] announced result to {origin['channel']}:{origin['chat_id']}")
     
-    def _build_subagent_prompt(self, task: str) -> str:
+    def _build_subagent_prompt(self, task: str, profile: "AgentProfile | None" = None) -> str:
         """Build a focused system prompt for the subagent."""
         from datetime import datetime
         import time as _time
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         tz = _time.strftime("%Z") or "UTC"
 
-        return f"""# Subagent
+        # Resolve workspace (use profile-specific if provided)
+        workspace = Path(self.workspace)
+        if profile and profile.workspace:
+            workspace = Path(profile.workspace).expanduser()
+
+        # Build custom prompt if profile provides one
+        if profile and profile.system_prompt:
+            if profile.inherit_base_prompt:
+                # Merge with base prompt
+                custom = profile.system_prompt
+            else:
+                # Use only custom prompt
+                custom = profile.system_prompt
+
+                return f"""# Subagent
+
+## Current Time
+{now} ({tz})
+
+{custom}
+
+## Workspace
+Your workspace is at: {workspace}
+
+## What You Can Do
+- Read and write files in the workspace
+- Execute shell commands
+- Search the web and fetch web pages
+- Complete the task thoroughly
+
+## What You Cannot Do
+- Send messages directly to users (no message tool available)
+- Spawn other subagents
+- Access the main agent's conversation history
+
+When you have completed the task, provide a clear summary of your findings or actions."""
+        else:
+            custom = None
+
+        # Standard subagent prompt
+        base_prompt = f"""# Subagent
 
 ## Current Time
 {now} ({tz})
@@ -241,10 +295,14 @@ You are a subagent spawned by the main agent to complete a specific task.
 - Access the main agent's conversation history
 
 ## Workspace
-Your workspace is at: {self.workspace}
-Skills are available at: {self.workspace}/skills/ (read SKILL.md files as needed)
+Your workspace is at: {workspace}
+Skills are available at: {workspace}/skills/ (read SKILL.md files as needed)
 
 When you have completed the task, provide a clear summary of your findings or actions."""
+
+        if custom:
+            return f"{base_prompt}\n\n## Additional Instructions\n{custom}"
+        return base_prompt
     
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""

@@ -10,6 +10,7 @@ from loguru import logger
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
+from nanobot.config.schema import WebSearchConfig
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
@@ -48,8 +49,11 @@ class AgentLoop:
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
+        web_search_config: "WebSearchConfig | None" = None,
+        system_prompt: str | None = None,
+        config: "Config | None" = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, WebSearchConfig, Config
         from nanobot.cron.service import CronService
         self.bus = bus
         self.provider = provider
@@ -61,7 +65,10 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
-        
+        self.web_search_config = web_search_config or WebSearchConfig()
+        self._custom_system_prompt = system_prompt
+        self.config = config
+
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
@@ -73,6 +80,7 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            config=config,
         )
         
         self._running = False
@@ -95,7 +103,11 @@ class AgentLoop:
         ))
         
         # Web tools
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key))
+        self.tools.register(WebSearchTool(
+            api_key=self.brave_api_key,
+            max_results=self.web_search_config.max_results,
+            engine=self.web_search_config.engine
+        ))
         self.tools.register(WebFetchTool())
         
         # Message tool
@@ -203,6 +215,7 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
+            system_prompt=self._custom_system_prompt,
         )
         
         # Agent loop
@@ -320,6 +333,7 @@ class AgentLoop:
             current_message=msg.content,
             channel=origin_channel,
             chat_id=origin_chat_id,
+            system_prompt=self._custom_system_prompt,
         )
         
         # Agent loop (limited for announce handling)

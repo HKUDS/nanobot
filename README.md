@@ -590,6 +590,71 @@ Simply send the command above to your nanobot (via CLI or any chat channel), and
 
 Config file: `~/.nanobot/config.json`
 
+### Agent Profiles
+
+Create multiple named agent configurations with different models, system prompts, and workspaces.
+
+**Example: Different agent personas**
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.nanobot/workspace",
+      "model": "anthropic/claude-opus-4-5"
+    },
+    "profiles": {
+      "coder": {
+        "model": "anthropic/claude-opus-4-5",
+        "temperature": 0.3,
+        "system_prompt": "You are an expert coding assistant. Focus on clean, efficient, well-documented code.",
+        "inherit_base_prompt": true,
+        "workspace": "~/.nanobot/workspace/coder"
+      },
+      "creative": {
+        "model": "anthropic/claude-sonnet-4-5",
+        "temperature": 0.9,
+        "system_prompt": "You are a creative writing assistant. Be imaginative and expressive.",
+        "inherit_base_prompt": true
+      },
+      "researcher": {
+        "model": "anthropic/claude-opus-4-5",
+        "temperature": 0.2,
+        "system_prompt": "You are a research assistant. Be thorough and cite sources.",
+        "inherit_base_prompt": false,
+        "workspace": "~/.nanobot/workspace/research"
+      }
+    }
+  }
+}
+```
+
+**Profile Options:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `model` | string | LLM model to use |
+| `temperature` | float | Sampling temperature (0.0-1.0) |
+| `max_tool_iterations` | integer | Maximum tool execution loops |
+| `memory_window` | integer | Conversation history size |
+| `system_prompt` | string | Custom system prompt (persona) |
+| `inherit_base_prompt` | boolean | Merge with base prompt (`true`) or replace (`false`) |
+| `workspace` | string | Custom workspace path (`null` = use default) |
+
+**Using profiles:**
+
+```bash
+# CLI: Use specific profile
+nanobot agent -a coder -m "Write a Python function"
+nanobot agent -a creative -m "Write a poem"
+
+# Gateway: Use specific profile
+nanobot gateway --agent researcher
+
+# In chat: Spawn subagent with profile
+> spawn(task="Research this topic", profile="researcher")
+```
+
 ### Providers
 
 > [!TIP]
@@ -673,10 +738,12 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 |---------|-------------|
 | `nanobot onboard` | Initialize config & workspace |
 | `nanobot agent -m "..."` | Chat with the agent |
+| `nanobot agent -a <profile>` | Use specific agent profile |
 | `nanobot agent` | Interactive chat mode |
 | `nanobot agent --no-markdown` | Show plain-text replies |
 | `nanobot agent --logs` | Show runtime logs during chat |
 | `nanobot gateway` | Start the gateway |
+| `nanobot gateway -a <profile>` | Use specific agent profile |
 | `nanobot status` | Show status |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |

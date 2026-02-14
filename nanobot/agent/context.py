@@ -129,6 +129,8 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        system_prompt: str | None = None,
+        profile_inherit_base: bool = True,
     ) -> list[dict[str, Any]]:
         """
         Build the complete message list for an LLM call.
@@ -140,6 +142,8 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
             media: Optional list of local file paths for images/media.
             channel: Current channel (telegram, feishu, etc.).
             chat_id: Current chat/user ID.
+            system_prompt: Optional custom system prompt.
+            profile_inherit_base: Whether to merge custom prompt with base prompt.
 
         Returns:
             List of messages including system prompt.
@@ -147,10 +151,22 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         messages = []
 
         # System prompt
-        system_prompt = self.build_system_prompt(skill_names)
+        base_system_prompt = self.build_system_prompt(skill_names)
+
+        # Handle custom system prompt
+        if system_prompt:
+            if profile_inherit_base:
+                # Merge: base prompt first, then custom additions
+                final_system_prompt = f"{base_system_prompt}\n\n## Additional Instructions\n{system_prompt}"
+            else:
+                # Replace entirely
+                final_system_prompt = system_prompt
+        else:
+            final_system_prompt = base_system_prompt
+
         if channel and chat_id:
-            system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
-        messages.append({"role": "system", "content": system_prompt})
+            final_system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
+        messages.append({"role": "system", "content": final_system_prompt})
 
         # History
         messages.extend(history)

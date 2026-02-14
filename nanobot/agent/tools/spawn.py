@@ -51,15 +51,32 @@ class SpawnTool(Tool):
                     "type": "string",
                     "description": "Optional short label for the task (for display)",
                 },
+                "profile": {
+                    "type": "string",
+                    "description": "Name of the agent profile to use for this subagent (optional)",
+                },
             },
             "required": ["task"],
         }
     
-    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
+    async def execute(self, task: str, label: str | None = None, profile: str | None = None, **kwargs: Any) -> str:
         """Spawn a subagent to execute the given task."""
+        from nanobot.config.schema import AgentProfile
+
+        # Resolve profile from config if specified
+        agent_profile = None
+        if profile:
+            # Access config through manager
+            config = self._manager.config
+            if config and profile in config.agents.profiles:
+                agent_profile = config.agents.profiles[profile]
+            else:
+                return f"Error: Agent profile '{profile}' not found. Available profiles: {', '.join(config.agents.profiles.keys()) if config and config.agents.profiles else 'none'}"
+
         return await self._manager.spawn(
             task=task,
             label=label,
             origin_channel=self._origin_channel,
             origin_chat_id=self._origin_chat_id,
+            profile=agent_profile,
         )

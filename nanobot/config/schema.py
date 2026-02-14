@@ -165,9 +165,31 @@ class AgentDefaults(BaseModel):
     memory_window: int = 50
 
 
+class AgentProfile(BaseModel):
+    """Named agent configuration profile.
+
+    A profile defines a specific agent configuration with custom settings,
+    system prompts, and optional workspace overrides.
+    """
+    # Technical settings
+    model: str = "anthropic/claude-opus-4-5"
+    max_tokens: int = 8192
+    temperature: float = 0.7
+    max_tool_iterations: int = 20
+    memory_window: int = 50
+
+    # Persona support
+    system_prompt: str | None = None  # Custom system prompt for this profile
+    inherit_base_prompt: bool = True  # Merge with base prompt or replace it
+
+    # Workspace configuration
+    workspace: str | None = None  # None = use default workspace
+
+
 class AgentsConfig(BaseModel):
     """Agent configuration."""
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    profiles: dict[str, AgentProfile] = Field(default_factory=dict)
 
 
 class ProviderConfig(BaseModel):
@@ -201,6 +223,7 @@ class GatewayConfig(BaseModel):
 
 class WebSearchConfig(BaseModel):
     """Web search tool configuration."""
+    engine: str = "auto"  # "auto", "brave", "ddg"
     api_key: str = ""  # Brave Search API key
     max_results: int = 5
 
