@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +43,7 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 20,
         temperature: float = 0.7,
+        max_tokens: int = 4096,
         memory_window: int = 50,
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
@@ -59,6 +59,7 @@ class AgentLoop:
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.temperature = temperature
+        self.max_tokens = max_tokens
         self.memory_window = memory_window
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
@@ -66,8 +67,6 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
 
         self.context = ContextBuilder(workspace)
-
-        # Initialize session manager
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -75,6 +74,8 @@ class AgentLoop:
             workspace=workspace,
             bus=bus,
             model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
@@ -152,6 +153,7 @@ class AgentLoop:
                 tools=self.tools.get_definitions(),
                 model=self.model,
                 temperature=self.temperature,
+                max_tokens=self.max_tokens,
             )
 
             if response.has_tool_calls:
@@ -193,20 +195,16 @@ class AgentLoop:
 
         while self._running:
             try:
-                # Wait for next message
                 msg = await asyncio.wait_for(
                     self.bus.consume_inbound(),
                     timeout=1.0
                 )
-                
-                # Process it
                 try:
                     response = await self._process_message(msg)
                     if response:
                         await self.bus.publish_outbound(response)
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
-                    # Send error response
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel,
                         chat_id=msg.chat_id,
@@ -231,15 +229,13 @@ class AgentLoop:
         Returns:
             The response message, or None if no response needed.
         """
-        # Handle system messages (subagent announces)
-        # The chat_id contains the original "channel:chat_id" to route back to
+        # System messages route back via chat_id ("channel:chat_id")
         if msg.channel == "system":
             return await self._process_system_message(msg)
         
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info(f"Processing message from {msg.channel}:{msg.sender_id}: {preview}")
         
-        # Get or create session
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
         
@@ -250,12 +246,9 @@ class AgentLoop:
             messages_to_archive = session.messages.copy()
             session.clear()
             self.sessions.save(session)
-            # Clear cache to force reload from disk on next request
-            self.sessions._cache.pop(session.key, None)
+            self.sessions.invalidate(session.key)
 
-            # Consolidate in background (non-blocking)
             async def _consolidate_and_cleanup():
-                # Create a temporary session with archived messages
                 temp_session = Session(key=session.key)
                 temp_session.messages = messages_to_archive
                 await self._consolidate_memory(temp_session, archive_all=True)
@@ -267,34 +260,25 @@ class AgentLoop:
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
         
-        # Consolidate memory before processing if session is too large
-        # Run in background to avoid blocking main conversation
         if len(session.messages) > self.memory_window:
             asyncio.create_task(self._consolidate_memory(session))
 
-        # Update tool contexts
         self._set_tool_context(msg.channel, msg.chat_id)
-
-        # Build initial messages
         initial_messages = self.context.build_messages(
-            history=session.get_history(),
+            history=session.get_history(max_messages=self.memory_window),
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
         )
-
-        # Run agent loop
         final_content, tools_used = await self._run_agent_loop(initial_messages)
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
         
-        # Log response preview
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
         
-        # Save to session (include tool names so consolidation sees what happened)
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content,
                             tools_used=tools_used if tools_used else None)
@@ -326,28 +310,20 @@ class AgentLoop:
             origin_channel = "cli"
             origin_chat_id = msg.chat_id
         
-        # Use the origin session for context
         session_key = f"{origin_channel}:{origin_chat_id}"
         session = self.sessions.get_or_create(session_key)
-
-        # Update tool contexts
         self._set_tool_context(origin_channel, origin_chat_id)
-
-        # Build messages with the announce content
         initial_messages = self.context.build_messages(
-            history=session.get_history(),
+            history=session.get_history(max_messages=self.memory_window),
             current_message=msg.content,
             channel=origin_channel,
             chat_id=origin_chat_id,
         )
-
-        # Run agent loop
         final_content, _ = await self._run_agent_loop(initial_messages)
 
         if final_content is None:
             final_content = "Background task completed."
         
-        # Save to session (mark as system message in history)
         session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
         session.add_message("assistant", final_content)
         self.sessions.save(session)
@@ -367,33 +343,26 @@ class AgentLoop:
         """
         memory = MemoryStore(self.workspace)
 
-        # Handle /new command: clear session and consolidate everything
         if archive_all:
-            old_messages = session.messages  # All messages
-            keep_count = 0  # Clear everything
+            old_messages = session.messages
+            keep_count = 0
             logger.info(f"Memory consolidation (archive_all): {len(session.messages)} total messages archived")
         else:
-            # Normal consolidation: only write files, keep session intact
             keep_count = self.memory_window // 2
-
-            # Check if consolidation is needed
             if len(session.messages) <= keep_count:
                 logger.debug(f"Session {session.key}: No consolidation needed (messages={len(session.messages)}, keep={keep_count})")
                 return
 
-            # Use last_consolidated to avoid re-processing messages
             messages_to_process = len(session.messages) - session.last_consolidated
             if messages_to_process <= 0:
                 logger.debug(f"Session {session.key}: No new messages to consolidate (last_consolidated={session.last_consolidated}, total={len(session.messages)})")
                 return
 
-            # Get messages to consolidate (from last_consolidated to keep_count from end)
             old_messages = session.messages[session.last_consolidated:-keep_count]
             if not old_messages:
                 return
             logger.info(f"Memory consolidation started: {len(session.messages)} total, {len(old_messages)} new to consolidate, {keep_count} keep")
 
-        # Format messages for LLM (include tool names when available)
         lines = []
         for m in old_messages:
             if not m.get("content"):
@@ -436,18 +405,11 @@ Respond with ONLY valid JSON, no markdown fences."""
                 if update != current_memory:
                     memory.write_long_term(update)
 
-            # Update last_consolidated to track what's been processed
             if archive_all:
-                # /new command: reset to 0 after clearing
                 session.last_consolidated = 0
             else:
-                # Normal: mark up to (total - keep_count) as consolidated
                 session.last_consolidated = len(session.messages) - keep_count
-
-            # Key: We do NOT modify session.messages (append-only for cache)
-            # The consolidation is only for human-readable files (MEMORY.md/HISTORY.md)
-            # LLM cache remains intact because the messages list is unchanged
-            logger.info(f"Memory consolidation done: {len(session.messages)} total messages (unchanged), last_consolidated={session.last_consolidated}")
+            logger.info(f"Memory consolidation done: {len(session.messages)} messages, last_consolidated={session.last_consolidated}")
         except Exception as e:
             logger.error(f"Memory consolidation failed: {e}")
 
