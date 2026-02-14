@@ -107,10 +107,9 @@ Only use the 'message' tool when you need to send a message to a specific chat c
 For normal conversation, just respond with text - do not call the message tool.
 
 Always be helpful, accurate, and concise. When using tools:
-1. Explain what you PLAN to do before calling tools (use future tense: "I will execute X")
-2. Wait for tool results before claiming success (use past tense only after receiving results: "I executed X successfully")
-3. Report actual tool outputs, not imagined results
-
+- Explain what you PLAN to do before calling tools (use future tense: "I will execute X")
+- Wait for tool results before claiming success (use past tense only after receiving results: "I executed X successfully")
+- Report actual tool outputs, not imagined results
 When remembering something important, write to {workspace_path}/memory/MEMORY.md
 To recall past events, grep {workspace_path}/memory/HISTORY.md"""
 
