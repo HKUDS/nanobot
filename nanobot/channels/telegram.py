@@ -197,33 +197,51 @@ class TelegramChannel(BaseChannel):
                     logger.info("Telegram polling stopped by user request")
                     break
                 else:
-                    # Unexpected stop, will retry
-                    logger.warning("Telegram polling stopped unexpectedly, will retry...")
-                    await asyncio.sleep(5)
+                    # Unexpected stop, clean up and retry
+                    self._polling_started = False
+                    logger.warning("Telegram polling stopped unexpectedly, cleaning up...")
+
+                    # Clean up the application completely
+                    if self._app:
+                        try:
+                            await self._app.updater.stop()
+                            await self._app.stop()
+                            await self._app.shutdown()
+                        except Exception as cleanup_error:
+                            logger.debug(f"Cleanup error (expected): {cleanup_error}")
+                        self._app = None
+
+                    # Wait longer to ensure old instance is fully released
+                    consecutive_failures += 1
+                    wait_time = min(2 ** consecutive_failures, 60)
+                    logger.info(f"Will retry in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
                 
             except Conflict as e:
                 self._polling_started = False
                 retry_count += 1
                 consecutive_failures += 1
-                
+
                 logger.error(
                     f"Telegram polling conflict (attempt {retry_count}/{max_retries}): {e}"
                 )
-                
-                # Clean up on conflict
+                logger.warning("Another bot instance may be running. Cleaning up completely...")
+
+                # Clean up on conflict - must stop updater first
                 if self._app:
                     try:
+                        await self._app.updater.stop()
                         await self._app.stop()
                         await self._app.shutdown()
-                    except Exception:
-                        pass
+                    except Exception as cleanup_error:
+                        logger.debug(f"Cleanup error (expected): {cleanup_error}")
                     self._app = None
-                
+
                 # Retry with increasing delay
                 if self._running:
                     # Use exponential backoff, but cap at 5 minutes
                     wait_time = min(2 ** consecutive_failures, 300)
-                    
+
                     if retry_count >= max_retries:
                         logger.warning(
                             f"Max retries reached. Entering keep-alive mode with {wait_time}s backoff. "
@@ -231,7 +249,7 @@ class TelegramChannel(BaseChannel):
                         )
                         # Reset retry_count to allow continuous retries
                         retry_count = 0
-                    
+
                     logger.info(f"Retrying in {wait_time}s...")
                     await asyncio.sleep(wait_time)
                     
@@ -239,16 +257,17 @@ class TelegramChannel(BaseChannel):
                 self._polling_started = False
                 consecutive_failures += 1
                 logger.error(f"Telegram error: {type(e).__name__}: {e}")
-                
-                # Clean up
+
+                # Clean up completely
                 if self._app:
                     try:
+                        await self._app.updater.stop()
                         await self._app.stop()
                         await self._app.shutdown()
-                    except Exception:
-                        pass
+                    except Exception as cleanup_error:
+                        logger.debug(f"Cleanup error (expected): {cleanup_error}")
                     self._app = None
-                
+
                 # Enter keep-alive mode with exponential backoff
                 if self._running:
                     wait_time = min(2 ** consecutive_failures, 300)  # Cap at 5 minutes
