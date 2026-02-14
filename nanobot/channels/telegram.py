@@ -178,37 +178,83 @@ class TelegramChannel(BaseChannel):
             await self._app.shutdown()
             self._app = None
     
+    def _split_text(self, text: str, max_length: int) -> list[str]:
+        """Breaks the text into parts, trying to maintain the integrity of the paragraphs."""
+        if len(text) <= max_length:
+            return [text]
+
+        chunks = []
+        # We split paragraphs by double line breaks to preserve formatting.
+        paragraphs = text.split('\n\n')
+        current_chunk = ""
+
+        for para in paragraphs:
+            # If adding the current paragraph does not exceed the limit.
+            if len(current_chunk) + len(para) + 2 <= max_length:
+                current_chunk += ("\n\n" if current_chunk else "") + para
+            else:
+                # If the current chunk is not empty, we save it.
+                if current_chunk:
+                    chunks.append(current_chunk)
+                
+                # If the paragraph itself is longer than the limit, it must be broken forcibly.
+                if len(para) > max_length:
+                    # Breaking up a long paragraph by characters (hard breaking)
+                    for i in range(0, len(para), max_length):
+                        chunks.append(para[i:i+max_length])
+                    current_chunk = ""
+                else:
+                    # Start a new chunk with the current paragraph
+                    current_chunk = para
+
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        return chunks
+
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Telegram."""
+        """Send a message through Telegram, splitting if necessary."""
         if not self._app:
             logger.warning("Telegram bot not running")
             return
-        
-        # Stop typing indicator for this chat
+
         self._stop_typing(msg.chat_id)
-        
+
         try:
-            # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
-            # Convert markdown to Telegram HTML
-            html_content = _markdown_to_telegram_html(msg.content)
-            await self._app.bot.send_message(
-                chat_id=chat_id,
-                text=html_content,
-                parse_mode="HTML"
-            )
         except ValueError:
             logger.error(f"Invalid chat_id: {msg.chat_id}")
-        except Exception as e:
-            # Fallback to plain text if HTML parsing fails
-            logger.warning(f"HTML parse failed, falling back to plain text: {e}")
+            return
+
+        # Maximum message length in Telegram
+        MAX_LENGTH = 4096
+        
+        # If the HTML didn't work (for example, the tag was cut during splitting),
+        # fall back to the normal text for this chunk
+        chunks = self._split_text(msg.content, MAX_LENGTH)
+
+        for chunk in chunks:
             try:
+                # Convert each part to HTML
+                html_content = _markdown_to_telegram_html(chunk)
+                
                 await self._app.bot.send_message(
-                    chat_id=int(msg.chat_id),
-                    text=msg.content
+                    chat_id=chat_id,
+                    text=html_content,
+                    parse_mode="HTML"
                 )
-            except Exception as e2:
-                logger.error(f"Error sending Telegram message: {e2}")
+            except Exception as e:
+                # If the HTML didn't work (for example, the tag was cut during splitting),
+                # fall back to the normal text for this chunk
+                logger.warning(f"Failed to send chunk as HTML, trying plain text: {e}")
+                try:
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=chunk, # We send a clean text of the piece
+                        parse_mode=None # We clearly indicate that there is no markup
+                    )
+                except Exception as e2:
+                    logger.error(f"Error sending Telegram message chunk: {e2}")
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
