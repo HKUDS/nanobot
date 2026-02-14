@@ -23,6 +23,8 @@ try:
         CreateMessageReactionRequestBody,
         Emoji,
         P2ImMessageReceiveV1,
+        P2ImChatAccessEventBotP2pChatEnteredV1,
+        P2ImMessageMessageReadV1,
     )
     FEISHU_AVAILABLE = True
 except ImportError:
@@ -88,6 +90,10 @@ class FeishuChannel(BaseChannel):
             self.config.verification_token or "",
         ).register_p2_im_message_receive_v1(
             self._on_message_sync
+        ).register_p2_im_chat_access_event_bot_p2p_chat_entered_v1(
+            self._on_p2p_chat_entered_sync
+        ).register_p2_im_message_message_read_v1(
+            self._on_message_read_sync
         ).build()
         
         # Create WebSocket client for long connection
@@ -289,6 +295,30 @@ class FeishuChannel(BaseChannel):
         """
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self._on_message(data), self._loop)
+
+    def _on_p2p_chat_entered_sync(self, data: "P2ImChatAccessEventBotP2pChatEnteredV1") -> None:
+        """
+        Sync handler for p2p chat entered event.
+        Just logs the event to avoid "processor not found" errors.
+        """
+        try:
+            event = data.event
+            operator_id = event.operator_ids.open_id if event.operator_ids else "unknown"
+            logger.debug(f"User {operator_id} entered P2P chat with bot")
+        except Exception as e:
+            logger.debug(f"Error handling p2p chat entered event: {e}")
+
+    def _on_message_read_sync(self, data: "P2ImMessageMessageReadV1") -> None:
+        """
+        Sync handler for message read event.
+        Just logs the event to avoid "processor not found" errors.
+        """
+        try:
+            event = data.event
+            reader_id = event.reader.reader_id.open_id if event.reader and event.reader.reader_id else "unknown"
+            logger.debug(f"User {reader_id} read messages: {event.message_id_list}")
+        except Exception as e:
+            logger.debug(f"Error handling message read event: {e}")
     
     async def _on_message(self, data: "P2ImMessageReceiveV1") -> None:
         """Handle incoming message from Feishu."""
