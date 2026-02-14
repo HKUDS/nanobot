@@ -13,6 +13,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
+from nanobot.utils.message import split_telegram_message
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -183,30 +184,44 @@ class TelegramChannel(BaseChannel):
         if not self._app:
             logger.warning("Telegram bot not running")
             return
-        
+
         # Stop typing indicator for this chat
         self._stop_typing(msg.chat_id)
-        
+
         try:
             # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
             # Convert markdown to Telegram HTML
             html_content = _markdown_to_telegram_html(msg.content)
-            await self._app.bot.send_message(
-                chat_id=chat_id,
-                text=html_content,
-                parse_mode="HTML"
-            )
+
+            # Split message if it exceeds Telegram's 4096 character limit
+            chunks = split_telegram_message(html_content, limit=4096)
+
+            for i, chunk in enumerate(chunks):
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=chunk,
+                    parse_mode="HTML"
+                )
+                # Small delay between chunks to avoid rate limiting
+                if i < len(chunks) - 1:
+                    await asyncio.sleep(0.5)
+
         except ValueError:
             logger.error(f"Invalid chat_id: {msg.chat_id}")
         except Exception as e:
             # Fallback to plain text if HTML parsing fails
             logger.warning(f"HTML parse failed, falling back to plain text: {e}")
             try:
-                await self._app.bot.send_message(
-                    chat_id=int(msg.chat_id),
-                    text=msg.content
-                )
+                # Also split plain text if needed
+                plain_chunks = split_telegram_message(msg.content, limit=4096)
+                for i, chunk in enumerate(plain_chunks):
+                    await self._app.bot.send_message(
+                        chat_id=int(msg.chat_id),
+                        text=chunk
+                    )
+                    if i < len(plain_chunks) - 1:
+                        await asyncio.sleep(0.5)
             except Exception as e2:
                 logger.error(f"Error sending Telegram message: {e2}")
     
