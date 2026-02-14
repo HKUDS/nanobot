@@ -236,7 +236,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     # Kimi K2.5 API enforces temperature >= 1.0.
     ProviderSpec(
         name="moonshot",
-        keywords=("moonshot", "kimi"),
+        keywords=("moonshot", "kimi-"),  # Use "kimi-" to avoid matching "xopkimik25"
         env_key="MOONSHOT_API_KEY",
         display_name="Moonshot",
         litellm_prefix="moonshot",          # kimi-k2.5 → moonshot/kimi-k2.5
@@ -315,8 +315,31 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
-)
 
+    # XunFei: XunFei API uses OpenAI-compatible interface
+    ProviderSpec(
+        name="xunfei",
+        keywords=("xunfei",),
+        env_key="OPENAI_API_KEY",  # XunFei uses OpenAI-compatible API
+        display_name="XunFei",
+        litellm_prefix="openai",  # Use openai prefix for OpenAI-compatible API
+        skip_prefixes=("xunfei/", "openai/"),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="xf-yun.com",  # Auto-detect by API base URL
+        default_api_base="",
+        strip_model_prefix=True,  # Strip xunfei/ prefix before adding openai/
+        model_overrides=(
+            ("xopkimik25", {"temperature":0.3}),
+            ("xopglm5", {"temperature":0.3}),
+            ("xminimaxm2", {"temperature":0.3}),
+            ("xopglm47blth2", {"temperature":0.3}),
+            
+            ),
+    ),
+)
 
 # ---------------------------------------------------------------------------
 # Lookup helpers

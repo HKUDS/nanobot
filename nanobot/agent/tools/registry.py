@@ -58,6 +58,9 @@ class ToolRegistry:
             if errors:
                 return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
             return await tool.execute(**params)
+        except TypeError as e:
+            # Handle missing required arguments
+            return f"Error: Invalid parameters for tool '{name}': {str(e)}. Received params: {list(params.keys())}"
         except Exception as e:
             return f"Error executing {name}: {str(e)}"
     

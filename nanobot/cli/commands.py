@@ -293,6 +293,7 @@ def _make_provider(config):
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=config.get_provider_name(),
+        fallback_model=getattr(config.agents.defaults, 'fallback_model', None),
     )
 
 
@@ -864,6 +865,198 @@ def status():
             else:
                 has_key = bool(p.api_key)
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+
+
+@app.command()
+def token():
+    """Show token usage statistics (SQLite-based)."""
+    from nanobot.session.token_store import TokenStore
+    from rich.table import Table
+
+    console.print(f"{__logo__} Token Usage Statistics\n")
+    
+    try:
+        store = TokenStore()
+        usage = store.get_summary()
+        
+        # Format numbers with commas
+        def fmt(n: int) -> str:
+            return f"{n:,}"
+        
+        # Overall statistics table
+        table = Table(show_header=True, header_style="bold magenta", title="Overall")
+        table.add_column("Period", style="cyan")
+        table.add_column("Requests", justify="right")
+        table.add_column("Input Tokens", justify="right")
+        table.add_column("Output Tokens", justify="right")
+        table.add_column("Total Tokens", justify="right")
+        
+        periods = [
+            ("Today", usage["today"]),
+            ("This Week", usage["this_week"]),
+            ("This Month", usage["this_month"]),
+            ("All Time", usage["all_time"]),
+        ]
+        
+        has_data = False
+        for period_name, data in periods:
+            if data["request_count"] > 0:
+                has_data = True
+                table.add_row(
+                    period_name,
+                    fmt(data["request_count"]),
+                    fmt(data["prompt_tokens"]),
+                    fmt(data["completion_tokens"]),
+                    fmt(data["total_tokens"]),
+                )
+        
+        if has_data:
+            console.print(table)
+            console.print()
+            
+            # Model breakdown table for All Time
+            model_usage = usage["all_time"].get("model_usage", {})
+            if model_usage:
+                model_table = Table(show_header=True, header_style="bold green", title="By Model (All Time)")
+                model_table.add_column("Model", style="cyan")
+                model_table.add_column("Requests", justify="right")
+                model_table.add_column("Input Tokens", justify="right")
+                model_table.add_column("Output Tokens", justify="right")
+                model_table.add_column("Total Tokens", justify="right")
+                
+                # Sort by total tokens descending
+                sorted_models = sorted(
+                    model_usage.items(),
+                    key=lambda x: x[1]["total_tokens"],
+                    reverse=True
+                )
+                
+                for model_name, data in sorted_models:
+                    model_table.add_row(
+                        model_name,
+                        fmt(data["request_count"]),
+                        fmt(data["prompt_tokens"]),
+                        fmt(data["completion_tokens"]),
+                        fmt(data["total_tokens"]),
+                    )
+                
+                console.print(model_table)
+            else:
+                console.print("[dim]No model usage data available yet.[/dim]")
+        else:
+            console.print("[dim]No token usage data available yet. Start a conversation to begin tracking.[/dim]")
+        
+    except Exception as e:
+        console.print(f"[red]Error loading token usage: {e}[/red]")
+
+
+@app.command()
+def token_reset(
+    model: str = typer.Option(None, "--model", "-m", help="Reset only this model's usage")
+):
+    """Reset token usage statistics."""
+    from nanobot.session.token_store import TokenStore
+    
+    try:
+        store = TokenStore()
+        deleted = store.reset(model)
+        
+        if model:
+            console.print(f"[green]✓[/green] Reset token usage for model '{model}': {deleted} records deleted")
+        else:
+            console.print(f"[green]✓[/green] Reset all token usage: {deleted} records deleted")
+        
+    except Exception as e:
+        console.print(f"[red]Error resetting token usage: {e}[/red]")
+
+
+# ============================================================================
+# Session Commands
+# ============================================================================
+
+session_app = typer.Typer(help="Session management commands")
+app.add_typer(session_app, name="session")
+
+
+@session_app.command("list")
+def session_list():
+    """List all sessions."""
+    from nanobot.session.manager import SessionManager
+    from pathlib import Path
+    
+    try:
+        manager = SessionManager(Path.home() / ".nanobot" / "workspace")
+        sessions = manager.list_sessions()
+        
+        if not sessions:
+            console.print("[dim]No sessions found.[/dim]")
+            return
+        
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("Session Key", style="cyan")
+        table.add_column("Created", style="green")
+        table.add_column("Updated", style="yellow")
+        
+        for s in sessions:
+            table.add_row(
+                s["key"],
+                s.get("created_at", "N/A")[:19] if s.get("created_at") else "N/A",
+                s.get("updated_at", "N/A")[:19] if s.get("updated_at") else "N/A",
+            )
+        
+        console.print(table)
+        console.print(f"\nTotal: {len(sessions)} sessions")
+        
+    except Exception as e:
+        console.print(f"[red]Error listing sessions: {e}[/red]")
+
+
+@session_app.command("delete")
+def session_delete(
+    session_key: str = typer.Argument(..., help="Session key to delete (e.g., 'feishu:ou_xxx')"),
+):
+    """Delete a session (clears both file and cache)."""
+    from nanobot.session.manager import SessionManager
+    from pathlib import Path
+    
+    try:
+        manager = SessionManager(Path.home() / ".nanobot" / "workspace")
+        
+        # Try to delete
+        deleted = manager.delete(session_key)
+        
+        if deleted:
+            console.print(f"[green]✓[/green] Deleted session: {session_key}")
+        else:
+            console.print(f"[yellow]Session not found: {session_key}[/yellow]")
+            
+    except Exception as e:
+        console.print(f"[red]Error deleting session: {e}[/red]")
+
+
+@session_app.command("clear")
+def session_clear():
+    """Clear all sessions (dangerous!)."""
+    from nanobot.session.manager import SessionManager
+    from pathlib import Path
+    
+    try:
+        manager = SessionManager(Path.home() / ".nanobot" / "workspace")
+        sessions = manager.list_sessions()
+        
+        if not sessions:
+            console.print("[dim]No sessions to clear.[/dim]")
+            return
+        
+        count = 0
+        for s in sessions:
+            if manager.delete(s["key"]):
+                count += 1
+        
+        console.print(f"[green]✓[/green] Cleared {count} sessions")
+        
+    except Exception as e:
+        console.print(f"[red]Error clearing sessions: {e}[/red]")
 
 
 if __name__ == "__main__":

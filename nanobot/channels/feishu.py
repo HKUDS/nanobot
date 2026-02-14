@@ -14,6 +14,9 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import FeishuConfig
 
+if False:  # TYPE_CHECKING
+    from nanobot.session.manager import SessionManager
+
 try:
     import lark_oapi as lark
     from lark_oapi.api.im.v1 import (
@@ -23,6 +26,12 @@ try:
         CreateMessageReactionRequestBody,
         Emoji,
         P2ImMessageReceiveV1,
+    )
+    from lark_oapi.api.im.v1 import (
+        CreateImageRequest,
+        CreateImageRequestBody,
+        CreateFileRequest,
+        CreateFileRequestBody,
     )
     FEISHU_AVAILABLE = True
 except ImportError:
@@ -53,7 +62,11 @@ class FeishuChannel(BaseChannel):
     
     name = "feishu"
     
-    def __init__(self, config: FeishuConfig, bus: MessageBus):
+    def __init__(
+        self,
+        config: FeishuConfig,
+        bus: MessageBus,
+    ):
         super().__init__(config, bus)
         self.config: FeishuConfig = config
         self._client: Any = None
@@ -251,6 +264,11 @@ class FeishuChannel(BaseChannel):
             else:
                 receive_id_type = "open_id"
             
+            # Handle media messages (image, file)
+            if msg.media:
+                await self._send_media(msg, receive_id_type)
+                return
+            
             # Build card with markdown + table support
             elements = self._build_card_elements(msg.content)
             card = {
@@ -281,6 +299,170 @@ class FeishuChannel(BaseChannel):
                 
         except Exception as e:
             logger.error(f"Error sending Feishu message: {e}")
+    
+    async def _send_media(self, msg: OutboundMessage, receive_id_type: str) -> None:
+        """Send media message (image or file) through Feishu."""
+        if not msg.media:
+            return
+        
+        media_type = msg.media.get("type")
+        media_url = msg.media.get("url")
+        media_path = msg.media.get("path")
+        media_content = msg.media.get("content")  # bytes
+        
+        try:
+            if media_type == "image":
+                await self._send_image(msg, receive_id_type, media_path, media_content)
+            elif media_type == "file":
+                await self._send_file(msg, receive_id_type, media_path, media_content, msg.media.get("name"))
+            else:
+                # Fallback to text message with media URL
+                content = f"{msg.content}\n\n[Media: {media_url}]" if msg.content else f"[Media: {media_url}]"
+                await self._send_text(msg, receive_id_type, content)
+        except Exception as e:
+            logger.error(f"Error sending media: {e}")
+            # Fallback to text message
+            await self._send_text(msg, receive_id_type, msg.content or "[Failed to send media]")
+    
+    async def _send_image(self, msg: OutboundMessage, receive_id_type: str,
+                          image_path: str | None, image_content: bytes | None) -> None:
+        """Upload and send an image."""
+        from io import BytesIO
+
+        # Get image as file-like object
+        if image_path:
+            image_file = open(image_path, "rb")
+        elif image_content:
+            image_file = BytesIO(image_content)
+        else:
+            raise ValueError("No image content provided")
+
+        # Upload image using CreateImageRequest - requires IO object
+        request = CreateImageRequest.builder() \
+            .request_body(
+                CreateImageRequestBody.builder()
+                .image_type("message")
+                .image(image_file)
+                .build()
+            ).build()
+
+        try:
+            response = self._client.im.v1.image.create(request)
+
+            if not response.success():
+                raise Exception(f"Failed to upload image: {response.msg}")
+
+            image_key = response.data.image_key
+
+            # Send image message
+            content = json.dumps({"image_key": image_key})
+
+            request = CreateMessageRequest.builder() \
+                .receive_id_type(receive_id_type) \
+                .request_body(
+                    CreateMessageRequestBody.builder()
+                    .receive_id(msg.chat_id)
+                    .msg_type("image")
+                    .content(content)
+                    .build()
+                ).build()
+
+            response = self._client.im.v1.message.create(request)
+
+            if not response.success():
+                raise Exception(f"Failed to send image: {response.msg}")
+
+            logger.debug(f"Image sent to {msg.chat_id}")
+        finally:
+            # Close file if we opened it
+            if image_path:
+                image_file.close()
+    
+    async def _send_file(self, msg: OutboundMessage, receive_id_type: str,
+                         file_path: str | None, file_content: bytes | None,
+                         file_name: str | None) -> None:
+        """Upload and send a file."""
+        from io import BytesIO
+
+        # Get file as file-like object
+        if file_path:
+            file_obj = open(file_path, "rb")
+            if not file_name:
+                file_name = file_path.split("/")[-1]
+        elif file_content:
+            file_obj = BytesIO(file_content)
+        else:
+            raise ValueError("No file content provided")
+
+        file_name = file_name or "file"
+
+        # Upload file using CreateFileRequest - requires IO object
+        request = CreateFileRequest.builder() \
+            .request_body(
+                CreateFileRequestBody.builder()
+                .file_type("stream")
+                .file_name(file_name)
+                .file(file_obj)
+                .build()
+            ).build()
+
+        try:
+            response = self._client.im.v1.file.create(request)
+
+            if not response.success():
+                raise Exception(f"Failed to upload file: {response.msg}")
+
+            file_key = response.data.file_key
+
+            # Send file message
+            content = json.dumps({"file_key": file_key})
+
+            request = CreateMessageRequest.builder() \
+                .receive_id_type(receive_id_type) \
+                .request_body(
+                    CreateMessageRequestBody.builder()
+                    .receive_id(msg.chat_id)
+                    .msg_type("file")
+                    .content(content)
+                    .build()
+                ).build()
+
+            response = self._client.im.v1.message.create(request)
+
+            if not response.success():
+                raise Exception(f"Failed to send file: {response.msg}")
+
+            logger.debug(f"File sent to {msg.chat_id}: {file_name}")
+        finally:
+            # Close file if we opened it
+            if file_path:
+                file_obj.close()
+    
+    async def _send_text(self, msg: OutboundMessage, receive_id_type: str, content: str) -> None:
+        """Send a simple text message."""
+        elements = self._build_card_elements(content)
+        card = {
+            "config": {"wide_screen_mode": True},
+            "elements": elements,
+        }
+        card_content = json.dumps(card, ensure_ascii=False)
+        
+        request = CreateMessageRequest.builder() \
+            .receive_id_type(receive_id_type) \
+            .request_body(
+                CreateMessageRequestBody.builder()
+                .receive_id(msg.chat_id)
+                .msg_type("interactive")
+                .content(card_content)
+                .build()
+            ).build()
+        
+        response = self._client.im.v1.message.create(request)
+        
+        if not response.success():
+            logger.error(f"Failed to send text: {response.msg}")
+        else:
+            logger.debug(f"Text sent to {msg.chat_id}")
     
     def _on_message_sync(self, data: "P2ImMessageReceiveV1") -> None:
         """
@@ -321,29 +503,51 @@ class FeishuChannel(BaseChannel):
             await self._add_reaction(message_id, "THUMBSUP")
             
             # Parse message content
+            media_paths = []
             if msg_type == "text":
                 try:
                     content = json.loads(message.content).get("text", "")
                 except json.JSONDecodeError:
                     content = message.content or ""
+            elif msg_type == "image":
+                # Image message - parse image_key for potential download
+                try:
+                    image_content = json.loads(message.content)
+                    image_key = image_content.get("image_key", "")
+                    content = f"[User sent an image (image_key: {image_key})]"
+                    # Note: To download the image, use GetImageRequest with the image_key
+                except json.JSONDecodeError:
+                    content = "[image]"
+            elif msg_type == "file":
+                # File message - parse file_key
+                try:
+                    file_content = json.loads(message.content)
+                    file_key = file_content.get("file_key", "")
+                    file_name = file_content.get("file_name", "unknown")
+                    content = f"[User sent a file: {file_name} (file_key: {file_key})]"
+                except json.JSONDecodeError:
+                    content = "[file]"
             else:
                 content = MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]")
-            
+
             if not content:
                 return
-            
-            # Forward to message bus
+
+            # Forward to message bus (including /reset command, handled by AgentLoop)
             reply_to = chat_id if chat_type == "group" else sender_id
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=reply_to,
                 content=content,
+                media=media_paths,
                 metadata={
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
                 }
             )
-            
+
         except Exception as e:
             logger.error(f"Error processing Feishu message: {e}")
+
+

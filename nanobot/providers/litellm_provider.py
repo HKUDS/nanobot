@@ -2,7 +2,7 @@
 
 import json
 import os
-from typing import Any
+from typing import Any, Callable
 
 import litellm
 from litellm import acompletion
@@ -27,10 +27,14 @@ class LiteLLMProvider(LLMProvider):
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
+        fallback_model: str | None = None,
+        error_callback: Callable | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
+        self.fallback_model = fallback_model
         self.extra_headers = extra_headers or {}
+        self.error_callback = error_callback
         
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -92,11 +96,19 @@ class LiteLLMProvider(LLMProvider):
     def _apply_model_overrides(self, model: str, kwargs: dict[str, Any]) -> None:
         """Apply model-specific parameter overrides from the registry."""
         model_lower = model.lower()
+        # First check gateway overrides if available
+        if self._gateway:
+            for pattern, overrides in self._gateway.model_overrides:
+                if pattern in model_lower:
+                    kwargs.update(overrides)
+                    return
+        # Then check standard provider overrides
         spec = find_by_model(model)
         if spec:
             for pattern, overrides in spec.model_overrides:
                 if pattern in model_lower:
                     kwargs.update(overrides)
+                    logger.debug(f"Applied standard overrides: {overrides}")
                     return
     
     async def chat(
@@ -148,15 +160,105 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
         
-        try:
-            response = await acompletion(**kwargs)
-            return self._parse_response(response)
-        except Exception as e:
-            # Return error as content for graceful handling
-            return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
-                finish_reason="error",
-            )
+        from loguru import logger
+        
+        max_retries = 2  # Try original model twice (initial + 1 retry)
+        retry_delay = 1  # Initial delay in seconds
+        error_history = []  # Track all errors
+        
+        # Try original model first
+        for attempt in range(max_retries):
+            try:
+                logger.debug(f"Attempt {attempt + 1}/{max_retries} to call LLM: {model}")
+                response = await acompletion(**kwargs)
+                parsed_response = self._parse_response(response)
+                
+                # Add model information to the response content
+                parsed_response = self._add_model_info_to_response(parsed_response, model)
+                
+                # Log the successful attempt with previous errors
+                if error_history:
+                    logger.info(f"LLM call succeeded after {attempt + 1} attempts, but with previous failures")
+                    logger.debug(f"Previous errors: {error_history}")
+                
+                return parsed_response
+            except Exception as e:
+                error_msg = str(e)
+                error_history.append(f"{model} (attempt {attempt + 1}): {error_msg}")
+                logger.warning(f"LLM call failed (attempt {attempt + 1}/{max_retries}): {error_msg}")
+                logger.info(f"Error details: {error_msg}")
+                
+                # Send error notification to client if callback is provided
+                error_notification = f"**{model}** 调用失败 (尝试 {attempt + 1}/{max_retries})\n原因: {error_msg}\n正在进行重试..."
+                await self._send_error_notification(error_notification)
+                
+                # Check if this is the last attempt
+                if attempt == max_retries - 1:
+                    logger.info(f"All attempts failed, checking for fallback model")
+                    break
+                
+                # Wait before retrying
+                logger.info(f"Retrying in {retry_delay} seconds...")
+                await asyncio.sleep(retry_delay)
+        
+        # Try fallback model if original failed
+        logger.info(f"Checking fallback model configuration: self.fallback_model = {self.fallback_model}")
+        if self.fallback_model:
+            logger.info(f"Fallback model is configured: {self.fallback_model}")
+            # Resolve fallback model name to compare with current model
+            fallback_model_resolved = self._resolve_model(self.fallback_model)
+            logger.info(f"Resolved fallback model: {fallback_model_resolved}")
+            
+            if model != fallback_model_resolved:
+                logger.info(f"Switching to fallback model: {self.fallback_model} (resolved: {fallback_model_resolved}, current: {model})")
+                
+                # Create fallback kwargs with the same parameters but different model
+                fallback_kwargs = kwargs.copy()
+                fallback_kwargs["model"] = fallback_model_resolved
+                
+                # Apply model overrides for fallback model
+                self._apply_model_overrides(fallback_model_resolved, fallback_kwargs)
+                
+                try:
+                    response = await acompletion(**fallback_kwargs)
+                    parsed_response = self._parse_response(response)
+                    
+                    # Add model information to the response content
+                    parsed_response = self._add_model_info_to_response(parsed_response, fallback_model_resolved)
+                    
+                    # Log the successful fallback attempt
+                    if error_history:
+                        logger.info(f"Fallback model call succeeded after previous failures")
+                        logger.debug(f"Previous errors: {error_history}")
+                    
+                    return parsed_response
+                except Exception as e:
+                    fallback_error = str(e)
+                    error_history.append(f"{fallback_model_resolved} (fallback): {fallback_error}")
+                    logger.error(f"Fallback model call failed: {fallback_error}")
+                    logger.info(f"Fallback error details: {fallback_error}")
+                    
+                    # Send error notification to client if callback is provided
+                    error_notification = f"**{fallback_model_resolved}** (备用模型) 调用失败\n原因: {fallback_error}\n所有尝试都已失败，将返回错误信息..."
+                    await self._send_error_notification(error_notification)
+        
+        # All attempts failed
+        logger.error(f"LLM call failed after all attempts")
+        
+        # Generate detailed error message
+        error_lines = []
+        for i, error_entry in enumerate(error_history):
+            error_lines.append(f"{error_entry}")
+        
+        detailed_error_msg = "\n\n".join(error_lines)
+        
+        # Format the final error message with clear sections
+        final_error_msg = f"LLM调用失败:\n\n{detailed_error_msg}"
+        
+        return LLMResponse(
+            content=final_error_msg,
+            finish_reason="error",
+        )
     
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
@@ -190,14 +292,39 @@ class LiteLLMProvider(LLMProvider):
         
         reasoning_content = getattr(message, "reasoning_content", None)
         
+        # Handle case where content might be a dict instead of string
+        content = message.content
+        if isinstance(content, dict):
+            content = str(content)
+        
         return LLMResponse(
-            content=message.content,
+            content=content,
             tool_calls=tool_calls,
             finish_reason=choice.finish_reason or "stop",
             usage=usage,
             reasoning_content=reasoning_content,
         )
     
+    def _add_model_info_to_response(self, response: LLMResponse, model: str) -> LLMResponse:
+        """Add model information to the response content."""
+        if response.content:
+            # Extract just the model name without prefix
+            model_name = model.split("/")[-1] if "/" in model else model
+            response.content = f"[{model_name}]:\n{response.content}"
+        return response
+
+    async def _send_error_notification(self, notification: str) -> None:
+        """Send error notification to client if callback is provided."""
+        if self.error_callback:
+            try:
+                import asyncio
+                if asyncio.iscoroutinefunction(self.error_callback):
+                    await self.error_callback(notification)
+                else:
+                    self.error_callback(notification)
+            except Exception as callback_error:
+                logger.warning(f"Error sending error notification: {callback_error}")
+
     def get_default_model(self) -> str:
         """Get the default model."""
         return self.default_model

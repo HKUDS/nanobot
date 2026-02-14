@@ -159,10 +159,12 @@ class AgentDefaults(BaseModel):
     """Default agent configuration."""
     workspace: str = "~/.nanobot/workspace"
     model: str = "anthropic/claude-opus-4-5"
+    fallback_model: str | None = None  # Fallback model if primary fails
     max_tokens: int = 8192
     temperature: float = 0.7
     max_tool_iterations: int = 20
-    memory_window: int = 50
+    memory_window: int = 50  # Max messages before memory consolidation
+    max_window_context: int = 100000  # Max context window in tokens before compression
 
 
 class AgentsConfig(BaseModel):
@@ -192,6 +194,7 @@ class ProvidersConfig(BaseModel):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
+    xunfei: ProviderConfig = Field(default_factory=ProviderConfig)  # XunFei API gateway
 
 
 class GatewayConfig(BaseModel):
