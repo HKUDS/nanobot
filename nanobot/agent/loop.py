@@ -26,6 +26,20 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import Session, SessionManager
 
 
+def _strip_thinking_blocks(text: str) -> str:
+    """Remove thinking/reasoning blocks from model output.
+
+    Handles two cases:
+    - ``<think>...</think>`` tags (e.g. DeepSeek-R1)
+    - A bare ``</think>`` prefix with no opening tag (e.g. GLM models)
+    """
+    # First, strip matched <think>…</think> blocks (DOTALL so . matches newlines)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    # Then, strip a bare </think> that may appear at the start (GLM models)
+    text = re.sub(r"^.*?</think>", "", text, flags=re.DOTALL)
+    return text.strip()
+
+
 class AgentLoop:
     """
     The agent loop is the core processing engine.
@@ -342,6 +356,11 @@ class AgentLoop:
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
+        
+        # Strip thinking blocks from the response before sending to the user.
+        # Handles <think>...</think> (e.g. DeepSeek-R1) and bare </think>
+        # prefixes (e.g. GLM models that omit the opening tag).
+        final_content = _strip_thinking_blocks(final_content)
         
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
