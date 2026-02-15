@@ -45,12 +45,12 @@ exec(command: str, working_dir: str = None) -> str
 ## Web Access
 
 ### web_search
-Search the web using Brave Search API.
+Search the web using DuckDuckGo (default, no API key required). Optionally use Brave Search by setting `BRAVE_API_KEY`.
 ```
 web_search(query: str, count: int = 5) -> str
 ```
 
-Returns search results with titles, URLs, and snippets. Requires `tools.web.search.apiKey` in config.
+Returns search results with titles, URLs, and snippets.
 
 ### web_fetch
 Fetch and extract main content from a URL.
