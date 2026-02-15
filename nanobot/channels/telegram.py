@@ -211,10 +211,14 @@ class TelegramChannel(BaseChannel):
         
         while self._running:
             try:
-                # Build the application
+                # Build the application with connection pool timeout
                 self._app = (
                     Application.builder()
                     .token(self.config.token)
+                    .connect_timeout(30.0)
+                    .read_timeout(30.0)
+                    .write_timeout(30.0)
+                    .pool_timeout(30.0)
                     .build()
                 )
                 
@@ -236,6 +240,13 @@ class TelegramChannel(BaseChannel):
                 # Initialize and start
                 await self._app.initialize()
                 await self._app.start()
+
+                # Clear any existing webhooks or connections
+                try:
+                    await self._app.bot.delete_webhook(drop_pending_updates=True)
+                    logger.debug("Cleared any existing webhooks")
+                except Exception as webhook_error:
+                    logger.debug(f"Webhook cleanup: {webhook_error}")
 
                 # Get bot info
                 bot_info = await self._app.bot.get_me()
@@ -294,7 +305,12 @@ class TelegramChannel(BaseChannel):
                 logger.error(
                     f"Telegram polling conflict (attempt {retry_count}/{max_retries}): {e}"
                 )
-                logger.warning("Another bot instance may be running. Cleaning up completely...")
+                logger.warning(
+                    "Another bot instance detected. This usually means:\n"
+                    "  1. A previous instance didn't shut down cleanly\n"
+                    "  2. The bot is running elsewhere (another server/container)\n"
+                    "  3. Telegram server hasn't released the old connection yet"
+                )
 
                 # Clean up on conflict - must stop updater first
                 if self._app:
@@ -306,20 +322,20 @@ class TelegramChannel(BaseChannel):
                         logger.debug(f"Cleanup error (expected): {cleanup_error}")
                     self._app = None
 
-                # Retry with increasing delay
+                # Retry with increasing delay - conflicts need longer waits
                 if self._running:
-                    # Use exponential backoff, but cap at 5 minutes
-                    wait_time = min(2 ** consecutive_failures, 300)
+                    # For conflicts, use longer backoff (start at 30s, max 10 minutes)
+                    base_wait = 30
+                    wait_time = min(base_wait * (2 ** (consecutive_failures - 1)), 600)
 
                     if retry_count >= max_retries:
                         logger.warning(
-                            f"Max retries reached. Entering keep-alive mode with {wait_time}s backoff. "
-                            "Will continue attempting to reconnect..."
+                            f"Max retries reached. Will keep trying every {wait_time}s until the conflict resolves..."
                         )
                         # Reset retry_count to allow continuous retries
                         retry_count = 0
 
-                    logger.info(f"Retrying in {wait_time}s...")
+                    logger.info(f"Waiting {wait_time}s for old connection to timeout...")
                     await asyncio.sleep(wait_time)
                     
             except Exception as e:
