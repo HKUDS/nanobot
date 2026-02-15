@@ -55,6 +55,9 @@ class LiteLLMProvider(LLMProvider):
         spec = self._gateway or find_by_model(model)
         if not spec:
             return
+        if not spec.env_key:
+            # OAuth/provider-only specs (for example: openai_codex)
+            return
 
         # Gateway/local overrides existing env; standard provider doesn't
         if self._gateway:
