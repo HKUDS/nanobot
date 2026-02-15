@@ -592,6 +592,15 @@ def channels_status():
         slack_config
     )
 
+    # Signal
+    sg = config.channels.signal
+    sg_config = f"phone: {sg.phone_number[:6]}..." if sg.phone_number else "[dim]not configured[/dim]"
+    table.add_row(
+        "Signal",
+        "✓" if sg.enabled else "✗",
+        sg_config
+    )
+
     console.print(table)
 
 

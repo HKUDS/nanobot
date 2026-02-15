@@ -78,3 +78,29 @@ def parse_session_key(key: str) -> tuple[str, str]:
     if len(parts) != 2:
         raise ValueError(f"Invalid session key: {key}")
     return parts[0], parts[1]
+
+
+def get_extension_from_mime(mime_type: str) -> str:
+    """Get file extension from MIME type.
+
+    Args:
+        mime_type: The MIME type (e.g., "image/jpeg")
+
+    Returns:
+        The file extension including the dot (e.g., ".jpg"), or empty string if unknown.
+    """
+    mime_map = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+        "audio/mpeg": ".mp3",
+        "audio/ogg": ".ogg",
+        "audio/aac": ".aac",
+        "audio/mp4": ".m4a",
+        "video/mp4": ".mp4",
+        "video/webm": ".webm",
+        "text/plain": ".txt",
+        "application/pdf": ".pdf",
+    }
+    return mime_map.get(mime_type, "")
