@@ -1,6 +1,7 @@
 """Session management for conversation history."""
 
 import hashlib
+import shutil
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -64,6 +65,7 @@ class SessionManager:
         self.workspace = workspace
         ws_hash = hashlib.md5(str(workspace.resolve()).encode()).hexdigest()[:8]
         self.sessions_dir = ensure_dir(Path.home() / ".nanobot" / "sessions" / ws_hash)
+        self._legacy_sessions_dir = Path.home() / ".nanobot" / "sessions"  # For backward compatibility
         self._cache: dict[str, Session] = {}
     
     def _get_session_path(self, key: str) -> Path:
@@ -94,6 +96,13 @@ class SessionManager:
     def _load(self, key: str) -> Session | None:
         """Load a session from disk."""
         path = self._get_session_path(key)
+
+        # Backward compatibility: migrate from legacy path if exists
+        if not path.exists():
+            legacy_path = self._legacy_sessions_dir / path.name
+            if legacy_path.exists():
+                logger.info(f"Migrating session {key} from legacy path to workspace-isolated path")
+                shutil.move(str(legacy_path), str(path))
 
         if not path.exists():
             return None
