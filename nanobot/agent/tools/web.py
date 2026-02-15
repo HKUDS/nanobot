@@ -54,12 +54,13 @@ class WebSearchTool(Tool):
     """Search web using DuckDuckGo (default) with optional Brave API support."""
 
     name = "web_search"
-    description = "Search web. Returns titles, URLs, and snippets. Uses DuckDuckGo by default, with optional Brave API support."
+    description = "Search web using multiple engines. Returns titles, URLs, and snippets. Engine options: 'ddg' (DuckDuckGo - general search, default), 'wikipedia' (encyclopedic/factual information), 'searxng' (aggregated search), 'brave' (privacy-focused, requires API key), 'combine' (all engines)."
     parameters = {
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "Search query"},
-            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10}
+            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10},
+            "engine": {"type": "string", "description": "Search engine: 'ddg' (default, general web), 'wikipedia' (factual/encyclopedic), 'searxng' (aggregated), 'brave' (requires API key), 'combine' (all engines)", "enum": ["ddg", "wikipedia", "searxng", "brave", "combine"]}
         },
         "required": ["query"]
     }
@@ -205,29 +206,33 @@ class WebSearchTool(Tool):
             return await self._search_wikipedia(query, n)
         return None
 
-    async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
+    async def execute(self, query: str, count: int | None = None, engine: str | None = None, **kwargs: Any) -> str:
         n = min(max(count or self.max_results, 1), 10)
 
+        # Use engine from parameter if provided, otherwise use default
+        search_engine = (engine or self.engine).lower()
+
         # Combine mode: search all engines
-        if self.engine == "combine":
-            results = {}
+        if search_engine == "combine":
+            engine_results = {}
             for engine in ["ddg", "searxng", "wikipedia", "brave"]:
                 engine_results[engine] = await self._search_engine(engine, query, n)
-                if any(engine_results.values()):
-                    combined = []
-                    for eng, res in engine_results.items():
-                        combined.extend(res or [])
-                    return "\n".join(combined)
-                return "Error: All search engines failed. Try installing duckduckgo-search or check your internet connection."
+
+            if any(engine_results.values()):
+                combined = []
+                for eng, res in engine_results.items():
+                    combined.extend(res or [])
+                return "\n".join(combined)
+            return "Error: All search engines failed. Try installing duckduckgo-search or check your internet connection."
 
         # Single engine mode
-        result = await self._search_engine(self.engine, query, n)
+        result = await self._search_engine(search_engine, query, n)
 
         if result:
             return result
-        elif self.engine == "brave":
+        elif search_engine == "brave":
             return "Error: Brave search failed. Check your API key."
-        return f"Error: {self.engine} search failed. Try installing duckduckgo-search or check your internet connection."
+        return f"Error: {search_engine} search failed. Try installing duckduckgo-search or check your internet connection."
 
 
 class WebFetchTool(Tool):
