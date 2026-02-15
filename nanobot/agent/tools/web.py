@@ -18,78 +18,37 @@ MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
 
 class DuckDuckGoSearchProvider:
     """DuckDuckGo HTML search provider (fallback)."""
+    
+    _link_re = re.compile(r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>', re.I)
+    _snippet_re = re.compile(r'<a[^>]*class="result__snippet[^"]*"[^>]*>([\s\S]*?)</a>', re.I)
 
     async def search(self, query: str, count: int) -> str:
-        """Search using DuckDuckGo HTML interface."""
-        search_url = f"https://html.duckduckgo.com/html/?q={quote(query)}"
-
         try:
             async with httpx.AsyncClient() as client:
                 r = await client.get(
-                    search_url,
+                    f"https://html.duckduckgo.com/html/?q={quote(query)}",
                     headers={"User-Agent": USER_AGENT},
                     timeout=10.0
                 )
                 r.raise_for_status()
-
-            return self._extract_results(r.text, count, query)
+            
+            # Extract links and snippets
+            links = self._link_re.findall(r.text)[:count]
+            snippets = self._snippet_re.findall(r.text)[:count]
+            
+            if not links:
+                return f"No results found. Query: {query}"
+            
+            lines = [f"Results for: {query} (via DuckDuckGo)"]
+            for i, (url, title) in enumerate(links, 1):
+                lines.append(f"{i}. {title.strip()}\n   {url}")
+                if i <= len(snippets):
+                    snippet = re.sub(r'<[^>]+>', '', snippets[i-1]).strip()
+                    if snippet:
+                        lines.append(f"   {snippet}")
+            return "\n".join(lines)
         except Exception as e:
             return f"Error: {e}"
-
-    def _extract_results(self, html: str, count: int, query: str) -> str:
-        """Extract results from DuckDuckGo HTML."""
-        # Match both href and title in one regex
-        link_re = re.compile(
-            r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>',
-            re.IGNORECASE
-        )
-        link_matches = link_re.findall(html)
-        
-        # Also try data-url for redirected URLs
-        data_url_re = re.compile(r'data-url="([^"]+)"')
-        data_urls = data_url_re.findall(html)
-        
-        # Build results
-        results = []
-        for i, match in enumerate(link_matches[:count + 5]):
-            # Prefer href, fallback to data-url
-            url = match[0] if match[0] else (data_urls[i] if i < len(data_urls) else "")
-            title = match[1].strip()
-            if url:
-                results.append((url, title))
-        
-        # Also try to extract snippets
-        snippet_re = re.compile(r'<a[^>]*class="result__snippet[^"]*"[^>]*>([\s\S]*?)</a>', re.IGNORECASE)
-        snippet_matches = snippet_re.findall(html, count + 5)
-
-        if not results:
-            return f"No results found. Query: {query}"
-
-        lines = [f"Results for: {query} (via DuckDuckGo)"]
-        max_items = min(len(results), count)
-
-        for i in range(max_items):
-            url = results[i][0]
-            title = results[i][1]
-
-            # Decode URL if needed (uddg= param)
-            if 'uddg=' in url:
-                try:
-                    idx = url.find('uddg=') + 5
-                    url = url[idx:]
-                except Exception:
-                    pass
-
-            lines.append(f"{i + 1}. {title}")
-            lines.append(f"   {url}")
-
-            # Add snippet if available
-            if i < len(snippet_matches):
-                snippet = re.sub(r'<[^>]+>', '', snippet_matches[i]).strip()
-                if snippet:
-                    lines.append(f"   {snippet}")
-
-        return "\n".join(lines)
 
 
 def _strip_tags(text: str) -> str:
