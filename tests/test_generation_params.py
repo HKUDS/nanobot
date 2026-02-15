@@ -6,9 +6,9 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.agent.subagent import SubagentManager
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults
-from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.providers.litellm_provider import LiteLLMProvider
+from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 from nanobot.session.manager import Session
 
 

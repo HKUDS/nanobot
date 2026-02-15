@@ -6,7 +6,7 @@ import json
 import os
 import re
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import httpx
@@ -14,6 +14,9 @@ from ddgs import DDGS
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import WebSearchConfig
 
 # Shared constants
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
@@ -77,7 +80,7 @@ class WebSearchTool(Tool):
 
     def __init__(
         self,
-        config: "WebSearchConfig | None" = None,
+        config: WebSearchConfig | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         ddgs_factory: Callable[[], DDGS] | None = None,
     ):
@@ -222,10 +225,21 @@ class WebFetchTool(Tool):
     def __init__(self, max_chars: int = 50000):
         self.max_chars = max_chars
 
-    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
+    async def execute(
+        self,
+        url: str,
+        extract_mode: str = "markdown",
+        max_chars: int | None = None,
+        **kwargs: Any,
+    ) -> str:
         from readability import Document
 
-        max_chars = maxChars or self.max_chars
+        if isinstance(kwargs.get("extractMode"), str):
+            extract_mode = kwargs["extractMode"]
+        if isinstance(kwargs.get("maxChars"), int):
+            max_chars = kwargs["maxChars"]
+
+        max_chars = max_chars or self.max_chars
 
         # Validate URL before fetching
         is_valid, error_msg = _validate_url(url)
@@ -249,7 +263,11 @@ class WebFetchTool(Tool):
             # HTML
             elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
                 doc = Document(r.text)
-                content = self._to_markdown(doc.summary()) if extractMode == "markdown" else _strip_tags(doc.summary())
+                content = (
+                    self._to_markdown(doc.summary())
+                    if extract_mode == "markdown"
+                    else _strip_tags(doc.summary())
+                )
                 text = f"# {doc.title()}\n\n{content}" if doc.title() else content
                 extractor = "readability"
             else:

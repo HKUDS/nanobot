@@ -1,7 +1,8 @@
-import httpx
-import pytest
 from collections.abc import Callable
 from typing import Literal
+
+import httpx
+import pytest
 
 from nanobot.agent.tools.web import WebSearchTool
 from nanobot.config.schema import WebSearchConfig

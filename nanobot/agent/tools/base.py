@@ -7,7 +7,7 @@ from typing import Any
 class Tool(ABC):
     """
     Abstract base class for agent tools.
-    
+
     Tools are capabilities that the agent can use to interact with
     the environment, such as reading files, executing commands, etc.
     """
@@ -43,10 +43,10 @@ class Tool(ABC):
     async def execute(self, **kwargs: Any) -> str:
         """
         Execute the tool with given parameters.
-        
+
         Args:
             **kwargs: Tool-specific parameters.
-        
+
         Returns:
             String result of the tool execution.
         """

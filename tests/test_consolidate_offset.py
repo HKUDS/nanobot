@@ -1,7 +1,9 @@
 """Test session management with cache-friendly message handling."""
 
-import pytest
 from pathlib import Path
+
+import pytest
+
 from nanobot.session.manager import Session, SessionManager
 
 # Test constants

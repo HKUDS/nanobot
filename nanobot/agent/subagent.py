@@ -4,7 +4,7 @@ import asyncio
 import json
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -21,6 +21,9 @@ from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
 
 class SubagentManager:
@@ -40,8 +43,8 @@ class SubagentManager:
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
-        web_search_config: "WebSearchConfig | None" = None,
-        exec_config: "ExecToolConfig | None" = None,
+        web_search_config: WebSearchConfig | None = None,
+        exec_config: ExecToolConfig | None = None,
         restrict_to_workspace: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig

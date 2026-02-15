@@ -2,7 +2,6 @@ import pytest
 
 from nanobot.agent.tools.shell import ExecTool
 
-
 BLOCKED_COMMANDS = [
     "mkfs.ext4 /dev/sda",
     "sudo mkfs.ext4 /dev/sda",

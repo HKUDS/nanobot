@@ -1,8 +1,8 @@
 from typing import Any
 
-from nanobot.agent.tools.web import WebSearchTool
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.web import WebSearchTool
 from nanobot.config.schema import WebSearchConfig
 
 

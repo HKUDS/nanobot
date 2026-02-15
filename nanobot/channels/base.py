@@ -12,7 +12,7 @@ from nanobot.bus.queue import MessageBus
 class BaseChannel(ABC):
     """
     Abstract base class for chat channel implementations.
-    
+
     Each channel (Telegram, Discord, etc.) should implement this interface
     to integrate with the nanobot message bus.
     """
@@ -22,7 +22,7 @@ class BaseChannel(ABC):
     def __init__(self, config: Any, bus: MessageBus):
         """
         Initialize the channel.
-        
+
         Args:
             config: Channel-specific configuration.
             bus: The message bus for communication.
@@ -35,7 +35,7 @@ class BaseChannel(ABC):
     async def start(self) -> None:
         """
         Start the channel and begin listening for messages.
-        
+
         This should be a long-running async task that:
         1. Connects to the chat platform
         2. Listens for incoming messages
@@ -52,7 +52,7 @@ class BaseChannel(ABC):
     async def send(self, msg: OutboundMessage) -> None:
         """
         Send a message through this channel.
-        
+
         Args:
             msg: The message to send.
         """
@@ -61,10 +61,10 @@ class BaseChannel(ABC):
     def is_allowed(self, sender_id: str) -> bool:
         """
         Check if a sender is allowed to use this bot.
-        
+
         Args:
             sender_id: The sender's identifier.
-        
+
         Returns:
             True if allowed, False otherwise.
         """
@@ -93,9 +93,9 @@ class BaseChannel(ABC):
     ) -> None:
         """
         Handle an incoming message from the chat platform.
-        
+
         This method checks permissions and forwards to the bus.
-        
+
         Args:
             sender_id: The sender's identifier.
             chat_id: The chat/channel identifier.

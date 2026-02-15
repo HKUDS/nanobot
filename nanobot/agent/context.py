@@ -13,7 +13,7 @@ from nanobot.agent.skills import SkillsLoader
 class ContextBuilder:
     """
     Builds the context (system prompt + messages) for the agent.
-    
+
     Assembles bootstrap files, memory, skills, and conversation history
     into a coherent prompt for the LLM.
     """
@@ -28,10 +28,10 @@ class ContextBuilder:
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
-        
+
         Args:
             skill_names: Optional list of skills to include.
-        
+
         Returns:
             Complete system prompt.
         """
@@ -191,13 +191,13 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
     ) -> list[dict[str, Any]]:
         """
         Add a tool result to the message list.
-        
+
         Args:
             messages: Current message list.
             tool_call_id: ID of the tool call.
             tool_name: Name of the tool.
             result: Tool execution result.
-        
+
         Returns:
             Updated message list.
         """
@@ -218,13 +218,13 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
     ) -> list[dict[str, Any]]:
         """
         Add an assistant message to the message list.
-        
+
         Args:
             messages: Current message list.
             content: Message content.
             tool_calls: Optional tool calls.
             reasoning_content: Thinking output (Kimi, DeepSeek-R1, etc.).
-        
+
         Returns:
             Updated message list.
         """

@@ -38,7 +38,7 @@ def _is_heartbeat_empty(content: str | None) -> bool:
 class HeartbeatService:
     """
     Periodic heartbeat service that wakes the agent to check for tasks.
-    
+
     The agent reads HEARTBEAT.md from the workspace and executes any
     tasks listed there. If nothing needs attention, it replies HEARTBEAT_OK.
     """

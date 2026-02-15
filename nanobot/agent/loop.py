@@ -4,6 +4,7 @@ import asyncio
 import json
 from contextlib import AsyncExitStack
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import json_repair
 from loguru import logger
@@ -29,6 +30,10 @@ from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
+if TYPE_CHECKING:
+    from nanobot.config.schema import ExecToolConfig, WebSearchConfig
+    from nanobot.cron.service import CronService
+
 
 class AgentLoop:
     """
@@ -52,9 +57,9 @@ class AgentLoop:
         temperature: float = 0.7,
         max_tokens: int = 4096,
         memory_window: int = 50,
-        web_search_config: "WebSearchConfig | None" = None,
-        exec_config: "ExecToolConfig | None" = None,
-        cron_service: "CronService | None" = None,
+        web_search_config: WebSearchConfig | None = None,
+        exec_config: ExecToolConfig | None = None,
+        cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,

@@ -14,7 +14,7 @@ from nanobot.providers.registry import find_by_model, find_gateway
 class LiteLLMProvider(LLMProvider):
     """
     LLM provider using LiteLLM for multi-provider support.
-    
+
     Supports OpenRouter, Anthropic, OpenAI, Gemini, MiniMax, and many other providers through
     a unified interface.  Provider-specific logic is driven by the registry
     (see providers/registry.py) — no if-elif chains needed here.
@@ -112,14 +112,14 @@ class LiteLLMProvider(LLMProvider):
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
-        
+
         Args:
             messages: List of message dicts with 'role' and 'content'.
             tools: Optional list of tool definitions in OpenAI format.
             model: Model identifier (e.g., 'anthropic/claude-sonnet-4-5').
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
-        
+
         Returns:
             LLMResponse with content and/or tool calls.
         """

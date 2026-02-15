@@ -8,7 +8,7 @@ from nanobot.agent.tools.base import Tool
 class ToolRegistry:
     """
     Registry for agent tools.
-    
+
     Allows dynamic registration and execution of tools.
     """
 
@@ -38,14 +38,14 @@ class ToolRegistry:
     async def execute(self, name: str, params: dict[str, Any]) -> str:
         """
         Execute a tool by name with given parameters.
-        
+
         Args:
             name: Tool name.
             params: Tool parameters.
-        
+
         Returns:
             Tool execution result as string.
-        
+
         Raises:
             KeyError: If tool not found.
         """

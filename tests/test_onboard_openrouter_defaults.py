@@ -1,3 +1,5 @@
+import pytest
+
 from nanobot.cli.commands import (
     OPENROUTER_DEFAULT_EXTRA_HEADERS,
     _make_provider,
@@ -5,7 +7,6 @@ from nanobot.cli.commands import (
     _seed_openrouter_attribution_headers,
 )
 from nanobot.config.schema import Config
-import pytest
 
 
 def test_do_not_override_intentionally_empty_openrouter_headers() -> None:
