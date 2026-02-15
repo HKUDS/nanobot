@@ -109,14 +109,22 @@ nanobot onboard
 
 **2. Configure** (`~/.nanobot/config.json`)
 
-For OpenRouter - recommended for global users:
+Add or merge these **two parts** into your config (other options have defaults).
+
+*Set your API key* (e.g. OpenRouter, recommended for global users):
 ```json
 {
   "providers": {
     "openrouter": {
       "apiKey": "sk-or-v1-xxx"
     }
-  },
+  }
+}
+```
+
+*Set your model*:
+```json
+{
   "agents": {
     "defaults": {
       "model": "anthropic/claude-opus-4-5"
@@ -128,47 +136,10 @@ For OpenRouter - recommended for global users:
 **3. Chat**
 
 ```bash
-nanobot agent -m "What is 2+2?"
+nanobot agent
 ```
 
 That's it! You have a working AI assistant in 2 minutes.
-
-## 🖥️ Local Models (vLLM)
-
-Run nanobot with your own local models using vLLM or any OpenAI-compatible server.
-
-**1. Start your vLLM server**
-
-```bash
-vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
-```
-
-**2. Configure** (`~/.nanobot/config.json`)
-
-```json
-{
-  "providers": {
-    "vllm": {
-      "apiKey": "dummy",
-      "apiBase": "http://localhost:8000/v1"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": "meta-llama/Llama-3.1-8B-Instruct"
-    }
-  }
-}
-```
-
-**3. Chat**
-
-```bash
-nanobot agent -m "Hello from my local LLM!"
-```
-
-> [!TIP]
-> The `apiKey` can be any non-empty string for local servers that don't require authentication.
 
 ## 💬 Chat Apps
 
@@ -641,6 +612,43 @@ If your provider is not listed above but exposes an **OpenAI-compatible API** (e
 </details>
 
 <details>
+<summary><b>vLLM (local / OpenAI-compatible)</b></summary>
+
+Run your own model with vLLM or any OpenAI-compatible server, then add to config:
+
+**1. Start the server** (example):
+```bash
+vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
+```
+
+**2. Add to config** (partial — merge into `~/.nanobot/config.json`):
+
+*Provider (key can be any non-empty string for local):*
+```json
+{
+  "providers": {
+    "vllm": {
+      "apiKey": "dummy",
+      "apiBase": "http://localhost:8000/v1"
+    }
+  }
+}
+```
+
+*Model:*
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "meta-llama/Llama-3.1-8B-Instruct"
+    }
+  }
+}
+```
+
+</details>
+
+<details>
 <summary><b>Adding a New Provider (Developer Guide)</b></summary>
 
 nanobot uses a **Provider Registry** (`nanobot/providers/registry.py`) as the single source of truth.
@@ -721,6 +729,7 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 ### Security
 
+> [!TIP]
 > For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
 
 | Option | Default | Description |
@@ -815,7 +824,6 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 
-- [x] **Voice Transcription** — Support for Groq Whisper (Issue #13)
 - [ ] **Multi-modal** — See and hear (images, voice, video)
 - [ ] **Long-term memory** — Never forget important context
 - [ ] **Better reasoning** — Multi-step planning and reflection
