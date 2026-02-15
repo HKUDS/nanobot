@@ -70,6 +70,7 @@ cd nanobot
 pip install -e .
 ```
 >pip install -e . --break-system-packages   kip
+
 **Install with [uv](https://github.com/astral-sh/uv)** (stable, fast)
 
 ```bash
