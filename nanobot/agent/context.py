@@ -49,6 +49,11 @@ class ContextBuilder:
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
+
+        # Knowledge base index
+        knowledge_index = self._load_knowledge_index()
+        if knowledge_index:
+            parts.append(f"# Knowledge Base\n\n{knowledge_index}")
         
         # Skills - progressive loading
         # 1. Always-loaded skills: include full content
@@ -109,6 +114,13 @@ Always be helpful, accurate, and concise. When using tools, think step by step: 
 When remembering something important, write to {workspace_path}/memory/MEMORY.md
 To recall past events, grep {workspace_path}/memory/HISTORY.md"""
     
+    def _load_knowledge_index(self) -> str:
+        """Load the knowledge base index if it exists."""
+        index_path = self.workspace / "knowledge" / "INDEX.md"
+        if index_path.exists():
+            return index_path.read_text(encoding="utf-8")
+        return ""
+
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
