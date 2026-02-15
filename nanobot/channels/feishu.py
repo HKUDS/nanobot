@@ -39,6 +39,53 @@ MSG_TYPE_MAP = {
 }
 
 
+def _extract_post_text(content_json: dict) -> str:
+    """Extract plain text from Feishu post (rich text) message content.
+    
+    Supports two formats:
+    1. Direct format: {"title": "...", "content": [...]}
+    2. Localized format: {"zh_cn": {"title": "...", "content": [...]}}
+    """
+    def extract_from_lang(lang_content: dict) -> str | None:
+        if not isinstance(lang_content, dict):
+            return None
+        title = lang_content.get("title", "")
+        content_blocks = lang_content.get("content", [])
+        if not isinstance(content_blocks, list):
+            return None
+        text_parts = []
+        if title:
+            text_parts.append(title)
+        for block in content_blocks:
+            if not isinstance(block, list):
+                continue
+            for element in block:
+                if isinstance(element, dict):
+                    tag = element.get("tag")
+                    if tag == "text":
+                        text_parts.append(element.get("text", ""))
+                    elif tag == "a":
+                        text_parts.append(element.get("text", ""))
+                    elif tag == "at":
+                        text_parts.append(f"@{element.get('user_name', 'user')}")
+        return " ".join(text_parts).strip() if text_parts else None
+    
+    # Try direct format first
+    if "content" in content_json:
+        result = extract_from_lang(content_json)
+        if result:
+            return result
+    
+    # Try localized format
+    for lang_key in ("zh_cn", "en_us", "ja_jp"):
+        lang_content = content_json.get(lang_key)
+        result = extract_from_lang(lang_content)
+        if result:
+            return result
+    
+    return ""
+
+
 class FeishuChannel(BaseChannel):
     """
     Feishu/Lark channel using WebSocket long connection.
@@ -166,6 +213,10 @@ class FeishuChannel(BaseChannel):
         re.MULTILINE,
     )
 
+    _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
+
+    _CODE_BLOCK_RE = re.compile(r"(```[\s\S]*?```)", re.MULTILINE)
+
     @staticmethod
     def _parse_md_table(table_text: str) -> dict | None:
         """Parse a markdown table into a Feishu table element."""
@@ -185,17 +236,52 @@ class FeishuChannel(BaseChannel):
         }
 
     def _build_card_elements(self, content: str) -> list[dict]:
-        """Split content into markdown + table elements for Feishu card."""
+        """Split content into div/markdown + table elements for Feishu card."""
         elements, last_end = [], 0
         for m in self._TABLE_RE.finditer(content):
-            before = content[last_end:m.start()].strip()
-            if before:
-                elements.append({"tag": "markdown", "content": before})
+            before = content[last_end:m.start()]
+            if before.strip():
+                elements.extend(self._split_headings(before))
             elements.append(self._parse_md_table(m.group(1)) or {"tag": "markdown", "content": m.group(1)})
             last_end = m.end()
-        remaining = content[last_end:].strip()
+        remaining = content[last_end:]
+        if remaining.strip():
+            elements.extend(self._split_headings(remaining))
+        return elements or [{"tag": "markdown", "content": content}]
+
+    def _split_headings(self, content: str) -> list[dict]:
+        """Split content by headings, converting headings to div elements."""
+        protected = content
+        code_blocks = []
+        for m in self._CODE_BLOCK_RE.finditer(content):
+            code_blocks.append(m.group(1))
+            protected = protected.replace(m.group(1), f"\x00CODE{len(code_blocks)-1}\x00", 1)
+
+        elements = []
+        last_end = 0
+        for m in self._HEADING_RE.finditer(protected):
+            before = protected[last_end:m.start()].strip()
+            if before:
+                elements.append({"tag": "markdown", "content": before})
+            level = len(m.group(1))
+            text = m.group(2).strip()
+            elements.append({
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**{text}**",
+                },
+            })
+            last_end = m.end()
+        remaining = protected[last_end:].strip()
         if remaining:
             elements.append({"tag": "markdown", "content": remaining})
+
+        for i, cb in enumerate(code_blocks):
+            for el in elements:
+                if el.get("tag") == "markdown":
+                    el["content"] = el["content"].replace(f"\x00CODE{i}\x00", cb)
+
         return elements or [{"tag": "markdown", "content": content}]
 
     async def send(self, msg: OutboundMessage) -> None:
@@ -286,6 +372,12 @@ class FeishuChannel(BaseChannel):
                 try:
                     content = json.loads(message.content).get("text", "")
                 except json.JSONDecodeError:
+                    content = message.content or ""
+            elif msg_type == "post":
+                try:
+                    content_json = json.loads(message.content)
+                    content = _extract_post_text(content_json)
+                except (json.JSONDecodeError, TypeError):
                     content = message.content or ""
             else:
                 content = MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]")
