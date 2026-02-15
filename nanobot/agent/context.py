@@ -25,7 +25,7 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
     
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(self) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
         
@@ -103,7 +103,6 @@ class ContextBuilder:
         Args:
             history: Previous conversation messages.
             current_message: The new user message.
-            skill_names: Optional skills to include.
             media: Optional list of local file paths for images/media.
             channel: Current channel (telegram, feishu, etc.).
             chat_id: Current chat/user ID.
