@@ -17,10 +17,15 @@ MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
 
 
 from ddgs import DDGS
+import logging
 
 
 class DuckDuckGoSearchProvider:
     """Metasearch provider using ddgs (aggregates DuckDuckGo, Bing, Google, etc. - no API key required)."""
+    
+    def __init__(self):
+        # Suppress ddgs impersonation warnings
+        logging.getLogger("primp.impersonate").setLevel(logging.ERROR)
 
     async def search(self, query: str, count: int) -> str:
         try:
