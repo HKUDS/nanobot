@@ -2,9 +2,11 @@
 
 import asyncio
 import json
+import mimetypes
 import re
 import threading
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -17,6 +19,8 @@ from nanobot.config.schema import FeishuConfig
 try:
     import lark_oapi as lark
     from lark_oapi.api.im.v1 import (
+        CreateImageRequest,
+        CreateImageRequestBody,
         CreateMessageRequest,
         CreateMessageRequestBody,
         CreateMessageReactionRequest,
@@ -216,6 +220,7 @@ class FeishuChannel(BaseChannel):
     _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 
     _CODE_BLOCK_RE = re.compile(r"(```[\s\S]*?```)", re.MULTILINE)
+    _MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 
     @staticmethod
     def _parse_md_table(table_text: str) -> dict | None:
@@ -291,43 +296,130 @@ class FeishuChannel(BaseChannel):
             return
         
         try:
-            # Determine receive_id_type based on chat_id format
-            # open_id starts with "ou_", chat_id starts with "oc_"
-            if msg.chat_id.startswith("oc_"):
-                receive_id_type = "chat_id"
-            else:
-                receive_id_type = "open_id"
-            
-            # Build card with markdown + table support
-            elements = self._build_card_elements(msg.content)
-            card = {
-                "config": {"wide_screen_mode": True},
-                "elements": elements,
-            }
-            content = json.dumps(card, ensure_ascii=False)
-            
-            request = CreateMessageRequest.builder() \
-                .receive_id_type(receive_id_type) \
-                .request_body(
-                    CreateMessageRequestBody.builder()
-                    .receive_id(msg.chat_id)
-                    .msg_type("interactive")
-                    .content(content)
-                    .build()
-                ).build()
-            
-            response = self._client.im.v1.message.create(request)
-            
-            if not response.success():
-                logger.error(
-                    f"Failed to send Feishu message: code={response.code}, "
-                    f"msg={response.msg}, log_id={response.get_log_id()}"
-                )
-            else:
-                logger.debug(f"Feishu message sent to {msg.chat_id}")
+            receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
+
+            if msg.content.strip():
+                self._send_interactive_message(msg.chat_id, receive_id_type, msg.content)
+
+            for image_path in self._collect_local_images(msg):
+                image_key = self._upload_image(image_path)
+                if not image_key:
+                    continue
+                self._send_image_message(msg.chat_id, receive_id_type, image_key)
                 
         except Exception as e:
             logger.error(f"Error sending Feishu message: {e}")
+
+    def _send_interactive_message(self, chat_id: str, receive_id_type: str, content_text: str) -> None:
+        """Send text content as interactive card."""
+        elements = self._build_card_elements(content_text)
+        card = {
+            "config": {"wide_screen_mode": True},
+            "elements": elements,
+        }
+        content = json.dumps(card, ensure_ascii=False)
+
+        request = CreateMessageRequest.builder() \
+            .receive_id_type(receive_id_type) \
+            .request_body(
+                CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .msg_type("interactive")
+                .content(content)
+                .build()
+            ).build()
+
+        response = self._client.im.v1.message.create(request)
+        if not response.success():
+            logger.error(
+                f"Failed to send Feishu message: code={response.code}, "
+                f"msg={response.msg}, log_id={response.get_log_id()}"
+            )
+        else:
+            logger.debug(f"Feishu interactive message sent to {chat_id}")
+
+    def _send_image_message(self, chat_id: str, receive_id_type: str, image_key: str) -> None:
+        """Send one image by image_key."""
+        request = CreateMessageRequest.builder() \
+            .receive_id_type(receive_id_type) \
+            .request_body(
+                CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .msg_type("image")
+                .content(json.dumps({"image_key": image_key}, ensure_ascii=False))
+                .build()
+            ).build()
+
+        response = self._client.im.v1.message.create(request)
+        if not response.success():
+            logger.error(
+                f"Failed to send Feishu image: code={response.code}, "
+                f"msg={response.msg}, log_id={response.get_log_id()}"
+            )
+        else:
+            logger.debug(f"Feishu image sent to {chat_id}, image_key={image_key}")
+
+    def _upload_image(self, image_path: str) -> str | None:
+        """Upload local image file to Feishu and return image_key."""
+        path = Path(image_path).expanduser().resolve()
+        if not path.is_file():
+            logger.warning(f"Skip non-file image path: {path}")
+            return None
+
+        mime, _ = mimetypes.guess_type(str(path))
+        if not mime or not mime.startswith("image/"):
+            logger.warning(f"Skip non-image file for Feishu upload: {path}")
+            return None
+
+        with path.open("rb") as f:
+            request = CreateImageRequest.builder() \
+                .request_body(
+                    CreateImageRequestBody.builder()
+                    .image_type("message")
+                    .image(f)
+                    .build()
+                ).build()
+            response = self._client.im.v1.image.create(request)
+
+        if not response.success():
+            logger.error(
+                f"Failed to upload Feishu image {path}: code={response.code}, "
+                f"msg={response.msg}, log_id={response.get_log_id()}"
+            )
+            return None
+
+        image_key = response.data.image_key if response.data else None
+        if not image_key:
+            logger.error(f"Feishu image upload succeeded but image_key is empty: {path}")
+            return None
+        return image_key
+
+    def _collect_local_images(self, msg: OutboundMessage) -> list[str]:
+        """Collect local image file paths from media field and markdown image links."""
+        paths: list[str] = []
+        seen: set[str] = set()
+
+        def add(path_text: str) -> None:
+            candidate = (path_text or "").strip()
+            if not candidate:
+                return
+            if candidate.startswith(("http://", "https://", "data:")):
+                return
+            if candidate.startswith("file://"):
+                candidate = candidate[7:]
+            if candidate in seen:
+                return
+            seen.add(candidate)
+            paths.append(candidate)
+
+        for media_path in msg.media:
+            if isinstance(media_path, str):
+                add(media_path)
+
+        for match in self._MARKDOWN_IMAGE_RE.finditer(msg.content or ""):
+            add(match.group(1))
+
+        return paths
     
     def _on_message_sync(self, data: "P2ImMessageReceiveV1") -> None:
         """

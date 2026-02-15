@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -288,6 +289,7 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
+            media=self._extract_local_images_for_outbound(final_content) if msg.channel == "feishu" else [],
             metadata=msg.metadata or {},  # Pass through for channel-specific needs (e.g. Slack thread_ts)
         )
     
@@ -333,6 +335,43 @@ class AgentLoop:
             chat_id=origin_chat_id,
             content=final_content
         )
+
+    def _extract_local_images_for_outbound(self, text: str) -> list[str]:
+        """Extract local image paths from assistant text and resolve within workspace."""
+        candidates: list[str] = []
+        seen: set[str] = set()
+        resolved: list[str] = []
+
+        def add_candidate(raw: str) -> None:
+            value = (raw or "").strip()
+            if not value:
+                return
+            if value.startswith(("http://", "https://", "data:")):
+                return
+            if value.startswith("file://"):
+                value = value[7:]
+            if value in seen:
+                return
+            seen.add(value)
+            candidates.append(value)
+
+        for m in self._MD_IMAGE_RE.finditer(text or ""):
+            add_candidate(m.group(1))
+        for m in self._CODE_IMAGE_RE.finditer(text or ""):
+            add_candidate(m.group(1))
+        for m in self._PLAIN_IMAGE_RE.finditer(text or ""):
+            add_candidate(m.group(1))
+
+        for candidate in candidates:
+            path = Path(candidate).expanduser()
+            if not path.is_absolute():
+                path = (self.workspace / path).resolve()
+            else:
+                path = path.resolve()
+            if path.is_file():
+                resolved.append(str(path))
+
+        return resolved
     
     async def _consolidate_memory(self, session, archive_all: bool = False) -> None:
         """Consolidate old messages into MEMORY.md + HISTORY.md.
@@ -441,3 +480,6 @@ Respond with ONLY valid JSON, no markdown fences."""
         
         response = await self._process_message(msg, session_key=session_key)
         return response.content if response else ""
+    _MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+    _CODE_IMAGE_RE = re.compile(r"`([^`]+\.(?:png|jpe?g|gif|webp|bmp))`", re.IGNORECASE)
+    _PLAIN_IMAGE_RE = re.compile(r"(?<![\w/.-])([^\s`\"']+\.(?:png|jpe?g|gif|webp|bmp))(?![\w])", re.IGNORECASE)
