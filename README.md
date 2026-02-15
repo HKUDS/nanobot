@@ -796,6 +796,13 @@ docker run -v ~/.nanobot:/root/.nanobot --rm nanobot agent -m "Hello!"
 docker run -v ~/.nanobot:/root/.nanobot --rm nanobot status
 ```
 
+**Or use Docker Compose**:
+
+```bash
+cp .env.example .env   # fill in your API keys / channels config
+docker compose up
+```
+
 ## 📁 Project Structure
 
 ```
