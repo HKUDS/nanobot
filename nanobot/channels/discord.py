@@ -32,6 +32,7 @@ class DiscordChannel(BaseChannel):
         self._heartbeat_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
+        self._bot_user_id: str | None = None
 
     async def start(self) -> None:
         """Start the Discord gateway connection."""
@@ -134,6 +135,10 @@ class DiscordChannel(BaseChannel):
                 await self._identify()
             elif op == 0 and event_type == "READY":
                 logger.info("Discord gateway READY")
+                # Capture bot user ID for mention detection
+                user_data = payload.get("user") or {}
+                self._bot_user_id = user_data.get("id")
+                logger.info(f"Discord bot connected as user {self._bot_user_id}")
             elif op == 0 and event_type == "MESSAGE_CREATE":
                 await self._handle_message_create(payload)
             elif op == 7:
@@ -190,12 +195,18 @@ class DiscordChannel(BaseChannel):
         sender_id = str(author.get("id", ""))
         channel_id = str(payload.get("channel_id", ""))
         content = payload.get("content") or ""
+        guild_id = payload.get("guild_id")
 
         if not sender_id or not channel_id:
             return
 
         if not self.is_allowed(sender_id):
             return
+
+        # Check group channel policy (DMs always respond if is_allowed passes)
+        if guild_id is not None:
+            if not self._should_respond_in_group(payload, content):
+                return
 
         content_parts = [content] if content else []
         media_paths: list[str] = []
@@ -233,10 +244,33 @@ class DiscordChannel(BaseChannel):
             media=media_paths,
             metadata={
                 "message_id": str(payload.get("id", "")),
-                "guild_id": payload.get("guild_id"),
+                "guild_id": guild_id,
                 "reply_to": reply_to,
             },
         )
+
+    def _should_respond_in_group(self, payload: dict[str, Any], content: str) -> bool:
+        """Check if bot should respond in a group channel based on policy."""
+        channel_id = str(payload.get("channel_id", ""))
+
+        if self.config.group_policy == "open":
+            return True
+
+        if self.config.group_policy == "mention":
+            # Check if bot was mentioned in the message
+            if self._bot_user_id:
+                # Check mentions array
+                mentions = payload.get("mentions") or []
+                for mention in mentions:
+                    if str(mention.get("id")) == self._bot_user_id:
+                        return True
+                # Also check content for mention format <@USER_ID>
+                if f"<@{self._bot_user_id}>" in content or f"<@!{self._bot_user_id}>" in content:
+                    return True
+            logger.debug(f"Discord message in {channel_id} ignored (bot not mentioned)")
+            return False
+
+        return True
 
     async def _start_typing(self, channel_id: str) -> None:
         """Start periodic typing indicator for a channel."""
