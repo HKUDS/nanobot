@@ -17,21 +17,22 @@ from nanobot.config.schema import TelegramConfig
 def _split_long_message(text: str, max_length: int = 4096) -> list[str]:
     """
     Split a message into chunks that fit Telegram's character limit.
-    
+
     Tries to split at paragraph boundaries to maintain readability.
+    Ensures HTML tags are not broken across chunks.
     Max length for Telegram is 4096 characters per message.
     """
     if len(text) <= max_length:
         return [text]
-    
+
     chunks = []
     remaining = text
-    
+
     while len(remaining) > max_length:
         # Try to split at double newline (paragraph boundary)
         chunk = remaining[:max_length]
         split_pos = chunk.rfind('\n\n')
-        
+
         if split_pos > max_length * 0.7:  # Found a paragraph break in the last 30%
             split_pos += 2  # Include the newlines
         else:
@@ -47,14 +48,72 @@ def _split_long_message(text: str, max_length: int = 4096) -> list[str]:
                     split_pos = max_length
                 else:
                     split_pos += 1
-        
-        chunks.append(remaining[:split_pos].rstrip())
+
+        # Check if we're splitting inside an HTML tag
+        split_pos = _adjust_split_for_html_tags(remaining, split_pos)
+
+        # Get unclosed tags before split point
+        unclosed_tags = _get_unclosed_tags(remaining[:split_pos])
+
+        # Close unclosed tags at the end of this chunk
+        chunk_text = remaining[:split_pos].rstrip()
+        if unclosed_tags:
+            chunk_text += ''.join(f'</{tag}>' for tag in reversed(unclosed_tags))
+
+        chunks.append(chunk_text)
+
+        # Reopen tags at the start of next chunk
         remaining = remaining[split_pos:].lstrip()
-    
+        if unclosed_tags and remaining:
+            remaining = ''.join(f'<{tag}>' for tag in unclosed_tags) + remaining
+
     if remaining:
         chunks.append(remaining)
-    
+
     return chunks
+
+
+def _adjust_split_for_html_tags(text: str, split_pos: int) -> int:
+    """
+    Adjust split position to avoid breaking inside HTML tags.
+    If split_pos is inside a tag, move it before the tag.
+    """
+    # Check if we're inside a tag by looking backwards for < and >
+    last_open = text[:split_pos].rfind('<')
+    last_close = text[:split_pos].rfind('>')
+
+    # If last < is after last >, we're inside a tag
+    if last_open > last_close:
+        # Move split position before the tag
+        return last_open
+
+    return split_pos
+
+
+def _get_unclosed_tags(text: str) -> list[str]:
+    """
+    Find HTML tags that are opened but not closed in the text.
+    Returns list of tag names in order they were opened.
+    """
+    # Telegram supports: b, i, u, s, a, code, pre
+    tag_stack = []
+
+    # Find all tags in order
+    tag_pattern = r'<(/?)(\w+)(?:\s[^>]*)?>'
+    for match in re.finditer(tag_pattern, text):
+        is_closing = match.group(1) == '/'
+        tag_name = match.group(2)
+
+        if is_closing:
+            # Remove from stack if it matches
+            if tag_stack and tag_stack[-1] == tag_name:
+                tag_stack.pop()
+        else:
+            # Add to stack (skip self-closing tags like <br/>)
+            if tag_name not in ['br', 'hr']:
+                tag_stack.append(tag_name)
+
+    return tag_stack
 
 
 def _markdown_to_telegram_html(text: str) -> str:
