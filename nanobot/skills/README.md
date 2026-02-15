@@ -17,6 +17,7 @@ The skill format and metadata structure follow OpenClaw's conventions to maintai
 
 | Skill | Description |
 |-------|-------------|
+| `open-skills` | Battle-tested code library for crypto, PDFs, search, web scraping & more (reduces API calls by ~98%) |
 | `github` | Interact with GitHub using the `gh` CLI |
 | `weather` | Get weather info using wttr.in and Open-Meteo |
 | `summarize` | Summarize URLs, files, and YouTube videos |

@@ -105,6 +105,14 @@ pip install nanobot-ai
 nanobot onboard
 ```
 
+**Optional: Install open-skills for 98% fewer API calls**
+
+```bash
+bash scripts/setup-open-skills.sh
+```
+
+This installs [open-skills](https://github.com/besoeasy/open-skills), a battle-tested code library that dramatically reduces token usage by providing ready-to-use patterns for crypto, PDFs, web search, scraping, and more.
+
 **2. Configure** (`~/.nanobot/config.json`)
 
 For OpenRouter - recommended for global users:
