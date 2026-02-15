@@ -48,6 +48,12 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "ruff>=0.1.0",
 ]
+a2a = [
+    "a2a-sdk[http-server]>=0.2.0",
+]
+all = [
+    "a2a-sdk[http-server]>=0.2.0",
+]
 
 [project.scripts]
 nanobot = "nanobot.cli.commands:app"
