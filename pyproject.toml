@@ -39,6 +39,7 @@ dependencies = [
     "python-socks[asyncio]>=2.4.0",
     "prompt-toolkit>=3.0.0",
     "mcp>=1.0.0",
+    "json-repair>=0.30.0",
 ]
 
 [project.optional-dependencies]
