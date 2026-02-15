@@ -305,6 +305,7 @@ def _make_provider(config):
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    force: bool = typer.Option(False, "--force", help="Kill existing gateway processes"),
 ):
     """Start the nanobot gateway."""
     from nanobot.config.loader import load_config, get_data_dir
@@ -315,6 +316,136 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
+    # NEW: Load plugins (registers hooks for Telegram UI, job tracking, etc.)
+    from nanobot import plugins
+
+    if force:
+        import subprocess
+        import time as time_mod
+        import os
+        import signal as sig
+        
+        current_pid = os.getpid()
+        try:
+            # Find all gateway processes using pgrep (more reliable)
+            result = subprocess.run(
+                ["pgrep", "-f", "nanobot gateway"], capture_output=True, text=True
+            )
+            pids = [
+                int(p) for p in result.stdout.strip().split("\n") if p and int(p) != current_pid
+            ]
+
+            if pids:
+                console.print(f"[yellow]Killing {len(pids)} existing gateway process(es)...[/yellow]")
+                for pid in pids:
+                    try:
+                        # Try SIGTERM first
+                        os.kill(pid, sig.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                
+                # Wait for processes to terminate
+                time_mod.sleep(2)
+                
+                # Check again and SIGKILL if necessary
+                result = subprocess.run(
+                    ["pgrep", "-f", "nanobot gateway"], capture_output=True, text=True
+                )
+                still_running = [
+                    int(p) for p in result.stdout.strip().split("\n") if p and int(p) != current_pid
+                ]
+                
+                if still_running:
+                    console.print(f"[red]Some processes still running, using SIGKILL...[/red]")
+                    for pid in still_running:
+                        try:
+                            os.kill(pid, sig.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    time_mod.sleep(1)
+                
+                console.print("[green]✓[/green] Old gateway(s) terminated")
+            
+            # Also clean up orphaned IPython kernel processes (only nanobot's kernels)
+            try:
+                # Find kernels that have "nanobot_ipython" in their command line
+                result = subprocess.run(
+                    ["pgrep", "-a", "-f", "nanobot_ipython"], capture_output=True, text=True
+                )
+                
+                ipython_pids = []
+                for line in result.stdout.strip().split("\n"):
+                    if line and "ipykernel_launcher" in line:
+                        try:
+                            pid = int(line.split()[0])
+                            ipython_pids.append(pid)
+                        except (ValueError, IndexError):
+                            continue
+                
+                if ipython_pids:
+                    console.print(f"[yellow]Cleaning up {len(ipython_pids)} orphaned nanobot IPython kernel(s)...[/yellow]")
+                    for pid in ipython_pids:
+                        try:
+                            os.kill(pid, sig.SIGTERM)
+                        except ProcessLookupError:
+                            pass
+                    
+                    time_mod.sleep(1)
+                    
+                    # SIGKILL any survivors
+                    result = subprocess.run(
+                        ["pgrep", "-a", "-f", "nanobot_ipython"], capture_output=True, text=True
+                    )
+                    still_running = []
+                    for line in result.stdout.strip().split("\n"):
+                        if line and "ipykernel_launcher" in line:
+                            try:
+                                pid = int(line.split()[0])
+                                still_running.append(pid)
+                            except (ValueError, IndexError):
+                                continue
+                    
+                    for pid in still_running:
+                        try:
+                            os.kill(pid, sig.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    
+                    console.print("[green]✓[/green] Orphaned nanobot IPython kernels cleaned up")
+            except Exception as e:
+                console.print(f"[dim]Could not clean up IPython kernels: {e}[/dim]")
+                
+        except Exception as e:
+            console.print(f"[dim]Could not kill existing gateways: {e}[/dim]")
+
+    # Configure logging with timestamps
+    from loguru import logger
+    import sys
+    
+    log_file = "/tmp/nanobot.log"
+    
+    # Remove default handler and add custom ones with timestamps
+    logger.remove()
+    
+    # Console format with timestamps
+    console_format = (
+        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+        "<level>{level: <8}</level> | "
+        "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
+        "<level>{message}</level>"
+    )
+    
+    # File format with timestamps
+    file_format = (
+        "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
+        "{level: <8} | "
+        "{name}:{function}:{line} - "
+        "{message}"
+    )
+    
+    # Add handlers
+    logger.add(log_file, rotation="10 MB", retention="3 days", level="DEBUG", format=file_format)
+    logger.add(sys.stderr, level="DEBUG" if verbose else "INFO", format=console_format)
     
     if verbose:
         import logging
@@ -326,6 +457,11 @@ def gateway(
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
+    
+    # Initialize job manager with workspace for persistence
+    from nanobot.agent.job_tracker import job_manager
+    job_manager._persist_dir = config.workspace_path / ".nanobot"
+    job_manager._persist_file = job_manager._persist_dir / "jobs.json"
     
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
@@ -352,13 +488,17 @@ def gateway(
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
-        response = await agent.process_direct(
-            job.payload.message,
-            session_key=f"cron:{job.id}",
-            channel=job.payload.channel or "cli",
-            chat_id=job.payload.to or "direct",
-        )
-        if job.payload.deliver and job.payload.to:
+        try:
+            response = await agent.process_direct(
+                job.payload.message,
+                session_key=f"cron:{job.id}",
+                channel=job.payload.channel or "cli",
+                chat_id=job.payload.to or "direct",
+            )
+        except Exception as e:
+            response = f"❌ Cron job failed: {e}"
+        
+        if job.payload.deliver_to in ("telegram", "both") and job.payload.to:
             from nanobot.bus.events import OutboundMessage
             await bus.publish_outbound(OutboundMessage(
                 channel=job.payload.channel or "cli",
@@ -381,7 +521,18 @@ def gateway(
     )
     
     # Create channel manager
-    channels = ChannelManager(config, bus)
+    channels = ChannelManager(
+        config,
+        bus,
+        session_manager=session_manager,
+        is_session_busy=agent._is_processing,
+    )
+    
+    # Connect Telegram channel to agent for thread creation
+    telegram_channel = channels.get_channel("telegram")
+    if telegram_channel:
+        agent._telegram_channel = telegram_channel
+        console.print("[green]✓[/green] Telegram thread support enabled")
     
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
@@ -396,6 +547,24 @@ def gateway(
     
     async def run():
         try:
+            # Handle any interrupted jobs from previous session
+            await job_manager.handle_interrupted_jobs(bus)
+
+            # Send restart confirmation if this boot was triggered by restart_gateway
+            from nanobot.agent.tools.gateway import check_restart_marker
+            await check_restart_marker(bus, agent.sessions if agent else None)
+
+            # NEW: Emit hook for gateway startup (allows plugins to initialize)
+            from nanobot.system.hooks import hook_manager
+            await hook_manager.emit("gateway.start",
+                bus=bus,
+                config=config,
+                agent=agent,
+                channels=channels,
+                cron=cron,
+                heartbeat=heartbeat
+            )
+
             await cron.start()
             await heartbeat.start()
             await asyncio.gather(
@@ -764,11 +933,14 @@ def cron_add(
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
     
+    # Convert boolean deliver to string deliver_to
+    deliver_to = "both" if deliver and to else "agent"
+    
     job = service.add_job(
         name=name,
         schedule=schedule,
         message=message,
-        deliver=deliver,
+        deliver_to=deliver_to,
         to=to,
         channel=channel,
     )
@@ -833,12 +1005,51 @@ def cron_run(
     else:
         console.print(f"[red]Failed to run job {job_id}[/red]")
 
-
-# ============================================================================
-# Status Commands
-# ============================================================================
-
-
+@cron_app.command("logs")
+def cron_logs(
+    job_id: str = typer.Argument(None, help="Job ID to filter logs"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Number of entries to show"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """View job execution logs."""
+    from nanobot.config.loader import get_data_dir
+    from nanobot.cron.service import CronService
+    
+    store_path = get_data_dir() / "cron" / "jobs.json"
+    service = CronService(store_path)
+    
+    logs = service.get_logs(job_id=job_id, limit=limit)
+    
+    if not logs:
+        console.print("No logs found.")
+        return
+    
+    if json_output:
+        import json as json_mod
+        console.print(json_mod.dumps(logs, indent=2))
+        return
+    
+    table = Table(title=f"Cron Job Logs ({len(logs)} entries)")
+    table.add_column("Time", style="dim")
+    table.add_column("Job", style="cyan")
+    table.add_column("Status")
+    table.add_column("Duration")
+    table.add_column("Error", style="red")
+    
+    for entry in logs:
+        status = "[green]ok[/green]" if entry.get("status") == "ok" else "[red]error[/red]"
+        duration = f"{entry.get('duration_ms', 0)}ms"
+        error = entry.get("error", "")[:30] if entry.get("error") else ""
+        
+        table.add_row(
+            entry.get("timestamp", "")[:19],
+            entry.get("job_name", entry.get("job_id", ""))[:15],
+            status,
+            duration,
+            error,
+        )
+    
+    console.print(table)
 @app.command()
 def status():
     """Show nanobot status."""

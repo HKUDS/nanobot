@@ -70,21 +70,30 @@ class CronTool(Tool):
         cron_expr: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
+        deliver_to: str | None = None,
+        channel: str | None = None,
+        to: str | None = None,
         **kwargs: Any
     ) -> str:
         if action == "add":
-            return self._add_job(message, every_seconds, cron_expr, at)
+            return self._add_job(message, every_seconds, cron_expr, at, deliver_to, channel, to)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
             return self._remove_job(job_id)
         return f"Unknown action: {action}"
     
-    def _add_job(self, message: str, every_seconds: int | None, cron_expr: str | None, at: str | None) -> str:
+    def _add_job(self, message: str, every_seconds: int | None, cron_expr: str | None, at: str | None, deliver_to: str | None, channel: str | None, to: str | None) -> str:
         if not message:
             return "Error: message is required for add"
-        if not self._channel or not self._chat_id:
-            return "Error: no session context (channel/chat_id)"
+        
+        # deliver_to is REQUIRED
+        if not deliver_to:
+            return "Error: deliver_to is required. Must be 'agent', 'telegram', or 'both'"
+        
+        # Validate deliver_to value
+        if deliver_to not in ("agent", "telegram", "both"):
+            return f"Error: deliver_to must be 'agent', 'telegram', or 'both', got '{deliver_to}'"
         
         # Build schedule
         delete_after = False
@@ -101,13 +110,20 @@ class CronTool(Tool):
         else:
             return "Error: either every_seconds, cron_expr, or at is required"
         
+        # Determine delivery target
+        deliver_channel = channel or self._channel
+        deliver_to_id = to or self._chat_id
+        
+        if deliver_to in ("telegram", "both") and (not deliver_channel or not deliver_to_id):
+            return "Error: channel and to are required when deliver_to is 'telegram' or 'both'"
+        
         job = self._cron.add_job(
             name=message[:30],
             schedule=schedule,
             message=message,
-            deliver=True,
-            channel=self._channel,
-            to=self._chat_id,
+            deliver_to=deliver_to,
+            channel=deliver_channel,
+            to=deliver_to_id,
             delete_after_run=delete_after,
         )
         return f"Created job '{job.name}' (id: {job.id})"

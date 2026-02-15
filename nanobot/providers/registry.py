@@ -117,6 +117,29 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # Kilo Code: Kilo.ai's gateway, OpenAI-compatible at /api/openrouter path.
+    # Provides GLM-5 and other models. Device auth returns JWT token.
+    # Requires custom headers: x-api-key and X-KILOCODE-EDITORNAME
+    # Use "kilo/" prefix for explicit routing (e.g., kilo/z-ai/glm-5:free)
+    ProviderSpec(
+        name="kilocode",
+        keywords=("kilocode", "kilo", "z-ai"),
+        env_key="OPENAI_API_KEY",           # OpenAI-compatible
+        display_name="Kilo Code",
+        litellm_prefix="",                  # No prefix - use raw model names
+        skip_prefixes=("kilo/",),           # Don't prefix if already prefixed
+        env_extras=(
+            ("KILOCODE_API_KEY", "{api_key}"),  # Mirror for x-api-key header
+        ),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="kilo.ai",
+        default_api_base="https://api.kilo.ai/api/openrouter",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # === Standard providers (matched by model-name keywords) ===============
 
     # Anthropic: LiteLLM recognizes "claude-*" natively, no prefix needed.
@@ -191,6 +214,46 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # Z.ai Coding: Zhipu's coding-focused API endpoint (OpenAI-compatible).
+    # Uses a different base URL than standard Zhipu API.
+    # MUST come before zhipu to avoid matching "glm" keyword first.
+    # Marked as local to force api_base usage and avoid LiteLLM's Zhipu routing.
+    ProviderSpec(
+        name="zaicoding",
+        keywords=("zaicoding",),
+        env_key="OPENAI_API_KEY",          # OpenAI-compatible, so use OPENAI_API_KEY
+        display_name="Z.ai Coding",
+        litellm_prefix="hosted_vllm",      # Use hosted_vllm prefix for custom OpenAI-compatible
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=True,                     # Treat as local to force api_base usage
+        detect_by_key_prefix="",
+        detect_by_base_keyword="api.z.ai",
+        default_api_base="https://api.z.ai/api/coding/paas/v4",
+        strip_model_prefix=True,           # strip provider prefix for OpenAI-compatible
+        model_overrides=(),
+    ),
+
+    # Z.ai Coding Plan: Zhipu's coding plan API endpoint (OpenAI-compatible).
+    # Same as zaicoding but with explicit "zaicodingplan" config key.
+    ProviderSpec(
+        name="zaicodingplan",
+        keywords=("zaicodingplan",),
+        env_key="OPENAI_API_KEY",          # OpenAI-compatible, so use OPENAI_API_KEY
+        display_name="Z.ai Coding Plan",
+        litellm_prefix="hosted_vllm",      # Use hosted_vllm prefix for custom OpenAI-compatible
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=True,                     # Treat as local to force api_base usage
+        detect_by_key_prefix="",
+        detect_by_base_keyword="api.z.ai/api/coding",
+        default_api_base="https://api.z.ai/api/coding/paas/v4",
+        strip_model_prefix=True,           # strip provider prefix for OpenAI-compatible
+        model_overrides=(),
+    ),
+
     # Zhipu: LiteLLM uses "zai/" prefix.
     # Also mirrors key to ZHIPUAI_API_KEY (some LiteLLM paths check that).
     # skip_prefixes: don't add "zai/" when already routed via gateway.
@@ -200,7 +263,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         env_key="ZAI_API_KEY",
         display_name="Zhipu AI",
         litellm_prefix="zai",              # glm-4 → zai/glm-4
-        skip_prefixes=("zhipu/", "zai/", "openrouter/", "hosted_vllm/"),
+        skip_prefixes=("zhipu/", "zai/", "openrouter/", "hosted_vllm/", "zaicoding/"),
         env_extras=(
             ("ZHIPUAI_API_KEY", "{api_key}"),
         ),
@@ -240,7 +303,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         env_key="MOONSHOT_API_KEY",
         display_name="Moonshot",
         litellm_prefix="moonshot",          # kimi-k2.5 → moonshot/kimi-k2.5
-        skip_prefixes=("moonshot/", "openrouter/"),
+        skip_prefixes=("moonshot/", "openrouter/", "opencode/"),  # don't prefix OpenCode Zen models
         env_extras=(
             ("MOONSHOT_API_BASE", "{api_base}"),
         ),

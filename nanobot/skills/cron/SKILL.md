@@ -20,6 +20,11 @@ Fixed reminder:
 cron(action="add", message="Time to take a break!", every_seconds=1200)
 ```
 
+One-shot timer (auto-deletes after first run):
+```
+cron(action="add", message="Timer done!", every_seconds=60, once=True)
+```
+
 Dynamic task (agent executes each time):
 ```
 cron(action="add", message="Check HKUDS/nanobot GitHub stars and report", every_seconds=600)
@@ -45,3 +50,16 @@ cron(action="remove", job_id="abc123")
 | every day at 8am | cron_expr: "0 8 * * *" |
 | weekdays at 5pm | cron_expr: "0 17 * * 1-5" |
 | at a specific time | at: ISO datetime string (compute from current time) |
+| once in 5 minutes | every_seconds: 300, once: true |
+
+## Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| action | string | "add", "list", or "remove" |
+| message | string | Reminder/task message |
+| every_seconds | int | Interval in seconds |
+| cron_expr | string | Cron expression |
+| at | string | ISO datetime for one-time execution |
+| once | bool | Auto-delete after first run |
+| job_id | string | Job ID (for remove) |

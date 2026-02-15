@@ -55,33 +55,71 @@ class ExecTool(Tool):
                 "working_dir": {
                     "type": "string",
                     "description": "Optional working directory for the command"
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": f"Optional timeout in seconds (default: {self.timeout})"
                 }
             },
             "required": ["command"]
         }
     
     async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
+        timeout = kwargs.get("timeout", self.timeout)
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
         
         try:
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-            )
+            # Run subprocess in a thread to isolate it from the async event loop
+            # This prevents async context corruption that causes weak reference errors
+            import subprocess
+            import threading
+            import queue
             
+            result_queue = queue.Queue()
+            
+            def run_subprocess():
+                process = None
+                try:
+                    process = subprocess.Popen(
+                        command,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        shell=True,
+                        cwd=cwd
+                    )
+                    stdout, stderr = process.communicate(timeout=timeout)
+                    result_queue.put(('success', stdout, stderr, process.returncode))
+                except subprocess.TimeoutExpired:
+                    if process is not None:
+                        process.kill()
+                    result_queue.put(('timeout', b'', b'', -1))
+                except Exception as e:
+                    result_queue.put(('error', b'', str(e).encode(), -1))
+            
+            # Run in thread
+            thread = threading.Thread(target=run_subprocess)
+            thread.start()
+            
+            # Wait for thread with timeout
+            thread.join(timeout=timeout + 5)  # Add buffer for thread overhead
+            
+            if thread.is_alive():
+                # Thread still running, can't kill it easily, just return timeout
+                return f"Error: Command timed out after {timeout} seconds"
+            
+            # Get result
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=self.timeout
-                )
-            except asyncio.TimeoutError:
-                process.kill()
-                return f"Error: Command timed out after {self.timeout} seconds"
+                status, stdout, stderr, returncode = result_queue.get(timeout=1)
+            except queue.Empty:
+                return "Error: Failed to get subprocess result"
+            
+            if status == 'timeout':
+                return f"Error: Command timed out after {timeout} seconds"
+            elif status == 'error':
+                return f"Error executing command: {stderr.decode('utf-8', errors='replace')}"
             
             output_parts = []
             
@@ -93,8 +131,8 @@ class ExecTool(Tool):
                 if stderr_text.strip():
                     output_parts.append(f"STDERR:\n{stderr_text}")
             
-            if process.returncode != 0:
-                output_parts.append(f"\nExit code: {process.returncode}")
+            if returncode != 0:
+                output_parts.append(f"\nExit code: {returncode}")
             
             result = "\n".join(output_parts) if output_parts else "(no output)"
             

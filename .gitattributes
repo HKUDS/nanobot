@@ -1,0 +1,12 @@
+*.ts merge=weave
+*.tsx merge=weave
+*.js merge=weave
+*.jsx merge=weave
+*.py merge=weave
+*.go merge=weave
+*.rs merge=weave
+*.json merge=weave
+*.yaml merge=weave
+*.yml merge=weave
+*.toml merge=weave
+*.md merge=weave

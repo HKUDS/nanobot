@@ -66,7 +66,8 @@ class HeartbeatService:
         if self.heartbeat_file.exists():
             try:
                 return self.heartbeat_file.read_text()
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to read HEARTBEAT.md: {e}")
                 return None
         return None
     
