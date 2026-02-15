@@ -209,6 +209,7 @@ class WebSearchConfig(BaseModel):
 class WebToolsConfig(BaseModel):
     """Web tools configuration."""
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    safeish_search: bool = False
 
 
 class ExecToolConfig(BaseModel):
