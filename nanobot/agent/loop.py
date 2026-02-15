@@ -12,6 +12,7 @@ from loguru import logger
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
+from nanobot.providers.registry import PROVIDERS
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
@@ -23,6 +24,31 @@ from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import Session, SessionManager
+
+
+def _list_models(config) -> str:
+    """List available models based on configured providers."""
+    providers = [spec.label for spec in PROVIDERS if getattr(config.providers, spec.name, None) and getattr(config.providers, spec.name).api_key]
+    examples = [
+        "  /model minimax/minimax-m2.5",
+        "  /model openai/gpt-4o", 
+        "  /model anthropic/claude-sonnet-4-5",
+        "  /model openrouter/google/gemini-pro-1.5"
+    ]
+    return f"📋 Model switching (use /model <provider/model>):\n\nCurrent: {config.agents.defaults.model}\n\nExamples:\n" + "\n".join(examples) + f"\n\nConfigured providers:\n" + "\n".join(f"  • {p}" for p in providers)
+
+
+def _set_model(model: str, config_path: Path | None = None) -> str:
+    """Set model in config and return confirmation."""
+    from nanobot.config.loader import load_config, save_config
+    config = load_config(config_path)
+    old, config.agents.defaults.model = config.agents.defaults.model, model
+    try:
+        save_config(config, config_path)
+        return f"✅ Model changed: {old} → {model}"
+    except Exception as e:
+        config.agents.defaults.model = old  # rollback on error
+        raise RuntimeError(f"Failed to save config: {e}")
 
 
 class AgentLoop:
@@ -284,7 +310,31 @@ class AgentLoop:
                                   content="New session started. Memory consolidation in progress.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+                                  content="🐈 Commands:\n/new — New conversation\n/model — List models\n/model <name> [-g] — Switch model\n/help — Show commands")
+        
+        # /model command
+        if cmd.startswith("/model"):
+            from nanobot.config.loader import load_config
+            parts = msg.content.strip().split()
+            if len(parts) == 1:
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                      content=_list_models(load_config()))
+            
+            global_flag = "-g" in parts
+            new_model = " ".join(p for p in parts[1:] if p != "-g")
+            if not new_model or "/" not in new_model:
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                      content="Usage: /model <provider/model> [-g]\nExample: /model openai/gpt-4o")
+            
+            self.model = self.subagents.model = new_model
+            if global_flag:
+                try:
+                    result = _set_model(new_model)
+                except RuntimeError as e:
+                    result = f"❌ {e}"
+            else:
+                result = f"✅ Model: {new_model} (session)"
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=result)
         
         if len(session.messages) > self.memory_window:
             asyncio.create_task(self._consolidate_memory(session))

@@ -754,6 +754,48 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
+## 💬 Chat Commands
+
+When chatting with nanobot (via CLI or any channel), use these slash commands:
+
+| Command | Description |
+|---------|-------------|
+| `/new` | Start a new conversation (clears session memory) |
+| `/model` | Show current model and usage examples |
+| `/model <provider/model>` | Switch model for current session only |
+| `/model <provider/model> -g` | Switch model globally (saved to config) |
+| `/help` | Show available commands |
+
+**Model Examples:**
+```bash
+# MiniMax
+/model minimax/minimax-m2.5
+
+# OpenAI
+/model openai/gpt-4o
+/model openai/gpt-4o-mini
+
+# Anthropic
+/model anthropic/claude-sonnet-4-5
+/model anthropic/claude-opus-4-5
+
+# OpenRouter (gateway for multiple providers)
+/model openrouter/google/gemini-pro-1.5
+/model openrouter/meta-llama/llama-3.3-70b-instruct
+
+# Moonshot (Kimi)
+/model moonshot/kimi-k2.5
+
+# DeepSeek
+/model deepseek/deepseek-chat
+
+# Google Gemini
+/model gemini/gemini-2.5-pro
+```
+
+> [!TIP]
+> Use `-g` flag to persist the model change to `~/.nanobot/config.json` for future sessions.
+
 <details>
 <summary><b>Scheduled Tasks (Cron)</b></summary>
 
