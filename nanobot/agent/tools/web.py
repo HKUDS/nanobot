@@ -87,7 +87,7 @@ class WebSearchTool(Tool):
                     lines.append(f"   {desc}")
             return "\n".join(lines)
         except Exception as e:
-            return f"Error: {e}"
+            return f"Error: {type(e).__name__}: {e}" if str(e) else f"Error: {type(e).__name__}"
 
 
 class WebFetchTool(Tool):
@@ -148,7 +148,8 @@ class WebFetchTool(Tool):
             return json.dumps({"url": url, "finalUrl": str(r.url), "status": r.status_code,
                               "extractor": extractor, "truncated": truncated, "length": len(text), "text": text})
         except Exception as e:
-            return json.dumps({"error": str(e), "url": url})
+            error_msg = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+            return json.dumps({"error": error_msg, "url": url})
     
     def _to_markdown(self, html: str) -> str:
         """Convert HTML to markdown."""
