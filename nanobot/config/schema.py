@@ -202,8 +202,9 @@ class GatewayConfig(BaseModel):
 
 class WebSearchConfig(BaseModel):
     """Web search tool configuration."""
-    api_key: str = ""  # Brave Search API key
+    api_key: str = ""  # Brave Search API key (optional if using DuckDuckGo)
     max_results: int = 5
+    provider: str = "auto"  # "auto", "brave", or "duckduckgo"
 
 
 class WebToolsConfig(BaseModel):

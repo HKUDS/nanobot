@@ -1,5 +1,6 @@
 """Web tools: web_search and web_fetch."""
 
+import asyncio
 import html
 import json
 import os
@@ -10,6 +11,17 @@ from urllib.parse import urlparse
 import httpx
 
 from nanobot.agent.tools.base import Tool
+
+# DuckDuckGo search support
+try:
+    from ddgs import DDGS
+    DDGS_AVAILABLE = True
+except ImportError:
+    try:
+        from ddgs import DDGS
+        DDGS_AVAILABLE = True
+    except ImportError:
+        DDGS_AVAILABLE = False
 
 # Shared constants
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
@@ -44,8 +56,8 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
-    
+    """Search the web using Brave Search API or DuckDuckGo (fallback)."""
+
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
     parameters = {
@@ -56,43 +68,96 @@ class WebSearchTool(Tool):
         },
         "required": ["query"]
     }
-    
-    def __init__(self, api_key: str | None = None, max_results: int = 5):
+
+    def __init__(self, api_key: str | None = None, max_results: int = 5, provider: str = "auto"):
         self.api_key = api_key or os.environ.get("BRAVE_API_KEY", "")
         self.max_results = max_results
-    
+        self.provider = provider  # "auto", "brave", "duckduckgo"
+
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        if not self.api_key:
-            return "Error: BRAVE_API_KEY not configured"
-        
-        try:
-            n = min(max(count or self.max_results, 1), 10)
-            async with httpx.AsyncClient() as client:
-                r = await client.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
-                    timeout=10.0
-                )
-                r.raise_for_status()
-            
-            results = r.json().get("web", {}).get("results", [])
-            if not results:
-                return f"No results for: {query}"
-            
-            lines = [f"Results for: {query}\n"]
-            for i, item in enumerate(results[:n], 1):
-                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
-                if desc := item.get("description"):
-                    lines.append(f"   {desc}")
-            return "\n".join(lines)
-        except Exception as e:
-            return f"Error: {e}"
+        n = min(max(count or self.max_results, 1), 10)
+
+        # Determine which provider to use
+        use_brave = self.provider in ("auto", "brave") and self.api_key
+        use_ddg = self.provider in ("auto", "duckduckgo") or (self.provider == "auto" and not self.api_key)
+
+        # Try Brave first if API key is available
+        if use_brave:
+            try:
+                return await self._search_brave(query, n)
+            except Exception as e:
+                if not use_ddg:
+                    return f"Error (Brave Search): {e}"
+                # Fall through to DuckDuckGo
+
+        # Try DuckDuckGo
+        if use_ddg:
+            if not DDGS_AVAILABLE:
+                return "Error: DuckDuckGo search requires 'duckduckgo-search' package. Install with: pip install duckduckgo-search"
+            try:
+                return await self._search_duckduckgo(query, n)
+            except Exception as e:
+                return f"Error (DuckDuckGo): {e}"
+
+        return "Error: No search provider available. Set BRAVE_API_KEY or install duckduckgo-search."
+
+    async def _search_brave(self, query: str, n: int) -> str:
+        """Search using Brave Search API."""
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                params={"q": query, "count": n},
+                headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
+                timeout=10.0
+            )
+            r.raise_for_status()
+
+        results = r.json().get("web", {}).get("results", [])
+        if not results:
+            return f"No results for: {query}"
+
+        lines = [f"Results for: {query}\n"]
+        for i, item in enumerate(results[:n], 1):
+            lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
+            if desc := item.get("description"):
+                lines.append(f"   {desc}")
+        return "\n".join(lines)
+
+    async def _search_duckduckgo(self, query: str, n: int) -> str:
+        """Search using DuckDuckGo (no API key required)."""
+        # Run DDGS in a thread pool since it's synchronous
+        loop = asyncio.get_event_loop()
+
+        def _search():
+            try:
+                # Try new package name first
+                try:
+                    from ddgs import DDGS as NewDDGS
+                    with NewDDGS() as ddgs:
+                        return list(ddgs.text(query, max_results=n))
+                except ImportError:
+                    from ddgs import DDGS as OldDDGS
+                    with OldDDGS() as ddgs:
+                        return list(ddgs.text(query, max_results=n))
+            except Exception as e:
+                raise e
+
+        results = await loop.run_in_executor(None, _search)
+
+        if not results:
+            return f"No results for: {query}"
+
+        lines = [f"Results for: {query}\n"]
+        for i, item in enumerate(results[:n], 1):
+            lines.append(f"{i}. {item.get('title', '')}\n   {item.get('href', '')}")
+            if desc := item.get("body"):
+                lines.append(f"   {desc}")
+        return "\n".join(lines)
 
 
 class WebFetchTool(Tool):
     """Fetch and extract content from a URL using Readability."""
-    
+
     name = "web_fetch"
     description = "Fetch URL and extract readable content (HTML → markdown/text)."
     parameters = {
@@ -104,10 +169,10 @@ class WebFetchTool(Tool):
         },
         "required": ["url"]
     }
-    
+
     def __init__(self, max_chars: int = 50000):
         self.max_chars = max_chars
-    
+
     async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
         from readability import Document
 
@@ -126,9 +191,9 @@ class WebFetchTool(Tool):
             ) as client:
                 r = await client.get(url, headers={"User-Agent": USER_AGENT})
                 r.raise_for_status()
-            
+
             ctype = r.headers.get("content-type", "")
-            
+
             # JSON
             if "application/json" in ctype:
                 text, extractor = json.dumps(r.json(), indent=2), "json"
@@ -140,16 +205,16 @@ class WebFetchTool(Tool):
                 extractor = "readability"
             else:
                 text, extractor = r.text, "raw"
-            
+
             truncated = len(text) > max_chars
             if truncated:
                 text = text[:max_chars]
-            
+
             return json.dumps({"url": url, "finalUrl": str(r.url), "status": r.status_code,
                               "extractor": extractor, "truncated": truncated, "length": len(text), "text": text})
         except Exception as e:
             return json.dumps({"error": str(e), "url": url})
-    
+
     def _to_markdown(self, html: str) -> str:
         """Convert HTML to markdown."""
         # Convert links, headings, lists before stripping tags
