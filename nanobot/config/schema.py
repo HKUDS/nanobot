@@ -192,6 +192,7 @@ class ProvidersConfig(BaseModel):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
+    nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # Nvidia
 
 
 class GatewayConfig(BaseModel):
