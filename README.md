@@ -110,6 +110,7 @@ nanobot onboard
 **2. Configure** (`~/.nanobot/config.json`)
 
 For OpenRouter - recommended for global users:
+
 ```json
 {
   "providers": {
@@ -185,11 +186,13 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, Mochat, DingTa
 | **Slack** | Medium (bot + app tokens) |
 | **Email** | Medium (IMAP/SMTP credentials) |
 | **QQ** | Easy (app credentials) |
+| **Matrix (Element)** | Medium (homeserver + access token) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
 
 **1. Create a bot**
+
 - Open Telegram, search `@BotFather`
 - Send `/newbot`, follow prompts
 - Copy the token
@@ -281,15 +284,18 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 <summary><b>Discord</b></summary>
 
 **1. Create a bot**
+
 - Go to https://discord.com/developers/applications
 - Create an application → Bot → Add Bot
 - Copy the bot token
 
 **2. Enable intents**
+
 - In the Bot settings, enable **MESSAGE CONTENT INTENT**
 - (Optional) Enable **SERVER MEMBERS INTENT** if you plan to use allow lists based on member data
 
 **3. Get your User ID**
+
 - Discord Settings → Advanced → enable **Developer Mode**
 - Right-click your avatar → **Copy User ID**
 
@@ -308,12 +314,80 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 ```
 
 **5. Invite the bot**
+
 - OAuth2 → URL Generator
 - Scopes: `bot`
 - Bot Permissions: `Send Messages`, `Read Message History`
 - Open the generated invite URL and add the bot to your server
 
 **6. Run**
+
+```bash
+nanobot gateway
+```
+
+</details>
+
+<details>
+<summary><b>Matrix (Element)</b></summary>
+
+Uses Matrix sync via `matrix-nio` (inbound media + outbound file attachments).
+
+**1. Create/choose a Matrix account**
+
+- Create or reuse a Matrix account on your homeserver (for example `matrix.org`).
+- Confirm you can log in with Element.
+
+**2. Get credentials**
+
+- You need:
+  - `userId` (example: `@nanobot:matrix.org`)
+  - `accessToken`
+  - `deviceId` (recommended so sync tokens can be restored across restarts)
+- You can obtain these from your homeserver login API (`/_matrix/client/v3/login`) or from your client's advanced session settings.
+
+**3. Configure**
+
+```json
+{
+  "channels": {
+    "matrix": {
+      "enabled": true,
+      "homeserver": "https://matrix.org",
+      "userId": "@nanobot:matrix.org",
+      "accessToken": "syt_xxx",
+      "deviceId": "NANOBOT01",
+      "e2eeEnabled": true,
+      "allowFrom": [],
+      "groupPolicy": "open",
+      "groupAllowFrom": [],
+      "allowRoomMentions": false,
+      "maxMediaBytes": 20971520
+    }
+  }
+}
+```
+
+> `allowFrom`: Empty allows all senders; set user IDs to restrict access.
+> `groupPolicy`: `open`, `mention`, or `allowlist`.
+> `groupAllowFrom`: Room allowlist used when `groupPolicy` is `allowlist`.
+> `allowRoomMentions`: If `true`, accepts `@room` (`m.mentions.room`) in mention mode.
+> `e2eeEnabled`: Enables Matrix E2EE support (default `true`); set `false` only for plaintext-only setups.
+> `maxMediaBytes`: Max attachment size in bytes (default `20MB`) for inbound and outbound media handling; set to `0` to block all inbound and outbound attachment uploads.
+
+> [!NOTE]
+> Matrix E2EE implications:
+>
+> - Keep a persistent `matrix-store` and stable `deviceId`; otherwise encrypted session state can be lost after restart.
+> - In newly joined encrypted rooms, initial messages may fail until Olm/Megolm sessions are established.
+> - With `e2eeEnabled=false`, encrypted room messages may be undecryptable and E2EE send safeguards are not applied.
+> - With `e2eeEnabled=true`, the bot sends with `ignore_unverified_devices=true` (more compatible, less strict than verified-only sending).
+> - Changing `accessToken`/`deviceId` effectively creates a new device and may require session re-establishment.
+> - Outbound attachments are sent from `OutboundMessage.media`.
+> - Effective media limit (inbound + outbound) uses the stricter value of local `maxMediaBytes` and homeserver `m.upload.size` (if advertised).
+> - If `tools.restrictToWorkspace=true`, Matrix outbound attachments are limited to files inside the workspace.
+
+**4. Run**
 
 ```bash
 nanobot gateway
@@ -364,6 +438,7 @@ nanobot gateway
 Uses **WebSocket** long connection — no public IP required.
 
 **1. Create a Feishu bot**
+
 - Visit [Feishu Open Platform](https://open.feishu.cn/app)
 - Create a new app → Enable **Bot** capability
 - **Permissions**: Add `im:message` (send messages)
@@ -452,6 +527,7 @@ Now send a message to the bot from QQ — it should respond!
 Uses **Stream Mode** — no public IP required.
 
 **1. Create a DingTalk bot**
+
 - Visit [DingTalk Open Platform](https://open-dev.dingtalk.com/)
 - Create a new app -> Add **Robot** capability
 - **Configuration**:
@@ -595,6 +671,7 @@ Config file: `~/.nanobot/config.json`
 ### Providers
 
 > [!TIP]
+>
 > - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
@@ -671,16 +748,16 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 
 **Common `ProviderSpec` options:**
 
-| Field | Description | Example |
-|-------|-------------|---------|
-| `litellm_prefix` | Auto-prefix model names for LiteLLM | `"dashscope"` → `dashscope/qwen-max` |
-| `skip_prefixes` | Don't prefix if model already starts with these | `("dashscope/", "openrouter/")` |
-| `env_extras` | Additional env vars to set | `(("ZHIPUAI_API_KEY", "{api_key}"),)` |
-| `model_overrides` | Per-model parameter overrides | `(("kimi-k2.5", {"temperature": 1.0}),)` |
-| `is_gateway` | Can route any model (like OpenRouter) | `True` |
-| `detect_by_key_prefix` | Detect gateway by API key prefix | `"sk-or-"` |
-| `detect_by_base_keyword` | Detect gateway by API base URL | `"openrouter"` |
-| `strip_model_prefix` | Strip existing prefix before re-prefixing | `True` (for AiHubMix) |
+| Field                    | Description                                     | Example                                  |
+| ------------------------ | ----------------------------------------------- | ---------------------------------------- |
+| `litellm_prefix`         | Auto-prefix model names for LiteLLM             | `"dashscope"` → `dashscope/qwen-max`     |
+| `skip_prefixes`          | Don't prefix if model already starts with these | `("dashscope/", "openrouter/")`          |
+| `env_extras`             | Additional env vars to set                      | `(("ZHIPUAI_API_KEY", "{api_key}"),)`    |
+| `model_overrides`        | Per-model parameter overrides                   | `(("kimi-k2.5", {"temperature": 1.0}),)` |
+| `is_gateway`             | Can route any model (like OpenRouter)           | `True`                                   |
+| `detect_by_key_prefix`   | Detect gateway by API key prefix                | `"sk-or-"`                               |
+| `detect_by_base_keyword` | Detect gateway by API base URL                  | `"openrouter"`                           |
+| `strip_model_prefix`     | Strip existing prefix before re-prefixing       | `True` (for AiHubMix)                    |
 
 </details>
 
@@ -723,11 +800,10 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 > For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
-| `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
-
+| Option                      | Default          | Description                                                                                                                                                 |
+| --------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tools.restrictToWorkspace` | `false`          | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
+| `channels.*.allowFrom`      | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact.                                                                  |
 
 ## CLI Reference
 
@@ -828,7 +904,6 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
   <img src="https://contrib.rocks/image?repo=HKUDS/nanobot&max=100&columns=12&updated=20260210" alt="Contributors" />
 </a>
 
-
 ## ⭐ Star History
 
 <div align="center">
@@ -845,7 +920,6 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
   <em> Thanks for visiting ✨ nanobot!</em><br><br>
   <img src="https://visitor-badge.laobi.icu/badge?page_id=HKUDS.nanobot&style=for-the-badge&color=00d4ff" alt="Views">
 </p>
-
 
 <p align="center">
   <sub>nanobot is for educational, research, and technical exchange purposes only</sub>

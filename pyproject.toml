@@ -40,6 +40,9 @@ dependencies = [
     "prompt-toolkit>=3.0.0",
     "mcp>=1.0.0",
     "json-repair>=0.30.0",
+    "matrix-nio[e2e]>=0.25.2",
+    "mistune>=3.0.0",
+    "nh3>=0.2.17",
 ]
 
 [project.optional-dependencies]
