@@ -4,6 +4,8 @@ import html
 import json
 import os
 import re
+import urllib.parse
+from abc import ABC, abstractmethod
 from typing import Any
 from urllib.parse import urlparse
 
@@ -43,8 +45,165 @@ def _validate_url(url: str) -> tuple[bool, str]:
         return False, str(e)
 
 
+# =============================================================================
+# Search Engine Backends
+# =============================================================================
+
+class SearchBackend(ABC):
+    """Abstract base class for search engine backends."""
+    
+    @abstractmethod
+    async def search(self, query: str, count: int) -> list[dict]:
+        """Execute search and return list of results with title, url, snippet."""
+        pass
+    
+    @abstractmethod
+    def is_available(self) -> tuple[bool, str]:
+        """Check if the backend is available. Returns (available, error_message)."""
+        pass
+
+
+class TavilyBackend(SearchBackend):
+    """Tavily Search API - optimized for AI/LLM applications."""
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+    
+    def is_available(self) -> tuple[bool, str]:
+        if not self.api_key:
+            return False, "TAVILY_API_KEY not configured. Get one free at https://tavily.com"
+        return True, ""
+    
+    async def search(self, query: str, count: int) -> list[dict]:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": self.api_key,
+                    "query": query,
+                    "max_results": count,
+                    "include_answer": False,
+                    "include_raw_content": False,
+                },
+                timeout=15.0
+            )
+            r.raise_for_status()
+        
+        data = r.json()
+        results = []
+        for item in data.get("results", [])[:count]:
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "snippet": item.get("content", "")
+            })
+        return results
+
+
+class BraveBackend(SearchBackend):
+    """Brave Search API - privacy-focused web search."""
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+    
+    def is_available(self) -> tuple[bool, str]:
+        if not self.api_key:
+            return False, "BRAVE_API_KEY not configured. Get one at https://brave.com/search/api/"
+        return True, ""
+    
+    async def search(self, query: str, count: int) -> list[dict]:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                params={"q": query, "count": count},
+                headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
+                timeout=10.0
+            )
+            r.raise_for_status()
+        
+        results = []
+        for item in r.json().get("web", {}).get("results", [])[:count]:
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "snippet": item.get("description", "")
+            })
+        return results
+
+
+class DuckDuckGoBackend(SearchBackend):
+    """DuckDuckGo HTML search - free, no API key required."""
+    
+    def is_available(self) -> tuple[bool, str]:
+        return True, ""  # Always available, no API key needed
+    
+    async def search(self, query: str, count: int) -> list[dict]:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                "https://html.duckduckgo.com/html/",
+                params={"q": query},
+                headers={"User-Agent": USER_AGENT, "Accept": "text/html"},
+                timeout=15.0
+            )
+            r.raise_for_status()
+        
+        return self._parse_html(r.text, count)
+    
+    def _parse_html(self, html_content: str, max_results: int) -> list[dict]:
+        """Parse DuckDuckGo HTML search results."""
+        results = []
+        
+        # Pattern to extract title and URL
+        title_pattern = re.compile(
+            r'<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>',
+            re.DOTALL | re.IGNORECASE
+        )
+        snippet_pattern = re.compile(
+            r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
+            re.DOTALL | re.IGNORECASE
+        )
+        
+        # Split by result divs
+        result_divs = re.split(
+            r'<div[^>]*class="[^"]*result[^"]*results_links[^"]*"',
+            html_content
+        )
+        
+        for div in result_divs[1:max_results + 1]:
+            title_match = title_pattern.search(div)
+            snippet_match = snippet_pattern.search(div)
+            
+            if title_match:
+                url = title_match.group(1)
+                # Extract actual URL from DuckDuckGo redirect
+                if "uddg=" in url:
+                    parsed = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+                    url = parsed.get("uddg", [url])[0]
+                
+                title = _strip_tags(title_match.group(2))
+                snippet = _strip_tags(snippet_match.group(1)) if snippet_match else ""
+                
+                if title and url:
+                    results.append({"title": title, "url": url, "snippet": snippet})
+            
+            if len(results) >= max_results:
+                break
+        
+        return results
+
+
+# =============================================================================
+# Main WebSearchTool
+# =============================================================================
+
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
+    """Search the web using configurable search engine backend.
+    
+    Supported engines:
+    - tavily (default): AI-optimized search, requires API key from https://tavily.com
+    - brave: Privacy-focused search, requires API key from https://brave.com/search/api/
+    - duckduckgo: Free search, no API key required
+    """
     
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
@@ -57,34 +216,63 @@ class WebSearchTool(Tool):
         "required": ["query"]
     }
     
-    def __init__(self, api_key: str | None = None, max_results: int = 5):
-        self.api_key = api_key or os.environ.get("BRAVE_API_KEY", "")
+    def __init__(
+        self,
+        api_key: str | None = None,
+        max_results: int = 5,
+        engine: str = "tavily"
+    ):
+        """Initialize WebSearchTool.
+        
+        Args:
+            api_key: API key for Tavily or Brave (not needed for DuckDuckGo)
+            max_results: Default number of results to return
+            engine: Search engine to use ("tavily", "brave", or "duckduckgo")
+        """
         self.max_results = max_results
+        self.engine = engine.lower()
+        
+        # Resolve API key from parameter or environment
+        if api_key:
+            self.api_key = api_key
+        elif self.engine == "tavily":
+            self.api_key = os.environ.get("TAVILY_API_KEY", "")
+        else:
+            self.api_key = os.environ.get("BRAVE_API_KEY", "")
+        
+        # Initialize the appropriate backend
+        self._backend = self._create_backend()
+    
+    def _create_backend(self) -> SearchBackend:
+        """Create the search backend based on configured engine."""
+        if self.engine == "tavily":
+            return TavilyBackend(self.api_key)
+        elif self.engine == "brave":
+            return BraveBackend(self.api_key)
+        elif self.engine == "duckduckgo":
+            return DuckDuckGoBackend()
+        else:
+            # Default to Tavily for unknown engines
+            return TavilyBackend(self.api_key)
     
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        if not self.api_key:
-            return "Error: BRAVE_API_KEY not configured"
+        # Check if backend is available
+        available, error_msg = self._backend.is_available()
+        if not available:
+            return f"Error: {error_msg}"
         
         try:
             n = min(max(count or self.max_results, 1), 10)
-            async with httpx.AsyncClient() as client:
-                r = await client.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
-                    timeout=10.0
-                )
-                r.raise_for_status()
+            results = await self._backend.search(query, n)
             
-            results = r.json().get("web", {}).get("results", [])
             if not results:
                 return f"No results for: {query}"
             
             lines = [f"Results for: {query}\n"]
-            for i, item in enumerate(results[:n], 1):
-                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
-                if desc := item.get("description"):
-                    lines.append(f"   {desc}")
+            for i, item in enumerate(results, 1):
+                lines.append(f"{i}. {item['title']}\n   {item['url']}")
+                if item.get("snippet"):
+                    lines.append(f"   {item['snippet']}")
             return "\n".join(lines)
         except Exception as e:
             return f"Error: {e}"
