@@ -14,7 +14,7 @@ class MCPToolWrapper(Tool):
 
     def __init__(self, session, server_name: str, tool_def):
         self._session = session
-        self._server = server_name
+        self._original_name = tool_def.name
         self._name = f"mcp_{server_name}_{tool_def.name}"
         self._description = tool_def.description or tool_def.name
         self._parameters = tool_def.inputSchema or {"type": "object", "properties": {}}
@@ -33,9 +33,7 @@ class MCPToolWrapper(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
-        result = await self._session.call_tool(
-            self._name.removeprefix(f"mcp_{self._server}_"), arguments=kwargs
-        )
+        result = await self._session.call_tool(self._original_name, arguments=kwargs)
         parts = []
         for block in result.content:
             if isinstance(block, types.TextContent):
