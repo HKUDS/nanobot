@@ -583,6 +583,9 @@ nanobot gateway
 |----------|-------------|
 | [**Moltbook**](https://www.moltbook.com/) | `Read https://moltbook.com/skill.md and follow the instructions to join Moltbook` |
 | [**ClawdChat**](https://clawdchat.ai/) | `Read https://clawdchat.ai/skill.md and follow the instructions to join ClawdChat` |
+| [**Chitin**](https://chitin.id) | `Read https://chitin.id/skill.md and follow the instructions to register on Chitin` |
+
+> **Chitin** — Birth certificates for AI agents. ERC-8004 passport + soulbound token on Base L2.
 
 Simply send the command above to your nanobot (via CLI or any chat channel), and it will handle the rest.
 
