@@ -296,6 +296,7 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
+            metadata=msg.metadata,
         )
         final_content, tools_used = await self._run_agent_loop(initial_messages)
 
@@ -344,6 +345,7 @@ class AgentLoop:
             current_message=msg.content,
             channel=origin_channel,
             chat_id=origin_chat_id,
+            metadata=msg.metadata,
         )
         final_content, _ = await self._run_agent_loop(initial_messages)
 

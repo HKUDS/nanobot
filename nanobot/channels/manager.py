@@ -11,6 +11,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
+from nanobot.session.manager import SessionManager
 
 
 class ChannelManager:
@@ -22,10 +23,11 @@ class ChannelManager:
     - Start/stop channels
     - Route outbound messages
     """
-    
-    def __init__(self, config: Config, bus: MessageBus):
+
+    def __init__(self, config: Config, bus: MessageBus, session_manager: SessionManager | None = None):
         self.config = config
         self.bus = bus
+        self.session_manager = session_manager
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
         
@@ -136,7 +138,21 @@ class ChannelManager:
                 logger.info("QQ channel enabled")
             except ImportError as e:
                 logger.warning(f"QQ channel not available: {e}")
-    
+
+        # Signal channel
+        if self.config.channels.signal.enabled:
+            try:
+                from nanobot.channels.signal import SignalChannel
+
+                self.channels["signal"] = SignalChannel(
+                    self.config.channels.signal,
+                    self.bus,
+                    session_manager=self.session_manager,
+                )
+                logger.info("Signal channel enabled")
+            except ImportError as e:
+                logger.warning(f"Signal channel not available: {e}")
+
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
         try:

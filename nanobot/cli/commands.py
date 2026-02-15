@@ -381,8 +381,8 @@ def gateway(
     )
     
     # Create channel manager
-    channels = ChannelManager(config, bus)
-    
+    channels = ChannelManager(config, bus, session_manager)
+
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
