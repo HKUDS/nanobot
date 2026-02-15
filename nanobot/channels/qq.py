@@ -53,6 +53,7 @@ class QQChannel(BaseChannel):
     def __init__(self, config: QQConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: QQConfig = config
+        self._markdown_enabled = getattr(config, 'markdown_enabled', True)
         self._client: "botpy.Client | None" = None
         self._processed_ids: deque = deque(maxlen=1000)
         self._bot_task: asyncio.Task | None = None
@@ -102,11 +103,18 @@ class QQChannel(BaseChannel):
             logger.warning("QQ client not initialized")
             return
         try:
-            await self._client.api.post_c2c_message(
-                openid=msg.chat_id,
-                msg_type=0,
-                content=msg.content,
-            )
+            if self._markdown_enabled:
+                await self._client.api.post_c2c_message(
+                    openid=msg.chat_id,
+                    msg_type=2,
+                    markdown={"content": msg.content},
+                )
+            else:
+                await self._client.api.post_c2c_message(
+                    openid=msg.chat_id,
+                    msg_type=0,
+                    content=msg.content,
+                )
         except Exception as e:
             logger.error(f"Error sending QQ message: {e}")
 
