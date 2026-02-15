@@ -45,6 +45,8 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         max_iterations: int = 20,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
@@ -58,6 +60,8 @@ class AgentLoop:
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
+        self.temperature = temperature
+        self.max_tokens = max_tokens
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -71,6 +75,8 @@ class AgentLoop:
             workspace=workspace,
             bus=bus,
             model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
@@ -198,7 +204,11 @@ class AgentLoop:
 
             # Call LLM
             response = await self.provider.chat(
-                messages=messages, tools=self.tools.get_definitions(), model=self.model
+                messages=messages,
+                tools=self.tools.get_definitions(),
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
             )
 
             # Handle tool calls
@@ -311,7 +321,11 @@ class AgentLoop:
             iteration += 1
 
             response = await self.provider.chat(
-                messages=messages, tools=self.tools.get_definitions(), model=self.model
+                messages=messages,
+                tools=self.tools.get_definitions(),
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
             )
 
             if response.has_tool_calls:
