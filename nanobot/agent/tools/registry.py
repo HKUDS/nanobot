@@ -35,17 +35,19 @@ class ToolRegistry:
         """Get all tool definitions in OpenAI format."""
         return [tool.to_schema() for tool in self._tools.values()]
     
-    async def execute(self, name: str, params: dict[str, Any]) -> str:
+    async def execute(self, name: str, params: dict[str, Any], **context: Any) -> str:
         """
         Execute a tool by name with given parameters.
-        
+
         Args:
             name: Tool name.
             params: Tool parameters.
-        
+            **context: Extra context (channel, chat_id, job_id) forwarded
+                       to the tool via kwargs. Context takes precedence over params.
+
         Returns:
             Tool execution result as string.
-        
+
         Raises:
             KeyError: If tool not found.
         """
@@ -57,7 +59,9 @@ class ToolRegistry:
             errors = tool.validate_params(params)
             if errors:
                 return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
-            return await tool.execute(**params)
+            # Merge params with context; context takes precedence to avoid duplicate key errors
+            merged = {**params, **context}
+            return await tool.execute(**merged)
         except Exception as e:
             return f"Error executing {name}: {str(e)}"
     

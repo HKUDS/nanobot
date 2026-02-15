@@ -7,14 +7,20 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Coroutine
+from datetime import datetime
 
 from loguru import logger
 
-from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule, CronStore
+from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule, CronStore, DeliverTo
 
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _format_timestamp(ms: int) -> str:
+    """Convert milliseconds to ISO timestamp."""
+    return datetime.utcfromtimestamp(ms / 1000).isoformat() + "Z"
 
 
 def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
@@ -38,7 +44,8 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
             cron = croniter(schedule.expr, base_dt)
             next_dt = cron.get_next(datetime)
             return int(next_dt.timestamp() * 1000)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Invalid cron expression '{schedule.expr}': {e}")
             return None
     
     return None
@@ -53,10 +60,21 @@ class CronService:
         on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None
     ):
         self.store_path = store_path
+        self.log_path = store_path.parent / "cron_history.log"
         self.on_job = on_job  # Callback to execute job, returns response text
         self._store: CronStore | None = None
         self._timer_task: asyncio.Task | None = None
         self._running = False
+    
+    def _append_log(self, entry: dict) -> None:
+        """Append a log entry to the history file."""
+        try:
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_line = json.dumps(entry)
+            with open(self.log_path, "a") as f:
+                f.write(log_line + "\n")
+        except Exception as e:
+            logger.warning(f"Failed to write cron log: {e}")
     
     def _load_store(self) -> CronStore:
         """Load jobs from disk."""
@@ -82,7 +100,7 @@ class CronService:
                         payload=CronPayload(
                             kind=j["payload"].get("kind", "agent_turn"),
                             message=j["payload"].get("message", ""),
-                            deliver=j["payload"].get("deliver", False),
+                            deliver_to=j["payload"].get("deliverTo", "agent"),
                             channel=j["payload"].get("channel"),
                             to=j["payload"].get("to"),
                         ),
@@ -129,7 +147,7 @@ class CronService:
                     "payload": {
                         "kind": j.payload.kind,
                         "message": j.payload.message,
-                        "deliver": j.payload.deliver,
+                        "deliverTo": j.payload.deliver_to,
                         "channel": j.payload.channel,
                         "to": j.payload.to,
                     },
@@ -223,8 +241,8 @@ class CronService:
         start_ms = _now_ms()
         logger.info(f"Cron: executing job '{job.name}' ({job.id})")
         
+        response = None
         try:
-            response = None
             if self.on_job:
                 response = await self.on_job(job)
             
@@ -237,18 +255,37 @@ class CronService:
             job.state.last_error = str(e)
             logger.error(f"Cron: job '{job.name}' failed: {e}")
         
-        job.state.last_run_at_ms = start_ms
-        job.updated_at_ms = _now_ms()
+        end_ms = _now_ms()
+        duration_ms = end_ms - start_ms
         
-        # Handle one-shot jobs
-        if job.schedule.kind == "at":
-            if job.delete_after_run:
-                self._store.jobs = [j for j in self._store.jobs if j.id != job.id]
-            else:
-                job.enabled = False
-                job.state.next_run_at_ms = None
+        job.state.last_run_at_ms = start_ms
+        job.updated_at_ms = end_ms
+        
+        # Log full execution details
+        log_entry = {
+            "timestamp": _format_timestamp(start_ms),
+            "job_id": job.id,
+            "job_name": job.name,
+            "status": job.state.last_status,
+            "error": job.state.last_error,
+            "duration_ms": duration_ms,
+            "schedule_kind": job.schedule.kind,
+            "message": job.payload.message,
+            "response": response[:500] if response else None,  # Truncate long responses
+        }
+        self._append_log(log_entry)
+        
+        # Handle one-shot jobs (delete_after_run works for all schedule types)
+        if job.delete_after_run:
+            self._store.jobs = [j for j in self._store.jobs if j.id != job.id]
+            self._save_store()  # Save immediately to prevent re-execution
+            logger.info(f"Cron: deleted one-shot job '{job.name}' ({job.id})")
+        elif job.schedule.kind == "at":
+            # One-time "at" jobs get disabled after running
+            job.enabled = False
+            job.state.next_run_at_ms = None
         else:
-            # Compute next run
+            # Recurring jobs compute next run
             job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
     
     # ========== Public API ==========
@@ -264,7 +301,7 @@ class CronService:
         name: str,
         schedule: CronSchedule,
         message: str,
-        deliver: bool = False,
+        deliver_to: DeliverTo = "agent",
         channel: str | None = None,
         to: str | None = None,
         delete_after_run: bool = False,
@@ -281,7 +318,7 @@ class CronService:
             payload=CronPayload(
                 kind="agent_turn",
                 message=message,
-                deliver=deliver,
+                deliver_to=deliver_to,
                 channel=channel,
                 to=to,
             ),
@@ -349,3 +386,35 @@ class CronService:
             "jobs": len(store.jobs),
             "next_wake_at_ms": self._get_next_wake_ms(),
         }
+    
+    def get_logs(self, job_id: str | None = None, limit: int = 100) -> list[dict]:
+        """Get job execution logs.
+        
+        Args:
+            job_id: Optional job ID to filter logs
+            limit: Maximum number of log entries to return (most recent first)
+        
+        Returns:
+            List of log entries, newest first
+        """
+        if not self.log_path.exists():
+            return []
+        
+        logs = []
+        try:
+            with open(self.log_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        if job_id is None or entry.get("job_id") == job_id:
+                            logs.append(entry)
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:
+            logger.warning(f"Failed to read cron logs: {e}")
+        
+        # Return most recent first, up to limit
+        return logs[-limit:][::-1]

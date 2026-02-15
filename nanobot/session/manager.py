@@ -173,7 +173,8 @@ class SessionManager:
                                 "updated_at": data.get("updated_at"),
                                 "path": str(path)
                             })
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to read session file {path}: {e}")
                 continue
         
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
