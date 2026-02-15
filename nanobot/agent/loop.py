@@ -261,16 +261,10 @@ class AgentLoop:
         if msg.channel == "system":
             return await self._process_system_message(msg)
         
-        # Command: /restart
-        if msg.content.strip() == "/restart":
-            logger.info(f"Restart command received from {msg.sender_id}")
-            await self.bus.publish_outbound(OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="Restarting... wait a few seconds"
-            ))
-            await asyncio.sleep(2)  # Wait for message delivery
-            os.execvp(sys.argv[0], sys.argv)
+        # Handle admin commands
+        if msg.content.strip().startswith("/"):
+            if await self._handle_admin_command(msg):
+                return None
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info(f"Processing message from {msg.channel}:{msg.sender_id}: {preview}")
@@ -487,3 +481,33 @@ Respond with ONLY valid JSON, no markdown fences."""
         
         response = await self._process_message(msg, session_key=session_key)
         return response.content if response else ""
+
+    async def _handle_admin_command(self, msg: InboundMessage) -> bool:
+        """
+        Handle admin commands (e.g., /restart).
+        Returns True if the message was handled as a command.
+        """
+        cmd = msg.content.strip().split()[0]
+        commands = {
+            "/restart": self._cmd_restart,
+        }
+        
+        if handler := commands.get(cmd):
+            logger.info(f"Admin command {cmd} received from {msg.sender_id}")
+            await handler(msg)
+            return True
+        return False
+
+    async def _cmd_restart(self, msg: InboundMessage) -> None:
+        """Handle /restart command."""
+        await self.bus.publish_outbound(OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="🔄 Restarting... back in a moment!"
+        ))
+        # Schedule restart to allow message delivery
+        async def _restart():
+            await asyncio.sleep(2)
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+            
+        asyncio.create_task(_restart())
