@@ -79,6 +79,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     # === Gateways (detected by api_key / api_base, not model name) =========
     # Gateways can route any model, so they win in fallback.
 
+    # NVIDIA NIM API
+    ProviderSpec(
+        name="nvidia",
+        keywords=("nvidia", "nvidia_nim"),
+        env_key="NVIDIA_API_KEY",
+        display_name="NVIDIA NIM",
+        litellm_prefix="",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="nvapi-",
+        detect_by_base_keyword="nvidia",
+        default_api_base="https://integrate.api.nvidia.com/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # OpenRouter: global gateway, keys start with "sk-or-"
     ProviderSpec(
         name="openrouter",
