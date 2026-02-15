@@ -107,7 +107,10 @@ class AgentLoop:
         ))
         
         # Web tools
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key))
+        self.tools.register(WebSearchTool(
+            api_key=self.brave_api_key,
+            max_results=config.tools.web.search.max_results,
+        ))
         self.tools.register(WebFetchTool())
         
         # Message tool

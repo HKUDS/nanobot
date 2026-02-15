@@ -5,7 +5,7 @@ import json
 import os
 import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -14,6 +14,82 @@ from nanobot.agent.tools.base import Tool
 # Shared constants
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
 MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
+
+
+class DuckDuckGoSearchProvider:
+    """DuckDuckGo HTML search provider (fallback)."""
+
+    async def search(self, query: str, count: int) -> str:
+        """Search using DuckDuckGo HTML interface."""
+        search_url = f"https://html.duckduckgo.com/html/?q={quote(query)}"
+
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(
+                    search_url,
+                    headers={"User-Agent": USER_AGENT},
+                    timeout=10.0
+                )
+                r.raise_for_status()
+
+            return self._extract_results(r.text, count, query)
+        except Exception as e:
+            return f"Error: {e}"
+
+    def _extract_results(self, html: str, count: int, query: str) -> str:
+        """Extract results from DuckDuckGo HTML."""
+        # Match both href and title in one regex
+        link_re = re.compile(
+            r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>',
+            re.IGNORECASE
+        )
+        link_matches = link_re.findall(html)
+        
+        # Also try data-url for redirected URLs
+        data_url_re = re.compile(r'data-url="([^"]+)"')
+        data_urls = data_url_re.findall(html)
+        
+        # Build results
+        results = []
+        for i, match in enumerate(link_matches[:count + 5]):
+            # Prefer href, fallback to data-url
+            url = match[0] if match[0] else (data_urls[i] if i < len(data_urls) else "")
+            title = match[1].strip()
+            if url:
+                results.append((url, title))
+        
+        # Also try to extract snippets
+        snippet_re = re.compile(r'<a[^>]*class="result__snippet[^"]*"[^>]*>([\s\S]*?)</a>', re.IGNORECASE)
+        snippet_matches = snippet_re.findall(html, count + 5)
+
+        if not results:
+            return f"No results found. Query: {query}"
+
+        lines = [f"Results for: {query} (via DuckDuckGo)"]
+        max_items = min(len(results), count)
+
+        for i in range(max_items):
+            url = results[i][0]
+            title = results[i][1]
+
+            # Decode URL if needed (uddg= param)
+            if 'uddg=' in url:
+                try:
+                    idx = url.find('uddg=') + 5
+                    url = url[idx:]
+                except Exception:
+                    pass
+
+            lines.append(f"{i + 1}. {title}")
+            lines.append(f"   {url}")
+
+            # Add snippet if available
+            if i < len(snippet_matches):
+                snippet = re.sub(r'<[^>]+>', '', snippet_matches[i]).strip()
+                if snippet:
+                    lines.append(f"   {snippet}")
+
+        return "\n".join(lines)
 
 
 def _strip_tags(text: str) -> str:
@@ -44,7 +120,7 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
+    """Search the web using Brave Search API or DuckDuckGo fallback."""
     
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
@@ -57,37 +133,51 @@ class WebSearchTool(Tool):
         "required": ["query"]
     }
     
-    def __init__(self, api_key: str | None = None, max_results: int = 5):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        max_results: int = 5,
+    ):
         self.api_key = api_key or os.environ.get("BRAVE_API_KEY", "")
         self.max_results = max_results
+        self._ddg_provider = DuckDuckGoSearchProvider()  # Always available as fallback
     
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        if not self.api_key:
-            return "Error: BRAVE_API_KEY not configured"
+        # Try Brave Search first if API key is available
+        if self.api_key:
+            try:
+                return await self._brave_search(query, count)
+            except Exception as e:
+                # Brave failed, fallback to DuckDuckGo
+                fallback_msg = f"Brave Search unavailable ({e}), falling back to DuckDuckGo...\n"
+                ddg_result = await self._ddg_provider.search(query, count or self.max_results)
+                return fallback_msg + ddg_result
         
-        try:
-            n = min(max(count or self.max_results, 1), 10)
-            async with httpx.AsyncClient() as client:
-                r = await client.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
-                    timeout=10.0
-                )
-                r.raise_for_status()
-            
-            results = r.json().get("web", {}).get("results", [])
-            if not results:
-                return f"No results for: {query}"
-            
-            lines = [f"Results for: {query}\n"]
-            for i, item in enumerate(results[:n], 1):
-                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
-                if desc := item.get("description"):
-                    lines.append(f"   {desc}")
-            return "\n".join(lines)
-        except Exception as e:
-            return f"Error: {e}"
+        # No Brave API key, use DuckDuckGo
+        return await self._ddg_provider.search(query, count or self.max_results)
+    
+    async def _brave_search(self, query: str, count: int | None = None) -> str:
+        """Search using Brave Search API."""
+        n = min(max(count or self.max_results, 1), 10)
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                params={"q": query, "count": n},
+                headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
+                timeout=10.0
+            )
+            r.raise_for_status()
+
+        results = r.json().get("web", {}).get("results", [])
+        if not results:
+            return f"No results for: {query}"
+        
+        lines = [f"Results for: {query}\n"]
+        for i, item in enumerate(results[:n], 1):
+            lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
+            if desc := item.get("description"):
+                lines.append(f"   {desc}")
+        return "\n".join(lines)
 
 
 class WebFetchTool(Tool):
