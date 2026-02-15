@@ -18,8 +18,9 @@ MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
 
 from ddgs import DDGS
 
+
 class DuckDuckGoSearchProvider:
-    """DuckDuckGo search provider (fallback)."""
+    """Metasearch provider using ddgs (aggregates DuckDuckGo, Bing, Google, etc. - no API key required)."""
 
     async def search(self, query: str, count: int) -> str:
         try:
