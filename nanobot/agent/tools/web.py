@@ -5,7 +5,7 @@ import json
 import os
 import re
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlparse, unquote
 
 import httpx
 
@@ -41,6 +41,12 @@ class DuckDuckGoSearchProvider:
             
             lines = [f"Results for: {query} (via DuckDuckGo)"]
             for i, (url, title) in enumerate(links, 1):
+                # Decode DuckDuckGo redirect URLs (uddg=...)
+                if "uddg=" in url:
+                    try:
+                        url = unquote(url.split("uddg=")[1].split("&")[0])
+                    except Exception:
+                        pass
                 lines.append(f"{i}. {title.strip()}\n   {url}")
                 if i <= len(snippets):
                     snippet = re.sub(r'<[^>]+>', '', snippets[i-1]).strip()
