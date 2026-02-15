@@ -202,7 +202,9 @@ class GatewayConfig(BaseModel):
 
 class WebSearchConfig(BaseModel):
     """Web search tool configuration."""
-    api_key: str = ""  # Brave Search API key
+    api_key: str = ""  # Brave Search API key (legacy, defaults to Brave)
+    brave_api_key: str = ""  # Brave Search API key (primary provider, takes precedence)
+    tavily_api_key: str = ""  # Tavily Search API key (secondary provider)
     max_results: int = 5
 
 

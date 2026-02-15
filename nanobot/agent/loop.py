@@ -48,6 +48,7 @@ class AgentLoop:
         max_tokens: int = 4096,
         memory_window: int = 50,
         brave_api_key: str | None = None,
+        tavily_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
@@ -65,6 +66,7 @@ class AgentLoop:
         self.max_tokens = max_tokens
         self.memory_window = memory_window
         self.brave_api_key = brave_api_key
+        self.tavily_api_key = tavily_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -80,6 +82,7 @@ class AgentLoop:
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             brave_api_key=brave_api_key,
+            tavily_api_key=tavily_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
@@ -107,7 +110,10 @@ class AgentLoop:
         ))
         
         # Web tools
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key))
+        self.tools.register(WebSearchTool(
+            brave_api_key=self.brave_api_key,
+            tavily_api_key=getattr(self, 'tavily_api_key', None)
+        ))
         self.tools.register(WebFetchTool())
         
         # Message tool
@@ -298,7 +304,6 @@ class AgentLoop:
             chat_id=msg.chat_id,
         )
         final_content, tools_used = await self._run_agent_loop(initial_messages)
-
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
         
