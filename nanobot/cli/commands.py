@@ -249,7 +249,7 @@ def gateway(
         on_heartbeat=on_heartbeat,
         interval_s=30 * 60,  # 30 minutes
         enabled=True,
-        session_manager=agent.session_manager  # Pass session manager for cache cleanup
+        session_manager=agent.sessions  # Pass session manager for cache cleanup
     )
 
     # Create channel manager
