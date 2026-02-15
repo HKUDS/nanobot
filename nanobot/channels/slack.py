@@ -84,7 +84,7 @@ class SlackChannel(BaseChannel):
             use_thread = thread_ts and channel_type != "im"
             await self._web_client.chat_postMessage(
                 channel=msg.chat_id,
-                text=msg.content or "",
+                text=msg.content or "<empty_response_from_the_bot>",
                 thread_ts=thread_ts if use_thread else None,
             )
         except Exception as e:
