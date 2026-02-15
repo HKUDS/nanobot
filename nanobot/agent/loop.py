@@ -12,6 +12,7 @@ from loguru import logger
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
+from nanobot.providers.registry import PROVIDERS
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
@@ -23,6 +24,28 @@ from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import Session, SessionManager
+
+
+def _list_models(config) -> str:
+    """List available models based on configured providers."""
+    lines = ["📋 Available models (use /model <name> to switch):\n"]
+    lines.append(f"Current: {config.agents.defaults.model}\n")
+    lines.append("Configured providers:")
+    for spec in PROVIDERS:
+        p = getattr(config.providers, spec.name, None)
+        if p and p.api_key:
+            lines.append(f"  • {spec.label}")
+    return "\n".join(lines)
+
+
+def _set_model(model: str, config_path: Path | None = None) -> str:
+    """Set model in config and return confirmation."""
+    from nanobot.config.loader import load_config, save_config
+    config = load_config(config_path)
+    old = config.agents.defaults.model
+    config.agents.defaults.model = model
+    save_config(config, config_path)
+    return f"✅ Model changed: {old} → {model}"
 
 
 class AgentLoop:
@@ -284,7 +307,39 @@ class AgentLoop:
                                   content="New session started. Memory consolidation in progress.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/model — List available models\n/model <name> — Switch model (session)\n/model <name> -g — Switch model (global)\n/help — Show available commands")
+        
+        # /model command - list or set model
+        if cmd.startswith("/model"):
+            from nanobot.config.loader import load_config
+            parts = msg.content.strip().split()
+            
+            if len(parts) == 1:
+                # /model - list available models
+                config = load_config()
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                      content=_list_models(config))
+            else:
+                # Check for -g flag
+                global_flag = "-g" in parts
+                if global_flag:
+                    parts.remove("-g")
+                new_model = " ".join(parts[1:]).strip()
+                
+                if new_model:
+                    # Update runtime model
+                    self.model = new_model
+                    self.subagents.model = new_model
+                    
+                    # Persist if -g flag
+                    if global_flag:
+                        result = _set_model(new_model)
+                    else:
+                        result = f"✅ Model set to {new_model} (session only)"
+                    
+                    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=result)
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                      content="Usage: /model <name> or /model <name> -g (global)")
         
         if len(session.messages) > self.memory_window:
             asyncio.create_task(self._consolidate_memory(session))
