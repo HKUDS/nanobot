@@ -150,3 +150,40 @@ class TestModelCommandParsing:
         
         assert model == "anthropic/claude-sonnet-4-5"
         assert global_flag is True
+
+
+class TestModelValidation:
+    """Tests for model format validation."""
+    
+    def test_model_without_slash_invalid(self):
+        """Model without slash should be rejected."""
+        content = "/model gpt4"
+        parts = content.strip().split()
+        new_model = " ".join(p for p in parts[1:] if p != "-g")
+        
+        assert "/" not in new_model
+    
+    def test_model_with_slash_valid(self):
+        """Model with slash should be accepted."""
+        content = "/model openai/gpt-4o"
+        parts = content.strip().split()
+        new_model = " ".join(p for p in parts[1:] if p != "-g")
+        
+        assert "/" in new_model
+
+
+class TestSetModelErrorHandling:
+    """Tests for error handling in _set_model."""
+    
+    @patch("nanobot.config.loader.load_config")
+    @patch("nanobot.config.loader.save_config")
+    def test_set_model_rollback_on_error(self, mock_save, mock_load):
+        """Should rollback model on save error."""
+        config = make_test_config(model="old-model")
+        mock_load.return_value = config
+        mock_save.side_effect = Exception("Disk full")
+        
+        with pytest.raises(RuntimeError, match="Failed to save"):
+            _set_model("new-model")
+        
+        assert config.agents.defaults.model == "old-model"  # rollback

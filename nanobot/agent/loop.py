@@ -43,8 +43,12 @@ def _set_model(model: str, config_path: Path | None = None) -> str:
     from nanobot.config.loader import load_config, save_config
     config = load_config(config_path)
     old, config.agents.defaults.model = config.agents.defaults.model, model
-    save_config(config, config_path)
-    return f"✅ Model changed: {old} → {model}"
+    try:
+        save_config(config, config_path)
+        return f"✅ Model changed: {old} → {model}"
+    except Exception as e:
+        config.agents.defaults.model = old  # rollback on error
+        raise RuntimeError(f"Failed to save config: {e}")
 
 
 class AgentLoop:
@@ -318,12 +322,18 @@ class AgentLoop:
             
             global_flag = "-g" in parts
             new_model = " ".join(p for p in parts[1:] if p != "-g")
-            if not new_model:
+            if not new_model or "/" not in new_model:
                 return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                      content="Usage: /model <provider/model> [-g]")
+                                      content="Usage: /model <provider/model> [-g]\nExample: /model openai/gpt-4o")
             
             self.model = self.subagents.model = new_model
-            result = _set_model(new_model) if global_flag else f"✅ Model: {new_model} (session)"
+            if global_flag:
+                try:
+                    result = _set_model(new_model)
+                except RuntimeError as e:
+                    result = f"❌ {e}"
+            else:
+                result = f"✅ Model: {new_model} (session)"
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=result)
         
         if len(session.messages) > self.memory_window:
