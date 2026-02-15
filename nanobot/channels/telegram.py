@@ -1,11 +1,13 @@
 """Telegram channel implementation using python-telegram-bot."""
 
+from __future__ import annotations
+
 import asyncio
 import re
-
 from loguru import logger
-from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram import BotCommand, Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -85,12 +87,25 @@ class TelegramChannel(BaseChannel):
     
     name = "telegram"
     
-    def __init__(self, config: TelegramConfig, bus: MessageBus, groq_api_key: str = ""):
+    # Commands registered with Telegram's command menu
+    BOT_COMMANDS = [
+        BotCommand("start", "Start the bot"),
+        BotCommand("new", "Start a new conversation"),
+        BotCommand("help", "Show available commands"),
+    ]
+    
+    def __init__(
+        self,
+        config: TelegramConfig,
+        bus: MessageBus,
+        groq_api_key: str = "",
+    ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
+        self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
     
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -100,20 +115,24 @@ class TelegramChannel(BaseChannel):
         
         self._running = True
         
-        # Build the application
-        builder = Application.builder().token(self.config.token)
+        # Build the application with larger connection pool to avoid pool-timeout on long runs
+        req = HTTPXRequest(connection_pool_size=16, pool_timeout=5.0, connect_timeout=30.0, read_timeout=30.0)
+        builder = Application.builder().token(self.config.token).request(req).get_updates_request(req)
         if self.config.proxy:
             builder = builder.proxy(self.config.proxy).get_updates_proxy(self.config.proxy)
         self._app = builder.build()
+        self._app.add_error_handler(self._on_error)
         
-        # Add /start command handler
-        from telegram.ext import CommandHandler
+        # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
+        self._app.add_handler(CommandHandler("new", self._forward_command))
+        self._app.add_handler(CommandHandler("help", self._forward_command))
         
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
             MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL), 
+                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL) 
+                & ~filters.COMMAND,
                 self._on_message
             )
         )
@@ -124,9 +143,15 @@ class TelegramChannel(BaseChannel):
         await self._app.initialize()
         await self._app.start()
         
-        # Get bot info
+        # Get bot info and register command menu
         bot_info = await self._app.bot.get_me()
         logger.info(f"Telegram bot @{bot_info.username} connected")
+        
+        try:
+            await self._app.bot.set_my_commands(self.BOT_COMMANDS)
+            logger.debug("Telegram bot commands registered")
+        except Exception as e:
+            logger.warning(f"Failed to register bot commands: {e}")
         
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
@@ -142,6 +167,10 @@ class TelegramChannel(BaseChannel):
         """Stop the Telegram bot."""
         self._running = False
         
+        # Cancel all typing indicators
+        for chat_id in list(self._typing_tasks):
+            self._stop_typing(chat_id)
+        
         if self._app:
             logger.info("Stopping Telegram bot...")
             await self._app.updater.stop()
@@ -154,6 +183,9 @@ class TelegramChannel(BaseChannel):
         if not self._app:
             logger.warning("Telegram bot not running")
             return
+        
+        # Stop typing indicator for this chat
+        self._stop_typing(msg.chat_id)
         
         try:
             # chat_id should be the Telegram chat ID (integer)
@@ -186,7 +218,18 @@ class TelegramChannel(BaseChannel):
         user = update.effective_user
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
-            "Send me a message and I'll respond!"
+            "Send me a message and I'll respond!\n"
+            "Type /help to see available commands."
+        )
+    
+    async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Forward slash commands to the bus for unified handling in AgentLoop."""
+        if not update.message or not update.effective_user:
+            return
+        await self._handle_message(
+            sender_id=str(update.effective_user.id),
+            chat_id=str(update.message.chat_id),
+            content=update.message.text,
         )
     
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -271,10 +314,15 @@ class TelegramChannel(BaseChannel):
         
         logger.debug(f"Telegram message from {sender_id}: {content[:50]}...")
         
+        str_chat_id = str(chat_id)
+        
+        # Start typing indicator before processing
+        self._start_typing(str_chat_id)
+        
         # Forward to the message bus
         await self._handle_message(
             sender_id=sender_id,
-            chat_id=str(chat_id),
+            chat_id=str_chat_id,
             content=content,
             media=media_paths,
             metadata={
@@ -286,6 +334,33 @@ class TelegramChannel(BaseChannel):
             }
         )
     
+    def _start_typing(self, chat_id: str) -> None:
+        """Start sending 'typing...' indicator for a chat."""
+        # Cancel any existing typing task for this chat
+        self._stop_typing(chat_id)
+        self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
+    
+    def _stop_typing(self, chat_id: str) -> None:
+        """Stop the typing indicator for a chat."""
+        task = self._typing_tasks.pop(chat_id, None)
+        if task and not task.done():
+            task.cancel()
+    
+    async def _typing_loop(self, chat_id: str) -> None:
+        """Repeatedly send 'typing' action until cancelled."""
+        try:
+            while self._app:
+                await self._app.bot.send_chat_action(chat_id=int(chat_id), action="typing")
+                await asyncio.sleep(4)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.debug(f"Typing indicator stopped for {chat_id}: {e}")
+    
+    async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Log polling / handler errors instead of silently swallowing them."""
+        logger.error(f"Telegram error: {context.error}")
+
     def _get_extension(self, media_type: str, mime_type: str | None) -> str:
         """Get file extension based on media type."""
         if mime_type:
