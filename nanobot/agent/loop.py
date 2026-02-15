@@ -4,6 +4,7 @@ import asyncio
 from contextlib import AsyncExitStack
 import json
 import json_repair
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,15 +27,99 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import Session, SessionManager
 
 
+# Model cache for /model command
+_MODEL_CACHE: dict[str, list[str]] = {}
+_CACHE_TIMESTAMP: float = 0
+_CACHE_TTL_SECONDS = 3600  # 1 hour
+
+PI_MONO_MODELS_URL = "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/ai/src/models.generated.ts"
+
+
+async def _fetch_models_from_github() -> dict[str, list[str]]:
+    """Fetch model list from pi-mono GitHub."""
+    global _MODEL_CACHE, _CACHE_TIMESTAMP
+    
+    # Return cached if still valid
+    if _MODEL_CACHE and (time.time() - _CACHE_TIMESTAMP) < _CACHE_TTL_SECONDS:
+        return _MODEL_CACHE
+    
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(PI_MONO_MODELS_URL)
+            resp.raise_for_status()
+            content = resp.text
+    except Exception as e:
+        logger.warning(f"Failed to fetch models from GitHub: {e}")
+        return {}
+    
+    # Parse models from TypeScript (extract provider -> [models])
+    models: dict[str, list[str]] = {}
+    current_provider = ""
+    in_provider = False
+    
+    for line in content.split("\n"):
+        stripped = line.strip()
+        # New provider section
+        if stripped.startswith('"') and stripped.endswith(":"):
+            current_provider = stripped.strip(':').strip('"')
+            if current_provider not in models:
+                models[current_provider] = []
+            in_provider = True
+        # Model entry (key without dot prefix = model id)
+        elif in_provider and stripped.startswith('"') and ": {" in stripped:
+            model_id = stripped.split(":")[0].strip('"')
+            if model_id and "." not in model_id:  # Skip nested keys like "id:", "name:"
+                models[current_provider].append(model_id)
+        elif stripped.startswith("}"):
+            in_provider = False
+    
+    # Filter to popular providers only (reduce noise)
+    popular = {"anthropic", "openai", "openrouter", "deepseek", "google", "minimax", "moonshot", "groq", "mistral", "xai"}
+    filtered = {k: v for k, v in models.items() if any(p in k.lower() for p in popular)}
+    
+    # Update cache
+    _MODEL_CACHE = filtered
+    _CACHE_TIMESTAMP = time.time()
+    return filtered
+
+
 def _list_models(config) -> str:
     """List available models based on configured providers."""
+    # Sync wrapper for async fetch - will show loading on first call
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # In async context, create task (will populate cache for next call)
+            asyncio.create_task(_fetch_models_from_github())
+        else:
+            # Sync context
+            _MODEL_CACHE.update(asyncio.run(_fetch_models_from_github()))
+    except RuntimeError:
+        pass  # No event loop, skip async
+    
     lines = ["📋 Available models (use /model <name> to switch):\n"]
     lines.append(f"Current: {config.agents.defaults.model}\n")
-    lines.append("Configured providers:")
-    for spec in PROVIDERS:
-        p = getattr(config.providers, spec.name, None)
-        if p and p.api_key:
-            lines.append(f"  • {spec.label}")
+    
+    # Show models from cache if available
+    if _MODEL_CACHE:
+        lines.append("\nAvailable models:")
+        for provider, models in sorted(_MODEL_CACHE.items()):
+            if models:
+                # Show first 5 models as preview
+                preview = ", ".join(models[:5])
+                if len(models) > 5:
+                    preview += f", ... ({len(models)} total)"
+                lines.append(f"  [{provider}] {preview}")
+        lines.append("\nFull list: https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts")
+    else:
+        # Fallback to providers
+        lines.append("\nConfigured providers:")
+        for spec in PROVIDERS:
+            p = getattr(config.providers, spec.name, None)
+            if p and p.api_key:
+                lines.append(f"  • {spec.label}")
+    
     return "\n".join(lines)
 
 
