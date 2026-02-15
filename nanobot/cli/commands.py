@@ -7,6 +7,7 @@ from pathlib import Path
 import select
 import sys
 
+import httpx
 import typer
 from rich.console import Console
 from rich.markdown import Markdown
@@ -835,6 +836,218 @@ def cron_run(
 
 
 # ============================================================================
+# Skills Commands
+# ============================================================================
+
+
+skills_app = typer.Typer(help="Manage skills")
+app.add_typer(skills_app, name="skills")
+
+
+@skills_app.command("list")
+def skills_list():
+    """List installed skills."""
+    from nanobot.config.loader import load_config
+    from nanobot.agent.skills import SkillsLoader
+
+    config = load_config()
+    loader = SkillsLoader(config.workspace_path)
+    all_skills = loader.list_skills(filter_unavailable=False)
+
+    if not all_skills:
+        console.print("No skills installed.")
+        return
+
+    table = Table(title="Installed Skills")
+    table.add_column("Name", style="cyan")
+    table.add_column("Source", style="yellow")
+    table.add_column("Description")
+    table.add_column("Available", justify="center")
+
+    for s in all_skills:
+        desc = loader._get_skill_description(s["name"])
+        meta = loader._get_skill_meta(s["name"])
+        available = loader._check_requirements(meta)
+        avail_str = "[green]yes[/green]" if available else "[red]no[/red]"
+        table.add_row(s["name"], s["source"], desc, avail_str)
+
+    console.print(table)
+
+
+@skills_app.command("add")
+def skills_add(
+    url: str = typer.Argument(..., help="GitHub URL of a skill or skill marketplace"),
+):
+    """Install skills from a GitHub URL.
+
+    Example: nanobot skills add https://github.com/anthropics/skills
+    """
+    import io
+    import shutil
+    import zipfile
+
+    from nanobot.config.loader import load_config
+    from nanobot.cli.github_market import (
+        GitHubMarketError,
+        fetch_skill_package_from_github,
+        resolve_market_url,
+    )
+
+    config = load_config()
+    workspace_skills = config.workspace_path / "skills"
+    workspace_skills.mkdir(parents=True, exist_ok=True)
+
+    def install_zip(zip_bytes: bytes, skill_name: str) -> None:
+        """Extract a skill ZIP into the workspace skills directory."""
+        target = workspace_skills / skill_name
+        if target.exists():
+            shutil.rmtree(target)
+        target.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            zf.extractall(target)
+
+    def _check_overwrite(skill_name: str) -> bool:
+        """Return True if OK to proceed (not exists, or user confirmed overwrite)."""
+        target = workspace_skills / skill_name
+        if not target.exists():
+            return True
+        return typer.confirm(f"Skill '{skill_name}' already installed. Overwrite?")
+
+    async def _add():
+        # 1. Resolve URL
+        with console.status("[dim]Resolving URL...[/dim]", spinner="dots"):
+            result = await resolve_market_url(url)
+
+        if result["mode"] == "direct":
+            # Direct install — check overwrite before downloading
+            # Infer skill name from URL path
+            from nanobot.cli.github_market import _parse_github_url, _normalize_subpath
+            _, repo, _, subpath = _parse_github_url(result["github_url"])
+            normalized = _normalize_subpath(subpath)
+            skill_name = Path(normalized).name if normalized else repo
+
+            if not _check_overwrite(skill_name):
+                console.print("[dim]Skipped.[/dim]")
+                return
+
+            with console.status("[dim]Downloading skill...[/dim]", spinner="dots"):
+                zip_bytes, skill_name, _ = await fetch_skill_package_from_github(
+                    result["github_url"]
+                )
+            install_zip(zip_bytes, skill_name)
+            console.print(f"[green]✓[/green] Installed skill: [cyan]{skill_name}[/cyan]")
+            return
+
+        # List mode — show numbered list for selection
+        skills = result["skills"]
+        if not skills:
+            console.print("[yellow]No skills found at this URL.[/yellow]")
+            return
+
+        console.print("\nAvailable skills:")
+        for i, s in enumerate(skills, 1):
+            desc = f" - {s['description']}" if s.get("description") else ""
+            console.print(f"  [cyan]{i}[/cyan]. {s['name']}{desc}")
+
+        console.print(
+            "\nEnter skill numbers to install (comma-separated, e.g. 1,3,5)."
+            " Enter [bold]a[/bold] for all, or press Enter to cancel:"
+        )
+        raw = input("> ").strip()
+        if not raw:
+            console.print("[dim]No skills selected.[/dim]")
+            return
+
+        if raw.lower() == "a":
+            indices = list(range(len(skills)))
+        else:
+            indices = []
+            for part in raw.split(","):
+                part = part.strip()
+                if not part.isdigit():
+                    continue
+                idx = int(part) - 1
+                if 0 <= idx < len(skills):
+                    indices.append(idx)
+
+        if not indices:
+            console.print("[dim]No valid skills selected.[/dim]")
+            return
+
+        selected_skills = [skills[i] for i in dict.fromkeys(indices)]
+
+        # Check overwrite for all selected skills before downloading
+        to_install: list[dict] = []
+        for s in selected_skills:
+            if _check_overwrite(s["name"]):
+                to_install.append(s)
+            else:
+                console.print(f"  [dim]Skipped: {s['name']}[/dim]")
+
+        if not to_install:
+            console.print("[dim]Nothing to install.[/dim]")
+            return
+
+        # Download and install
+        installed: list[str] = []
+        for s in to_install:
+            with console.status(f"[dim]Downloading {s['name']}...[/dim]", spinner="dots"):
+                zip_bytes, skill_name, _ = await fetch_skill_package_from_github(s["github_url"])
+            install_zip(zip_bytes, skill_name)
+            installed.append(skill_name)
+            console.print(f"  [green]✓[/green] Installed: [cyan]{skill_name}[/cyan]")
+
+        if installed:
+            console.print(f"\n[green]✓[/green] {len(installed)} skill(s) installed.")
+
+    try:
+        asyncio.run(_add())
+    except GitHubMarketError as e:
+        console.print(f"[red]Error: {e.message}[/red]")
+        if e.detail:
+            console.print(f"  {e.detail}")
+        if e.suggested_action:
+            console.print(f"  [dim]{e.suggested_action}[/dim]")
+        raise typer.Exit(1)
+    except httpx.TimeoutException:
+        console.print("[red]Error: Request timed out. Check your network connection.[/red]")
+        raise typer.Exit(1)
+
+
+@skills_app.command("remove")
+def skills_remove(
+    name: str = typer.Argument(..., help="Skill name to remove"),
+):
+    """Remove a workspace skill."""
+    import shutil
+
+    from nanobot.config.loader import load_config
+    from nanobot.agent.skills import SkillsLoader, BUILTIN_SKILLS_DIR
+
+    config = load_config()
+    loader = SkillsLoader(config.workspace_path)
+
+    # Check if it's a builtin skill
+    builtin_path = BUILTIN_SKILLS_DIR / name
+    if builtin_path.exists() and builtin_path.is_dir():
+        workspace_path = config.workspace_path / "skills" / name
+        if not workspace_path.exists():
+            console.print(f"[red]Cannot remove builtin skill '{name}'.[/red]")
+            raise typer.Exit(1)
+
+    target = config.workspace_path / "skills" / name
+    if not target.exists():
+        console.print(f"[red]Skill '{name}' not found in workspace.[/red]")
+        raise typer.Exit(1)
+
+    if not typer.confirm(f"Remove skill '{name}'?"):
+        raise typer.Exit()
+
+    shutil.rmtree(target)
+    console.print(f"[green]✓[/green] Removed skill: [cyan]{name}[/cyan]")
+
+
+# ============================================================================
 # Status Commands
 # ============================================================================
 
@@ -857,7 +1070,7 @@ def status():
         from nanobot.providers.registry import PROVIDERS
 
         console.print(f"Model: {config.agents.defaults.model}")
-        
+
         # Check API keys from registry
         for spec in PROVIDERS:
             p = getattr(config.providers, spec.name, None)
