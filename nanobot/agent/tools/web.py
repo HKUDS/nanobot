@@ -16,42 +16,24 @@ USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
 MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
 
 
+from ddgs import DDGS
+
 class DuckDuckGoSearchProvider:
-    """DuckDuckGo HTML search provider (fallback)."""
-    
-    _link_re = re.compile(r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>', re.I)
-    _snippet_re = re.compile(r'<a[^>]*class="result__snippet[^"]*"[^>]*>([\s\S]*?)</a>', re.I)
+    """DuckDuckGo search provider (fallback)."""
 
     async def search(self, query: str, count: int) -> str:
         try:
-            async with httpx.AsyncClient() as client:
-                r = await client.get(
-                    f"https://html.duckduckgo.com/html/?q={quote(query)}",
-                    headers={"User-Agent": USER_AGENT},
-                    timeout=10.0
-                )
-                r.raise_for_status()
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=count))
             
-            # Extract links and snippets
-            links = self._link_re.findall(r.text)[:count]
-            snippets = self._snippet_re.findall(r.text)[:count]
-            
-            if not links:
+            if not results:
                 return f"No results found. Query: {query}"
             
             lines = [f"Results for: {query} (via DuckDuckGo)"]
-            for i, (url, title) in enumerate(links, 1):
-                # Decode DuckDuckGo redirect URLs (uddg=...)
-                if "uddg=" in url:
-                    try:
-                        url = unquote(url.split("uddg=")[1].split("&")[0])
-                    except Exception:
-                        pass
-                lines.append(f"{i}. {title.strip()}\n   {url}")
-                if i <= len(snippets):
-                    snippet = re.sub(r'<[^>]+>', '', snippets[i-1]).strip()
-                    if snippet:
-                        lines.append(f"   {snippet}")
+            for i, r in enumerate(results, 1):
+                lines.append(f"{i}. {r.get('title', '')}\n   {r.get('href', '')}")
+                if desc := r.get('body'):
+                    lines.append(f"   {desc}")
             return "\n".join(lines)
         except Exception as e:
             return f"Error: {e}"

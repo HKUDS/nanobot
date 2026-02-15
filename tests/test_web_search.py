@@ -1,30 +1,38 @@
 """Tests for web search tool with DuckDuckGo fallback."""
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 
 from nanobot.agent.tools.web import WebSearchTool, DuckDuckGoSearchProvider
 
 
 class TestDuckDuckGoSearchProvider:
-    """Tests for DuckDuckGo HTML search provider."""
+    """Tests for DuckDuckGo search provider."""
+
+    @pytest.mark.asyncio
+    async def test_ddg_search_integration(self) -> None:
+        """Integration test: actually calls DuckDuckGo API."""
+        provider = DuckDuckGoSearchProvider()
+        result = await provider.search("what is nanobot", 3)
+        
+        assert "(via DuckDuckGo)" in result
+        assert "nanobot" in result.lower()
+        assert "http" in result
 
     @pytest.mark.asyncio
     async def test_ddg_search_returns_results(self) -> None:
         """Test that DuckDuckGo provider returns parsed results."""
         provider = DuckDuckGoSearchProvider()
         
-        # Mock HTML response from DuckDuckGo
-        mock_html = '''
-        <a class="result__a" href="https://example.com">Example Title</a>
-        <a class="result__snippet">Example description</a>
-        '''
+        mock_results = [
+            {"title": "Example Title", "href": "https://example.com", "body": "Example description"}
+        ]
         
-        with patch("httpx.AsyncClient.get") as mock_get:
-            mock_response = MagicMock()
-            mock_response.text = mock_html
-            mock_response.raise_for_status = MagicMock()
-            mock_get.return_value = mock_response
+        with patch("nanobot.agent.tools.web.DDGS") as mock_ddgs:
+            mock_instance = MagicMock()
+            mock_instance.text.return_value = iter(mock_results)
+            mock_ddgs.return_value.__enter__ = MagicMock(return_value=mock_instance)
+            mock_instance.__exit__ = MagicMock(return_value=False)
 
             result = await provider.search("test query", 5)
 
@@ -37,13 +45,11 @@ class TestDuckDuckGoSearchProvider:
         """Test DuckDuckGo provider handles empty results."""
         provider = DuckDuckGoSearchProvider()
         
-        mock_html = '<html><body>no results</body></html>'
-        
-        with patch("httpx.AsyncClient.get") as mock_get:
-            mock_response = MagicMock()
-            mock_response.text = mock_html
-            mock_response.raise_for_status = MagicMock()
-            mock_get.return_value = mock_response
+        with patch("nanobot.agent.tools.web.DDGS") as mock_ddgs:
+            mock_instance = MagicMock()
+            mock_instance.text.return_value = iter([])
+            mock_ddgs.return_value.__enter__ = MagicMock(return_value=mock_instance)
+            mock_instance.__exit__ = MagicMock(return_value=False)
 
             result = await provider.search("nonexistent query", 5)
 
@@ -52,11 +58,10 @@ class TestDuckDuckGoSearchProvider:
     @pytest.mark.asyncio
     async def test_ddg_search_handles_network_error(self) -> None:
         """Test DuckDuckGo provider handles network errors."""
-        import httpx
         provider = DuckDuckGoSearchProvider()
         
-        with patch("httpx.AsyncClient.get") as mock_get:
-            mock_get.side_effect = httpx.TimeoutException("timeout")
+        with patch("nanobot.agent.tools.web.DDGS") as mock_ddgs:
+            mock_ddgs.side_effect = Exception("Network error")
 
             result = await provider.search("test", 5)
 
@@ -71,15 +76,15 @@ class TestWebSearchTool:
         """Test that DuckDuckGo is used when no Brave API key is set."""
         tool = WebSearchTool(api_key="", max_results=5)
         
-        mock_html = '''
-        <a class="result__a" href="https://example.com">Test Result</a>
-        '''
+        mock_results = [
+            {"title": "Test Result", "href": "https://example.com", "body": ""}
+        ]
         
-        with patch("httpx.AsyncClient.get") as mock_get:
-            mock_response = MagicMock()
-            mock_response.text = mock_html
-            mock_response.raise_for_status = MagicMock()
-            mock_get.return_value = mock_response
+        with patch("nanobot.agent.tools.web.DDGS") as mock_ddgs:
+            mock_instance = MagicMock()
+            mock_instance.text.return_value = iter(mock_results)
+            mock_ddgs.return_value.__enter__ = MagicMock(return_value=mock_instance)
+            mock_instance.__exit__ = MagicMock(return_value=False)
 
             result = await tool.execute(query="test")
 
@@ -91,9 +96,9 @@ class TestWebSearchTool:
         """Test fallback to DuckDuckGo when Brave Search fails."""
         tool = WebSearchTool(api_key="fake-api-key", max_results=5)
         
-        mock_html = '''
-        <a class="result__a" href="https://fallback.com">Fallback Result</a>
-        '''
+        mock_results = [
+            {"title": "Fallback Result", "href": "https://fallback.com", "body": ""}
+        ]
         
         with patch("httpx.AsyncClient.get") as mock_get:
             # First call (Brave) fails
@@ -101,9 +106,11 @@ class TestWebSearchTool:
             mock_response.raise_for_status.side_effect = Exception("Brave API error")
             mock_get.return_value = mock_response
 
-            # Patch DDG to return results
-            with patch.object(tool._ddg_provider, "search", new_callable=AsyncMock) as mock_ddg:
-                mock_ddg.return_value = "Results for: test (via DuckDuckGo)\n1. Fallback Result\n   https://fallback.com"
+            with patch("nanobot.agent.tools.web.DDGS") as mock_ddgs:
+                mock_instance = MagicMock()
+                mock_instance.text.return_value = iter(mock_results)
+                mock_ddgs.return_value.__enter__ = MagicMock(return_value=mock_instance)
+                mock_instance.__exit__ = MagicMock(return_value=False)
                 
                 result = await tool.execute(query="test")
 
@@ -146,21 +153,17 @@ class TestWebSearchTool:
         """Test that count parameter is respected."""
         tool = WebSearchTool(api_key="", max_results=3)
         
-        mock_html = '''
-        <a class="result__a" href="https://1.com">Result 1</a>
-        <a class="result__a" href="https://2.com">Result 2</a>
-        <a class="result__a" href="https://3.com">Result 3</a>
-        <a class="result__a" href="https://4.com">Result 4</a>
-        '''
+        mock_results = [
+            {"title": f"Result {i}", "href": f"https://{i}.com", "body": ""}
+            for i in range(5)
+        ]
         
-        with patch("httpx.AsyncClient.get") as mock_get:
-            mock_response = MagicMock()
-            mock_response.text = mock_html
-            mock_response.raise_for_status = MagicMock()
-            mock_get.return_value = mock_response
+        with patch("nanobot.agent.tools.web.DDGS") as mock_ddgs:
+            mock_instance = MagicMock()
+            mock_instance.text.return_value = iter(mock_results)
+            mock_ddgs.return_value.__enter__ = MagicMock(return_value=mock_instance)
+            mock_instance.__exit__ = MagicMock(return_value=False)
 
             result = await tool.execute(query="test", count=2)
 
-        # Should only have 2 results (but DDG might parse more)
-        # The key is that it returns something
         assert "Result" in result
