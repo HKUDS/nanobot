@@ -12,7 +12,8 @@ def mock_prompt_session():
     """Mock the global prompt session."""
     mock_session = MagicMock()
     mock_session.prompt_async = AsyncMock()
-    with patch("nanobot.cli.commands._PROMPT_SESSION", mock_session):
+    with patch("nanobot.cli.commands._PROMPT_SESSION", mock_session), \
+         patch("nanobot.cli.commands.patch_stdout"):
         yield mock_session
 
 
