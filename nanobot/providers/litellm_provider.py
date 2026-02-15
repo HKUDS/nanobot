@@ -1,6 +1,7 @@
 """LiteLLM provider implementation for multi-provider support."""
 
 import json
+import json_repair
 import os
 from typing import Any
 
@@ -173,10 +174,7 @@ class LiteLLMProvider(LLMProvider):
                 # Parse arguments from JSON string if needed
                 args = tc.function.arguments
                 if isinstance(args, str):
-                    try:
-                        args = json.loads(args)
-                    except json.JSONDecodeError:
-                        args = {"raw": args}
+                    args = json_repair.loads(args)
                 
                 tool_calls.append(ToolCallRequest(
                     id=tc.id,
