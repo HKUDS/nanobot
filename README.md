@@ -599,6 +599,7 @@ Config file: `~/.nanobot/config.json`
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
+| `custom` | Any OpenAI-compatible endpoint | — |
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
@@ -611,6 +612,31 @@ Config file: `~/.nanobot/config.json`
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
+
+<details>
+<summary><b>Custom Provider (Any OpenAI-compatible API)</b></summary>
+
+If your provider is not listed above but exposes an **OpenAI-compatible API** (e.g. Together AI, Fireworks, Azure OpenAI, self-hosted endpoints), use the `custom` provider:
+
+```json
+{
+  "providers": {
+    "custom": {
+      "apiKey": "your-api-key",
+      "apiBase": "https://api.your-provider.com/v1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "your-model-name"
+    }
+  }
+}
+```
+
+> The `custom` provider routes through LiteLLM's OpenAI-compatible path. It works with any endpoint that follows the OpenAI chat completions API format. The model name is passed directly to the endpoint without any prefix.
+
+</details>
 
 <details>
 <summary><b>Adding a New Provider (Developer Guide)</b></summary>
