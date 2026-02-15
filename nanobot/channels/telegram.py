@@ -78,6 +78,23 @@ def _markdown_to_telegram_html(text: str) -> str:
     return text
 
 
+def _split_message(content: str, max_len: int = 4000) -> list[str]:
+    """Split content into chunks within max_len, preferring line breaks."""
+    if len(content) <= max_len:
+        return [content]
+    chunks = []
+    while len(content) > max_len:
+        chunk = content[:max_len]
+        break_pos = chunk.rfind('\n')
+        if break_pos == -1:
+            break_pos = chunk.rfind(' ')
+        if break_pos == -1:
+            break_pos = max_len
+        chunks.append(chunk[:break_pos])
+        content = content[break_pos:].lstrip()
+    return chunks + [content]
+
+
 class TelegramChannel(BaseChannel):
     """
     Telegram channel using long polling.
@@ -183,59 +200,24 @@ class TelegramChannel(BaseChannel):
         if not self._app:
             logger.warning("Telegram bot not running")
             return
-        
-        # Stop typing indicator for this chat
+
         self._stop_typing(msg.chat_id)
-        
+
         try:
             chat_id = int(msg.chat_id)
         except ValueError:
             logger.error(f"Invalid chat_id: {msg.chat_id}")
             return
-        
-        # Split content into chunks (Telegram limit: 4096 chars)
-        MAX_LENGTH = 4000  # Leave some margin for safety
-        content = msg.content
-        chunks = []
-        
-        while content:
-            if len(content) <= MAX_LENGTH:
-                chunks.append(content)
-                break
-            
-            # Find a good break point (newline or space)
-            chunk = content[:MAX_LENGTH]
-            # Prefer breaking at newline
-            break_pos = chunk.rfind('\n')
-            if break_pos == -1:
-                # Fall back to last space
-                break_pos = chunk.rfind(' ')
-            if break_pos == -1:
-                # No good break point, force break at limit
-                break_pos = MAX_LENGTH
-            
-            chunks.append(content[:break_pos])
-            content = content[break_pos:].lstrip()
-        
-        # Send each chunk
-        for i, chunk in enumerate(chunks):
+
+        for chunk in _split_message(msg.content):
             try:
-                html_content = _markdown_to_telegram_html(chunk)
-                await self._app.bot.send_message(
-                    chat_id=chat_id,
-                    text=html_content,
-                    parse_mode="HTML"
-                )
+                await self._app.bot.send_message(chat_id=chat_id, text=_markdown_to_telegram_html(chunk), parse_mode="HTML")
             except Exception as e:
-                # Fallback to plain text if HTML parsing fails
-                logger.warning(f"HTML parse failed for chunk {i+1}, falling back to plain text: {e}")
+                logger.warning(f"HTML parse failed, falling back to plain text: {e}")
                 try:
-                    await self._app.bot.send_message(
-                        chat_id=chat_id,
-                        text=chunk
-                    )
+                    await self._app.bot.send_message(chat_id=chat_id, text=chunk)
                 except Exception as e2:
-                    logger.error(f"Error sending Telegram chunk {i+1}: {e2}")
+                    logger.error(f"Error sending Telegram message: {e2}")
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
