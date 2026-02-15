@@ -69,7 +69,8 @@ git clone https://github.com/HKUDS/nanobot.git
 cd nanobot
 pip install -e .
 ```
->pip install -e . --break-system-packages   kip
+>pip install -e . --break-system-packages
+>kip
 
 **Install with [uv](https://github.com/astral-sh/uv)** (stable, fast)
 
