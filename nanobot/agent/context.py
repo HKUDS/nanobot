@@ -18,7 +18,7 @@ class ContextBuilder:
     into a coherent prompt for the LLM.
     """
     
-    BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
+    BOOTSTRAP_FILES = ["SYSTEM.md", "TOOLS.md"]
     
     def __init__(self, workspace: Path):
         self.workspace = workspace
@@ -29,48 +29,24 @@ class ContextBuilder:
         """
         Build the system prompt from bootstrap files, memory, and skills.
         
-        Args:
-            skill_names: Optional list of skills to include.
-        
         Returns:
             Complete system prompt.
         """
         parts = []
-        
-        # Core identity
-        parts.append(self._get_identity())
-        
+
         # Bootstrap files
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
-        
+
         # Memory context
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
-        
-        # Skills - progressive loading
-        # 1. Always-loaded skills: include full content
-        always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
-        
-        # 2. Available skills: only show summary (agent uses read_file to load)
-        skills_summary = self.skills.build_skills_summary()
-        if skills_summary:
-            parts.append(f"""# Skills
 
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
-
-{skills_summary}""")
-        
         return "\n\n---\n\n".join(parts)
-    
-    def _get_identity(self) -> str:
+
+    def _replace_keywords(self, content: str) -> str:
         """Get the core identity section."""
         from datetime import datetime
         import time as _time
@@ -78,37 +54,29 @@ Skills with available="false" need dependencies installed first - you can try in
         tz = _time.strftime("%Z") or "UTC"
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
-        runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
-        
-        return f"""# nanobot 🐈
+        runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}"
+        python = f" Python {platform.python_version()}"
+        replaced_content = ((((content.replace("{workspace_path}", f"{workspace_path}")
+                .replace("{now}", f"{now}"))
+                .replace("{tz}", f"{tz}"))
+                .replace("{runtime}", f"{runtime}"))
+                .replace("{python}", f"{python}"))
 
-You are nanobot, a helpful AI assistant. You have access to tools that allow you to:
-- Read, write, and edit files
-- Execute shell commands
-- Search the web and fetch web pages
-- Send messages to users on chat channels
-- Spawn subagents for complex background tasks
+        if replaced_content.__contains__("{always_skills}"):
+            # Skills - progressive loading
+            # 1. Always-loaded skills: include full content
+            always_skills = self.skills.get_always_skills()
+            if always_skills:
+                always_content = self.skills.load_skills_for_context(always_skills)
+                if always_content:
+                    replaced_content = replaced_content.replace("{always_skills}", f"{always_skills}")
+        if replaced_content.__contains__("{skill_summary}"):
+            # 2. Available skills: only show summary (agent uses read_file to load)
+            skills_summary = self.skills.build_skills_summary()
+            if skills_summary:
+                replaced_content = replaced_content.replace("{skill_summary}", f"{skills_summary}")
+        return replaced_content
 
-## Current Time
-{now} ({tz})
-
-## Runtime
-{runtime}
-
-## Workspace
-Your workspace is at: {workspace_path}
-- Long-term memory: {workspace_path}/memory/MEMORY.md
-- History log: {workspace_path}/memory/HISTORY.md (grep-searchable)
-- Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
-
-IMPORTANT: When responding to direct questions or conversations, reply directly with your text response.
-Only use the 'message' tool when you need to send a message to a specific chat channel (like WhatsApp).
-For normal conversation, just respond with text - do not call the message tool.
-
-Always be helpful, accurate, and concise. When using tools, think step by step: what you know, what you need, and why you chose this tool.
-When remembering something important, write to {workspace_path}/memory/MEMORY.md
-To recall past events, grep {workspace_path}/memory/HISTORY.md"""
-    
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
@@ -117,7 +85,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
             file_path = self.workspace / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
-                parts.append(f"## {filename}\n\n{content}")
+                parts.append(f"## {filename}\n\n{self._replace_keywords(content)}")
         
         return "\n\n".join(parts) if parts else ""
     
@@ -125,7 +93,6 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         self,
         history: list[dict[str, Any]],
         current_message: str,
-        skill_names: list[str] | None = None,
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
@@ -147,7 +114,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         messages = []
 
         # System prompt
-        system_prompt = self.build_system_prompt(skill_names)
+        system_prompt = self.build_system_prompt()
         if channel and chat_id:
             system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
         messages.append({"role": "system", "content": system_prompt})
