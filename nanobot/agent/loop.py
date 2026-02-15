@@ -28,27 +28,21 @@ from nanobot.session.manager import Session, SessionManager
 
 def _list_models(config) -> str:
     """List available models based on configured providers."""
-    lines = ["📋 Model switching (use /model <provider/model> to switch):\n"]
-    lines.append(f"Current: {config.agents.defaults.model}\n")
-    lines.append("\nExamples:")
-    lines.append("  /model minimax/minimax-m2.5")
-    lines.append("  /model openai/gpt-4o")
-    lines.append("  /model anthropic/claude-sonnet-4-5")
-    lines.append("  /model openrouter/google/gemini-pro-1.5")
-    lines.append("\nConfigured providers:")
-    for spec in PROVIDERS:
-        p = getattr(config.providers, spec.name, None)
-        if p and p.api_key:
-            lines.append(f"  • {spec.label}")
-    return "\n".join(lines)
+    providers = [spec.label for spec in PROVIDERS if getattr(config.providers, spec.name, None) and getattr(config.providers, spec.name).api_key]
+    examples = [
+        "  /model minimax/minimax-m2.5",
+        "  /model openai/gpt-4o", 
+        "  /model anthropic/claude-sonnet-4-5",
+        "  /model openrouter/google/gemini-pro-1.5"
+    ]
+    return f"📋 Model switching (use /model <provider/model>):\n\nCurrent: {config.agents.defaults.model}\n\nExamples:\n" + "\n".join(examples) + f"\n\nConfigured providers:\n" + "\n".join(f"  • {p}" for p in providers)
 
 
 def _set_model(model: str, config_path: Path | None = None) -> str:
     """Set model in config and return confirmation."""
     from nanobot.config.loader import load_config, save_config
     config = load_config(config_path)
-    old = config.agents.defaults.model
-    config.agents.defaults.model = model
+    old, config.agents.defaults.model = config.agents.defaults.model, model
     save_config(config, config_path)
     return f"✅ Model changed: {old} → {model}"
 
@@ -312,39 +306,25 @@ class AgentLoop:
                                   content="New session started. Memory consolidation in progress.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/model — List available models\n/model <name> — Switch model (session)\n/model <name> -g — Switch model (global)\n/help — Show available commands")
+                                  content="🐈 Commands:\n/new — New conversation\n/model — List models\n/model <name> [-g] — Switch model\n/help — Show commands")
         
-        # /model command - list or set model
+        # /model command
         if cmd.startswith("/model"):
             from nanobot.config.loader import load_config
             parts = msg.content.strip().split()
-            
             if len(parts) == 1:
-                # /model - list available models
-                config = load_config()
                 return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                      content=_list_models(config))
-            else:
-                # Check for -g flag
-                global_flag = "-g" in parts
-                if global_flag:
-                    parts.remove("-g")
-                new_model = " ".join(parts[1:]).strip()
-                
-                if new_model:
-                    # Update runtime model
-                    self.model = new_model
-                    self.subagents.model = new_model
-                    
-                    # Persist if -g flag
-                    if global_flag:
-                        result = _set_model(new_model)
-                    else:
-                        result = f"✅ Model set to {new_model} (session only)"
-                    
-                    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=result)
+                                      content=_list_models(load_config()))
+            
+            global_flag = "-g" in parts
+            new_model = " ".join(p for p in parts[1:] if p != "-g")
+            if not new_model:
                 return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                      content="Usage: /model <name> or /model <name> -g (global)")
+                                      content="Usage: /model <provider/model> [-g]")
+            
+            self.model = self.subagents.model = new_model
+            result = _set_model(new_model) if global_flag else f"✅ Model: {new_model} (session)"
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=result)
         
         if len(session.messages) > self.memory_window:
             asyncio.create_task(self._consolidate_memory(session))
