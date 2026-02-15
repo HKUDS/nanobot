@@ -16,7 +16,7 @@
 
 ⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
 
-📏 Real-time line count: **3,536 lines** (run `bash core_agent_lines.sh` to verify anytime)
+📏 Real-time line count: **3,656 lines** (run `bash core_agent_lines.sh` to verify anytime)
 
 ## 📢 News
 
@@ -681,6 +681,40 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 | `strip_model_prefix` | Strip existing prefix before re-prefixing | `True` (for AiHubMix) |
 
 </details>
+
+
+### MCP (Model Context Protocol)
+
+> [!TIP]
+> The config format is compatible with Claude Desktop / Cursor. You can copy MCP server configs directly from any MCP server's README.
+
+nanobot supports [MCP](https://modelcontextprotocol.io/) — connect external tool servers and use them as native agent tools.
+
+Add MCP servers to your `config.json`:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+      }
+    }
+  }
+}
+```
+
+Two transport modes are supported:
+
+| Mode | Config | Example |
+|------|--------|---------|
+| **Stdio** | `command` + `args` | Local process via `npx` / `uvx` |
+| **HTTP** | `url` | Remote endpoint (`https://mcp.example.com/sse`) |
+
+MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
+
+
 
 
 ### Security

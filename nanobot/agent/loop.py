@@ -229,7 +229,7 @@ class AgentLoop:
             except asyncio.TimeoutError:
                 continue
     
-    async def _close_mcp(self) -> None:
+    async def close_mcp(self) -> None:
         """Close MCP connections."""
         if self._mcp_stack:
             try:
