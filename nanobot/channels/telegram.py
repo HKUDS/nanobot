@@ -226,8 +226,14 @@ class TelegramChannel(BaseChannel):
         """Forward slash commands to the bus for unified handling in AgentLoop."""
         if not update.message or not update.effective_user:
             return
+        
+        user = update.effective_user
+        sender_id = str(user.id)
+        if user.username:
+            sender_id = f"{sender_id}|{user.username}"
+        
         await self._handle_message(
-            sender_id=str(update.effective_user.id),
+            sender_id=sender_id,
             chat_id=str(update.message.chat_id),
             content=update.message.text,
         )
