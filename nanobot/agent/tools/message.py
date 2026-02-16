@@ -47,11 +47,11 @@ class MessageTool(Tool):
                 },
                 "channel": {
                     "type": "string",
-                    "description": "Optional: target channel (telegram, discord, etc.)"
+                    "description": "Optional: target platform (telegram, discord, etc.)"
                 },
                 "chat_id": {
                     "type": "string",
-                    "description": "Optional: target chat/user ID"
+                    "description": "Optional: target chat/channel/user ID"
                 }
             },
             "required": ["content"]
