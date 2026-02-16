@@ -1,101 +1,180 @@
 ---
 name: browser-automation
 description: >
-  Browser automation via Playwright CLI. Navigate pages, click elements,
+  Browser automation via Playwright. Navigate pages, click elements,
   fill forms, take screenshots, and extract data from websites.
   Use this skill whenever the user asks to interact with a website,
   scrape data, fill a form, take a screenshot, or automate any browser task.
-metadata: '{"nanobot":{"requires":{"bins":["playwright-cli"]}}}'
 ---
 
-# Browser Automation (Playwright CLI)
+# Browser Automation (Playwright)
 
-You have browser automation capabilities via the `playwright-cli` command.
+You have browser automation capabilities via Playwright.
 All browser commands are executed through the `exec` (shell) tool.
 
-## Quick Reference
+## IMPORTANT: First-Run Setup
 
-### Navigation
+Before running ANY Playwright command, you MUST check if Playwright is installed.
+Run this check **every time** this skill is loaded for the first time in a session:
+
 ```bash
-playwright-cli open <url>              # Open a URL
-playwright-cli go-back                 # Go back
-playwright-cli go-forward              # Go forward
-playwright-cli reload                  # Reload page
+python -c "import playwright; print('OK')"
 ```
 
-### Page Inspection
+If that fails (ModuleNotFoundError or non-zero exit), run the full setup:
+
 ```bash
-playwright-cli snapshot                # Get accessibility tree (preferred)
-playwright-cli screenshot              # Screenshot entire page
-playwright-cli screenshot <ref>        # Screenshot specific element
+pip install playwright
+playwright install chromium
 ```
 
-### Interaction
+Wait for both commands to complete successfully before proceeding.
+If `playwright install chromium` fails due to missing system dependencies on Linux, try:
+
 ```bash
-playwright-cli click <ref>             # Click element by ref number
-playwright-cli type <text>             # Type text into focused element
-playwright-cli type --ref <ref> <text> # Type into specific element
-playwright-cli press Enter             # Press a key
-playwright-cli select <ref> <value>    # Select dropdown option
-playwright-cli hover <ref>             # Hover over element
+playwright install-deps chromium
+playwright install chromium
 ```
 
-### Sessions (multiple tabs/contexts)
+Once setup succeeds, confirm to the user: "Browser automation is now ready."
+Do NOT attempt any browser automation until setup is confirmed.
+
+## Usage
+
+Use Python with Playwright's sync API via the exec tool. Example pattern:
+
 ```bash
-playwright-cli --session=myname open <url>   # Named session
-playwright-cli tab-list                       # List open tabs
-playwright-cli tab-new <url>                  # New tab
-playwright-cli tab-select <index>             # Switch tab
-playwright-cli tab-close <index>              # Close tab
+python -c "
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    page = browser.new_page()
+    page.goto('https://example.com')
+    print(page.title())
+    browser.close()
+"
 ```
 
-### File Operations
-```bash
-playwright-cli screenshot --output /tmp/shot.png
-playwright-cli pdf --output /tmp/page.pdf
+For longer scripts, write a .py file to the workspace first, then execute it.
+
+## Common Tasks
+
+### Navigate and get page content
+```python
+from playwright.sync_api import sync_playwright
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    page = browser.new_page()
+    page.goto(URL)
+    print(page.content())       # Full HTML
+    print(page.title())         # Page title
+    print(page.inner_text("body"))  # Visible text only
+    browser.close()
+```
+
+### Take a screenshot
+```python
+from playwright.sync_api import sync_playwright
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    page = browser.new_page()
+    page.goto(URL)
+    page.screenshot(path="/tmp/screenshot.png", full_page=True)
+    browser.close()
+```
+
+### Fill a form and submit
+```python
+from playwright.sync_api import sync_playwright
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    page = browser.new_page()
+    page.goto(URL)
+
+    page.fill('input[name="username"]', 'myuser')
+    page.fill('input[name="password"]', 'mypass')
+    page.click('button[type="submit"]')
+
+    page.wait_for_load_state("networkidle")
+    print(page.title())
+    browser.close()
+```
+
+### Click and interact with elements
+```python
+from playwright.sync_api import sync_playwright
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    page = browser.new_page()
+    page.goto(URL)
+
+    # Click by text
+    page.click("text=Sign In")
+
+    # Click by CSS selector
+    page.click("#submit-button")
+
+    # Select dropdown
+    page.select_option("select#country", "US")
+
+    # Type into focused element
+    page.keyboard.type("search query")
+    page.keyboard.press("Enter")
+
+    browser.close()
+```
+
+### Wait for dynamic content
+```python
+# Wait for a specific element to appear
+page.wait_for_selector(".results-loaded", timeout=10000)
+
+# Wait for navigation to complete
+page.wait_for_load_state("networkidle")
+
+# Wait for a specific URL pattern
+page.wait_for_url("**/dashboard")
+```
+
+### Extract structured data
+```python
+from playwright.sync_api import sync_playwright
+import json
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
+    page = browser.new_page()
+    page.goto(URL)
+
+    items = page.query_selector_all(".product-card")
+    results = []
+    for item in items:
+        name = item.query_selector(".name").inner_text()
+        price = item.query_selector(".price").inner_text()
+        results.append({"name": name, "price": price})
+
+    print(json.dumps(results, indent=2))
+    browser.close()
 ```
 
 ## Workflow Pattern
 
-For any browser task, follow this pattern:
+For any browser automation task:
 
-1. **Open the page**: `playwright-cli open <url>`
-2. **Snapshot the page**: `playwright-cli snapshot` to see the accessibility tree with element references like [1], [2], etc.
-3. **Interact**: Use `click`, `type`, `press` with the ref numbers from the snapshot.
-4. **Re-snapshot after actions**: The page may have changed — always snapshot again before the next interaction.
-5. **Extract or screenshot**: Get the data you need or take a screenshot.
+1. **Check Playwright is installed** (first-run setup above)
+2. **Write a Python script** to the workspace if the task is multi-step
+3. **Execute it** via the exec tool
+4. **Return results** to the user (text, data, or path to screenshots)
 
-## Example: Login to a website
+## Tips
 
-```bash
-# Step 1: Navigate
-playwright-cli open https://example.com/login
-
-# Step 2: See what's on the page
-playwright-cli snapshot
-# Output shows: [1] input "Username"  [2] input "Password"  [3] button "Sign In"
-
-# Step 3: Fill in credentials
-playwright-cli type --ref 1 "myusername"
-playwright-cli type --ref 2 "mypassword"
-playwright-cli click 3
-
-# Step 4: Verify login worked
-playwright-cli snapshot
-```
-
-## Example: Scrape data from a page
-
-```bash
-playwright-cli open https://example.com/products
-playwright-cli snapshot
-# Parse the accessibility tree output to extract product names, prices, etc.
-```
-
-## Important Notes
-
-- Always use `snapshot` (not screenshot) as your primary way to understand page structure. It returns a text-based accessibility tree that you can reason about.
-- Element refs (like [1], [2]) expire after page changes. Always re-snapshot after navigation or clicks.
-- If `playwright-cli` is not installed, install it with: `pip install playwright`
-- For sites that need JavaScript to render, add a short wait: `sleep 2` before snapshot.
-- Use `--session` flag to maintain separate browser contexts for different sites.
+- Always use `headless=True` unless the user specifically needs a visible browser
+- Set reasonable timeouts: `page.goto(url, timeout=15000)`
+- Use `page.wait_for_load_state("networkidle")` for JS-heavy pages
+- Close the browser in a `finally` block or use `with` context managers
+- For sites needing JavaScript rendering, add `page.wait_for_timeout(2000)` as fallback
+- Store screenshots and PDFs in `/tmp/` or the workspace directory
