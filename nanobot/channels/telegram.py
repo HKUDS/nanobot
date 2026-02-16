@@ -212,14 +212,26 @@ class TelegramChannel(BaseChannel):
             logger.error(f"Invalid chat_id: {msg.chat_id}")
             return
 
+        # Get message_thread_id from metadata for topic replies
+        thread_id = msg.metadata.get("message_thread_id") if msg.metadata else None
+
         for chunk in _split_message(msg.content):
             try:
                 html = _markdown_to_telegram_html(chunk)
-                await self._app.bot.send_message(chat_id=chat_id, text=html, parse_mode="HTML")
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=html,
+                    parse_mode="HTML",
+                    message_thread_id=thread_id
+                )
             except Exception as e:
                 logger.warning(f"HTML parse failed, falling back to plain text: {e}")
                 try:
-                    await self._app.bot.send_message(chat_id=chat_id, text=chunk)
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=chunk,
+                        message_thread_id=thread_id
+                    )
                 except Exception as e2:
                     logger.error(f"Error sending Telegram message: {e2}")
     
@@ -381,19 +393,25 @@ class TelegramChannel(BaseChannel):
         self._start_typing(str_chat_id)
 
         # Forward to the message bus (skip base is_allowed check since we already checked above)
+        metadata = {
+            "message_id": message.message_id,
+            "user_id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "is_group": is_group
+        }
+
+        # Include message_thread_id for topic replies
+        if hasattr(message, 'message_thread_id') and message.message_thread_id:
+            metadata["message_thread_id"] = message.message_thread_id
+
         msg = InboundMessage(
             channel=self.name,
             sender_id=sender_id,
             chat_id=str_chat_id,
             content=content,
             media=media_paths or [],
-            metadata={
-                "message_id": message.message_id,
-                "user_id": user.id,
-                "username": user.username,
-                "first_name": user.first_name,
-                "is_group": is_group
-            }
+            metadata=metadata
         )
         await self.bus.publish_inbound(msg)
     
