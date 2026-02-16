@@ -86,7 +86,7 @@ class SlackChannel(BaseChannel):
             use_thread = thread_ts and channel_type != "im"
             await self._web_client.chat_postMessage(
                 channel=msg.chat_id,
-                text=slackify_markdown(msg.content) if msg.content else "",
+                text=self._to_mrkdwn(msg.content),
                 thread_ts=thread_ts if use_thread else None,
             )
         except Exception as e:
@@ -205,4 +205,31 @@ class SlackChannel(BaseChannel):
         if not text or not self._bot_user_id:
             return text
         return re.sub(rf"<@{re.escape(self._bot_user_id)}>\s*", "", text).strip()
+
+    _TABLE_RE = re.compile(r"(?m)^\|.*\|$(?:\n\|[\s:|-]*\|$)(?:\n\|.*\|$)*")
+
+    @classmethod
+    def _to_mrkdwn(cls, text: str) -> str:
+        """Convert Markdown to Slack mrkdwn, including tables."""
+        if not text:
+            return ""
+        text = cls._TABLE_RE.sub(cls._convert_table, text)
+        return slackify_markdown(text)
+
+    @staticmethod
+    def _convert_table(match: re.Match) -> str:
+        """Convert a Markdown table to a Slack-readable list."""
+        lines = [ln.strip() for ln in match.group(0).strip().splitlines() if ln.strip()]
+        if len(lines) < 2:
+            return match.group(0)
+        headers = [h.strip() for h in lines[0].strip("|").split("|")]
+        start = 2 if re.fullmatch(r"[|\s:\-]+", lines[1]) else 1
+        rows: list[str] = []
+        for line in lines[start:]:
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            cells = (cells + [""] * len(headers))[: len(headers)]
+            parts = [f"**{headers[i]}**: {cells[i]}" for i in range(len(headers)) if cells[i]]
+            if parts:
+                rows.append(" · ".join(parts))
+        return "\n".join(rows)
 
