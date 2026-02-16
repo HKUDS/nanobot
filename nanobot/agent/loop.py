@@ -85,6 +85,7 @@ class AgentLoop:
         )
         
         self._running = False
+        self._pending_consolidations: list[asyncio.Task] = []
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
@@ -279,7 +280,8 @@ class AgentLoop:
                 temp_session.messages = messages_to_archive
                 await self._consolidate_memory(temp_session, archive_all=True)
 
-            asyncio.create_task(_consolidate_and_cleanup())
+            task = asyncio.create_task(_consolidate_and_cleanup())
+            self._pending_consolidations.append(task)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started. Memory consolidation in progress.")
         if cmd == "/help":
@@ -287,7 +289,8 @@ class AgentLoop:
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
         
         if len(session.messages) > self.memory_window:
-            asyncio.create_task(self._consolidate_memory(session))
+            task = asyncio.create_task(self._consolidate_memory(session))
+            self._pending_consolidations.append(task)
 
         self._set_tool_context(msg.channel, msg.chat_id)
         initial_messages = self.context.build_messages(
@@ -473,4 +476,13 @@ Respond with ONLY valid JSON, no markdown fences."""
         )
         
         response = await self._process_message(msg, session_key=session_key)
+
+        # Await any pending consolidation tasks so they complete before the
+        # process exits (critical for single-message mode).
+        # It adds a few seconds delay for interactive mode while the user is
+        # reading the response.
+        if self._pending_consolidations:
+            await asyncio.gather(*self._pending_consolidations, return_exceptions=True)
+            self._pending_consolidations.clear()
+
         return response.content if response else ""
