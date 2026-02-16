@@ -3,7 +3,18 @@
 from typing import Any
 from urllib.parse import urlparse
 
+from loguru import logger
+
 from nanobot.agent.tools.base import Tool
+
+# Match web_fetch so sites that allow httpx also allow the browser
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+# Client Hints matching Chrome 120; some sites check these before sending body (may help with ERR_EMPTY_RESPONSE)
+BROWSER_SEC_CH_UA = '"Not A(Brand";v="24", "Chromium";v="120", "Google Chrome";v="120"'
+BROWSER_ACCEPT_LANGUAGE = "en-US,en;q=0.9"
 
 try:
     from playwright.async_api import async_playwright, Browser, Page
@@ -27,6 +38,10 @@ def _validate_url(url: str) -> tuple[bool, str]:
         return False, str(e)
 
 
+# Launch args to reduce automation detection (e.g. navigator.webdriver); may help with ERR_EMPTY_RESPONSE on some sites
+_BROWSER_LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled"]
+
+
 class BrowserSession:
     """Shared Playwright browser/page session. Lazy start, single page."""
 
@@ -46,8 +61,25 @@ class BrowserSession:
                 "Playwright is not installed. Install with: pip install nanobot-ai[browser], then run: playwright install (see https://playwright.dev/python/docs/library)"
             )
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=self._headless)
-        context = await self._browser.new_context()
+        launch_options: dict[str, Any] = {
+            "headless": self._headless,
+            "args": _BROWSER_LAUNCH_ARGS,
+        }
+        logger.info(
+            "Browser session starting (headless={}, timeout_ms={})",
+            self._headless,
+            self._timeout_ms,
+        )
+        self._browser = await self._playwright.chromium.launch(**launch_options)
+        context = await self._browser.new_context(
+            user_agent=BROWSER_USER_AGENT,
+            viewport={"width": 1280, "height": 720},
+            ignore_https_errors=False,
+            extra_http_headers={
+                "Sec-CH-UA": BROWSER_SEC_CH_UA,
+                "Accept-Language": BROWSER_ACCEPT_LANGUAGE,
+            },
+        )
         self._page = await context.new_page()
         self._page.set_default_timeout(self._timeout_ms)
         return self._page
@@ -55,6 +87,7 @@ class BrowserSession:
     async def close(self) -> None:
         """Close browser and playwright."""
         if self._browser:
+            logger.debug("Browser session closing")
             await self._browser.close()
             self._browser = None
         self._page = None
@@ -82,12 +115,15 @@ class BrowserNavigateTool(Tool):
     async def execute(self, url: str, **kwargs: Any) -> str:
         ok, err = _validate_url(url)
         if not ok:
+            logger.warning("browser_navigate invalid url: {}", err)
             return f"Error: {err}"
         try:
             page = await self._browser_session.get_page()
-            await page.goto(url, wait_until="domcontentloaded")
+            await page.goto(url, wait_until="load")
+            logger.info("browser_navigate: {} -> OK", url)
             return f"Navigated to {url}"
         except Exception as e:
+            logger.error("browser_navigate: {} -> {}: {}", url, type(e).__name__, e)
             return f"Error: {type(e).__name__}: {e}"
 
 
@@ -131,8 +167,11 @@ class BrowserSnapshotTool(Tool):
                 """,
                 n,
             )
+            count = len((result or "").strip().split("\n")) if result else 0
+            logger.debug("browser_snapshot: {} elements", count)
             return result or "No interactive elements found."
         except Exception as e:
+            logger.error("browser_snapshot: {}: {}", type(e).__name__, e)
             return f"Error: {type(e).__name__}: {e}"
 
 
@@ -157,8 +196,10 @@ class BrowserClickTool(Tool):
             page = await self._browser_session.get_page()
             locator = page.locator(f'[data-nanobot-ref="{ref}"]').first
             await locator.click()
+            logger.info("browser_click: ref={} -> OK", ref)
             return f"Clicked ref {ref}"
         except Exception as e:
+            logger.error("browser_click: ref={} -> {}: {}", ref, type(e).__name__, e)
             return f"Error: {type(e).__name__}: {e}"
 
 
@@ -188,8 +229,10 @@ class BrowserTypeTool(Tool):
             await locator.press_sequentially(text)
             if submit:
                 await locator.press("Enter")
+            logger.debug("browser_type: ref={}, submit={}", ref, submit)
             return f"Typed into ref {ref}" + (" and pressed Enter." if submit else ".")
         except Exception as e:
+            logger.error("browser_type: ref={} -> {}: {}", ref, type(e).__name__, e)
             return f"Error: {type(e).__name__}: {e}"
 
 
@@ -212,18 +255,27 @@ class BrowserPressTool(Tool):
     async def execute(self, key: str, **kwargs: Any) -> str:
         try:
             page = await self._browser_session.get_page()
-            await page.keyboard.press(key.strip() or "Enter")
-            return f"Pressed {key!r}"
+            k = key.strip() or "Enter"
+            await page.keyboard.press(k)
+            logger.debug("browser_press: key={!r}", k)
+            return f"Pressed {k!r}"
         except Exception as e:
+            logger.error("browser_press: key={!r} -> {}: {}", key, type(e).__name__, e)
             return f"Error: {type(e).__name__}: {e}"
 
 
 def create_browser_tools(config: Any) -> list[Tool]:
-    """Create browser tools sharing one session. Returns [] if Playwright is not installed. config: BrowserToolConfig with headless, timeout_ms."""
+    """Create browser tools sharing one session. Returns [] if Playwright is not installed. config: BrowserToolConfig (headless, timeout_ms)."""
     if not _PLAYWRIGHT_AVAILABLE:
+        logger.debug("Browser tools skipped: Playwright not installed")
         return []
     headless = getattr(config, "headless", True)
     timeout_ms = getattr(config, "timeout_ms", 30000)
+    logger.info(
+        "Browser tools created (headless={}, timeout_ms={})",
+        headless,
+        timeout_ms,
+    )
     session = BrowserSession(headless=headless, timeout_ms=timeout_ms)
     return [
         BrowserNavigateTool(session),
