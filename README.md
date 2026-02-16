@@ -20,8 +20,10 @@
 
 ## 📢 News
 
+- **2026-02-14** 🔌 nanobot now supports MCP! See [MCP section](#mcp-model-context-protocol) for details.
 - **2026-02-13** 🎉 Released v0.1.3.post7 — includes security hardening and multiple improvements. All users are recommended to upgrade to the latest version. See [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post7) for more details.
 - **2026-02-12** 🧠 Redesigned memory system — Less code, more reliable. Join the [discussion](https://github.com/HKUDS/nanobot/discussions/566) about it!
+- **2026-02-11** ✨ Enhanced CLI experience and added MiniMax support!
 - **2026-02-10** 🎉 Released v0.1.3.post6 with improvements! Check the updates [notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post6) and our [roadmap](https://github.com/HKUDS/nanobot/discussions/431).
 - **2026-02-09** 💬 Added Slack, Email, and QQ support — nanobot now supports multiple chat platforms!
 - **2026-02-08** 🔧 Refactored Providers—adding a new LLM provider now takes just 2 simple steps! Check [here](#providers).
@@ -107,14 +109,22 @@ nanobot onboard
 
 **2. Configure** (`~/.nanobot/config.json`)
 
-For OpenRouter - recommended for global users:
+Add or merge these **two parts** into your config (other options have defaults).
+
+*Set your API key* (e.g. OpenRouter, recommended for global users):
 ```json
 {
   "providers": {
     "openrouter": {
       "apiKey": "sk-or-v1-xxx"
     }
-  },
+  }
+}
+```
+
+*Set your model*:
+```json
+{
   "agents": {
     "defaults": {
       "model": "anthropic/claude-opus-4-5"
@@ -126,47 +136,10 @@ For OpenRouter - recommended for global users:
 **3. Chat**
 
 ```bash
-nanobot agent -m "What is 2+2?"
+nanobot agent
 ```
 
 That's it! You have a working AI assistant in 2 minutes.
-
-## 🖥️ Local Models (vLLM)
-
-Run nanobot with your own local models using vLLM or any OpenAI-compatible server.
-
-**1. Start your vLLM server**
-
-```bash
-vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
-```
-
-**2. Configure** (`~/.nanobot/config.json`)
-
-```json
-{
-  "providers": {
-    "vllm": {
-      "apiKey": "dummy",
-      "apiBase": "http://localhost:8000/v1"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": "meta-llama/Llama-3.1-8B-Instruct"
-    }
-  }
-}
-```
-
-**3. Chat**
-
-```bash
-nanobot agent -m "Hello from my local LLM!"
-```
-
-> [!TIP]
-> The `apiKey` can be any non-empty string for local servers that don't require authentication.
 
 ## 💬 Chat Apps
 
@@ -612,6 +585,37 @@ Config file: `~/.nanobot/config.json`
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
+| `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
+
+<details>
+<summary><b>OpenAI Codex (OAuth)</b></summary>
+
+Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account.
+
+**1. Login:**
+```bash
+nanobot provider login openai-codex
+```
+
+**2. Set model** (merge into `~/.nanobot/config.json`):
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "openai-codex/gpt-5.1-codex"
+    }
+  }
+}
+```
+
+**3. Chat:**
+```bash
+nanobot agent -m "Hello!"
+```
+
+> Docker users: use `docker run -it` for interactive OAuth login.
+
+</details>
 
 <details>
 <summary><b>Custom Provider (Any OpenAI-compatible API)</b></summary>
@@ -635,6 +639,43 @@ If your provider is not listed above but exposes an **OpenAI-compatible API** (e
 ```
 
 > The `custom` provider routes through LiteLLM's OpenAI-compatible path. It works with any endpoint that follows the OpenAI chat completions API format. The model name is passed directly to the endpoint without any prefix.
+
+</details>
+
+<details>
+<summary><b>vLLM (local / OpenAI-compatible)</b></summary>
+
+Run your own model with vLLM or any OpenAI-compatible server, then add to config:
+
+**1. Start the server** (example):
+```bash
+vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
+```
+
+**2. Add to config** (partial — merge into `~/.nanobot/config.json`):
+
+*Provider (key can be any non-empty string for local):*
+```json
+{
+  "providers": {
+    "vllm": {
+      "apiKey": "dummy",
+      "apiBase": "http://localhost:8000/v1"
+    }
+  }
+}
+```
+
+*Model:*
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "meta-llama/Llama-3.1-8B-Instruct"
+    }
+  }
+}
+```
 
 </details>
 
@@ -719,6 +760,7 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 ### Security
 
+> [!TIP]
 > For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
 
 | Option | Default | Description |
@@ -738,6 +780,7 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `nanobot agent --logs` | Show runtime logs during chat |
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
+| `nanobot provider login openai-codex` | OAuth login for providers |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
 
@@ -813,7 +856,6 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 
-- [x] **Voice Transcription** — Support for Groq Whisper (Issue #13)
 - [ ] **Multi-modal** — See and hear (images, voice, video)
 - [ ] **Long-term memory** — Never forget important context
 - [ ] **Better reasoning** — Multi-step planning and reflection
