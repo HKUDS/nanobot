@@ -159,7 +159,6 @@ class BrowserSession:
         context_cookies = await self._context.cookies()
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        file_cookies_before = len(data.get("cookies") or [])
         data["cookies"] = context_cookies
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
@@ -168,9 +167,8 @@ class BrowserSession:
         except OSError:
             pass
         logger.info(
-            "Browser storage state: context.cookies()={}, storage_state() had {} cookies -> wrote {} to {}",
+            "Browser storage state: context.cookies()={}, wrote {} to {}",
             len(context_cookies),
-            file_cookies_before,
             len(context_cookies),
             path,
         )
@@ -183,7 +181,7 @@ class BrowserSession:
             return False, "Browser not started yet. Use a browser action (e.g. browser_navigate) first, then save session."
         try:
             await self._write_storage_state()
-            logger.info("Browser storage state saved to {}", self._storage_state_path)
+            logger.debug("Browser storage state saved to {}", self._storage_state_path)
             return True, f"Saved to {self._storage_state_path}"
         except Exception as e:
             logger.error("Browser storage state save failed: {}", e)
@@ -202,7 +200,7 @@ class BrowserSession:
                     e,
                 )
         elif self._storage_state_path and not (self._browser and self._context):
-            logger.info(
+            logger.debug(
                 "Browser storage state not saved on close (browser was never started). "
                 "Use browser_navigate (or another browser tool) at least once, then exit or call browser_save_session."
             )
@@ -397,7 +395,7 @@ class BrowserSaveSessionTool(Tool):
     """Save current browser cookies and storage to the configured path (e.g. after login)."""
 
     name = "browser_save_session"
-    description = "Save the current browser session (cookies, localStorage) to disk so it can be restored after restart. Use after logging in or when the page is in a good state. Session is also saved automatically when the agent shuts down."
+    description = "Save the current browser session (cookies, localStorage) to disk so it can be restored after restart. Use after logging in or when the page is in a good state."
     parameters = {
         "type": "object",
         "properties": {},
