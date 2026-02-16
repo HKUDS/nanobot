@@ -233,11 +233,11 @@ class SlackChannel(BaseChannel):
             # Convert URL formatting
             # Step 6: [text](URL) -> <URL|text>
             converted_text = re.sub(
-                r"(^|[^!])\[(.+?)\]\((http.+?)\)", r"<\2|\1>", converted_text)
+                r"(^|[^!])\[(.+?)\]\((http.+?)\)", r"\1<\3|\2>", converted_text)
             # Convert image URL
             # Step 6: ![alt text](URL "title") -> <URL>
             converted_text = re.sub(
-                r"[!]\[.+?\]\((http.+?)(?: \".*?\")?\)", r"<\2>", converted_text)
+                r"[!]\[.+?\]\((http.+?)(?: \".*?\")?\)", r"<\1>", converted_text)
             return converted_text
         def escape_mrkdwn(text: str) -> str:
             return (text.replace('&', '&amp;')
