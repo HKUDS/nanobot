@@ -42,8 +42,32 @@ class Session:
         self.updated_at = datetime.now()
     
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """Get recent messages in LLM format (role + content only)."""
-        return [{"role": m["role"], "content": m["content"]} for m in self.messages[-max_messages:]]
+        """
+        Get recent messages in LLM format.
+
+        Preserves tool call metadata so sessions can be replayed accurately.
+        """
+        history: list[dict[str, Any]] = []
+        for msg in self.messages[-max_messages:]:
+            llm_msg: dict[str, Any] = {
+                "role": msg["role"],
+                "content": msg.get("content", ""),
+            }
+
+            # Preserve assistant tool call descriptors.
+            if msg["role"] == "assistant" and "tool_calls" in msg:
+                llm_msg["tool_calls"] = msg["tool_calls"]
+
+            # Preserve tool response linkage for tool role messages.
+            if msg["role"] == "tool":
+                if "tool_call_id" in msg:
+                    llm_msg["tool_call_id"] = msg["tool_call_id"]
+                if "name" in msg:
+                    llm_msg["name"] = msg["name"]
+
+            history.append(llm_msg)
+
+        return history
     
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
