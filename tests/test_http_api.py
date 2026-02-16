@@ -1,6 +1,6 @@
 """Tests for HTTP API channel."""
 
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -26,71 +26,6 @@ def test_http_api_config_enabled():
     cfg = HTTPAPIConfig(enabled=True, auth_token="test-token-123")
     assert cfg.enabled is True
     assert cfg.auth_token == "test-token-123"
-
-
-# --- HTTPAPIChannel._check_auth tests ---
-
-def _make_channel(auth_token: str = ""):
-    """Create an HTTPAPIChannel with a mocked agent."""
-    from nanobot.channels.http_api import HTTPAPIChannel
-    config = HTTPAPIConfig(enabled=True, auth_token=auth_token)
-    mock_agent = MagicMock()
-    return HTTPAPIChannel(config, mock_agent)
-
-
-def _make_request(auth_header: str | None = None):
-    """Create a mock request with optional auth header."""
-    request = MagicMock()
-    headers = {}
-    if auth_header is not None:
-        headers["authorization"] = auth_header
-    request.headers = headers
-    return request
-
-
-def test_check_auth_no_token_configured():
-    """No auth required when auth_token is empty."""
-    channel = _make_channel(auth_token="")
-    request = _make_request()
-    # Should not raise
-    channel._check_auth(request)
-
-
-def test_check_auth_valid_token():
-    """Valid bearer token passes."""
-    channel = _make_channel(auth_token="secret123")
-    request = _make_request(auth_header="Bearer secret123")
-    channel._check_auth(request)
-
-
-def test_check_auth_missing_header():
-    """Missing auth header returns 401."""
-    from fastapi import HTTPException
-    channel = _make_channel(auth_token="secret123")
-    request = _make_request()
-    with pytest.raises(HTTPException) as exc_info:
-        channel._check_auth(request)
-    assert exc_info.value.status_code == 401
-
-
-def test_check_auth_wrong_token():
-    """Wrong token returns 403."""
-    from fastapi import HTTPException
-    channel = _make_channel(auth_token="secret123")
-    request = _make_request(auth_header="Bearer wrongtoken")
-    with pytest.raises(HTTPException) as exc_info:
-        channel._check_auth(request)
-    assert exc_info.value.status_code == 403
-
-
-def test_check_auth_invalid_format():
-    """Non-Bearer format returns 401."""
-    from fastapi import HTTPException
-    channel = _make_channel(auth_token="secret123")
-    request = _make_request(auth_header="Basic dXNlcjpwYXNz")
-    with pytest.raises(HTTPException) as exc_info:
-        channel._check_auth(request)
-    assert exc_info.value.status_code == 401
 
 
 # --- FastAPI app endpoint tests (using TestClient) ---
@@ -181,8 +116,32 @@ def test_chat_endpoint_wrong_token():
     assert resp.status_code == 403
 
 
+def test_chat_endpoint_invalid_auth_format():
+    """POST /api/v1/chat with non-Bearer format returns 401."""
+    client, _ = _make_test_client(auth_token="my-token")
+    resp = client.post(
+        "/api/v1/chat",
+        json={"message": "Hello"},
+        headers={"Authorization": "Basic dXNlcjpwYXNz"},
+    )
+    assert resp.status_code == 401
+
+
 def test_health_no_auth_required():
     """GET /api/v1/health does not require auth even when configured."""
     client, _ = _make_test_client(auth_token="my-token")
     resp = client.get("/api/v1/health")
     assert resp.status_code == 200
+
+
+def test_chat_session_isolation():
+    """Two requests with different session_keys use separate sessions."""
+    client, mock_agent = _make_test_client()
+
+    client.post("/api/v1/chat", json={"message": "A", "session_key": "user-1"})
+    client.post("/api/v1/chat", json={"message": "B", "session_key": "user-2"})
+
+    calls = mock_agent.process_direct.call_args_list
+    assert len(calls) == 2
+    assert calls[0].kwargs["session_key"] == "user-1"
+    assert calls[1].kwargs["session_key"] == "user-2"
