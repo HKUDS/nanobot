@@ -4,6 +4,7 @@ from typing import Any, Callable, Awaitable
 
 from nanobot.agent.tools.base import Tool
 from nanobot.bus.events import OutboundMessage
+from nanobot.i18n import _
 
 
 class MessageTool(Tool):
@@ -30,11 +31,11 @@ class MessageTool(Tool):
     
     @property
     def name(self) -> str:
-        return "message"
+        return _("tools.message.name")
     
     @property
     def description(self) -> str:
-        return "Send a message to the user. Use this when you want to communicate something."
+        return _("tools.message.description")
     
     @property
     def parameters(self) -> dict[str, Any]:
@@ -68,10 +69,10 @@ class MessageTool(Tool):
         chat_id = chat_id or self._default_chat_id
         
         if not channel or not chat_id:
-            return "Error: No target channel/chat specified"
+            return _("tools.message.error_no_target")
         
         if not self._send_callback:
-            return "Error: Message sending not configured"
+            return _("tools.message.error_not_configured")
         
         msg = OutboundMessage(
             channel=channel,

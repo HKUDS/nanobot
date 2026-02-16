@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+from nanobot.i18n import _
 
 
 def _resolve_path(path: str, allowed_dir: Path | None = None) -> Path:
@@ -22,11 +23,11 @@ class ReadFileTool(Tool):
 
     @property
     def name(self) -> str:
-        return "read_file"
+        return _("tools.filesystem.read.name")
     
     @property
     def description(self) -> str:
-        return "Read the contents of a file at the given path."
+        return _("tools.filesystem.read.description")
     
     @property
     def parameters(self) -> dict[str, Any]:
@@ -65,11 +66,11 @@ class WriteFileTool(Tool):
 
     @property
     def name(self) -> str:
-        return "write_file"
+        return _("tools.filesystem.write.name")
     
     @property
     def description(self) -> str:
-        return "Write content to a file at the given path. Creates parent directories if needed."
+        return _("tools.filesystem.write.description")
     
     @property
     def parameters(self) -> dict[str, Any]:
@@ -108,11 +109,11 @@ class EditFileTool(Tool):
 
     @property
     def name(self) -> str:
-        return "edit_file"
+        return _("tools.filesystem.edit.name")
     
     @property
     def description(self) -> str:
-        return "Edit a file by replacing old_text with new_text. The old_text must exist exactly in the file."
+        return _("tools.filesystem.edit.description")
     
     @property
     def parameters(self) -> dict[str, Any]:
@@ -169,11 +170,11 @@ class ListDirTool(Tool):
 
     @property
     def name(self) -> str:
-        return "list_dir"
+        return _("tools.filesystem.list.name")
     
     @property
     def description(self) -> str:
-        return "List the contents of a directory."
+        return _("tools.filesystem.list.description")
     
     @property
     def parameters(self) -> dict[str, Any]:

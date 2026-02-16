@@ -10,6 +10,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import WhatsAppConfig
+from nanobot.i18n import _
 
 
 class WhatsAppChannel(BaseChannel):
@@ -46,7 +47,7 @@ class WhatsAppChannel(BaseChannel):
                     if self.config.bridge_token:
                         await ws.send(json.dumps({"type": "auth", "token": self.config.bridge_token}))
                     self._connected = True
-                    logger.info("Connected to WhatsApp bridge")
+                    logger.info(_("channels.whatsapp.connected"))
                     
                     # Listen for messages
                     async for message in ws:
@@ -78,7 +79,7 @@ class WhatsAppChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WhatsApp."""
         if not self._ws or not self._connected:
-            logger.warning("WhatsApp bridge not connected")
+            logger.warning(_("channels.whatsapp.not_connected"))
             return
         
         try:
@@ -142,7 +143,7 @@ class WhatsAppChannel(BaseChannel):
         
         elif msg_type == "qr":
             # QR code for authentication
-            logger.info("Scan QR code in the bridge terminal to connect WhatsApp")
+            logger.info(_("channels.whatsapp.scan_qr"))
         
         elif msg_type == "error":
             logger.error(f"WhatsApp bridge error: {data.get('error')}")

@@ -35,12 +35,25 @@ def load_config(config_path: Path | None = None) -> Config:
             with open(path) as f:
                 data = json.load(f)
             data = _migrate_config(data)
-            return Config.model_validate(convert_keys(data))
+            config = Config.model_validate(convert_keys(data))
         except (json.JSONDecodeError, ValueError) as e:
             print(f"Warning: Failed to load config from {path}: {e}")
             print("Using default configuration.")
+            config = Config()
+    else:
+        config = Config()
     
-    return Config()
+    _init_locale(config)
+    return config
+
+
+def _init_locale(config: Config) -> None:
+    """Initialize i18n locale from config."""
+    try:
+        from nanobot.i18n.core import set_language
+        set_language(config.locale)
+    except Exception:
+        pass
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:

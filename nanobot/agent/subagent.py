@@ -173,7 +173,7 @@ class SubagentManager:
                     break
             
             if final_result is None:
-                final_result = "Task completed but no final response was generated."
+                final_result = "⚠️ Subagent task: LLM returned empty response. Task may have been interrupted or filtered."
             
             logger.info(f"Subagent [{task_id}] completed successfully")
             await self._announce_result(task_id, label, task, final_result, origin, "ok")

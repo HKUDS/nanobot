@@ -11,6 +11,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
+from nanobot.i18n import _
 
 
 class ChannelManager:
@@ -43,7 +44,7 @@ class ChannelManager:
                     self.bus,
                     groq_api_key=self.config.providers.groq.api_key,
                 )
-                logger.info("Telegram channel enabled")
+                logger.info(_("channels.manager.telegram_enabled"))
             except ImportError as e:
                 logger.warning(f"Telegram channel not available: {e}")
         
@@ -54,7 +55,7 @@ class ChannelManager:
                 self.channels["whatsapp"] = WhatsAppChannel(
                     self.config.channels.whatsapp, self.bus
                 )
-                logger.info("WhatsApp channel enabled")
+                logger.info(_("channels.manager.whatsapp_enabled"))
             except ImportError as e:
                 logger.warning(f"WhatsApp channel not available: {e}")
 
@@ -65,7 +66,7 @@ class ChannelManager:
                 self.channels["discord"] = DiscordChannel(
                     self.config.channels.discord, self.bus
                 )
-                logger.info("Discord channel enabled")
+                logger.info(_("channels.manager.discord_enabled"))
             except ImportError as e:
                 logger.warning(f"Discord channel not available: {e}")
         
@@ -99,7 +100,7 @@ class ChannelManager:
                 self.channels["dingtalk"] = DingTalkChannel(
                     self.config.channels.dingtalk, self.bus
                 )
-                logger.info("DingTalk channel enabled")
+                logger.info(_("channels.manager.dingtalk_enabled"))
             except ImportError as e:
                 logger.warning(f"DingTalk channel not available: {e}")
 
@@ -147,7 +148,7 @@ class ChannelManager:
     async def start_all(self) -> None:
         """Start all channels and the outbound dispatcher."""
         if not self.channels:
-            logger.warning("No channels enabled")
+            logger.warning(_("channels.manager.no_channels"))
             return
         
         # Start outbound dispatcher
@@ -184,7 +185,7 @@ class ChannelManager:
     
     async def _dispatch_outbound(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""
-        logger.info("Outbound dispatcher started")
+        logger.info(_("channels.manager.dispatcher_started"))
         
         while True:
             try:

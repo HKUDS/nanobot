@@ -23,6 +23,7 @@ from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import Session, SessionManager
+from nanobot.i18n import _
 
 
 class AgentLoop:
@@ -202,6 +203,9 @@ class AgentLoop:
                 final_content = response.content
                 break
 
+        if final_content is None and iteration >= self.max_iterations:
+            final_content = _('agent.max_iterations', count=self.max_iterations)
+
         return final_content, tools_used
 
     async def run(self) -> None:
@@ -225,7 +229,7 @@ class AgentLoop:
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel,
                         chat_id=msg.chat_id,
-                        content=f"Sorry, I encountered an error: {str(e)}"
+                        content=_('agent.error_processing', error=str(e))
                     ))
             except asyncio.TimeoutError:
                 continue
@@ -268,7 +272,6 @@ class AgentLoop:
         # Handle slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            # Capture messages before clearing (avoid race condition with background task)
             messages_to_archive = session.messages.copy()
             session.clear()
             self.sessions.save(session)
@@ -281,10 +284,10 @@ class AgentLoop:
 
             asyncio.create_task(_consolidate_and_cleanup())
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started. Memory consolidation in progress.")
+                                  content=_('agent.new_session'))
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+                                  content=_('agent.help'))
         
         if len(session.messages) > self.memory_window:
             asyncio.create_task(self._consolidate_memory(session))
@@ -300,7 +303,7 @@ class AgentLoop:
         final_content, tools_used = await self._run_agent_loop(initial_messages)
 
         if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+            final_content = _('agent.empty_response')
         
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
@@ -348,7 +351,7 @@ class AgentLoop:
         final_content, _ = await self._run_agent_loop(initial_messages)
 
         if final_content is None:
-            final_content = "Background task completed."
+            final_content = _('agent.empty_response_bg')
         
         session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
         session.add_message("assistant", final_content)

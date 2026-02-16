@@ -1,0 +1,199 @@
+{
+  "cli": {
+    "onboard": {
+      "config_exists": "Config already exists at {path}",
+      "overwrite_y": "y = overwrite with defaults (existing values will be lost)",
+      "overwrite_n": "N = refresh config, keeping existing values and adding new fields",
+      "overwrite_prompt": "Overwrite?",
+      "config_reset": "Config reset to defaults at {path}",
+      "config_refreshed": "Config refreshed at {path} (existing values preserved)",
+      "config_created": "Created config at {path}",
+      "workspace_created": "Created workspace at {path}",
+      "ready": "nanobot is ready!",
+      "next_steps": "Next steps:",
+      "step1": "1. Add your API key to ~/.nanobot/config.json",
+      "step1_link": "Get one at: https://openrouter.ai/keys",
+      "step2": "2. Chat: nanobot agent -m \"Hello!\"",
+      "chat_apps": "Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps",
+      "created_file": "Created {filename}"
+    },
+    "agent": {
+      "error_no_api_key": "Error: No API key configured.",
+      "set_api_key": "Set one in ~/.nanobot/config.json under providers section",
+      "thinking": "nanobot is thinking...",
+      "interactive_mode": "Interactive mode (type exit or Ctrl+C to quit)",
+      "goodbye": "Goodbye!"
+    },
+    "gateway": {
+      "starting": "Starting nanobot gateway on port {port}...",
+      "channels_enabled": "Channels enabled: {channels}",
+      "no_channels": "Warning: No channels enabled",
+      "cron_jobs": "Cron: {count} scheduled jobs",
+      "heartbeat": "Heartbeat: every 30m",
+      "shutting_down": "Shutting down..."
+    },
+    "channels": {
+      "title": "Channel Status",
+      "channel": "Channel",
+      "enabled": "Enabled",
+      "configuration": "Configuration",
+      "not_configured": "not configured"
+    },
+    "whatsapp": {
+      "setting_up": "Setting up bridge...",
+      "installing_deps": "Installing dependencies...",
+      "building": "Building...",
+      "bridge_ready": "Bridge ready",
+      "build_failed": "Build failed: {error}",
+      "starting": "Starting bridge...",
+      "scan_qr": "Scan the QR code to connect.",
+      "bridge_failed": "Bridge failed: {error}",
+      "npm_not_found": "npm not found. Please install Node.js >= 18.",
+      "bridge_not_found": "Bridge source not found.",
+      "reinstall": "Try reinstalling: pip install --force-reinstall nanobot"
+    },
+    "cron": {
+      "title": "Scheduled Jobs",
+      "name": "Name",
+      "schedule": "Schedule",
+      "status": "Status",
+      "next_run": "Next Run",
+      "no_jobs": "No scheduled jobs.",
+      "error_schedule": "Error: Must specify --every, --cron, or --at",
+      "job_added": "Added job '{name}' ({id})",
+      "job_removed": "Removed job {id}",
+      "job_not_found": "Job {id} not found",
+      "job_status": "Job '{name}' {status}",
+      "job_executed": "Job executed",
+      "job_failed": "Failed to run job {id}"
+    },
+    "status": {
+      "title": "nanobot Status",
+      "config": "Config",
+      "workspace": "Workspace",
+      "model": "Model",
+      "not_set": "not set",
+      "api_base": "API Base"
+    }
+  },
+  "agent": {
+    "new_session": "New session started. Memory consolidation in progress.",
+    "help": "🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands",
+    "empty_response": "⚠️ LLM returned empty response. This may be due to content filtering or an unexpected model behavior. Please retry.",
+    "empty_response_bg": "⚠️ Background task: LLM returned empty response. Task may have been interrupted or filtered.",
+    "max_iterations": "⚠️ Maximum iteration limit reached ({count} iterations). Task incomplete. Please simplify your request or break it into smaller steps.",
+    "error_processing": "Sorry, I encountered an error: {error}"
+  },
+  "tools": {
+    "cron": {
+      "name": "cron",
+      "description": "Schedule reminders and recurring tasks. Actions: add, list, remove.",
+      "error_action_required": "Error: action is required (add, list, or remove)",
+      "error_message_required": "Error: message is required for add",
+      "error_no_session": "Error: no session context (channel/chat_id)",
+      "error_schedule_required": "Error: either every_seconds, cron_expr, or at is required",
+      "no_jobs": "No scheduled jobs.",
+      "scheduled_jobs": "Scheduled jobs:",
+      "error_job_id_required": "Error: job_id is required for remove",
+      "job_created": "Created job '{name}' (id: {id})",
+      "job_removed": "Removed job {id}",
+      "job_not_found": "Job {id} not found"
+    },
+    "shell": {
+      "name": "exec",
+      "description": "Execute a shell command and return its output. Use with caution.",
+      "error_blocked_dangerous": "Error: Command blocked by safety guard (dangerous pattern detected)",
+      "error_blocked_allowlist": "Error: Command blocked by safety guard (not in allowlist)",
+      "error_blocked_traversal": "Error: Command blocked by safety guard (path traversal detected)",
+      "error_blocked_outside": "Error: Command blocked by safety guard (path outside working dir)",
+      "error_timeout": "Error: Command timed out after {timeout} seconds",
+      "error_executing": "Error executing command: {error}"
+    },
+    "filesystem": {
+      "read": {
+        "name": "read_file",
+        "description": "Read the contents of a file at the given path."
+      },
+      "write": {
+        "name": "write_file",
+        "description": "Write content to a file at the given path. Creates parent directories if needed."
+      },
+      "edit": {
+        "name": "edit_file",
+        "description": "Edit a file by replacing old_text with new_text. The old_text must exist exactly in the file."
+      },
+      "list": {
+        "name": "list_dir",
+        "description": "List the contents of a directory."
+      }
+    },
+    "web": {
+      "error_no_api_key": "Error: BRAVE_API_KEY not configured"
+    },
+    "message": {
+      "name": "message",
+      "description": "Send a message to the user. Use this when you want to communicate something.",
+      "error_no_target": "Error: No target channel/chat specified",
+      "error_not_configured": "Error: Message sending not configured"
+    },
+    "spawn": {
+      "name": "spawn"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "start": "Start the bot",
+      "new": "Start a new conversation",
+      "help": "Show available commands",
+      "error_no_token": "Telegram bot token not configured",
+      "connected": "Telegram bot @{username} connected",
+      "not_running": "Telegram bot not running",
+      "welcome": "Send me a message and I'll respond!"
+    },
+    "whatsapp": {
+      "connected": "Connected to WhatsApp bridge",
+      "not_connected": "WhatsApp bridge not connected",
+      "scan_qr": "Scan QR code in the bridge terminal to connect WhatsApp"
+    },
+    "feishu": {
+      "error_no_sdk": "Feishu SDK not installed. Run: pip install lark-oapi",
+      "error_no_config": "Feishu app_id and app_secret not configured",
+      "started": "Feishu bot started with WebSocket long connection",
+      "no_public_ip": "No public IP required - using WebSocket to receive events",
+      "stopped": "Feishu bot stopped",
+      "not_initialized": "Feishu client not initialized"
+    },
+    "mochat": {
+      "error_no_token": "Mochat claw_token not configured",
+      "error_missing_token": "Mochat claw_token missing, skip send",
+      "error_empty_target": "Mochat outbound target is empty",
+      "connected": "Mochat websocket connected",
+      "disconnected": "Mochat websocket disconnected",
+      "error_not_initialized": "Mochat HTTP client not initialized"
+    },
+    "manager": {
+      "telegram_enabled": "Telegram channel enabled",
+      "whatsapp_enabled": "WhatsApp channel enabled",
+      "discord_enabled": "Discord channel enabled",
+      "feishu_enabled": "Feishu channel enabled",
+      "mochat_enabled": "Mochat channel enabled",
+      "dingtalk_enabled": "DingTalk channel enabled",
+      "email_enabled": "Email channel enabled",
+      "slack_enabled": "Slack channel enabled",
+      "no_channels": "No channels enabled",
+      "stopped": "Stopped {name} channel",
+      "dispatcher_started": "Outbound dispatcher started"
+    }
+  },
+  "common": {
+    "yes": "Yes",
+    "no": "No",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "error": "Error",
+    "success": "Success",
+    "loading": "Loading...",
+    "cancel": "Cancel",
+    "confirm": "Confirm"
+  }
+}

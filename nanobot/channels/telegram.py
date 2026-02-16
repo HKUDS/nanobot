@@ -13,6 +13,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
+from nanobot.i18n import _
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -89,9 +90,9 @@ class TelegramChannel(BaseChannel):
     
     # Commands registered with Telegram's command menu
     BOT_COMMANDS = [
-        BotCommand("start", "Start the bot"),
-        BotCommand("new", "Start a new conversation"),
-        BotCommand("help", "Show available commands"),
+        BotCommand("start", _("channels.telegram.start")),
+        BotCommand("new", _("channels.telegram.new")),
+        BotCommand("help", _("channels.telegram.help")),
     ]
     
     def __init__(
@@ -145,7 +146,7 @@ class TelegramChannel(BaseChannel):
         
         # Get bot info and register command menu
         bot_info = await self._app.bot.get_me()
-        logger.info(f"Telegram bot @{bot_info.username} connected")
+        logger.info(_("channels.telegram.connected", username=bot_info.username))
         
         try:
             await self._app.bot.set_my_commands(self.BOT_COMMANDS)
@@ -181,7 +182,7 @@ class TelegramChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
         if not self._app:
-            logger.warning("Telegram bot not running")
+            logger.warning(_("channels.telegram.not_running"))
             return
         
         # Stop typing indicator for this chat
@@ -218,7 +219,7 @@ class TelegramChannel(BaseChannel):
         user = update.effective_user
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
-            "Send me a message and I'll respond!\n"
+            f"{_('channels.telegram.welcome')}\n"
             "Type /help to see available commands."
         )
     

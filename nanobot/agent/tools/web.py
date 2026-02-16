@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import httpx
 
 from nanobot.agent.tools.base import Tool
+from nanobot.i18n import _
 
 # Shared constants
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
@@ -63,7 +64,7 @@ class WebSearchTool(Tool):
     
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         if not self.api_key:
-            return "Error: BRAVE_API_KEY not configured"
+            return _("tools.web.error_no_api_key")
         
         try:
             n = min(max(count or self.max_results, 1), 10)
