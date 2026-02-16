@@ -1,5 +1,6 @@
 """File system tools: read, write, edit."""
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -9,8 +10,10 @@ from nanobot.agent.tools.base import Tool
 def _resolve_path(path: str, allowed_dir: Path | None = None) -> Path:
     """Resolve path and optionally enforce directory restriction."""
     resolved = Path(path).expanduser().resolve()
-    if allowed_dir and not str(resolved).startswith(str(allowed_dir.resolve())):
-        raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
+    if allowed_dir:
+        allowed_resolved = allowed_dir.resolve()
+        if not resolved.is_relative_to(allowed_resolved):
+            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
     return resolved
 
 
@@ -209,3 +212,62 @@ class ListDirTool(Tool):
             return f"Error: {e}"
         except Exception as e:
             return f"Error listing directory: {str(e)}"
+
+
+class DeleteFileTool(Tool):
+    """Tool to delete a file."""
+
+    def __init__(self, allowed_dir: Path | None = None):
+        self._allowed_dir = allowed_dir
+
+    @property
+    def name(self) -> str:
+        return "delete_file"
+
+    @property
+    def description(self) -> str:
+        return "Delete a file or symlink at the given path. For symlinks, only the link is deleted."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "The file path to delete",
+                },
+            },
+            "required": ["path"],
+        }
+
+    async def execute(self, path: str, **kwargs: Any) -> str:
+        try:
+            # Keep lexical path (no resolve) so symlink entries can be deleted as links.
+            file_path = Path(os.path.abspath(str(Path(path).expanduser())))
+            if self._allowed_dir:
+                # Support both configured symlink workspace path (alias) and its real path.
+                allowed_alias = Path(os.path.abspath(str(self._allowed_dir.expanduser())))
+                allowed_resolved = allowed_alias.resolve()
+
+                in_alias = file_path.is_relative_to(allowed_alias)
+                in_resolved = file_path.is_relative_to(allowed_resolved)
+                if not (in_alias or in_resolved):
+                    return f"Error: Path {path} is outside allowed directory {self._allowed_dir}"
+
+                # Block escape via symlinked parent directories inside allowed_dir.
+                parent_resolved = file_path.parent.resolve()
+                if not parent_resolved.is_relative_to(allowed_resolved):
+                    return f"Error: Path {path} is outside allowed directory {self._allowed_dir}"
+
+            if not file_path.exists():
+                # Broken symlinks have exists() == False but are still valid unlink targets.
+                if not file_path.is_symlink():
+                    return f"Error: File not found: {path}"
+            if file_path.is_dir() and not file_path.is_symlink():
+                return f"Error: Not a file: {path}"
+
+            file_path.unlink()
+            return f"Successfully deleted {path}"
+        except Exception as e:
+            return f"Error deleting file: {str(e)}"
