@@ -146,12 +146,21 @@ class AgentLoop:
             if isinstance(cron_tool, CronTool):
                 cron_tool.set_context(channel, chat_id)
 
-    async def _run_agent_loop(self, initial_messages: list[dict]) -> tuple[str | None, list[str]]:
+    async def _run_agent_loop(
+        self,
+        initial_messages: list[dict],
+        session: "Session | None" = None,
+        channel: str | None = None,
+        chat_id: str | None = None,
+    ) -> tuple[str | None, list[str]]:
         """
         Run the agent iteration loop.
 
         Args:
             initial_messages: Starting messages for the LLM conversation.
+            session: Optional session for verbose mode checking and message sending.
+            channel: Channel for verbose message sending.
+            chat_id: Chat ID for verbose message sending.
 
         Returns:
             Tuple of (final_content, list_of_tools_used).
@@ -160,6 +169,9 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        
+        # Check if verbose mode is enabled
+        is_verbose = session.metadata.get("verbose", False) if session else False
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -189,10 +201,34 @@ class AgentLoop:
                     reasoning_content=response.reasoning_content,
                 )
 
+                # Send reasoning if verbose mode is on and reasoning exists
+                if is_verbose and response.reasoning_content and channel and chat_id:
+                    await self.bus.publish_outbound(OutboundMessage(
+                        channel=channel,
+                        chat_id=chat_id,
+                        content=f"🧠 **Reasoning:**\n{response.reasoning_content}"
+                    ))
+
                 for tool_call in response.tool_calls:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
+                    
+                    # Send tool call notification if verbose mode is on
+                    if is_verbose and channel and chat_id:
+                        tool_msg = f"🔧 **Tool:** `{tool_call.name}`"
+                        if tool_call.arguments:
+                            # Format arguments nicely
+                            args_display = json.dumps(tool_call.arguments, ensure_ascii=False, indent=2)
+                            if len(args_display) > 500:
+                                args_display = args_display[:500] + "..."
+                            tool_msg += f"\n```json\n{args_display}\n```"
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=channel,
+                            chat_id=chat_id,
+                            content=tool_msg
+                        ))
+                    
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
@@ -284,7 +320,22 @@ class AgentLoop:
                                   content="New session started. Memory consolidation in progress.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands\n/verbose on|off — Toggle verbose mode (show tool calls and reasoning)")
+        
+        # Handle verbose command
+        verbose_match = None
+        if cmd.startswith("/verbose "):
+            verbose_match = cmd[9:].strip()
+        elif cmd.startswith("/v "):
+            verbose_match = cmd[3:].strip()
+        
+        if verbose_match in ("on", "off"):
+            is_verbose = verbose_match == "on"
+            session.metadata["verbose"] = is_verbose
+            self.sessions.save(session)
+            status = "enabled" if is_verbose else "disabled"
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                  content=f"Verbose mode {status}. {'Tool calls and reasoning will be shown.' if is_verbose else 'Running in quiet mode.'}")
         
         if len(session.messages) > self.memory_window:
             asyncio.create_task(self._consolidate_memory(session))
@@ -297,7 +348,12 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
         )
-        final_content, tools_used = await self._run_agent_loop(initial_messages)
+        final_content, tools_used = await self._run_agent_loop(
+            initial_messages,
+            session=session,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+        )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
@@ -345,7 +401,12 @@ class AgentLoop:
             channel=origin_channel,
             chat_id=origin_chat_id,
         )
-        final_content, _ = await self._run_agent_loop(initial_messages)
+        final_content, _ = await self._run_agent_loop(
+            initial_messages,
+            session=session,
+            channel=origin_channel,
+            chat_id=origin_chat_id,
+        )
 
         if final_content is None:
             final_content = "Background task completed."
