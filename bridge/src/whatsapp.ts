@@ -37,6 +37,7 @@ export class WhatsAppClient {
   private sock: any = null;
   private options: WhatsAppClientOptions;
   private reconnecting = false;
+  private sentMessageIds = new Set<string>();
 
   constructor(options: WhatsAppClientOptions) {
     this.options = options;
@@ -59,8 +60,9 @@ export class WhatsAppClient {
       logger,
       printQRInTerminal: false,
       browser: ['nanobot', 'cli', VERSION],
-      syncFullHistory: false,
+      syncFullHistory: true,
       markOnlineOnConnect: false,
+      emitOwnEvents: true,
     });
 
     // Handle WebSocket errors
@@ -107,11 +109,16 @@ export class WhatsAppClient {
 
     // Handle incoming messages
     this.sock.ev.on('messages.upsert', async ({ messages, type }: { messages: any[]; type: string }) => {
-      if (type !== 'notify') return;
+      if (type !== 'notify' && type !== 'append') return;
 
       for (const msg of messages) {
-        // Skip own messages
-        if (msg.key.fromMe) continue;
+        const msgId = msg.key.id || '';
+        
+        // Skip bot's own replies (tracked by sendMessage to prevent infinite loops)
+        if (this.sentMessageIds.has(msgId)) {
+          this.sentMessageIds.delete(msgId);
+          continue;
+        }
 
         // Skip status updates
         if (msg.key.remoteJid === 'status@broadcast') continue;
@@ -121,6 +128,34 @@ export class WhatsAppClient {
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
 
+        this.options.onMessage({
+          id: msg.key.id || '',
+          sender: msg.key.remoteJid || '',
+          pn: msg.key.remoteJidAlt || '',
+          content,
+          timestamp: msg.messageTimestamp as number,
+          isGroup,
+        });
+      }
+    });
+
+    this.sock.ev.on('messages.update', async (updates: any[]) => {
+      for (const update of updates) {
+        const msg = { key: update.key, message: update.update?.message, messageTimestamp: Date.now() / 1000 };
+        const msgId = msg.key.id || '';
+        
+        if (this.sentMessageIds.has(msgId)) {
+          this.sentMessageIds.delete(msgId);
+          continue;
+        }
+        
+        if (msg.key.remoteJid === 'status@broadcast') continue;
+        
+        const content = this.extractMessageContent(msg);
+        if (!content) continue;
+        
+        const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
+        
         this.options.onMessage({
           id: msg.key.id || '',
           sender: msg.key.remoteJid || '',
@@ -175,7 +210,11 @@ export class WhatsAppClient {
       throw new Error('Not connected');
     }
 
-    await this.sock.sendMessage(to, { text });
+    const sent = await this.sock.sendMessage(to, { text });
+    if (sent?.key?.id) {
+      this.sentMessageIds.add(sent.key.id);
+      setTimeout(() => this.sentMessageIds.delete(sent.key.id), 30000);
+    }
   }
 
   async disconnect(): Promise<void> {

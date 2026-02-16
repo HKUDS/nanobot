@@ -768,6 +768,12 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
 | `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
 
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NANOBOT_SHARED_SESSION` | *(unset)* | When set, all channels share the same conversation session instead of maintaining separate sessions per channel. The value is used as the shared session identifier (e.g. `NANOBOT_SHARED_SESSION=my-session`). Useful when you want continuity across WhatsApp, Telegram, etc. |
+
 
 ## CLI Reference
 
