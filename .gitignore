@@ -20,3 +20,11 @@ poetry.lock
 .pytest_cache/
 botpy.log
 tests/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
