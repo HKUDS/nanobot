@@ -223,9 +223,21 @@ class SlackChannel(BaseChannel):
             # Step 3.a: ***text*** -> *_text_*
             converted_text = re.sub(
                 r"(?m)(^|[^\*])\*\*\*([^\*].+?[^\*])\*\*\*([^\*]|$)", r"\1*_\2_*\3", converted_text)
-            # Step 3.b - ___text___ to *_text_*
+            # Step 3.b - ___text___ -> *_text_*
             converted_text = re.sub(
                 r"(?m)(^|[^_])___([^_].+?[^_])___([^_]|$)", r"\1*_\2_*\3", converted_text)
+            # Convert strikethrough
+            # Step 4: ~~text~~ -> ~text~
+            converted_text = re.sub(
+                r"(?m)(^|[^~])~~([^~].+?[^~])~~([^~]|$)", r"\1~\2~\3", converted_text)
+            # Convert URL formatting
+            # Step 6: [text](URL) -> <URL|text>
+            converted_text = re.sub(
+                r"(^|[^!])\[(.+?)\]\((http.+?)\)", r"<\2|\1>", converted_text)
+            # Convert image URL
+            # Step 6: ![alt text](URL "title") -> <URL>
+            converted_text = re.sub(
+                r"[!]\[.+?\]\((http.+?)(?: \".*?\")?\)", r"<\2>", converted_text)
             return converted_text
         def escape_mrkdwn(text: str) -> str:
             return (text.replace('&', '&amp;')
