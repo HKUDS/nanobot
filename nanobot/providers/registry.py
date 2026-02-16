@@ -66,6 +66,20 @@ class ProviderSpec:
 
 PROVIDERS: tuple[ProviderSpec, ...] = (
 
+    # === Custom (user-provided OpenAI-compatible endpoint) =================
+    # No auto-detection — only activates when user explicitly configures "custom".
+
+    ProviderSpec(
+        name="custom",
+        keywords=(),
+        env_key="OPENAI_API_KEY",
+        display_name="Custom",
+        litellm_prefix="openai",
+        skip_prefixes=("openai/",),
+        is_gateway=True,
+        strip_model_prefix=True,
+    ),
+
     # === Gateways (detected by api_key / api_base, not model name) =========
     # Gateways can route any model, so they win in fallback.
 
@@ -263,6 +277,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(
             ("kimi-k2.5", {"temperature": 1.0}),
         ),
+    ),
+
+    # MiniMax: needs "minimax/" prefix for LiteLLM routing.
+    # Uses OpenAI-compatible API at api.minimax.io/v1.
+    ProviderSpec(
+        name="minimax",
+        keywords=("minimax",),
+        env_key="MINIMAX_API_KEY",
+        display_name="MiniMax",
+        litellm_prefix="minimax",            # MiniMax-M2.1 → minimax/MiniMax-M2.1
+        skip_prefixes=("minimax/", "openrouter/"),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://api.minimax.io/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
     ),
 
     # === Local deployment (matched by config key, NOT by api_base) =========
