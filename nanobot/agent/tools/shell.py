@@ -62,16 +62,24 @@ class ExecTool(Tool):
             },
             "required": ["command"]
         }
-    
-    async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
+
+    async def execute(
+        self,
+        command: str,
+        working_dir: str | None = None,
+        env: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
-        
-        env = os.environ.copy()
+
+        run_env = os.environ.copy()
         if self.path_append:
-            env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
+            run_env["PATH"] = run_env.get("PATH", "") + os.pathsep + self.path_append
+        if env:
+            run_env.update(env)
 
         try:
             process = await asyncio.create_subprocess_shell(
@@ -79,9 +87,9 @@ class ExecTool(Tool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
-                env=env,
+                env=run_env,
             )
-            
+
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
@@ -96,29 +104,29 @@ class ExecTool(Tool):
                 except asyncio.TimeoutError:
                     pass
                 return f"Error: Command timed out after {self.timeout} seconds"
-            
+
             output_parts = []
-            
+
             if stdout:
                 output_parts.append(stdout.decode("utf-8", errors="replace"))
-            
+
             if stderr:
                 stderr_text = stderr.decode("utf-8", errors="replace")
                 if stderr_text.strip():
                     output_parts.append(f"STDERR:\n{stderr_text}")
-            
+
             if process.returncode != 0:
                 output_parts.append(f"\nExit code: {process.returncode}")
-            
+
             result = "\n".join(output_parts) if output_parts else "(no output)"
-            
+
             # Truncate very long output
             max_len = 10000
             if len(result) > max_len:
                 result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
-            
+
             return result
-            
+
         except Exception as e:
             return f"Error executing command: {str(e)}"
 
