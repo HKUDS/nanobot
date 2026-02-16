@@ -1,7 +1,5 @@
 """HTTP API channel for programmatic access to nanobot."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from loguru import logger
@@ -39,18 +37,34 @@ class HTTPAPIChannel:
 
     def _create_app(self) -> Any:
         """Create the FastAPI application with routes."""
-        from fastapi import FastAPI, HTTPException, Request
-        from fastapi.responses import JSONResponse
+        from fastapi import Depends, FastAPI, Header, HTTPException
 
         app = FastAPI(title="nanobot API", version="1.0.0")
+
+        def _verify_token(authorization: str = Header(default="")) -> None:
+            """FastAPI dependency that verifies bearer token."""
+            if not self.config.auth_token:
+                return  # No auth required
+
+            if not authorization:
+                raise HTTPException(status_code=401, detail="Authorization header required")
+
+            parts = authorization.split(" ", 1)
+            if len(parts) != 2 or parts[0].lower() != "bearer":
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid authorization format (expected 'Bearer <token>')",
+                )
+
+            if parts[1] != self.config.auth_token:
+                raise HTTPException(status_code=403, detail="Invalid token")
 
         @app.get("/api/v1/health")
         async def health() -> dict:
             return {"status": "ok"}
 
         @app.post("/api/v1/chat", response_model=ChatResponse)
-        async def chat(req: ChatRequest, request: Request) -> ChatResponse:
-            self._check_auth(request)
+        async def chat(req: ChatRequest, _: None = Depends(_verify_token)) -> ChatResponse:
             response = await self.agent.process_direct(
                 content=req.message,
                 session_key=req.session_key,
@@ -60,24 +74,6 @@ class HTTPAPIChannel:
             return ChatResponse(response=response, session_key=req.session_key)
 
         return app
-
-    def _check_auth(self, request: Any) -> None:
-        """Validate bearer token if auth_token is configured."""
-        from fastapi import HTTPException
-
-        if not self.config.auth_token:
-            return  # No auth required
-
-        auth_header = request.headers.get("authorization", "")
-        if not auth_header:
-            raise HTTPException(status_code=401, detail="Authorization header required")
-
-        parts = auth_header.split(" ", 1)
-        if len(parts) != 2 or parts[0].lower() != "bearer":
-            raise HTTPException(status_code=401, detail="Invalid authorization format (expected 'Bearer <token>')")
-
-        if parts[1] != self.config.auth_token:
-            raise HTTPException(status_code=403, detail="Invalid token")
 
     async def start(self, host: str, port: int) -> None:
         """Start the HTTP API server."""
