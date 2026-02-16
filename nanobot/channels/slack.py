@@ -84,7 +84,7 @@ class SlackChannel(BaseChannel):
             use_thread = thread_ts and channel_type != "im"
             await self._web_client.chat_postMessage(
                 channel=msg.chat_id,
-                text=msg.content or "",
+                text=self._convert_markdown(msg.content) or "",
                 thread_ts=thread_ts if use_thread else None,
             )
         except Exception as e:
@@ -203,3 +203,47 @@ class SlackChannel(BaseChannel):
         if not text or not self._bot_user_id:
             return text
         return re.sub(rf"<@{re.escape(self._bot_user_id)}>\s*", "", text).strip()
+
+    # Markdown → Slack mrkdwn formatting rules (order matters: longest markers first)
+    _MD_TO_SLACK = (
+        (r'(?m)(^|[^\*])\*\*\*(.+?)\*\*\*([^\*]|$)', r'\1*_\2_*\3'),  # ***bold italic***
+        (r'(?m)(^|[^_])___(.+?)___([^_]|$)', r'\1*_\2_*\3'),            # ___bold italic___
+        (r'(?m)(^|[^\*])\*\*(.+?)\*\*([^\*]|$)', r'\1*\2*\3'),          # **bold**
+        (r'(?m)(^|[^_])__(.+?)__([^_]|$)', r'\1*\2*\3'),                # __bold__
+        (r'(?m)(^|[^\*])\*(.+?)\*([^\*]|$)', r'\1_\2_\3'),              # *italic*
+        (r'(?m)(^|[^~])~~(.+?)~~([^~]|$)', r'\1~\2~\3'),                # ~~strike~~
+        (r'(?m)(^|[^!])\[(.+?)\]\((http.+?)\)', r'\1<\3|\2>'),          # [text](url)
+        (r'!\[.+?\]\((http.+?)(?:\s".*?")?\)', r'<\1>'),                # ![alt](url)
+    )
+    _TABLE_RE = re.compile(r'(?m)^\|.*?\|$(?:\n(?:\|\:?-{3,}\:?)*?\|$)(?:\n\|.*?\|$)*')
+
+    def _convert_markdown(self, text: str) -> str:
+        """Convert standard Markdown to Slack mrkdwn format."""
+        if not text:
+            return text
+        for pattern, repl in self._MD_TO_SLACK:
+            text = re.sub(pattern, repl, text)
+        return self._TABLE_RE.sub(self._convert_table, text)
+
+    @staticmethod
+    def _convert_table(match: re.Match) -> str:
+        """Convert Markdown table to Slack quote + bullet format."""
+        lines = [l.strip() for l in match.group(0).strip().split('\n') if l.strip()]
+        if len(lines) < 2:
+            return match.group(0)
+
+        headers = [h.strip() for h in lines[0].strip('|').split('|')]
+        start = 2 if not re.search(r'[^|\-\s:]', lines[1]) else 1
+
+        result: list[str] = []
+        for line in lines[start:]:
+            cells = [c.strip() for c in line.strip('|').split('|')]
+            cells = (cells + [''] * len(headers))[:len(headers)]
+            if not any(cells):
+                continue
+            result.append(f"> *{headers[0]}*: {cells[0] or '--'}")
+            for i, cell in enumerate(cells[1:], 1):
+                if cell and i < len(headers):
+                    result.append(f"  \u2022 *{headers[i]}*: {cell}")
+            result.append("")
+        return '\n'.join(result).rstrip()
