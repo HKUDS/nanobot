@@ -190,6 +190,8 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, Mochat, DingTa
 - `"mention"`: Bot only responds when mentioned with @botname
 - `"allowlist"`: Bot only responds in specific groups (defined in `groupAllowFrom`)
 
+> **Important:** `allowFrom` only applies to **DMs (direct messages)**. In groups, the bot responds to **all users** based on the `groupPolicy` and `groupAllowFrom` settings. This allows any member of an allowed group to interact with the bot.
+>
 > **Note:** `groupAllowFrom` acts as an additional filter for all policies. For example, with `"mention"` + `groupAllowFrom`, the bot only responds to @mentions in the specified groups.
 >
 > The bot also supports **Telegram Topics** (forum threads) and will automatically reply in the correct topic.
