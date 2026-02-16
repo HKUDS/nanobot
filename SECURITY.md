@@ -55,7 +55,8 @@ chmod 600 ~/.nanobot/config.json
 ```
 
 **Security Notes:**
-- Empty `allowFrom` list will **ALLOW ALL** users (open by default for personal use)
+- Empty `allowFrom` list will **DENY ALL** users by default
+- Set `publicAccess: true` only if you explicitly want open access
 - Get your Telegram user ID from `@userinfobot`
 - Use full phone numbers with country code for WhatsApp
 - Review access logs regularly for unauthorized access attempts
@@ -73,6 +74,7 @@ The `exec` tool can execute shell commands. While dangerous command patterns are
 
 **Blocked patterns:**
 - `rm -rf /` - Root filesystem deletion
+- Destructive script calls (e.g. `python -c "shutil.rmtree(...)"`)
 - Fork bombs
 - Filesystem formatting (`mkfs.*`)
 - Raw disk writes
@@ -214,7 +216,7 @@ If you suspect a security breach:
 ✅ **Authentication**
 - Allow-list based access control
 - Failed authentication attempt logging
-- Open by default (configure allowFrom for production use)
+- Deny-by-default when `allowFrom` is empty (optional `publicAccess` override)
 
 ✅ **Resource Protection**
 - Command execution timeouts (60s default)

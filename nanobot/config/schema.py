@@ -11,6 +11,7 @@ class WhatsAppConfig(BaseModel):
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""  # Shared token for bridge auth (optional, recommended)
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
+    public_access: bool = False  # If true and allow_from is empty, allow any sender
 
 
 class TelegramConfig(BaseModel):
@@ -18,6 +19,7 @@ class TelegramConfig(BaseModel):
     enabled: bool = False
     token: str = ""  # Bot token from @BotFather
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
+    public_access: bool = False  # If true and allow_from is empty, allow any sender
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
 
 
@@ -29,6 +31,7 @@ class FeishuConfig(BaseModel):
     encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
     verification_token: str = ""  # Verification Token for event subscription (optional)
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
+    public_access: bool = False  # If true and allow_from is empty, allow any sender
 
 
 class DingTalkConfig(BaseModel):
@@ -37,6 +40,7 @@ class DingTalkConfig(BaseModel):
     client_id: str = ""  # AppKey
     client_secret: str = ""  # AppSecret
     allow_from: list[str] = Field(default_factory=list)  # Allowed staff_ids
+    public_access: bool = False  # If true and allow_from is empty, allow any sender
 
 
 class DiscordConfig(BaseModel):
@@ -44,6 +48,7 @@ class DiscordConfig(BaseModel):
     enabled: bool = False
     token: str = ""  # Bot token from Discord Developer Portal
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
+    public_access: bool = False  # If true and allow_from is empty, allow any sender
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 
@@ -76,6 +81,7 @@ class EmailConfig(BaseModel):
     max_body_chars: int = 12000
     subject_prefix: str = "Re: "
     allow_from: list[str] = Field(default_factory=list)  # Allowed sender email addresses
+    public_access: bool = False  # If true and allow_from is empty, allow any sender
 
 
 class MochatMentionConfig(BaseModel):
@@ -108,6 +114,7 @@ class MochatConfig(BaseModel):
     sessions: list[str] = Field(default_factory=list)
     panels: list[str] = Field(default_factory=list)
     allow_from: list[str] = Field(default_factory=list)
+    public_access: bool = False  # If true and allow_from is empty, allow any sender
     mention: MochatMentionConfig = Field(default_factory=MochatMentionConfig)
     groups: dict[str, MochatGroupRule] = Field(default_factory=dict)
     reply_delay_mode: str = "non-mention"  # off | non-mention
@@ -139,7 +146,8 @@ class QQConfig(BaseModel):
     enabled: bool = False
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user openids
+    public_access: bool = False  # If true and allow_from is empty, allow any sender
 
 
 class ChannelsConfig(BaseModel):
@@ -215,6 +223,7 @@ class WebToolsConfig(BaseModel):
 class ExecToolConfig(BaseModel):
     """Shell exec tool configuration."""
     timeout: int = 60
+    block_destructive_scripts: bool = True
 
 
 class MCPServerConfig(BaseModel):
