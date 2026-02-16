@@ -585,6 +585,37 @@ Config file: `~/.nanobot/config.json`
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
+| `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
+
+<details>
+<summary><b>OpenAI Codex (OAuth)</b></summary>
+
+Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account.
+
+**1. Login:**
+```bash
+nanobot provider login openai-codex
+```
+
+**2. Set model** (merge into `~/.nanobot/config.json`):
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "openai-codex/gpt-5.1-codex"
+    }
+  }
+}
+```
+
+**3. Chat:**
+```bash
+nanobot agent -m "Hello!"
+```
+
+> Docker users: use `docker run -it` for interactive OAuth login.
+
+</details>
 
 <details>
 <summary><b>Custom Provider (Any OpenAI-compatible API)</b></summary>
