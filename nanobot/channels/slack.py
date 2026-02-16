@@ -204,126 +204,46 @@ class SlackChannel(BaseChannel):
             return text
         return re.sub(rf"<@{re.escape(self._bot_user_id)}>\s*", "", text).strip()
 
+    # Markdown → Slack mrkdwn formatting rules (order matters: longest markers first)
+    _MD_TO_SLACK = (
+        (r'(?m)(^|[^\*])\*\*\*(.+?)\*\*\*([^\*]|$)', r'\1*_\2_*\3'),  # ***bold italic***
+        (r'(?m)(^|[^_])___(.+?)___([^_]|$)', r'\1*_\2_*\3'),            # ___bold italic___
+        (r'(?m)(^|[^\*])\*\*(.+?)\*\*([^\*]|$)', r'\1*\2*\3'),          # **bold**
+        (r'(?m)(^|[^_])__(.+?)__([^_]|$)', r'\1*\2*\3'),                # __bold__
+        (r'(?m)(^|[^\*])\*(.+?)\*([^\*]|$)', r'\1_\2_\3'),              # *italic*
+        (r'(?m)(^|[^~])~~(.+?)~~([^~]|$)', r'\1~\2~\3'),                # ~~strike~~
+        (r'(?m)(^|[^!])\[(.+?)\]\((http.+?)\)', r'\1<\3|\2>'),          # [text](url)
+        (r'!\[.+?\]\((http.+?)(?:\s".*?")?\)', r'<\1>'),                # ![alt](url)
+    )
+    _TABLE_RE = re.compile(r'(?m)^\|.*?\|$(?:\n(?:\|\:?-{3,}\:?)*?\|$)(?:\n\|.*?\|$)*')
+
     def _convert_markdown(self, text: str) -> str:
+        """Convert standard Markdown to Slack mrkdwn format."""
         if not text:
             return text
-        def convert_formatting(input: str) -> str:
-            # Convert italics
-            # Step 1: *text* -> _text_
-            converted_text = re.sub(
-                r"(?m)(^|[^\*])\*([^\*].+?[^\*])\*([^\*]|$)", r"\1_\2_\3", input)
-            # Convert bold
-            # Step 2.a: **text** -> *text*
-            converted_text = re.sub(
-                r"(?m)(^|[^\*])\*\*([^\*].+?[^\*])\*\*([^\*]|$)", r"\1*\2*\3", converted_text)
-            # Step 2.b: __text__ -> *text*
-            converted_text = re.sub(
-                r"(?m)(^|[^_])__([^_].+?[^_])__([^_]|$)", r"\1*\2*\3", converted_text)
-            # convert bold italics
-            # Step 3.a: ***text*** -> *_text_*
-            converted_text = re.sub(
-                r"(?m)(^|[^\*])\*\*\*([^\*].+?[^\*])\*\*\*([^\*]|$)", r"\1*_\2_*\3", converted_text)
-            # Step 3.b - ___text___ -> *_text_*
-            converted_text = re.sub(
-                r"(?m)(^|[^_])___([^_].+?[^_])___([^_]|$)", r"\1*_\2_*\3", converted_text)
-            # Convert strikethrough
-            # Step 4: ~~text~~ -> ~text~
-            converted_text = re.sub(
-                r"(?m)(^|[^~])~~([^~].+?[^~])~~([^~]|$)", r"\1~\2~\3", converted_text)
-            # Convert URL formatting
-            # Step 6: [text](URL) -> <URL|text>
-            converted_text = re.sub(
-                r"(?m)(^|[^!])\[(.+?)\]\((http.+?)\)", r"\1<\3|\2>", converted_text)
-            # Convert image URL
-            # Step 6: ![alt text](URL "title") -> <URL>
-            converted_text = re.sub(
-                r"[!]\[.+?\]\((http.+?)(?: \".*?\")?\)", r"<\1>", converted_text)
-            return converted_text
-        def escape_mrkdwn(text: str) -> str:
-            return (text.replace('&', '&amp;')
-                     .replace('<', '&lt;')
-                     .replace('>', '&gt;'))
-        def convert_table(match: re.Match) -> str:
-            # Slack doesn't support Markdown tables
-            # Convert table to bulleted list with sections
-            # -- input_md:
-            # Some text before the table.
-            # | Col1 | Col2 | Col3 |
-            # |-----|----------|------|
-            # | Row1 - A | Row1 - B | Row1 - C |
-            # | Row2 - D | Row2 - E | Row2 - F |
-            #
-            # Some text after the table.
-            # 
-            # -- will be converted to:
-            # Some text before the table.
-            # > *Col1* : Row1 - A
-            #   • *Col2*: Row1 - B
-            #   • *Col3*: Row1 - C
-            # > *Col1* : Row2 - D
-            #   • *Col2*: Row2 - E
-            #   • *Col3*: Row2 - F
-            #
-            # Some text after the table.
-            
-            block = match.group(0).strip()
-            lines = [line.strip()
-                     for line in block.split('\n') if line.strip()]
+        for pattern, repl in self._MD_TO_SLACK:
+            text = re.sub(pattern, repl, text)
+        return self._TABLE_RE.sub(self._convert_table, text)
 
-            if len(lines) < 2:
-                return block
+    @staticmethod
+    def _convert_table(match: re.Match) -> str:
+        """Convert Markdown table to Slack quote + bullet format."""
+        lines = [l.strip() for l in match.group(0).strip().split('\n') if l.strip()]
+        if len(lines) < 2:
+            return match.group(0)
 
-            # 1. Parse Headers from the first line
-            # Split by pipe, filtering out empty start/end strings caused by outer pipes
-            header_line = lines[0].strip('|')
-            headers = [escape_mrkdwn(h.strip())
-                       for h in header_line.split('|')]
+        headers = [h.strip() for h in lines[0].strip('|').split('|')]
+        start = 2 if not re.search(r'[^|\-\s:]', lines[1]) else 1
 
-            # 2. Identify Data Start (Skip Separator)
-            data_start_idx = 1
-            # If line 2 contains only separator chars (|-: ), skip it
-            if len(lines) > 1 and not re.search(r'[^|\-\s:]', lines[1]):
-                data_start_idx = 2
-
-            # 3. Process Data Rows
-            slack_lines = []
-            for line in lines[data_start_idx:]:
-                # Clean and split cells
-                clean_line = line.strip('|')
-                cells = [escape_mrkdwn(c.strip())
-                         for c in clean_line.split('|')]
-
-                # Normalize cell count to match headers
-                if len(cells) < len(headers):
-                    cells += [''] * (len(headers) - len(cells))
-                cells = cells[:len(headers)]
-
-                # Skip empty rows
-                if not any(cells):
-                    continue
-
-                # Key is the first column
-                key = cells[0]
-                label = headers[0]
-                slack_lines.append(
-                    f"> *{label}* : {key}" if key else "> *{label}* : --")
-
-                # Sub-bullets for remaining columns
-                for i, cell in enumerate(cells[1:], 1):
-                    if cell:
-                        label = headers[i] if i < len(headers) else "Col"
-                        slack_lines.append(f"  • *{label}*: {cell}")
-
-                slack_lines.append("")  # Spacer between items
-
-            return "\n".join(slack_lines).rstrip()
-
-        # (?m) : Multiline mode so ^ matches start of line and $ end of line
-        # ^\| : Start of line and a literal pipe
-        # .*?\|$ : Rest of the line and a pipe at the end
-        # (?:\n(?:\|\:?-{3,}\:?)*?\|$) : A heading line with at least three dashes in each column, pipes, and : e.g. |:---|----|:---:|
-        # (?:\n\|.*?\|$)* : Zero or more subsequent lines that ALSO start and end with a pipe
-        table_pattern = r'(?m)^\|.*?\|$(?:\n(?:\|\:?-{3,}\:?)*?\|$)(?:\n\|.*?\|$)*'
-
-        input_md = convert_formatting(text)
-        return re.sub(table_pattern, convert_table, input_md)
+        result: list[str] = []
+        for line in lines[start:]:
+            cells = [c.strip() for c in line.strip('|').split('|')]
+            cells = (cells + [''] * len(headers))[:len(headers)]
+            if not any(cells):
+                continue
+            result.append(f"> *{headers[0]}*: {cells[0] or '--'}")
+            for i, cell in enumerate(cells[1:], 1):
+                if cell and i < len(headers):
+                    result.append(f"  \u2022 *{headers[i]}*: {cell}")
+            result.append("")
+        return '\n'.join(result).rstrip()
