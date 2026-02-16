@@ -93,12 +93,19 @@ class HeartbeatConfig(Base):
     keep_recent_messages: int = 8
 
 
+class HTTPAPIConfig(Base):
+    """HTTP API channel configuration."""
+    enabled: bool = False
+    auth_token: str = ""  # Bearer token (empty = no auth)
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    api: HTTPAPIConfig = Field(default_factory=HTTPAPIConfig)
 
 
 class WebSearchConfig(Base):
