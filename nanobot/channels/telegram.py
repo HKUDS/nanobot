@@ -304,7 +304,8 @@ class TelegramChannel(BaseChannel):
 
         # Debug: Log chat_id for group messages
         if is_group:
-            logger.debug(f"Group message: chat_id={chat_id}, type={message.chat.type}, sender={sender_id}")
+            thread_id = message.message_thread_id if hasattr(message, 'message_thread_id') else None
+            logger.debug(f"Group message: chat_id={chat_id}, type={message.chat.type}, thread_id={thread_id}, sender={sender_id}")
 
         # Check group policy
         if is_group and not self._is_allowed_group(str(chat_id), message.text or message.caption or ""):
