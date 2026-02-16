@@ -199,6 +199,7 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        extra_env: dict[str, str] | None = None,
         *,
         channel: str = "cli",
         chat_id: str = "direct",
@@ -294,7 +295,7 @@ class AgentLoop:
                 # return_exceptions=True ensures all results are collected
                 # even if one tool is cancelled or raises BaseException.
                 results = await asyncio.gather(*(
-                    self.tools.execute(tc.name, tc.arguments)
+                    self.tools.execute(tc.name, tc.arguments, env=extra_env)
                     for tc in response.tool_calls
                 ), return_exceptions=True)
 
