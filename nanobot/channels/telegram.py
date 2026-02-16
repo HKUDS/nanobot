@@ -82,17 +82,20 @@ def _split_message(content: str, max_len: int = 4000) -> list[str]:
     """Split content into chunks within max_len, preferring line breaks."""
     if len(content) <= max_len:
         return [content]
-    chunks = []
-    while len(content) > max_len:
-        chunk = content[:max_len]
-        break_pos = chunk.rfind('\n')
-        if break_pos == -1:
-            break_pos = chunk.rfind(' ')
-        if break_pos == -1:
-            break_pos = max_len
-        chunks.append(chunk[:break_pos])
-        content = content[break_pos:].lstrip()
-    return chunks + [content]
+    chunks: list[str] = []
+    while content:
+        if len(content) <= max_len:
+            chunks.append(content)
+            break
+        cut = content[:max_len]
+        pos = cut.rfind('\n')
+        if pos == -1:
+            pos = cut.rfind(' ')
+        if pos == -1:
+            pos = max_len
+        chunks.append(content[:pos])
+        content = content[pos:].lstrip()
+    return chunks
 
 
 class TelegramChannel(BaseChannel):
@@ -211,7 +214,8 @@ class TelegramChannel(BaseChannel):
 
         for chunk in _split_message(msg.content):
             try:
-                await self._app.bot.send_message(chat_id=chat_id, text=_markdown_to_telegram_html(chunk), parse_mode="HTML")
+                html = _markdown_to_telegram_html(chunk)
+                await self._app.bot.send_message(chat_id=chat_id, text=html, parse_mode="HTML")
             except Exception as e:
                 logger.warning(f"HTML parse failed, falling back to plain text: {e}")
                 try:
