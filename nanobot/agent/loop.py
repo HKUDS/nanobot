@@ -282,9 +282,18 @@ class AgentLoop:
             asyncio.create_task(_consolidate_and_cleanup())
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started. Memory consolidation in progress.")
+        if cmd == "/compact":
+            if len(session.messages) < 3:
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                      content="Session too short to compact. Minimum 3 messages required.")
+            
+            compacted_count = await self._compact_session(session)
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                  content=f"Context compacted. {compacted_count} messages summarized into 1 compact message. Token usage reduced while preserving key context.")
+        
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/compact — Compress context to save tokens\n/help — Show available commands")
         
         if len(session.messages) > self.memory_window:
             asyncio.create_task(self._consolidate_memory(session))
@@ -444,6 +453,96 @@ Respond with ONLY valid JSON, no markdown fences."""
             logger.info(f"Memory consolidation done: {len(session.messages)} messages, last_consolidated={session.last_consolidated}")
         except Exception as e:
             logger.error(f"Memory consolidation failed: {e}")
+
+    async def _compact_session(self, session: Session) -> int:
+        """
+        Compact the session history to reduce token usage.
+        
+        This method compresses older messages into a single summary message,
+        keeping the most recent exchanges intact for context continuity.
+        
+        Args:
+            session: The session to compact.
+        
+        Returns:
+            Number of messages that were compacted.
+        """
+        if len(session.messages) < 3:
+            return 0
+        
+        # Keep the last 2 exchanges (4 messages: user, assistant, user, assistant)
+        # This preserves immediate context while compressing older history
+        keep_count = 4
+        if len(session.messages) <= keep_count:
+            return 0
+        
+        messages_to_compact = session.messages[:-keep_count]
+        preserved_messages = session.messages[-keep_count:]
+        
+        logger.info(f"Compacting session {session.key}: {len(messages_to_compact)} messages will be summarized")
+        
+        # Build conversation text for the LLM
+        lines = []
+        for m in messages_to_compact:
+            if not m.get("content"):
+                continue
+            role = m['role'].upper()
+            content = m['content']
+            if len(content) > 500:
+                content = content[:500] + "..."
+            lines.append(f"{role}: {content}")
+        
+        conversation = "\n\n".join(lines)
+        
+        prompt = f"""Summarize this conversation history concisely. Preserve all important facts, decisions, context, and current state. The summary should enable the assistant to continue the conversation seamlessly.
+
+Focus on:
+- Key facts and information shared
+- Decisions made or conclusions reached
+- Current state of any ongoing tasks
+- User preferences or requirements mentioned
+- Technical details (file paths, commands, code changes)
+
+Be specific and detailed enough that no important context is lost. Write in first person as the assistant reflecting on the conversation.
+
+## Conversation to Summarize
+{conversation}
+
+## Your Summary
+[Previous context - conversation summarized on {datetime.now().strftime('%Y-%m-%d %H:%M')}]:"""
+        
+        try:
+            response = await self.provider.chat(
+                messages=[
+                    {"role": "system", "content": "You are a context compression specialist. Create detailed, information-dense summaries that preserve all important context for continuing a conversation."},
+                    {"role": "user", "content": prompt},
+                ],
+                model=self.model,
+                temperature=0.3,
+                max_tokens=2048,
+            )
+            
+            summary = (response.content or "").strip()
+            if not summary:
+                logger.warning("Session compaction: LLM returned empty summary, aborting")
+                return 0
+            
+            # Create compacted messages: summary + preserved context
+            compacted_messages = [
+                {"role": "assistant", "content": summary, "timestamp": datetime.now().isoformat(), "compacted": True}
+            ] + preserved_messages
+            
+            compacted_count = len(session.messages) - len(compacted_messages)
+            session.messages = compacted_messages
+            session.last_consolidated = 0  # Reset consolidation marker
+            self.sessions.save(session)
+            
+            logger.info(f"Session {session.key} compacted: {compacted_count} messages → {len(compacted_messages)} messages")
+            return compacted_count
+            
+        except Exception as e:
+            logger.error(f"Session compaction failed: {e}")
+            return 0
 
     async def process_direct(
         self,
