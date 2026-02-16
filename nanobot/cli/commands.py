@@ -479,17 +479,10 @@ def agent(
         
         asyncio.run(run_once())
     else:
-        # Interactive mode
+        # Interactive mode (no custom SIGINT handler so Ctrl+C lets finally run and agent_loop.close() saves browser state)
         _init_prompt_session()
         console.print(f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n")
 
-        def _exit_on_sigint(signum, frame):
-            _restore_terminal()
-            console.print("\nGoodbye!")
-            os._exit(0)
-
-        signal.signal(signal.SIGINT, _exit_on_sigint)
-        
         async def run_interactive():
             try:
                 while True:
@@ -509,6 +502,10 @@ def agent(
                             response = await agent_loop.process_direct(user_input, session_id)
                         _print_agent_response(response, render_markdown=markdown)
                     except KeyboardInterrupt:
+                        _restore_terminal()
+                        console.print("\nGoodbye!")
+                        break
+                    except asyncio.CancelledError:
                         _restore_terminal()
                         console.print("\nGoodbye!")
                         break

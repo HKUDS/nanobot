@@ -1,5 +1,7 @@
 """Browser control tools (Playwright). Optional: pip install nanobot-ai[browser], then run: playwright install (see https://playwright.dev/python/docs/library)."""
 
+import asyncio
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -139,6 +141,40 @@ class BrowserSession:
         self._page.set_default_timeout(self._timeout_ms)
         return self._page
 
+    async def _write_storage_state(self) -> None:
+        """Write storage state to path. Uses context.cookies() as source of truth for cookies (Playwright storage_state() can write empty cookies in headless)."""
+        path = Path(self._storage_state_path).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        abs_path = str(path)
+        if self._page:
+            try:
+                await self._page.wait_for_load_state("domcontentloaded", timeout=2000)
+            except Exception:
+                pass
+        await self._context.storage_state(path=abs_path)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+        context_cookies = await self._context.cookies()
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        file_cookies_before = len(data.get("cookies") or [])
+        data["cookies"] = context_cookies
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+        logger.info(
+            "Browser storage state: context.cookies()={}, storage_state() had {} cookies -> wrote {} to {}",
+            len(context_cookies),
+            file_cookies_before,
+            len(context_cookies),
+            path,
+        )
+
     async def save_storage_state(self) -> tuple[bool, str]:
         """Save current context storage state to configured path. Returns (success, message)."""
         if not self._storage_state_path:
@@ -146,13 +182,7 @@ class BrowserSession:
         if self._context is None:
             return False, "Browser not started yet. Use a browser action (e.g. browser_navigate) first, then save session."
         try:
-            path = Path(self._storage_state_path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            await self._context.storage_state(path=self._storage_state_path)
-            try:
-                path.chmod(0o600)
-            except OSError:
-                pass
+            await self._write_storage_state()
             logger.info("Browser storage state saved to {}", self._storage_state_path)
             return True, f"Saved to {self._storage_state_path}"
         except Exception as e:
@@ -163,16 +193,19 @@ class BrowserSession:
         """Close browser and playwright; save storage state first if configured."""
         if self._browser and self._context and self._storage_state_path:
             try:
-                path = Path(self._storage_state_path)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                await self._context.storage_state(path=self._storage_state_path)
-                try:
-                    path.chmod(0o600)
-                except OSError:
-                    pass
+                await self._write_storage_state()
                 logger.debug("Browser storage state saved on close")
             except Exception as e:
-                logger.warning("Browser storage state save on close failed: {}", e)
+                logger.warning(
+                    "Browser storage state save on close failed: {} (browser may already be closed by shutdown). "
+                    "Session is auto-saved after each browser_navigate; cookie.json may already be up to date.",
+                    e,
+                )
+        elif self._storage_state_path and not (self._browser and self._context):
+            logger.info(
+                "Browser storage state not saved on close (browser was never started). "
+                "Use browser_navigate (or another browser tool) at least once, then exit or call browser_save_session."
+            )
         if self._browser:
             logger.debug("Browser session closing")
             await self._browser.close()
@@ -209,6 +242,14 @@ class BrowserNavigateTool(Tool):
             page = await self._browser_session.get_page()
             await page.goto(url, wait_until="load")
             logger.info("browser_navigate: {} -> OK", url)
+            session = self._browser_session
+            async def _auto_save_after_navigate() -> None:
+                try:
+                    await session.save_storage_state()
+                except Exception as e:
+                    logger.debug("Auto-save after navigate skipped: {}", e)
+            if session._storage_state_path:
+                asyncio.create_task(_auto_save_after_navigate())
             return f"Navigated to {url}"
         except Exception as e:
             logger.error("browser_navigate: {} -> {}: {}", url, type(e).__name__, e)
@@ -384,6 +425,15 @@ def create_browser_tools(
     timeout_ms = getattr(config, "timeout_ms", 30000)
     proxy_server = getattr(config, "proxy_server", "") or ""
     storage_state_path = _resolve_storage_state_path(config, workspace_path)
+    if storage_state_path:
+        try:
+            Path(storage_state_path).parent.mkdir(parents=True, exist_ok=True)
+            logger.info(
+                "Browser storage directory: {} (cookie.json will be written on save or exit)",
+                Path(storage_state_path).parent,
+            )
+        except OSError as e:
+            logger.warning("Could not create browser storage directory {}: {}", Path(storage_state_path).parent, e)
     logger.info(
         "Browser tools created (headless={}, timeout_ms={}, proxy_server={}, storage_state_path={})",
         headless,
