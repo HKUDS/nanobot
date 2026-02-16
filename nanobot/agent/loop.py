@@ -181,12 +181,19 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+
+        # Build merged env once: inherit process env + overlay per-request vars.
+        # This avoids mutating os.environ (unsafe for concurrent requests).
+        merged_env: dict[str, str] | None = None
+        if extra_env:
+            merged_env = {**os.environ, **extra_env}
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -237,7 +244,9 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    result = await self.tools.execute(
+                        tool_call.name, tool_call.arguments, env=extra_env
+                    )
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
