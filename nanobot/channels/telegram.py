@@ -254,9 +254,19 @@ class TelegramChannel(BaseChannel):
         return f"{sid}|{user.username}" if user.username else sid
 
     def _is_allowed_group(self, chat_id: str, text: str) -> bool:
-        """Check if a group message should be processed based on group_policy."""
+        """Check if a group message should be processed based on group_policy.
+
+        If groupAllowFrom is set, it acts as an additional filter regardless of policy.
+        """
         policy = self.config.group_policy
 
+        # First check: if groupAllowFrom is specified, chat_id must be in it
+        if self.config.group_allow_from:
+            if chat_id not in self.config.group_allow_from:
+                logger.debug(f"Group {chat_id} not in allowlist")
+                return False
+
+        # Second check: apply policy
         if policy == "disabled":
             logger.debug(f"Group message from {chat_id} ignored (policy: disabled)")
             return False
@@ -274,10 +284,8 @@ class TelegramChannel(BaseChannel):
             return False
 
         if policy == "allowlist":
-            allowed = chat_id in self.config.group_allow_from
-            if not allowed:
-                logger.debug(f"Group {chat_id} not in allowlist")
-            return allowed
+            # Already checked above
+            return True
 
         return False
 
