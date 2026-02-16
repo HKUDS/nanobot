@@ -302,7 +302,7 @@ class TelegramChannel(BaseChannel):
                 media_dir = Path.home() / ".nanobot" / "media"
                 media_dir.mkdir(parents=True, exist_ok=True)
                 
-                file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
+                file_path = media_dir / f"{media_file.file_id}{ext}"
                 await file.download_to_drive(str(file_path))
                 
                 media_paths.append(str(file_path))
