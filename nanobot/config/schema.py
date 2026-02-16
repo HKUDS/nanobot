@@ -216,6 +216,13 @@ class ExecToolConfig(BaseModel):
     timeout: int = 60
 
 
+class BrowserToolConfig(BaseModel):
+    """Browser automation tool configuration (Playwright). Optional; requires [browser] extra."""
+    enabled: bool = False
+    headless: bool = True
+    timeout_ms: int = 30000  # Navigation and action timeout
+
+
 class MCPServerConfig(BaseModel):
     """MCP server connection configuration (stdio or HTTP)."""
     command: str = ""  # Stdio: command to run (e.g. "npx")
@@ -228,6 +235,7 @@ class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    browser: BrowserToolConfig = Field(default_factory=BrowserToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 

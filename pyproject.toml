@@ -48,6 +48,9 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "ruff>=0.1.0",
 ]
+browser = [
+    "playwright>=1.40.0",
+]
 
 [project.scripts]
 nanobot = "nanobot.cli.commands:app"
