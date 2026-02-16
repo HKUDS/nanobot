@@ -90,6 +90,7 @@ class AgentLoop:
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
+        self._browser_session: Any = None
         self._register_default_tools()
     
     def _register_default_tools(self) -> None:
@@ -128,7 +129,10 @@ class AgentLoop:
         if self._browser_config and getattr(self._browser_config, "enabled", False):
             try:
                 from nanobot.agent.tools.browser import create_browser_tools
-                for tool in create_browser_tools(self._browser_config, self.workspace):
+                browser_tools, self._browser_session = create_browser_tools(
+                    self._browser_config, self.workspace
+                )
+                for tool in browser_tools:
                     self.tools.register(tool)
             except ImportError:
                 pass
@@ -249,6 +253,13 @@ class AgentLoop:
             except (RuntimeError, BaseExceptionGroup):
                 pass  # MCP SDK cancel scope cleanup is noisy but harmless
             self._mcp_stack = None
+
+    async def close(self) -> None:
+        """Close MCP and browser session (saves storage state if configured). Idempotent."""
+        await self.close_mcp()
+        if self._browser_session is not None:
+            await self._browser_session.close()
+            self._browser_session = None
 
     def stop(self) -> None:
         """Stop the agent loop."""

@@ -144,7 +144,7 @@ class BrowserSession:
         if not self._storage_state_path:
             return False, "No storage state path configured"
         if self._context is None:
-            return False, "Browser not started yet"
+            return False, "Browser not started yet. Use a browser action (e.g. browser_navigate) first, then save session."
         try:
             path = Path(self._storage_state_path)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -356,7 +356,7 @@ class BrowserSaveSessionTool(Tool):
     """Save current browser cookies and storage to the configured path (e.g. after login)."""
 
     name = "browser_save_session"
-    description = "Save the current browser session (cookies, localStorage) to disk so it can be restored after restart. Use after logging in or when the page is in a good state."
+    description = "Save the current browser session (cookies, localStorage) to disk so it can be restored after restart. Use after logging in or when the page is in a good state. Session is also saved automatically when the agent shuts down."
     parameters = {
         "type": "object",
         "properties": {},
@@ -373,11 +373,13 @@ class BrowserSaveSessionTool(Tool):
         return f"Error: {msg}"
 
 
-def create_browser_tools(config: Any, workspace_path: Path | None = None) -> list[Tool]:
-    """Create browser tools sharing one session. Returns [] if Playwright is not installed. config: BrowserToolConfig; workspace_path used for default storage_state_path."""
+def create_browser_tools(
+    config: Any, workspace_path: Path | None = None
+) -> tuple[list[Tool], BrowserSession | None]:
+    """Create browser tools sharing one session. Returns (tools, session); ([], None) if Playwright not installed. config: BrowserToolConfig; workspace_path used for default storage_state_path."""
     if not _PLAYWRIGHT_AVAILABLE:
         logger.debug("Browser tools skipped: Playwright not installed")
-        return []
+        return ([], None)
     headless = getattr(config, "headless", True)
     timeout_ms = getattr(config, "timeout_ms", 30000)
     proxy_server = getattr(config, "proxy_server", "") or ""
@@ -395,7 +397,7 @@ def create_browser_tools(config: Any, workspace_path: Path | None = None) -> lis
         proxy_server=proxy_server,
         storage_state_path=storage_state_path,
     )
-    return [
+    tools = [
         BrowserNavigateTool(session),
         BrowserSnapshotTool(session),
         BrowserClickTool(session),
@@ -403,6 +405,7 @@ def create_browser_tools(config: Any, workspace_path: Path | None = None) -> lis
         BrowserPressTool(session),
         BrowserSaveSessionTool(session),
     ]
+    return (tools, session)
 
 
 def is_browser_available() -> bool:
