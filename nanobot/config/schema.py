@@ -17,8 +17,10 @@ class TelegramConfig(BaseModel):
     """Telegram channel configuration."""
     enabled: bool = False
     token: str = ""  # Bot token from @BotFather
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames for DMs
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
+    group_policy: str = "disabled"  # "disabled", "open", "mention", or "allowlist"
+    group_allow_from: list[str] = Field(default_factory=list)  # Allowed chat IDs if group_policy is "allowlist"
 
 
 class FeishuConfig(BaseModel):

@@ -9,7 +9,7 @@ from telegram import BotCommand, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
@@ -214,14 +214,42 @@ class TelegramChannel(BaseChannel):
         """Handle /start command."""
         if not update.message or not update.effective_user:
             return
-        
+
         user = update.effective_user
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
             "Send me a message and I'll respond!\n"
             "Type /help to see available commands."
         )
-    
+
+    def _is_allowed_group(self, chat_id: str, text: str) -> bool:
+        """Check if a group message should be processed based on group_policy."""
+        policy = self.config.group_policy
+
+        if policy == "disabled":
+            logger.debug(f"Group message from {chat_id} ignored (policy: disabled)")
+            return False
+
+        if policy == "open":
+            return True
+
+        if policy == "mention":
+            # Check if bot is mentioned (needs bot username)
+            if self._app and self._app.bot:
+                bot_username = self._app.bot.username
+                if bot_username and f"@{bot_username}" in text:
+                    return True
+            logger.debug(f"Group message from {chat_id} ignored (not mentioned)")
+            return False
+
+        if policy == "allowlist":
+            allowed = chat_id in self.config.group_allow_from
+            if not allowed:
+                logger.debug(f"Group {chat_id} not in allowlist")
+            return allowed
+
+        return False
+
     async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Forward slash commands to the bus for unified handling in AgentLoop."""
         if not update.message or not update.effective_user:
@@ -236,16 +264,29 @@ class TelegramChannel(BaseChannel):
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:
             return
-        
+
         message = update.message
         user = update.effective_user
         chat_id = message.chat_id
-        
+        is_group = message.chat.type != "private"
+
         # Use stable numeric ID, but keep username for allowlist compatibility
         sender_id = str(user.id)
         if user.username:
             sender_id = f"{sender_id}|{user.username}"
-        
+
+        # Check group policy
+        if is_group and not self._is_allowed_group(str(chat_id), message.text or ""):
+            return
+
+        # Check user allowlist for DMs
+        if not is_group and not self.is_allowed(sender_id):
+            logger.warning(
+                f"Access denied for user {sender_id} in DM. "
+                f"Add them to allowFrom list in config to grant access."
+            )
+            return
+
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
         
@@ -313,26 +354,28 @@ class TelegramChannel(BaseChannel):
         content = "\n".join(content_parts) if content_parts else "[empty message]"
         
         logger.debug(f"Telegram message from {sender_id}: {content[:50]}...")
-        
+
         str_chat_id = str(chat_id)
-        
+
         # Start typing indicator before processing
         self._start_typing(str_chat_id)
-        
-        # Forward to the message bus
-        await self._handle_message(
-            sender_id=sender_id,
+
+        # Forward to the message bus (skip is_allowed check in base class since we already checked above)
+        msg = InboundMessage(
+            channel=self.name,
+            sender_id=str(sender_id),
             chat_id=str_chat_id,
             content=content,
-            media=media_paths,
+            media=media_paths or [],
             metadata={
                 "message_id": message.message_id,
                 "user_id": user.id,
                 "username": user.username,
                 "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
+                "is_group": is_group
             }
         )
+        await self.bus.publish_inbound(msg)
     
     def _start_typing(self, chat_id: str) -> None:
         """Start sending 'typing...' indicator for a chat."""
