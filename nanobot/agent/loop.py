@@ -288,9 +288,16 @@ class AgentLoop:
                 return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                       content="Session too short to compact. Minimum 3 messages required.")
             
-            compacted_count = await self._compact_session(session)
+            stats = await self._compact_session(session)
+            if stats["compacted_count"] == 0:
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                      content="Nothing to compact. Session is already minimal.")
+            
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content=f"Context compacted. {compacted_count} messages summarized into 1 compact message. Token usage reduced while preserving key context.")
+                                  content=f"🗜️ Context compacted\n\n"
+                                         f"Messages: {stats['compacted_count']} → summarized into 1\n"
+                                         f"Tokens: {stats['tokens_before']:,} → {stats['tokens_after']:,} "
+                                         f"(-{stats['tokens_saved']:,}, -{round(stats['tokens_saved']/stats['tokens_before']*100) if stats['tokens_before'] > 0 else 0}%)")
         
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
@@ -455,7 +462,7 @@ Respond with ONLY valid JSON, no markdown fences."""
         except Exception as e:
             logger.error(f"Memory consolidation failed: {e}")
 
-    async def _compact_session(self, session: Session) -> int:
+    async def _compact_session(self, session: Session) -> dict:
         """
         Compact the session history to reduce token usage.
         
@@ -466,19 +473,25 @@ Respond with ONLY valid JSON, no markdown fences."""
             session: The session to compact.
         
         Returns:
-            Number of messages that were compacted.
+            Dict with statistics: compacted_count, tokens_before, tokens_after, tokens_saved.
         """
         if len(session.messages) < 3:
-            return 0
+            return {"compacted_count": 0, "tokens_before": 0, "tokens_after": 0, "tokens_saved": 0}
         
         # Keep the last 2 exchanges (4 messages: user, assistant, user, assistant)
         # This preserves immediate context while compressing older history
         keep_count = 4
         if len(session.messages) <= keep_count:
-            return 0
+            return {"compacted_count": 0, "tokens_before": 0, "tokens_after": 0, "tokens_saved": 0}
         
         messages_to_compact = session.messages[:-keep_count]
         preserved_messages = session.messages[-keep_count:]
+        
+        # Calculate tokens before compaction (~4 chars = 1 token)
+        def estimate_tokens(text: str) -> int:
+            return max(1, len(text) // 4)
+        
+        content_before = sum(estimate_tokens(m.get("content", "")) for m in session.messages)
         
         logger.info(f"Compacting session {session.key}: {len(messages_to_compact)} messages will be summarized")
         
@@ -526,24 +539,37 @@ Be specific and detailed enough that no important context is lost. Write in firs
             summary = (response.content or "").strip()
             if not summary:
                 logger.warning("Session compaction: LLM returned empty summary, aborting")
-                return 0
+                return {"compacted_count": 0, "tokens_before": content_before, "tokens_after": content_before, "tokens_saved": 0}
             
             # Create compacted messages: summary + preserved context
             compacted_messages = [
                 {"role": "assistant", "content": summary, "timestamp": datetime.now().isoformat(), "compacted": True}
             ] + preserved_messages
             
+            # Calculate tokens after compaction
+            content_after = estimate_tokens(summary) + sum(
+                estimate_tokens(m.get("content", "")) for m in preserved_messages
+            )
+            
             compacted_count = len(session.messages) - len(compacted_messages)
             session.messages = compacted_messages
             session.last_consolidated = 0  # Reset consolidation marker
             self.sessions.save(session)
             
-            logger.info(f"Session {session.key} compacted: {compacted_count} messages → {len(compacted_messages)} messages")
-            return compacted_count
+            tokens_saved = content_before - content_after
+            
+            logger.info(f"Session {session.key} compacted: {compacted_count} messages → {len(compacted_messages)} messages, {content_before} → {content_after} tokens")
+            
+            return {
+                "compacted_count": compacted_count,
+                "tokens_before": content_before,
+                "tokens_after": content_after,
+                "tokens_saved": tokens_saved
+            }
             
         except Exception as e:
             logger.error(f"Session compaction failed: {e}")
-            return 0
+            return {"compacted_count": 0, "tokens_before": content_before, "tokens_after": content_before, "tokens_saved": 0}
 
     async def process_direct(
         self,
