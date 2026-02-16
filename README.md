@@ -581,6 +581,7 @@ Config file: `~/.nanobot/config.json`
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `minimax` | LLM (MiniMax direct) | [platform.minimax.io](https://platform.minimax.io) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
+| `synthetic` | Open-source model gateway (DeepSeek, Kimi, Qwen, Llama, etc.) | [synthetic.new](https://synthetic.new) |
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
@@ -608,6 +609,30 @@ If your provider is not listed above but exposes an **OpenAI-compatible API** (e
 ```
 
 > The `custom` provider routes through LiteLLM's OpenAI-compatible path. It works with any endpoint that follows the OpenAI chat completions API format. The model name is passed directly to the endpoint without any prefix.
+
+</details>
+
+<details>
+<summary><b>Synthetic (Open-Source Model Gateway)</b></summary>
+
+[Synthetic](https://synthetic.new) provides access to open-source models (DeepSeek, Kimi, Qwen, Llama, GLM, MiniMax, etc.) via a single API key. Model IDs use the `hf:` prefix format.
+
+```json
+{
+  "providers": {
+    "synthetic": {
+      "apiKey": "your-synthetic-api-key"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "synthetic/hf:moonshotai/Kimi-K2.5"
+    }
+  }
+}
+```
+
+> Model names follow HuggingFace conventions: `hf:org/model-name`. See [synthetic.new](https://synthetic.new) for the full list of available models.
 
 </details>
 

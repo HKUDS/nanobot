@@ -117,6 +117,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # Synthetic: open-source model gateway (DeepSeek, Kimi, Qwen, Llama, etc.)
+    # LiteLLM has native synthetic/ provider support with SYNTHETIC_API_KEY.
+    ProviderSpec(
+        name="synthetic",
+        keywords=("synthetic",),
+        env_key="SYNTHETIC_API_KEY",
+        display_name="Synthetic",
+        litellm_prefix="synthetic",
+        skip_prefixes=("synthetic/",),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="synthetic",
+        default_api_base="https://api.synthetic.new/openai/v1",
+        strip_model_prefix=False,           # model IDs like hf:org/name must stay intact
+        model_overrides=(),
+    ),
+
     # === Standard providers (matched by model-name keywords) ===============
 
     # Anthropic: LiteLLM recognizes "claude-*" natively, no prefix needed.
