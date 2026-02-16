@@ -128,6 +128,7 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         channel: str | None = None,
         chat_id: str | None = None,
         current_role: str = "user",
+        extra_system_prompt: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id)
@@ -140,8 +141,12 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
+        system_prompt = self.build_system_prompt(skill_names)
+        if extra_system_prompt:
+            system_prompt += f"\n\n{extra_system_prompt}"
+
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": system_prompt},
             *history,
             {"role": current_role, "content": merged},
         ]
