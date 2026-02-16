@@ -290,10 +290,7 @@ def _make_provider(config: Config):
 
     # OpenAI Codex (OAuth): don't route via LiteLLM; use the dedicated implementation.
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
-        return OpenAICodexProvider(
-            default_model=model,
-            api_base=p.api_base if p else None,
-        )
+        return OpenAICodexProvider(default_model=model)
 
     if not model.startswith("bedrock/") and not (p and p.api_key):
         console.print("[red]Error: No API key configured.[/red]")

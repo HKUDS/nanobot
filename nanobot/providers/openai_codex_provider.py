@@ -8,6 +8,7 @@ import json
 from typing import Any, AsyncGenerator
 
 import httpx
+from loguru import logger
 
 from oauth_cli_kit import get_token as get_codex_token
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -59,9 +60,9 @@ class OpenAICodexProvider(LLMProvider):
             try:
                 content, tool_calls, finish_reason = await _request_codex(url, headers, body, verify=True)
             except Exception as e:
-                # Certificate verification failed, downgrade to disable verification (security risk)
                 if "CERTIFICATE_VERIFY_FAILED" not in str(e):
                     raise
+                logger.warning("SSL certificate verification failed for Codex API; retrying with verify=False")
                 content, tool_calls, finish_reason = await _request_codex(url, headers, body, verify=False)
             return LLMResponse(
                 content=content,
@@ -76,6 +77,7 @@ class OpenAICodexProvider(LLMProvider):
 
     def get_default_model(self) -> str:
         return self.default_model
+
 
 def _strip_model_prefix(model: str) -> str:
     if model.startswith("openai-codex/"):
@@ -94,6 +96,7 @@ def _build_headers(account_id: str, token: str) -> dict[str, str]:
         "content-type": "application/json",
     }
 
+
 async def _request_codex(
     url: str,
     headers: dict[str, str],
@@ -107,35 +110,24 @@ async def _request_codex(
                 raise RuntimeError(_friendly_error(response.status_code, text.decode("utf-8", "ignore")))
             return await _consume_sse(response)
 
+
 def _convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    # Nanobot tool definitions already use the OpenAI function schema.
+    """Convert OpenAI function-calling schema to Codex flat format."""
     converted: list[dict[str, Any]] = []
     for tool in tools:
-        fn = tool.get("function") if isinstance(tool, dict) and tool.get("type") == "function" else None
-        if fn and isinstance(fn, dict):
-            name = fn.get("name")
-            desc = fn.get("description")
-            params = fn.get("parameters")
-        else:
-            name = tool.get("name")
-            desc = tool.get("description")
-            params = tool.get("parameters")
-        if not isinstance(name, str) or not name:
-            # Skip invalid tools to avoid Codex rejection.
+        fn = (tool.get("function") or {}) if tool.get("type") == "function" else tool
+        name = fn.get("name")
+        if not name:
             continue
-        params = params or {}
-        if not isinstance(params, dict):
-            # Parameters must be a JSON Schema object.
-            params = {}
-        converted.append(
-            {
-                "type": "function",
-                "name": name,
-                "description": desc or "",
-                "parameters": params,
-            }
-        )
+        params = fn.get("parameters") or {}
+        converted.append({
+            "type": "function",
+            "name": name,
+            "description": fn.get("description") or "",
+            "parameters": params if isinstance(params, dict) else {},
+        })
     return converted
+
 
 def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
     system_prompt = ""
@@ -183,7 +175,7 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[st
             continue
 
         if role == "tool":
-            call_id = _extract_call_id(msg.get("tool_call_id"))
+            call_id, _ = _split_tool_call_id(msg.get("tool_call_id"))
             output_text = content if isinstance(content, str) else json.dumps(content)
             input_items.append(
                 {
@@ -195,6 +187,7 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[st
             continue
 
     return system_prompt, input_items
+
 
 def _convert_user_message(content: Any) -> dict[str, Any]:
     if isinstance(content, str):
@@ -215,12 +208,6 @@ def _convert_user_message(content: Any) -> dict[str, Any]:
     return {"role": "user", "content": [{"type": "input_text", "text": ""}]}
 
 
-def _extract_call_id(tool_call_id: Any) -> str:
-    if isinstance(tool_call_id, str) and tool_call_id:
-        return tool_call_id.split("|", 1)[0]
-    return "call_0"
-
-
 def _split_tool_call_id(tool_call_id: Any) -> tuple[str, str | None]:
     if isinstance(tool_call_id, str) and tool_call_id:
         if "|" in tool_call_id:
@@ -229,9 +216,11 @@ def _split_tool_call_id(tool_call_id: Any) -> tuple[str, str | None]:
         return tool_call_id, None
     return "call_0", None
 
+
 def _prompt_cache_key(messages: list[dict[str, Any]]) -> str:
     raw = json.dumps(messages, ensure_ascii=True, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
 
 async def _iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], None]:
     buffer: list[str] = []
@@ -251,6 +240,7 @@ async def _iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], 
                     continue
             continue
         buffer.append(line)
+
 
 async def _consume_sse(response: httpx.Response) -> tuple[str, list[ToolCallRequest], str]:
     content = ""
@@ -308,16 +298,13 @@ async def _consume_sse(response: httpx.Response) -> tuple[str, list[ToolCallRequ
 
     return content, tool_calls, finish_reason
 
+
+_FINISH_REASON_MAP = {"completed": "stop", "incomplete": "length", "failed": "error", "cancelled": "error"}
+
+
 def _map_finish_reason(status: str | None) -> str:
-    if not status:
-        return "stop"
-    if status == "completed":
-        return "stop"
-    if status == "incomplete":
-        return "length"
-    if status in {"failed", "cancelled"}:
-        return "error"
-    return "stop"
+    return _FINISH_REASON_MAP.get(status or "completed", "stop")
+
 
 def _friendly_error(status_code: int, raw: str) -> str:
     if status_code == 429:

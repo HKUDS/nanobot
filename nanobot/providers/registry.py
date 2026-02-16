@@ -53,7 +53,6 @@ class ProviderSpec:
 
     # OAuth-based providers (e.g., OpenAI Codex) don't use API keys
     is_oauth: bool = False                   # if True, uses OAuth flow instead of API key
-    oauth_provider: str = ""                 # OAuth provider name for token retrieval
 
     @property
     def label(self) -> str:
@@ -176,7 +175,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
         is_oauth=True,                      # OAuth-based authentication
-        oauth_provider="openai-codex",      # OAuth provider identifier
     ),
 
     # DeepSeek: needs "deepseek/" prefix for LiteLLM routing.
