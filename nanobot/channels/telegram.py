@@ -290,8 +290,13 @@ class TelegramChannel(BaseChannel):
         is_group = message.chat.type != "private"
         sender_id = self._sender_id(user)
 
+        # Debug: Log chat_id for group messages
+        if is_group:
+            logger.debug(f"Group message: chat_id={chat_id}, type={message.chat.type}, sender={sender_id}")
+
         # Check group policy
         if is_group and not self._is_allowed_group(str(chat_id), message.text or message.caption or ""):
+            logger.debug(f"Group message blocked by policy: chat_id={chat_id}")
             return
 
         # Check user allowlist for DMs
