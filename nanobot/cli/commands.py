@@ -19,6 +19,7 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.patch_stdout import patch_stdout
 
 from nanobot import __version__, __logo__
+from nanobot.config.schema import Config
 
 app = typer.Typer(
     name="nanobot",
@@ -155,7 +156,7 @@ def main(
 @app.command()
 def onboard():
     """Initialize nanobot configuration and workspace."""
-    from nanobot.config.loader import get_config_path, save_config
+    from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
     from nanobot.utils.helpers import get_workspace_path
     
@@ -163,17 +164,26 @@ def onboard():
     
     if config_path.exists():
         console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
-        if not typer.confirm("Overwrite?"):
-            raise typer.Exit()
-    
-    # Create default config
-    config = Config()
-    save_config(config)
-    console.print(f"[green]✓[/green] Created config at {config_path}")
+        console.print("  [bold]y[/bold] = overwrite with defaults (existing values will be lost)")
+        console.print("  [bold]N[/bold] = refresh config, keeping existing values and adding new fields")
+        if typer.confirm("Overwrite?"):
+            config = Config()
+            save_config(config)
+            console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
+        else:
+            config = load_config()
+            save_config(config)
+            console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
+    else:
+        save_config(Config())
+        console.print(f"[green]✓[/green] Created config at {config_path}")
     
     # Create workspace
     workspace = get_workspace_path()
-    console.print(f"[green]✓[/green] Created workspace at {workspace}")
+    
+    if not workspace.exists():
+        workspace.mkdir(parents=True, exist_ok=True)
+        console.print(f"[green]✓[/green] Created workspace at {workspace}")
     
     # Create default bootstrap files
     _create_workspace_templates(workspace)
@@ -269,21 +279,30 @@ This file stores important information that should persist across sessions.
     skills_dir.mkdir(exist_ok=True)
 
 
-def _make_provider(config):
+def _make_provider(config: Config):
     """Create LiteLLMProvider from config. Exits if no API key found."""
     from nanobot.providers.litellm_provider import LiteLLMProvider
-    p = config.get_provider()
+    from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+
     model = config.agents.defaults.model
-    if not (p and p.api_key) and not model.startswith("bedrock/"):
+    provider_name = config.get_provider_name(model)
+    p = config.get_provider(model)
+
+    # OpenAI Codex (OAuth): don't route via LiteLLM; use the dedicated implementation.
+    if provider_name == "openai_codex" or model.startswith("openai-codex/"):
+        return OpenAICodexProvider(default_model=model)
+
+    if not model.startswith("bedrock/") and not (p and p.api_key):
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers section")
         raise typer.Exit(1)
+
     return LiteLLMProvider(
         api_key=p.api_key if p else None,
-        api_base=config.get_api_base(),
+        api_base=config.get_api_base(model),
         default_model=model,
         extra_headers=p.extra_headers if p else None,
-        provider_name=config.get_provider_name(),
+        provider_name=provider_name,
     )
 
 
@@ -328,6 +347,8 @@ def gateway(
         provider=provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
+        temperature=config.agents.defaults.temperature,
+        max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
         brave_api_key=config.tools.web.search.api_key or None,
@@ -335,6 +356,7 @@ def gateway(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
+        mcp_servers=config.tools.mcp_servers,
     )
     
     # Set cron callback (needs agent)
@@ -392,6 +414,8 @@ def gateway(
             )
         except KeyboardInterrupt:
             console.print("\nShutting down...")
+        finally:
+            await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
             agent.stop()
@@ -435,11 +459,14 @@ def agent(
         provider=provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
+        temperature=config.agents.defaults.temperature,
+        max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        mcp_servers=config.tools.mcp_servers,
     )
     
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -456,6 +483,7 @@ def agent(
             with _thinking_ctx():
                 response = await agent_loop.process_direct(message, session_id)
             _print_agent_response(response, render_markdown=markdown)
+            await agent_loop.close_mcp()
         
         asyncio.run(run_once())
     else:
@@ -471,30 +499,33 @@ def agent(
         signal.signal(signal.SIGINT, _exit_on_sigint)
         
         async def run_interactive():
-            while True:
-                try:
-                    _flush_pending_tty_input()
-                    user_input = await _read_interactive_input_async()
-                    command = user_input.strip()
-                    if not command:
-                        continue
+            try:
+                while True:
+                    try:
+                        _flush_pending_tty_input()
+                        user_input = await _read_interactive_input_async()
+                        command = user_input.strip()
+                        if not command:
+                            continue
 
-                    if _is_exit_command(command):
+                        if _is_exit_command(command):
+                            _restore_terminal()
+                            console.print("\nGoodbye!")
+                            break
+                        
+                        with _thinking_ctx():
+                            response = await agent_loop.process_direct(user_input, session_id)
+                        _print_agent_response(response, render_markdown=markdown)
+                    except KeyboardInterrupt:
                         _restore_terminal()
                         console.print("\nGoodbye!")
                         break
-                    
-                    with _thinking_ctx():
-                        response = await agent_loop.process_direct(user_input, session_id)
-                    _print_agent_response(response, render_markdown=markdown)
-                except KeyboardInterrupt:
-                    _restore_terminal()
-                    console.print("\nGoodbye!")
-                    break
-                except EOFError:
-                    _restore_terminal()
-                    console.print("\nGoodbye!")
-                    break
+                    except EOFError:
+                        _restore_terminal()
+                        console.print("\nGoodbye!")
+                        break
+            finally:
+                await agent_loop.close_mcp()
         
         asyncio.run(run_interactive())
 
@@ -851,6 +882,53 @@ def status():
             else:
                 has_key = bool(p.api_key)
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+
+
+# ============================================================================
+# OAuth Login
+# ============================================================================
+
+provider_app = typer.Typer(help="Manage providers")
+app.add_typer(provider_app, name="provider")
+
+
+@provider_app.command("login")
+def provider_login(
+    provider: str = typer.Argument(..., help="OAuth provider to authenticate with (e.g., 'openai-codex')"),
+):
+    """Authenticate with an OAuth provider."""
+    console.print(f"{__logo__} OAuth Login - {provider}\n")
+
+    if provider == "openai-codex":
+        try:
+            from oauth_cli_kit import get_token, login_oauth_interactive
+            token = None
+            try:
+                token = get_token()
+            except Exception:
+                token = None
+            if not (token and token.access):
+                console.print("[cyan]No valid token found. Starting interactive OAuth login...[/cyan]")
+                console.print("A browser window may open for you to authenticate.\n")
+                token = login_oauth_interactive(
+                    print_fn=lambda s: console.print(s),
+                    prompt_fn=lambda s: typer.prompt(s),
+                )
+            if not (token and token.access):
+                console.print("[red]✗ Authentication failed[/red]")
+                raise typer.Exit(1)
+            console.print("[green]✓ Successfully authenticated with OpenAI Codex![/green]")
+            console.print(f"[dim]Account ID: {token.account_id}[/dim]")
+        except ImportError:
+            console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
+            raise typer.Exit(1)
+        except Exception as e:
+            console.print(f"[red]Authentication error: {e}[/red]")
+            raise typer.Exit(1)
+    else:
+        console.print(f"[red]Unknown OAuth provider: {provider}[/red]")
+        console.print("[yellow]Supported providers: openai-codex[/yellow]")
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

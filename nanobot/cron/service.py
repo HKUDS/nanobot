@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Coroutine
 
@@ -30,38 +31,13 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
     if schedule.kind == "cron" and schedule.expr:
         try:
             from croniter import croniter
-            from datetime import datetime
-            try:
-                import zoneinfo
-            except ImportError:
-                # Python < 3.9 fallback
-                from backports import zoneinfo  # type: ignore
-
-            # Use specified timezone or system default (local timezone)
-            tz = None
-            if schedule.tz:
-                try:
-                    tz = zoneinfo.ZoneInfo(schedule.tz)
-                except Exception:
-                    logger.warning(f"Invalid timezone '{schedule.tz}', falling back to system local timezone")
-
-            # If no timezone specified, use system local timezone
-            if tz is None:
-                try:
-                    tz = datetime.now().astimezone().tzinfo
-                except Exception:
-                    pass  # Fall back to naive datetime
-
-            # Create timezone-aware datetime
-            if tz:
-                base_time = datetime.fromtimestamp(time.time(), tz=tz)
-            else:
-                # Fallback to naive datetime (UTC behavior)
-                base_time = datetime.fromtimestamp(time.time())
-
-            cron = croniter(schedule.expr, base_time)
-            next_time = cron.get_next(float)
-            return int(next_time * 1000)
+            from zoneinfo import ZoneInfo
+            base_time = time.time()
+            tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
+            base_dt = datetime.fromtimestamp(base_time, tz=tz)
+            cron = croniter(schedule.expr, base_dt)
+            next_dt = cron.get_next(datetime)
+            return int(next_dt.timestamp() * 1000)
         except Exception:
             return None
     

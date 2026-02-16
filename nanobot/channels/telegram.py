@@ -222,6 +222,12 @@ class TelegramChannel(BaseChannel):
             "Type /help to see available commands."
         )
 
+    @staticmethod
+    def _sender_id(user) -> str:
+        """Build sender_id with username for allowlist matching."""
+        sid = str(user.id)
+        return f"{sid}|{user.username}" if user.username else sid
+
     def _is_allowed_group(self, chat_id: str, text: str) -> bool:
         """Check if a group message should be processed based on group_policy."""
         policy = self.config.group_policy
@@ -255,7 +261,7 @@ class TelegramChannel(BaseChannel):
         if not update.message or not update.effective_user:
             return
         await self._handle_message(
-            sender_id=str(update.effective_user.id),
+            sender_id=self._sender_id(update.effective_user),
             chat_id=str(update.message.chat_id),
             content=update.message.text,
         )
@@ -270,10 +276,8 @@ class TelegramChannel(BaseChannel):
         chat_id = message.chat_id
         is_group = message.chat.type != "private"
 
-        # Use stable numeric ID, but keep username for allowlist compatibility
-        sender_id = str(user.id)
-        if user.username:
-            sender_id = f"{sender_id}|{user.username}"
+        # Build sender_id with username for allowlist matching
+        sender_id = self._sender_id(user)
 
         # Check group policy
         if is_group and not self._is_allowed_group(str(chat_id), message.text or ""):
