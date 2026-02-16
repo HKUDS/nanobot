@@ -78,6 +78,26 @@ def _markdown_to_telegram_html(text: str) -> str:
     return text
 
 
+def _split_message(content: str, max_len: int = 4000) -> list[str]:
+    """Split content into chunks within max_len, preferring line breaks."""
+    if len(content) <= max_len:
+        return [content]
+    chunks: list[str] = []
+    while content:
+        if len(content) <= max_len:
+            chunks.append(content)
+            break
+        cut = content[:max_len]
+        pos = cut.rfind('\n')
+        if pos == -1:
+            pos = cut.rfind(' ')
+        if pos == -1:
+            pos = max_len
+        chunks.append(content[:pos])
+        content = content[pos:].lstrip()
+    return chunks
+
+
 class TelegramChannel(BaseChannel):
     """
     Telegram channel using long polling.
@@ -183,45 +203,38 @@ class TelegramChannel(BaseChannel):
         if not self._app:
             logger.warning("Telegram bot not running")
             return
-        
-        # Stop typing indicator for this chat
+
         self._stop_typing(msg.chat_id)
-        
+
         try:
-            # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
-            # Convert markdown to Telegram HTML
-            html_content = _markdown_to_telegram_html(msg.content)
-            await self._app.bot.send_message(
-                chat_id=chat_id,
-                text=html_content,
-                parse_mode="HTML"
-            )
         except ValueError:
             logger.error(f"Invalid chat_id: {msg.chat_id}")
-        except Exception as e:
-            # Fallback to plain text if HTML parsing fails
-            logger.warning(f"HTML parse failed, falling back to plain text: {e}")
+            return
+
+        for chunk in _split_message(msg.content):
             try:
-                await self._app.bot.send_message(
-                    chat_id=int(msg.chat_id),
-                    text=msg.content
-                )
-            except Exception as e2:
-                logger.error(f"Error sending Telegram message: {e2}")
+                html = _markdown_to_telegram_html(chunk)
+                await self._app.bot.send_message(chat_id=chat_id, text=html, parse_mode="HTML")
+            except Exception as e:
+                logger.warning(f"HTML parse failed, falling back to plain text: {e}")
+                try:
+                    await self._app.bot.send_message(chat_id=chat_id, text=chunk)
+                except Exception as e2:
+                    logger.error(f"Error sending Telegram message: {e2}")
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
         if not update.message or not update.effective_user:
             return
-
+        
         user = update.effective_user
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
             "Send me a message and I'll respond!\n"
             "Type /help to see available commands."
         )
-
+    
     @staticmethod
     def _sender_id(user) -> str:
         """Build sender_id with username for allowlist matching."""
@@ -270,17 +283,15 @@ class TelegramChannel(BaseChannel):
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:
             return
-
+        
         message = update.message
         user = update.effective_user
         chat_id = message.chat_id
         is_group = message.chat.type != "private"
-
-        # Build sender_id with username for allowlist matching
         sender_id = self._sender_id(user)
 
         # Check group policy
-        if is_group and not self._is_allowed_group(str(chat_id), message.text or ""):
+        if is_group and not self._is_allowed_group(str(chat_id), message.text or message.caption or ""):
             return
 
         # Check user allowlist for DMs
@@ -358,16 +369,16 @@ class TelegramChannel(BaseChannel):
         content = "\n".join(content_parts) if content_parts else "[empty message]"
         
         logger.debug(f"Telegram message from {sender_id}: {content[:50]}...")
-
+        
         str_chat_id = str(chat_id)
-
+        
         # Start typing indicator before processing
         self._start_typing(str_chat_id)
 
-        # Forward to the message bus (skip is_allowed check in base class since we already checked above)
+        # Forward to the message bus (skip base is_allowed check since we already checked above)
         msg = InboundMessage(
             channel=self.name,
-            sender_id=str(sender_id),
+            sender_id=sender_id,
             chat_id=str_chat_id,
             content=content,
             media=media_paths or [],
