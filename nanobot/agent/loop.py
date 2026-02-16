@@ -400,7 +400,7 @@ class AgentLoop:
 
         prompt = f"""You are a memory consolidation agent. Process this conversation and return a JSON object with exactly two keys:
 
-1. "history_entry": A paragraph (2-5 sentences) summarizing the key events/decisions/topics. Start with a timestamp like [YYYY-MM-DD HH:MM]. Include enough detail to be useful when found by grep search later. After the paragraph, add two or three keywords **not present in the paragraph** to help with searchability. Example: "User researched about sailing and asked about the Atlantic route. Keywords: boat, sea, navigation."
+1. "history_entry": A paragraph (2-5 sentences) summarizing the key events/decisions/topics. Start with a timestamp like [YYYY-MM-DD HH:MM]. Include enough detail to be useful when found by grep search later. After the paragraph, add 2–3 keywords **not present verbatim in the paragraph** (prefer synonyms, related concepts, tools, or domains). Example: "User researched about sailing and asked about the Atlantic route. Keywords: boat, sea, navigation."
 
 2. "memory_update": The updated long-term memory content. Add any new facts: user location, preferences, personal info, habits, project context, technical decisions, tools/services used. If nothing new, return the existing content unchanged.
 
