@@ -221,6 +221,8 @@ class BrowserToolConfig(BaseModel):
     enabled: bool = False
     headless: bool = True
     timeout_ms: int = 30000  # Navigation and action timeout
+    # Proxy for browser traffic (Chromium does not use HTTP_PROXY/HTTPS_PROXY by default). Empty = no proxy; fallback to env if unset.
+    proxy_server: str = ""
 
 
 class MCPServerConfig(BaseModel):

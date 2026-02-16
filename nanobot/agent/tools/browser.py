@@ -1,5 +1,6 @@
 """Browser control tools (Playwright). Optional: pip install nanobot-ai[browser], then run: playwright install (see https://playwright.dev/python/docs/library)."""
 
+import os
 from typing import Any
 from urllib.parse import urlparse
 
@@ -42,12 +43,26 @@ def _validate_url(url: str) -> tuple[bool, str]:
 _BROWSER_LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled"]
 
 
+def _resolve_proxy(proxy_server: str) -> str:
+    """Resolve proxy URL: config value if non-empty, else HTTPS_PROXY or HTTP_PROXY from env."""
+    s = (proxy_server or "").strip()
+    if s:
+        return s
+    return os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+
+
 class BrowserSession:
     """Shared Playwright browser/page session. Lazy start, single page."""
 
-    def __init__(self, headless: bool = True, timeout_ms: int = 30000) -> None:
+    def __init__(
+        self,
+        headless: bool = True,
+        timeout_ms: int = 30000,
+        proxy_server: str = "",
+    ) -> None:
         self._headless = headless
         self._timeout_ms = timeout_ms
+        self._proxy_server = proxy_server or ""
         self._playwright = None
         self._browser: Browser | None = None
         self._page: Page | None = None
@@ -65,21 +80,33 @@ class BrowserSession:
             "headless": self._headless,
             "args": _BROWSER_LAUNCH_ARGS,
         }
-        logger.info(
-            "Browser session starting (headless={}, timeout_ms={})",
-            self._headless,
-            self._timeout_ms,
-        )
+        proxy_url = _resolve_proxy(self._proxy_server)
+        if proxy_url:
+            logger.info(
+                "Browser session starting (headless={}, timeout_ms={}, proxy={})",
+                self._headless,
+                self._timeout_ms,
+                proxy_url,
+            )
+        else:
+            logger.info(
+                "Browser session starting (headless={}, timeout_ms={})",
+                self._headless,
+                self._timeout_ms,
+            )
         self._browser = await self._playwright.chromium.launch(**launch_options)
-        context = await self._browser.new_context(
-            user_agent=BROWSER_USER_AGENT,
-            viewport={"width": 1280, "height": 720},
-            ignore_https_errors=False,
-            extra_http_headers={
+        context_options: dict[str, Any] = {
+            "user_agent": BROWSER_USER_AGENT,
+            "viewport": {"width": 1280, "height": 720},
+            "ignore_https_errors": False,
+            "extra_http_headers": {
                 "Sec-CH-UA": BROWSER_SEC_CH_UA,
                 "Accept-Language": BROWSER_ACCEPT_LANGUAGE,
             },
-        )
+        }
+        if proxy_url:
+            context_options["proxy"] = {"server": proxy_url}
+        context = await self._browser.new_context(**context_options)
         self._page = await context.new_page()
         self._page.set_default_timeout(self._timeout_ms)
         return self._page
@@ -265,18 +292,24 @@ class BrowserPressTool(Tool):
 
 
 def create_browser_tools(config: Any) -> list[Tool]:
-    """Create browser tools sharing one session. Returns [] if Playwright is not installed. config: BrowserToolConfig (headless, timeout_ms)."""
+    """Create browser tools sharing one session. Returns [] if Playwright is not installed. config: BrowserToolConfig (headless, timeout_ms, proxy_server)."""
     if not _PLAYWRIGHT_AVAILABLE:
         logger.debug("Browser tools skipped: Playwright not installed")
         return []
     headless = getattr(config, "headless", True)
     timeout_ms = getattr(config, "timeout_ms", 30000)
+    proxy_server = getattr(config, "proxy_server", "") or ""
     logger.info(
-        "Browser tools created (headless={}, timeout_ms={})",
+        "Browser tools created (headless={}, timeout_ms={}, proxy_server={})",
         headless,
         timeout_ms,
+        proxy_server or "(none/env)",
     )
-    session = BrowserSession(headless=headless, timeout_ms=timeout_ms)
+    session = BrowserSession(
+        headless=headless,
+        timeout_ms=timeout_ms,
+        proxy_server=proxy_server,
+    )
     return [
         BrowserNavigateTool(session),
         BrowserSnapshotTool(session),
