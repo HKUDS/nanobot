@@ -333,9 +333,16 @@ class AgentLoop:
             is_verbose = verbose_match == "on"
             session.metadata["verbose"] = is_verbose
             self.sessions.save(session)
-            status = "enabled" if is_verbose else "disabled"
+            status = "enabled 🔊" if is_verbose else "disabled 🔇"
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content=f"Verbose mode {status}. {'Tool calls and reasoning will be shown.' if is_verbose else 'Running in quiet mode.'}")
+                                  content=f"Verbose mode {status}.\n{'Tool calls and reasoning will be shown.' if is_verbose else 'Running in quiet mode.'}")
+        
+        # Show current status if no valid argument provided
+        if cmd in ["/verbose", "/v"]:
+            is_verbose = session.metadata.get("verbose", False)
+            status = "ON 🔊" if is_verbose else "OFF 🔇"
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                  content=f"Verbose mode is currently {status}\n\nUse `/verbose on` or `/verbose off` to change.")
         
         if len(session.messages) > self.memory_window:
             asyncio.create_task(self._consolidate_memory(session))

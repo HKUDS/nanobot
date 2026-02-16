@@ -112,8 +112,8 @@ class TelegramChannel(BaseChannel):
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
         BotCommand("help", "Show available commands"),
-        BotCommand("verbose", "Toggle verbose mode on/off"),
-        BotCommand("v", "Quick toggle verbose mode"),
+        BotCommand("verbose", "Verbose mode (/verbose on|off)"),
+        BotCommand("v", "Verbose alias (/v on|off)"),
     ]
     
     def __init__(
