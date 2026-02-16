@@ -112,6 +112,8 @@ class TelegramChannel(BaseChannel):
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
         BotCommand("help", "Show available commands"),
+        BotCommand("verbose", "Toggle verbose mode on/off"),
+        BotCommand("v", "Quick toggle verbose mode"),
     ]
     
     def __init__(
@@ -147,6 +149,8 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._forward_command))
+        self._app.add_handler(CommandHandler("verbose", self._forward_command))
+        self._app.add_handler(CommandHandler("v", self._forward_command))
         
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
