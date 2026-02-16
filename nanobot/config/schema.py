@@ -223,6 +223,8 @@ class BrowserToolConfig(BaseModel):
     timeout_ms: int = 30000  # Navigation and action timeout
     # Proxy for browser traffic (Chromium does not use HTTP_PROXY/HTTPS_PROXY by default). Empty = no proxy; fallback to env if unset.
     proxy_server: str = ""
+    # Storage state (cookies, localStorage) path. Empty = use workspace/browser/cookie.json.
+    storage_state_path: str = ""
 
 
 class MCPServerConfig(BaseModel):

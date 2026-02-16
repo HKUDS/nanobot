@@ -1,6 +1,7 @@
 """Browser control tools (Playwright). Optional: pip install nanobot-ai[browser], then run: playwright install (see https://playwright.dev/python/docs/library)."""
 
 import os
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -18,11 +19,12 @@ BROWSER_SEC_CH_UA = '"Not A(Brand";v="24", "Chromium";v="120", "Google Chrome";v
 BROWSER_ACCEPT_LANGUAGE = "en-US,en;q=0.9"
 
 try:
-    from playwright.async_api import async_playwright, Browser, Page
+    from playwright.async_api import async_playwright, Browser, BrowserContext, Page
     _PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     _PLAYWRIGHT_AVAILABLE = False
     Browser = None  # type: ignore[misc, assignment]
+    BrowserContext = None  # type: ignore[misc, assignment]
     Page = None  # type: ignore[misc, assignment]
 
 
@@ -51,6 +53,16 @@ def _resolve_proxy(proxy_server: str) -> str:
     return os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
 
 
+def _resolve_storage_state_path(config: Any, workspace_path: Path | None) -> str:
+    """Resolve storage state file path: config.storage_state_path if set, else workspace/browser/cookie.json."""
+    explicit = (getattr(config, "storage_state_path", None) or "").strip()
+    if explicit:
+        return str(Path(explicit).expanduser())
+    if workspace_path is None:
+        return ""
+    return str((workspace_path / "browser" / "cookie.json").resolve())
+
+
 class BrowserSession:
     """Shared Playwright browser/page session. Lazy start, single page."""
 
@@ -59,12 +71,15 @@ class BrowserSession:
         headless: bool = True,
         timeout_ms: int = 30000,
         proxy_server: str = "",
+        storage_state_path: str = "",
     ) -> None:
         self._headless = headless
         self._timeout_ms = timeout_ms
         self._proxy_server = proxy_server or ""
+        self._storage_state_path = (storage_state_path or "").strip()
         self._playwright = None
         self._browser: Browser | None = None
+        self._context: BrowserContext | None = None
         self._page: Page | None = None
 
     async def get_page(self) -> Page:
@@ -106,17 +121,63 @@ class BrowserSession:
         }
         if proxy_url:
             context_options["proxy"] = {"server": proxy_url}
-        context = await self._browser.new_context(**context_options)
+        if self._storage_state_path:
+            path = Path(self._storage_state_path)
+            if path.exists():
+                context_options["storage_state"] = self._storage_state_path
+                logger.debug("Browser loading storage state from {}", self._storage_state_path)
+        try:
+            context = await self._browser.new_context(**context_options)
+        except Exception as e:
+            if context_options.pop("storage_state", None):
+                logger.warning("Browser storage state load failed, starting clean: {}", e)
+                context = await self._browser.new_context(**context_options)
+            else:
+                raise
+        self._context = context
         self._page = await context.new_page()
         self._page.set_default_timeout(self._timeout_ms)
         return self._page
 
+    async def save_storage_state(self) -> tuple[bool, str]:
+        """Save current context storage state to configured path. Returns (success, message)."""
+        if not self._storage_state_path:
+            return False, "No storage state path configured"
+        if self._context is None:
+            return False, "Browser not started yet"
+        try:
+            path = Path(self._storage_state_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            await self._context.storage_state(path=self._storage_state_path)
+            try:
+                path.chmod(0o600)
+            except OSError:
+                pass
+            logger.info("Browser storage state saved to {}", self._storage_state_path)
+            return True, f"Saved to {self._storage_state_path}"
+        except Exception as e:
+            logger.error("Browser storage state save failed: {}", e)
+            return False, f"Save failed: {type(e).__name__}: {e}"
+
     async def close(self) -> None:
-        """Close browser and playwright."""
+        """Close browser and playwright; save storage state first if configured."""
+        if self._browser and self._context and self._storage_state_path:
+            try:
+                path = Path(self._storage_state_path)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                await self._context.storage_state(path=self._storage_state_path)
+                try:
+                    path.chmod(0o600)
+                except OSError:
+                    pass
+                logger.debug("Browser storage state saved on close")
+            except Exception as e:
+                logger.warning("Browser storage state save on close failed: {}", e)
         if self._browser:
             logger.debug("Browser session closing")
             await self._browser.close()
             self._browser = None
+        self._context = None
         self._page = None
         if self._playwright:
             await self._playwright.stop()
@@ -291,24 +352,48 @@ class BrowserPressTool(Tool):
             return f"Error: {type(e).__name__}: {e}"
 
 
-def create_browser_tools(config: Any) -> list[Tool]:
-    """Create browser tools sharing one session. Returns [] if Playwright is not installed. config: BrowserToolConfig (headless, timeout_ms, proxy_server)."""
+class BrowserSaveSessionTool(Tool):
+    """Save current browser cookies and storage to the configured path (e.g. after login)."""
+
+    name = "browser_save_session"
+    description = "Save the current browser session (cookies, localStorage) to disk so it can be restored after restart. Use after logging in or when the page is in a good state."
+    parameters = {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    }
+
+    def __init__(self, session: BrowserSession) -> None:
+        self._browser_session = session
+
+    async def execute(self, **kwargs: Any) -> str:
+        ok, msg = await self._browser_session.save_storage_state()
+        if ok:
+            return msg
+        return f"Error: {msg}"
+
+
+def create_browser_tools(config: Any, workspace_path: Path | None = None) -> list[Tool]:
+    """Create browser tools sharing one session. Returns [] if Playwright is not installed. config: BrowserToolConfig; workspace_path used for default storage_state_path."""
     if not _PLAYWRIGHT_AVAILABLE:
         logger.debug("Browser tools skipped: Playwright not installed")
         return []
     headless = getattr(config, "headless", True)
     timeout_ms = getattr(config, "timeout_ms", 30000)
     proxy_server = getattr(config, "proxy_server", "") or ""
+    storage_state_path = _resolve_storage_state_path(config, workspace_path)
     logger.info(
-        "Browser tools created (headless={}, timeout_ms={}, proxy_server={})",
+        "Browser tools created (headless={}, timeout_ms={}, proxy_server={}, storage_state_path={})",
         headless,
         timeout_ms,
         proxy_server or "(none/env)",
+        storage_state_path or "(none)",
     )
     session = BrowserSession(
         headless=headless,
         timeout_ms=timeout_ms,
         proxy_server=proxy_server,
+        storage_state_path=storage_state_path,
     )
     return [
         BrowserNavigateTool(session),
@@ -316,6 +401,7 @@ def create_browser_tools(config: Any) -> list[Tool]:
         BrowserClickTool(session),
         BrowserTypeTool(session),
         BrowserPressTool(session),
+        BrowserSaveSessionTool(session),
     ]
 
 

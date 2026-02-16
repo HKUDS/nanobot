@@ -128,7 +128,7 @@ class AgentLoop:
         if self._browser_config and getattr(self._browser_config, "enabled", False):
             try:
                 from nanobot.agent.tools.browser import create_browser_tools
-                for tool in create_browser_tools(self._browser_config):
+                for tool in create_browser_tools(self._browser_config, self.workspace):
                     self.tools.register(tool)
             except ImportError:
                 pass
