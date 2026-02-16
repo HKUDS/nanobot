@@ -173,7 +173,9 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, Mochat, DingTa
     "telegram": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
+      "allowFrom": ["YOUR_USER_ID"],
+      "groupPolicy": "mention",
+      "groupAllowFrom": ["-1001234567890"]
     }
   }
 }
@@ -181,6 +183,16 @@ Talk to your nanobot through Telegram, Discord, WhatsApp, Feishu, Mochat, DingTa
 
 > You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`.
 > Copy this value **without the `@` symbol** and paste it into the config file.
+
+**Group Policy Options:**
+- `"disabled"` (default): Bot ignores all group messages
+- `"open"`: Bot responds to all messages in groups
+- `"mention"`: Bot only responds when mentioned with @botname
+- `"allowlist"`: Bot only responds in specific groups (defined in `groupAllowFrom`)
+
+> **Note:** `groupAllowFrom` acts as an additional filter for all policies. For example, with `"mention"` + `groupAllowFrom`, the bot only responds to @mentions in the specified groups.
+>
+> The bot also supports **Telegram Topics** (forum threads) and will automatically reply in the correct topic.
 
 
 **3. Run**
