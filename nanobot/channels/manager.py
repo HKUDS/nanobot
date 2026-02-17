@@ -136,6 +136,18 @@ class ChannelManager:
                 logger.info("QQ channel enabled")
             except ImportError as e:
                 logger.warning(f"QQ channel not available: {e}")
+
+        # OneBot 11 channel
+        if self.config.channels.onebot11.enabled:
+            try:
+                from nanobot.channels.onebot11 import OneBot11Channel
+                self.channels["onebot11"] = OneBot11Channel(
+                    self.config.channels.onebot11,
+                    self.bus,
+                )
+                logger.info("OneBot 11 channel enabled")
+            except ImportError as e:
+                logger.warning(f"OneBot 11 channel not available: {e}")
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""

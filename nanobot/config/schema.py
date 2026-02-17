@@ -142,6 +142,16 @@ class QQConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
 
+class OneBot11Config(BaseModel):
+    """OneBot 11 channel configuration (Reverse WebSocket)."""
+    enabled: bool = False
+    ws_reverse_url: str = "ws://127.0.0.1:6700/ws"  # OneBot Reverse WebSocket URL
+    access_token: str = ""  # Access token for authentication (optional)
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs (empty = public access)
+    allow_groups: list[str] = Field(default_factory=list)  # Allowed group IDs (empty = all groups)
+    nickname: str = ""  # Bot nickname for mention parsing (optional)
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
@@ -153,6 +163,7 @@ class ChannelsConfig(BaseModel):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    onebot11: OneBot11Config = Field(default_factory=OneBot11Config)
 
 
 class AgentDefaults(BaseModel):
