@@ -9,6 +9,12 @@ MEMORY_WINDOW = 50
 KEEP_COUNT = MEMORY_WINDOW // 2  # 25
 
 
+@pytest.fixture(autouse=True)
+def isolate_home(monkeypatch, tmp_path):
+    """Force SessionManager paths under tmp to avoid writing to real HOME."""
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+
 def create_session_with_messages(key: str, count: int, role: str = "user") -> Session:
     """Create a session and add the specified number of messages.
 
