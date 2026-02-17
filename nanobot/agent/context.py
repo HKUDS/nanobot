@@ -227,10 +227,8 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         """
         msg: dict[str, Any] = {"role": "assistant"}
 
-        # Only include the content key when there is non-empty text.
-        # Some LLM backends reject empty text blocks, so omit the key
-        # to avoid sending empty content entries.
-        if content is not None and content != "":
+        # Omit empty content — some backends reject empty text blocks
+        if content:
             msg["content"] = content
 
         if tool_calls:
