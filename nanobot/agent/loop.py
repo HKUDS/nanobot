@@ -239,7 +239,52 @@ class AgentLoop:
                 final_content = response.content
                 break
 
+        # Check if we hit max_iterations without getting a final response
+        if final_content is None and iteration >= self.max_iterations:
+            logger.warning(f"Max iterations ({self.max_iterations}) reached for session")
+            # Store state for potential /continue
+            if session:
+                session.metadata["paused_loop"] = {
+                    "messages": messages,
+                    "tools_used": tools_used,
+                }
+                self.sessions.save(session)
+            # Notify user if we have channel info
+            if channel and chat_id:
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=channel,
+                    chat_id=chat_id,
+                    content=f"⚠️ Maximum steps ({self.max_iterations}) reached. Use /continue to continue."
+                ))
+
         return final_content, tools_used
+
+    async def _continue_agent_loop(
+        self,
+        messages: list[dict],
+        session: "Session | None" = None,
+        channel: str | None = None,
+        chat_id: str | None = None,
+    ) -> tuple[str | None, list[str]]:
+        """
+        Continue the agent loop from a paused state with reset iteration counter.
+        Simply delegates to _run_agent_loop with start_iteration=0.
+
+        Args:
+            messages: Current message state from paused loop.
+            session: Optional session for verbose mode checking and message sending.
+            channel: Channel for verbose message sending.
+            chat_id: Chat ID for verbose message sending.
+
+        Returns:
+            Tuple of (final_content, list_of_tools_used).
+        """
+        return await self._run_agent_loop(
+            initial_messages=messages,
+            session=session,
+            channel=channel,
+            chat_id=chat_id,
+        )
 
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -337,7 +382,47 @@ class AgentLoop:
         
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/compact — Compress context to save tokens\n/help — Show available commands\n/verbose on|off — Toggle verbose mode (show tool calls and reasoning)")
+                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/compact — Compress context to save tokens\n/help — Show available commands\n/verbose on|off — Toggle verbose mode (show tool calls and reasoning)\n/continue — Continue after max steps reached")
+        
+        if cmd == "/continue":
+            # Check if there's a paused loop to continue
+            if not session.metadata.get("paused_loop"):
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                      content="No paused operation to continue. Send a message to start a new conversation.")
+            
+            # Resume the loop from where it left off
+            paused_data = session.metadata.pop("paused_loop")
+            self.sessions.save(session)
+            
+            # Restore the messages state
+            messages = paused_data["messages"]
+            tools_used = paused_data.get("tools_used", [])
+            
+            # Continue the agent loop with reset iteration counter
+            final_content, additional_tools = await self._continue_agent_loop(
+                messages, session=session, channel=msg.channel, chat_id=msg.chat_id
+            )
+            tools_used.extend(additional_tools)
+            
+            if final_content is None:
+                # Still paused (hit max_iterations again)
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=f"⏳ Maximum steps ({self.max_iterations}) reached again. Use /continue to continue."
+                )
+            
+            # Success - save the response
+            session.add_message("assistant", final_content,
+                                tools_used=tools_used if tools_used else None)
+            self.sessions.save(session)
+            
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=final_content,
+                metadata=msg.metadata or {},
+            )
         
         # Handle verbose command
         verbose_match = None
