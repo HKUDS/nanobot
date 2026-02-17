@@ -60,6 +60,8 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self._config_path = Path.home() / ".nanobot" / "config.json"
+        self._fallback_model = self.model  # original model as fallback
         self.max_iterations = max_iterations
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -76,7 +78,7 @@ class AgentLoop:
             provider=provider,
             workspace=workspace,
             bus=bus,
-            model=self.model,
+            model=self._get_active_model(),
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             brave_api_key=brave_api_key,
@@ -90,6 +92,17 @@ class AgentLoop:
         self._mcp_connected = False
         self._register_default_tools()
     
+    def _get_active_model(self) -> str:
+        """Read model from config.json (hot-reload). Falls back to startup model."""
+        try:
+            cfg = json.loads(self._config_path.read_text())
+            model = cfg.get("agents", {}).get("defaults", {}).get("model", "")
+            if model:
+                return model
+        except Exception:
+            pass
+        return self._fallback_model
+
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         # File tools (restrict to workspace if configured)
@@ -167,7 +180,7 @@ class AgentLoop:
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
-                model=self.model,
+                model=self._get_active_model(),
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
@@ -418,7 +431,7 @@ Respond with ONLY valid JSON, no markdown fences."""
                     {"role": "system", "content": "You are a memory consolidation agent. Respond only with valid JSON."},
                     {"role": "user", "content": prompt},
                 ],
-                model=self.model,
+                model=self._get_active_model(),
             )
             text = (response.content or "").strip()
             if not text:
