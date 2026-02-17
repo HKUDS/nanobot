@@ -23,6 +23,23 @@ from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.errors import (
+    NanobotError,
+    ProviderError,
+    ProviderRateLimitError,
+    ProviderConnectionError,
+    ToolError,
+    ToolTimeoutError,
+    ErrorInfo,
+    ErrorSeverity,
+    ErrorRecoverability,
+    RetryPolicy,
+    with_retry,
+    CircuitBreaker,
+    CircuitBreakerError,
+    format_error_for_user,
+    log_error,
+)
 
 
 class AgentLoop:
@@ -35,7 +52,26 @@ class AgentLoop:
     3. Calls the LLM
     4. Executes tool calls
     5. Sends responses back
+    
+    Error Handling:
+    - Uses circuit breaker for LLM calls to prevent cascading failures
+    - Retries transient errors with exponential backoff
+    - Provides user-friendly error messages
+    - Logs structured error context for debugging
     """
+
+    # Default retry policy for LLM calls
+    DEFAULT_RETRY_POLICY = RetryPolicy(
+        max_retries=3,
+        base_delay=2.0,
+        max_delay=60.0,
+        retryable_exceptions=(
+            ProviderConnectionError,
+            ProviderRateLimitError,
+            ConnectionError,
+            TimeoutError,
+        ),
+    )
 
     def __init__(
         self,
@@ -53,6 +89,8 @@ class AgentLoop:
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
+        retry_policy: RetryPolicy | None = None,
+        circuit_breaker: CircuitBreaker | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
@@ -68,6 +106,15 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+
+        # Error handling configuration
+        self.retry_policy = retry_policy or self.DEFAULT_RETRY_POLICY
+        self.circuit_breaker = circuit_breaker or CircuitBreaker(
+            name="llm_provider",
+            failure_threshold=5,
+            success_threshold=2,
+            timeout=30.0,
+        )
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -155,6 +202,10 @@ class AgentLoop:
 
         Returns:
             Tuple of (final_content, list_of_tools_used).
+        
+        Raises:
+            CircuitBreakerError: If the circuit breaker is open.
+            ProviderError: If the LLM call fails after retries.
         """
         messages = initial_messages
         iteration = 0
@@ -164,13 +215,28 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
+            # Use circuit breaker for LLM calls
+            try:
+                response = await self.circuit_breaker.call(
+                    self._call_llm_with_retry,
+                    messages=messages,
+                )
+            except CircuitBreakerError as e:
+                log_error(e, "LLM call blocked by circuit breaker")
+                raise ProviderError(
+                    "Service temporarily unavailable. Please try again later.",
+                    context={"circuit_breaker": self.circuit_breaker.name}
+                )
+            except Exception as e:
+                # Check if it's a retryable error that exhausted retries
+                error_info = ErrorInfo.from_exception(e)
+                if error_info.recoverability in (ErrorRecoverability.TRANSIENT, ErrorRecoverability.RECOVERABLE):
+                    log_error(e, f"LLM call failed after {self.retry_policy.max_retries} retries")
+                    raise ProviderError(
+                        f"Service temporarily unavailable: {format_error_for_user(e)}",
+                        context={"original_error": str(e)}
+                    )
+                raise
 
             if response.has_tool_calls:
                 tool_call_dicts = [
@@ -193,7 +259,9 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    
+                    # Execute tool with error handling
+                    result = await self._execute_tool_safe(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -204,8 +272,82 @@ class AgentLoop:
 
         return final_content, tools_used
 
+    async def _call_llm_with_retry(self, messages: list[dict]) -> "LLMResponse":
+        """
+        Call LLM with retry logic for transient errors.
+        
+        Args:
+            messages: Messages to send to the LLM.
+        
+        Returns:
+            LLM response.
+        """
+        last_error: Exception | None = None
+        
+        for attempt in range(1, self.retry_policy.max_retries + 1):
+            try:
+                return await self.provider.chat(
+                    messages=messages,
+                    tools=self.tools.get_definitions(),
+                    model=self.model,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                )
+            except Exception as e:
+                last_error = e
+                
+                if not self.retry_policy.should_retry(e, attempt):
+                    raise
+                
+                delay = self.retry_policy.get_delay(attempt, e)
+                logger.warning(
+                    f"LLM call retry {attempt}/{self.retry_policy.max_retries} "
+                    f"after {delay:.2f}s: {type(e).__name__}: {e}"
+                )
+                
+                await asyncio.sleep(delay)
+        
+        # Should not reach here, but raise last error just in case
+        if last_error:
+            raise last_error
+        raise RuntimeError("Unexpected state in LLM retry logic")
+
+    async def _execute_tool_safe(self, name: str, arguments: dict[str, Any]) -> str:
+        """
+        Execute a tool with safe error handling.
+        
+        Wraps tool execution to always return a string result,
+        even on error, so the agent can handle failures gracefully.
+        
+        Args:
+            name: Tool name.
+            arguments: Tool arguments.
+        
+        Returns:
+            Tool result as string (error message if execution failed).
+        """
+        try:
+            result = await self.tools.execute(name, arguments)
+            return result
+        except ToolTimeoutError as e:
+            log_error(e, f"Tool '{name}' timed out", level="warning")
+            return f"Error: Tool '{name}' timed out. Try a simpler request."
+        except ToolError as e:
+            log_error(e, f"Tool '{name}' failed")
+            return f"Error: {e.message}"
+        except Exception as e:
+            log_error(e, f"Tool '{name}' unexpected error")
+            return f"Error: {format_error_for_user(e)}"
+
     async def run(self) -> None:
-        """Run the agent loop, processing messages from the bus."""
+        """Run the agent loop, processing messages from the bus.
+        
+        Error Handling:
+        - Messages that fail processing are caught and a user-friendly
+          error response is sent back.
+        - Circuit breaker state is checked before processing.
+        - Errors are logged with structured context for debugging.
+        """
         self._running = True
         await self._connect_mcp()
         logger.info("Agent loop started")
@@ -220,12 +362,57 @@ class AgentLoop:
                     response = await self._process_message(msg)
                     if response:
                         await self.bus.publish_outbound(response)
-                except Exception as e:
-                    logger.error(f"Error processing message: {e}")
+                except CircuitBreakerError as e:
+                    # Circuit breaker is open - service unavailable
+                    log_error(e, "Message processing blocked", extra_context={
+                        "channel": msg.channel,
+                        "chat_id": msg.chat_id,
+                    })
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel,
                         chat_id=msg.chat_id,
-                        content=f"Sorry, I encountered an error: {str(e)}"
+                        content="The AI service is temporarily unavailable due to high load. "
+                                "Please wait a moment and try again."
+                    ))
+                except ProviderError as e:
+                    # Provider-specific errors
+                    log_error(e, "Provider error during message processing", extra_context={
+                        "channel": msg.channel,
+                        "chat_id": msg.chat_id,
+                    })
+                    await self.bus.publish_outbound(OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content=format_error_for_user(e)
+                    ))
+                except NanobotError as e:
+                    # Known nanobot errors
+                    log_error(e, "Error processing message", extra_context={
+                        "channel": msg.channel,
+                        "chat_id": msg.chat_id,
+                    })
+                    await self.bus.publish_outbound(OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content=format_error_for_user(e)
+                    ))
+                except Exception as e:
+                    # Unexpected errors - log with full context
+                    error_info = ErrorInfo.from_exception(e)
+                    log_error(
+                        e, 
+                        "Unexpected error processing message",
+                        extra_context={
+                            "channel": msg.channel,
+                            "chat_id": msg.chat_id,
+                            "severity": error_info.severity.value,
+                        },
+                        level="error",
+                    )
+                    await self.bus.publish_outbound(OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content="I encountered an unexpected error. Please try again."
                     ))
             except asyncio.TimeoutError:
                 continue

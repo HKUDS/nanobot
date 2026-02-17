@@ -3,13 +3,25 @@
 import json
 import json_repair
 import os
+import re
 from typing import Any
 
 import litellm
 from litellm import acompletion
+from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
+from nanobot.utils.errors import (
+    ProviderError,
+    ProviderConnectionError,
+    ProviderRateLimitError,
+    ProviderAuthError,
+    ProviderModelNotFoundError,
+    ProviderResponseError,
+    ErrorInfo,
+    log_error,
+)
 
 
 class LiteLLMProvider(LLMProvider):
@@ -123,6 +135,13 @@ class LiteLLMProvider(LLMProvider):
         
         Returns:
             LLMResponse with content and/or tool calls.
+        
+        Raises:
+            ProviderRateLimitError: If rate limit is exceeded.
+            ProviderConnectionError: If connection fails.
+            ProviderAuthError: If authentication fails.
+            ProviderModelNotFoundError: If model is not found.
+            ProviderError: For other provider errors.
         """
         model = self._resolve_model(model or self.default_model)
         
@@ -160,11 +179,127 @@ class LiteLLMProvider(LLMProvider):
             response = await acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
-            # Return error as content for graceful handling
-            return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
-                finish_reason="error",
+            # Convert to typed provider errors
+            raise self._classify_error(e, model) from e
+    
+    def _classify_error(self, error: Exception, model: str) -> ProviderError:
+        """
+        Classify a LiteLLM exception into a typed provider error.
+        
+        Args:
+            error: The original exception from LiteLLM.
+            model: The model being used when the error occurred.
+        
+        Returns:
+            Appropriate ProviderError subclass.
+        """
+        error_str = str(error).lower()
+        error_type = type(error).__name__
+        
+        # Extract retry-after header if present
+        retry_after = self._extract_retry_after(error)
+        
+        # Rate limit errors
+        if "rate limit" in error_str or "too many requests" in error_str or "429" in error_str:
+            log_error(error, "Rate limit exceeded", extra_context={"model": model})
+            return ProviderRateLimitError(
+                f"Rate limit exceeded for {model}",
+                retry_after=retry_after,
+                context={"model": model, "error_type": error_type}
             )
+        
+        # Authentication errors
+        if any(s in error_str for s in ["unauthorized", "invalid api key", "authentication", "401", "403"]):
+            log_error(error, "Authentication failed", extra_context={"model": model})
+            return ProviderAuthError(
+                f"Authentication failed for {model}. Check your API key.",
+                context={"model": model, "error_type": error_type}
+            )
+        
+        # Model not found errors
+        if any(s in error_str for s in ["model not found", "does not exist", "unknown model", "404"]):
+            log_error(error, "Model not found", extra_context={"model": model})
+            return ProviderModelNotFoundError(
+                f"Model '{model}' not found or not available.",
+                context={"model": model, "error_type": error_type}
+            )
+        
+        # Connection errors
+        if any(s in error_str for s in ["connection", "timeout", "network", "unreachable", "refused"]):
+            log_error(error, "Connection failed", extra_context={"model": model})
+            return ProviderConnectionError(
+                f"Failed to connect to provider for {model}",
+                context={"model": model, "error_type": error_type}
+            )
+        
+        # Context length exceeded
+        if "context length" in error_str or "maximum context" in error_str or "token limit" in error_str:
+            log_error(error, "Context length exceeded", extra_context={"model": model})
+            return ProviderResponseError(
+                f"Context length exceeded for {model}. Try reducing the conversation length.",
+                context={"model": model, "error_type": error_type}
+            )
+        
+        # Content filter / safety
+        if any(s in error_str for s in ["content filter", "safety", "inappropriate", "flagged"]):
+            log_error(error, "Content filtered", extra_context={"model": model})
+            return ProviderResponseError(
+                f"Request blocked by content filter for {model}",
+                context={"model": model, "error_type": error_type}
+            )
+        
+        # Overloaded / service unavailable
+        if any(s in error_str for s in ["overloaded", "503", "service unavailable", "capacity"]):
+            log_error(error, "Service overloaded", extra_context={"model": model})
+            return ProviderConnectionError(
+                f"Provider is overloaded. Please try again later.",
+                context={"model": model, "error_type": error_type}
+            )
+        
+        # Generic provider error
+        log_error(error, "Provider error", extra_context={"model": model})
+        return ProviderError(
+            f"Error from provider: {error}",
+            context={"model": model, "error_type": error_type}
+        )
+    
+    def _extract_retry_after(self, error: Exception) -> float | None:
+        """
+        Extract retry-after value from error if available.
+        
+        Args:
+            error: The exception to extract from.
+        
+        Returns:
+            Retry-after seconds if found, None otherwise.
+        """
+        error_str = str(error)
+        
+        # Try to parse retry-after from error message
+        # Common patterns: "retry after 30s", "wait 60 seconds"
+        patterns = [
+            r"retry.?after\s*(\d+(?:\.\d+)?)\s*s?",
+            r"wait\s*(\d+(?:\.\d+)?)\s*s?econds?",
+            r"retry.?in\s*(\d+(?:\.\d+)?)\s*s?",
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, error_str, re.IGNORECASE)
+            if match:
+                return float(match.group(1))
+        
+        # Check for LiteLLM specific attributes
+        if hasattr(error, "response"):
+            response = error.response
+            if hasattr(response, "headers"):
+                retry_after = response.headers.get("retry-after")
+                if retry_after:
+                    try:
+                        return float(retry_after)
+                    except ValueError:
+                        pass
+        
+        return None
     
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
