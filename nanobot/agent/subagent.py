@@ -44,7 +44,7 @@ class SubagentManager:
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
-        self.web_search_config = WebSearchConfig.from_legacy(config=web_search_config)
+        self.web_search_config = web_search_config or WebSearchConfig()
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.exec_config = exec_config or ExecToolConfig()
