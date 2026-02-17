@@ -2,7 +2,7 @@
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "nanobot gateway --port $PORT"
+startCommand = "/bin/sh -c 'exec nanobot gateway --port $PORT'"
 healthcheckPath = "/api/v1/health"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
