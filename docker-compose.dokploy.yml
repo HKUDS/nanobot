@@ -1,0 +1,38 @@
+services:
+  nanobot-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nanobot
+    restart: unless-stopped
+    volumes:
+      - nanobot-data:/root/.nanobot
+      - /var/run/docker.sock:/var/run/docker.sock
+    expose:
+      - "18790"
+    environment:
+      - LOG_LEVEL=INFO
+      - NANOBOT_TELEMETRY=false
+    command: ["gateway"]
+    healthcheck:
+      test: ["CMD", "nanobot", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - dokploy-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+networks:
+  dokploy-network:
+    external: true
+
+volumes:
+  nanobot-data:
