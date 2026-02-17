@@ -165,10 +165,15 @@ class AgentDefaults(BaseModel):
     memory_window: int = 50
 
 
+class AnswerConfig(BaseModel):
+    after_tool_calls: str = "Reflect on the results and decide next steps."
+    system_message_missing_final: str = "Background task completed."
+    message_missing_final: str = "I've completed processing but have no response to give."
+
 class AgentsConfig(BaseModel):
     """Agent configuration."""
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
-
+    answer_config: AnswerConfig = Field(default_factory=AnswerConfig)
 
 class ProviderConfig(BaseModel):
     """LLM provider configuration."""
