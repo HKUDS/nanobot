@@ -73,15 +73,10 @@ except ImportError:
 
 def _validate_url(url: str) -> tuple[bool, str]:
     """Return (True, '') if url is a valid http/https URL, else (False, reason)."""
-    try:
-        p = urlparse(url)
-        if p.scheme not in ("http", "https"):
-            return False, f"Only http/https allowed, got '{p.scheme or 'none'}'"
-        if not p.netloc:
-            return False, "Missing domain"
-        return True, ""
-    except Exception as e:
-        return False, str(e)
+    p = urlparse(url)
+    if p.scheme not in ("http", "https"):
+        return False, f"Only http/https allowed, got '{p.scheme or 'none'}'"
+    return (True, "") if p.netloc else (False, "Missing domain")
 
 
 def _find_browser_exe() -> str | None:
@@ -90,28 +85,17 @@ def _find_browser_exe() -> str | None:
 
 
 def _get_win_username() -> str:
-    """Return the Windows username via PowerShell, with a directory-scan fallback."""
-    if Path(_POWERSHELL).exists():
-        try:
-            result = subprocess.run(
-                [_POWERSHELL, "-NoProfile", "-Command", "$env:USERNAME"],
-                capture_output=True, text=True, timeout=5,
-            )
-            if username := result.stdout.strip():
-                return username
-        except Exception:
-            pass
-    # Fallback: pick the non-system user directory with the most entries
-    skip = {"default", "default user", "public", "all users", "defaultuser0"}
+    """Return the Windows username via PowerShell, falling back to $USER env var."""
+    if not Path(_POWERSHELL).exists():
+        return os.environ.get("USER", "user")
     try:
-        users_dir = Path("/mnt/c/Users")
-        if users_dir.exists():
-            candidates = [d for d in users_dir.iterdir() if d.is_dir() and d.name.lower() not in skip]
-            if candidates:
-                return max(candidates, key=lambda d: sum(1 for _ in d.iterdir())).name
-    except Exception:
-        pass
-    return os.environ.get("USER", "user")
+        result = subprocess.run(
+            [_POWERSHELL, "-NoProfile", "-Command", "$env:USERNAME"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout.strip() or os.environ.get("USER", "user")
+    except (OSError, subprocess.TimeoutExpired):
+        return os.environ.get("USER", "user")
 
 
 def _resolve_proxy(proxy_server: str) -> str:
@@ -313,14 +297,10 @@ class BrowserSession:
 
     async def close(self) -> None:
         """Disconnect from remote CDP or close local Chromium (saving storage state first)."""
-        if not self._remote and self._context and self._storage_state_path:
-            try:
-                path = Path(self._storage_state_path).resolve()
-                path.parent.mkdir(parents=True, exist_ok=True)
-                await self._context.storage_state(path=str(path))
-                path.chmod(0o600)
-            except Exception as e:
-                logger.warning("Browser: storage state save on close failed: {}", e)
+        if not self._remote and self._context:
+            ok, msg = await self.save_storage_state()
+            if not ok and msg.startswith("Save failed"):
+                logger.warning("Browser: save on close: {}", msg)
 
         if self._browser:
             await self._browser.close()
@@ -395,11 +375,7 @@ class BrowserNavigateTool(Tool):
 
         # Reconfigure session if the agent is requesting a different browser or headless mode
         if browser != "default" or headless is not None:
-            new_cdp: str | None = None
-            if browser == "chromium":
-                new_cdp = ""
-            elif browser == "edge":
-                new_cdp = self._default_cdp_url or "http://localhost:9223"
+            new_cdp = {"chromium": "", "edge": self._default_cdp_url or "http://localhost:9223"}.get(browser)
             await self._session.reconfigure(cdp_url=new_cdp, headless=headless)
 
         try:
