@@ -1,0 +1,33 @@
+services:
+  nanobot:
+    image: nanobot:latest
+    build: .
+    container_name: nanobot
+    restart: unless-stopped
+    command: ["gateway"]
+    ports:
+      - "${NANOBOT_GATEWAY_PORT:-18790}:18790"
+    volumes:
+      - nanobot-data:/root/.nanobot
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - NANOBOT_AGENTS__DEFAULTS__MODEL
+      - NANOBOT_PROVIDERS__ANTHROPIC__API_KEY
+      - NANOBOT_PROVIDERS__OPENROUTER__API_KEY
+      - NANOBOT_PROVIDERS__OPENAI__API_KEY
+      - NANOBOT_PROVIDERS__DEEPSEEK__API_KEY
+      - NANOBOT_PROVIDERS__GEMINI__API_KEY
+      - NANOBOT_PROVIDERS__GROQ__API_KEY
+      - NANOBOT_PROVIDERS__VLLM__API_KEY
+      - NANOBOT_PROVIDERS__VLLM__API_BASE
+      - NANOBOT_TOOLS__WEB__SEARCH__API_KEY
+      - NANOBOT_CHANNELS__TELEGRAM__ENABLED
+      - NANOBOT_CHANNELS__TELEGRAM__TOKEN
+      - NANOBOT_CHANNELS__DISCORD__ENABLED
+      - NANOBOT_CHANNELS__DISCORD__TOKEN
+      - NANOBOT_CHANNELS__WHATSAPP__ENABLED
+
+volumes:
+  nanobot-data:
