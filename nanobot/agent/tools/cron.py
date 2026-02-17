@@ -99,6 +99,12 @@ class CronTool(Tool):
             return "Error: no session context (channel/chat_id)"
         if tz and not cron_expr:
             return "Error: tz can only be used with cron_expr"
+        if tz:
+            from zoneinfo import ZoneInfo
+            try:
+                ZoneInfo(tz)
+            except (KeyError, Exception):
+                return f"Error: unknown timezone '{tz}'"
         
         # Build schedule
         delete_after = False
