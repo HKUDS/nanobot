@@ -204,7 +204,6 @@ class AgentLoop:
                 break
 
         return final_content, tools_used, reasoning_content
-                break
 
         return final_content, tools_used
 
@@ -456,7 +455,7 @@ Respond with ONLY valid JSON, no markdown fences."""
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
-    ) -> str:
+    ) -> OutboundMessage:
         """
         Process a message directly (for CLI or cron usage).
         
@@ -478,4 +477,4 @@ Respond with ONLY valid JSON, no markdown fences."""
         )
         
         response = await self._process_message(msg, session_key=session_key)
-        return response.content if response else ""
+        return response if response else OutboundMessage(channel=channel, chat_id=chat_id, content="")
