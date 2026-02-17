@@ -359,6 +359,7 @@ def gateway(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
+        browser_config=config.tools.browser,
     )
     
     # Set cron callback (needs agent)
@@ -417,7 +418,7 @@ def gateway(
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
-            await agent.close_mcp()
+            await agent.close()
             heartbeat.stop()
             cron.stop()
             agent.stop()
@@ -469,8 +470,9 @@ def agent(
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
+        browser_config=config.tools.browser,
     )
-    
+
     # Show spinner when logs are off (no output to miss); skip when logs are on
     def _thinking_ctx():
         if logs:
@@ -485,8 +487,8 @@ def agent(
             with _thinking_ctx():
                 response = await agent_loop.process_direct(message, session_id)
             _print_agent_response(response, render_markdown=markdown)
-            await agent_loop.close_mcp()
-        
+            await agent_loop.close()
+
         asyncio.run(run_once())
     else:
         # Interactive mode
@@ -527,8 +529,8 @@ def agent(
                         console.print("\nGoodbye!")
                         break
             finally:
-                await agent_loop.close_mcp()
-        
+                await agent_loop.close()
+
         asyncio.run(run_interactive())
 
 

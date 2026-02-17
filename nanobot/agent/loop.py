@@ -53,10 +53,12 @@ class AgentLoop:
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
+        browser_config: "BrowserToolConfig | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
         self.bus = bus
+        self._browser_config = browser_config
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
@@ -88,6 +90,7 @@ class AgentLoop:
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
+        self._browser_session: Any = None
         self._register_default_tools()
     
     def _register_default_tools(self) -> None:
@@ -121,7 +124,19 @@ class AgentLoop:
         # Cron tool (for scheduling)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
-    
+
+        # Browser tools (optional; requires tools.browser.enabled and playwright)
+        if self._browser_config and getattr(self._browser_config, "enabled", False):
+            try:
+                from nanobot.agent.tools.browser import create_browser_tools
+                browser_tools, self._browser_session = create_browser_tools(
+                    self._browser_config, self.workspace
+                )
+                for tool in browser_tools:
+                    self.tools.register(tool)
+            except ImportError:
+                pass
+
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
         if self._mcp_connected or not self._mcp_servers:
@@ -238,6 +253,13 @@ class AgentLoop:
             except (RuntimeError, BaseExceptionGroup):
                 pass  # MCP SDK cancel scope cleanup is noisy but harmless
             self._mcp_stack = None
+
+    async def close(self) -> None:
+        """Close MCP and browser session. Idempotent."""
+        await self.close_mcp()
+        if self._browser_session is not None:
+            await self._browser_session.close()
+            self._browser_session = None
 
     def stop(self) -> None:
         """Stop the agent loop."""

@@ -218,6 +218,23 @@ class ExecToolConfig(BaseModel):
     timeout: int = 60
 
 
+class BrowserToolConfig(BaseModel):
+    """Browser automation tool configuration (Playwright). Optional; requires [browser] extra.
+
+    Two modes:
+    - Local (cdp_url unset): launches headless Chromium; cookies saved to storage_state_path.
+    - Remote CDP (cdp_url set): attaches to an existing browser (e.g. Windows Edge on WSL2).
+      storage_state_path and proxy_server are ignored in remote mode.
+    """
+    enabled: bool = False
+    headless: bool = True
+    timeout_ms: int = 30000
+    proxy_server: str = ""  # Chromium ignores HTTP_PROXY by default; set explicitly if needed
+    storage_state_path: str = ""  # Empty = workspace/browser/cookie.json (local mode only)
+    cdp_url: str = ""  # Remote CDP endpoint, e.g. "http://localhost:9223" for Windows Edge
+    auto_start: bool = True  # Auto-launch Windows browser via PowerShell if CDP unreachable (remote mode only)
+
+
 class MCPServerConfig(BaseModel):
     """MCP server connection configuration (stdio or HTTP)."""
     command: str = ""  # Stdio: command to run (e.g. "npx")
@@ -230,6 +247,7 @@ class ToolsConfig(BaseModel):
     """Tools configuration."""
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    browser: BrowserToolConfig = Field(default_factory=BrowserToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
