@@ -20,6 +20,7 @@ from prompt_toolkit.patch_stdout import patch_stdout
 
 from nanobot import __version__, __logo__
 from nanobot.config.schema import Config
+from nanobot.bus.events import OutboundMessage
 
 app = typer.Typer(
     name="nanobot",
@@ -97,10 +98,15 @@ def _init_prompt_session() -> None:
     )
 
 
-def _print_agent_response(response: str, render_markdown: bool) -> None:
+def _print_agent_response(message: OutboundMessage, render_markdown: bool) -> None:
     """Render assistant response with consistent terminal styling."""
     import re
-    content = response or ""
+    content = message.content or ""
+    
+    # Display reasoning content in dim italics if present
+    if message.reasoning_content:
+        console.print()
+        console.print(f"[dim italic]{message.reasoning_content}[/dim italic]")
     # Skip Markdown for very short responses that look like list items (e.g., "4.", "1.")
     # Rich's Markdown parser interprets "N." as a numbered list and renders nothing for single items
     if render_markdown and len(content) < 20 and re.match(r'^\d+\.\s*$', content.strip()):

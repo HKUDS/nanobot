@@ -200,6 +200,10 @@ class AgentLoop:
                 messages.append({"role": "user", "content": "Reflect on the results and decide next steps."})
             else:
                 final_content = response.content
+                reasoning_content = response.reasoning_content
+                break
+
+        return final_content, tools_used, reasoning_content
                 break
 
         return final_content, tools_used
@@ -297,7 +301,7 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
         )
-        final_content, tools_used = await self._run_agent_loop(initial_messages)
+        final_content, tools_used, reasoning_content = await self._run_agent_loop(initial_messages)
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
@@ -314,6 +318,7 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
+            reasoning_content=reasoning_content,
             metadata=msg.metadata or {},  # Pass through for channel-specific needs (e.g. Slack thread_ts)
         )
     
