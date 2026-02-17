@@ -153,6 +153,7 @@ class AgentLoop:
         session: "Session | None" = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        is_continuation: bool = False,
     ) -> tuple[str | None, list[str]]:
         """
         Run the agent iteration loop.
@@ -162,6 +163,7 @@ class AgentLoop:
             session: Optional session for verbose mode checking and message sending.
             channel: Channel for verbose message sending.
             chat_id: Chat ID for verbose message sending.
+            is_continuation: If True, this is a continued loop, don't send max_iterations warning.
 
         Returns:
             Tuple of (final_content, list_of_tools_used).
@@ -249,8 +251,8 @@ class AgentLoop:
                     "tools_used": tools_used,
                 }
                 self.sessions.save(session)
-            # Notify user if we have channel info
-            if channel and chat_id:
+            # Notify user if we have channel info (but not for continuations - caller handles it)
+            if channel and chat_id and not is_continuation:
                 await self.bus.publish_outbound(OutboundMessage(
                     channel=channel,
                     chat_id=chat_id,
@@ -268,7 +270,7 @@ class AgentLoop:
     ) -> tuple[str | None, list[str]]:
         """
         Continue the agent loop from a paused state with reset iteration counter.
-        Simply delegates to _run_agent_loop with start_iteration=0.
+        Delegates to _run_agent_loop with is_continuation=True.
 
         Args:
             messages: Current message state from paused loop.
@@ -284,6 +286,7 @@ class AgentLoop:
             session=session,
             channel=channel,
             chat_id=chat_id,
+            is_continuation=True,
         )
 
     async def run(self) -> None:
