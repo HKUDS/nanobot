@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
+from nanobot.nodes.types import NodeServerConfig, NodeClientConfig
+
 
 class Base(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
@@ -265,6 +267,13 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class NodesConfig(Base):
+    """Multi-node management configuration."""
+
+    server: NodeServerConfig = Field(default_factory=NodeServerConfig)
+    client: NodeClientConfig = Field(default_factory=NodeClientConfig)
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -273,6 +282,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    nodes: NodesConfig = Field(default_factory=NodesConfig)
 
     @property
     def workspace_path(self) -> Path:
