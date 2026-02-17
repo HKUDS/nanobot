@@ -72,12 +72,28 @@ def _migrate_config(data: dict) -> dict:
     return data
 
 
-def convert_keys(data: Any) -> Any:
+_PRESERVE_ENTRY_KEY_FIELDS = {"extraHeaders", "extra_headers"}
+
+
+def convert_keys(data: Any, preserve_entry_keys: bool = False) -> Any:
     """Convert camelCase keys to snake_case for Pydantic."""
+    return _convert_keys(data, preserve_entry_keys=preserve_entry_keys)
+
+
+def _convert_keys(data: Any, preserve_entry_keys: bool) -> Any:
+    """Convert keys recursively while preserving selected free-form entry keys."""
     if isinstance(data, dict):
-        return {camel_to_snake(k): convert_keys(v) for k, v in data.items()}
+        if preserve_entry_keys:
+            return {k: _convert_keys(v, preserve_entry_keys=False) for k, v in data.items()}
+
+        converted: dict[str, Any] = {}
+        for key, value in data.items():
+            converted_key = camel_to_snake(key)
+            preserve_header_entry_keys = key in _PRESERVE_ENTRY_KEY_FIELDS
+            converted[converted_key] = _convert_keys(value, preserve_header_entry_keys)
+        return converted
     if isinstance(data, list):
-        return [convert_keys(item) for item in data]
+        return [_convert_keys(item, preserve_entry_keys=False) for item in data]
     return data
 
 
