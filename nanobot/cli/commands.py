@@ -99,7 +99,12 @@ def _init_prompt_session() -> None:
 
 def _print_agent_response(response: str, render_markdown: bool) -> None:
     """Render assistant response with consistent terminal styling."""
+    import re
     content = response or ""
+    # Skip Markdown for very short responses that look like list items (e.g., "4.", "1.")
+    # Rich's Markdown parser interprets "N." as a numbered list and renders nothing for single items
+    if render_markdown and len(content) < 20 and re.match(r'^\d+\.\s*$', content.strip()):
+        render_markdown = False
     body = Markdown(content) if render_markdown else Text(content)
     console.print()
     console.print(f"[cyan]{__logo__} nanobot[/cyan]")
