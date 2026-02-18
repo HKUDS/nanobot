@@ -42,6 +42,7 @@ dependencies = [
     "prompt-toolkit>=3.0.0",
     "mcp>=1.0.0",
     "json-repair>=0.30.0",
+    "tomli>=2.0.0; python_version<\"3.11\"",
 ]
 
 [project.optional-dependencies]
