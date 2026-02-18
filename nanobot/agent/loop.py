@@ -328,29 +328,9 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
         )
-<<<<<<< HEAD
         final_content, tools_used, reasoning_content = await self._run_agent_loop(initial_messages)
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
-        if final_content is None:
-            final_content = "I've completed processing but have no response to give."
-        
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
-        
-        session.add_message("user", msg.content)
-        session.add_message("assistant", final_content,
-                            tools_used=tools_used if tools_used else None)
-        self.sessions.save(session)
-        
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=final_content,
-            reasoning_content=reasoning_content,
-            metadata=msg.metadata or {},  # Pass through for channel-specific needs (e.g. Slack thread_ts)
-        )
-    
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
         Process a system message (e.g., subagent announce).
@@ -485,7 +465,7 @@ Respond with ONLY valid JSON, no markdown fences."""
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
-<<<<<<< HEAD
+        on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> OutboundMessage:
         """
         Process a message directly (for CLI or cron usage).
@@ -494,6 +474,9 @@ Respond with ONLY valid JSON, no markdown fences."""
             session_key: Session identifier (overrides channel:chat_id for session lookup).
             channel: Source channel (for tool context routing).
             chat_id: Source chat ID (for tool context routing).
+            on_progress: Optional callback for intermediate output.
+        
+        Returns:
             OutboundMessage with reasoning_content field populated.
         """
         await self._connect_mcp()
@@ -503,5 +486,5 @@ Respond with ONLY valid JSON, no markdown fences."""
             chat_id=chat_id,
             content=content
         )
-        response = await self._process_message(msg, session_key=session_key)
+        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
         return response if response else OutboundMessage(channel=channel, chat_id=chat_id, content="")
