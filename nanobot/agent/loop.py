@@ -68,6 +68,7 @@ class AgentLoop:
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
+        strip_thinking_blocks: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
@@ -83,6 +84,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.strip_thinking_blocks = strip_thinking_blocks
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -357,10 +359,8 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
         
-        # Strip thinking blocks from the response before sending to the user.
-        # Handles <think>...</think> (e.g. DeepSeek-R1) and bare </think>
-        # prefixes (e.g. GLM models that omit the opening tag).
-        final_content = _strip_thinking_blocks(final_content)
+        if self.strip_thinking_blocks:
+            final_content = _strip_thinking_blocks(final_content)
         
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
