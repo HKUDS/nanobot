@@ -225,11 +225,10 @@ class AgentLoop:
                         messages, tool_call.id, tool_call.name, result
                     )
             else:
-                final_content = self._strip_think(response.content)
+                final_content = response.content
+                reasoning_content = response.reasoning_content
                 break
-
-        return final_content, tools_used
-
+        return final_content, tools_used, reasoning_content
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
         self._running = True
@@ -329,20 +328,9 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
         )
-
-        async def _bus_progress(content: str) -> None:
-            await self.bus.publish_outbound(OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content=content,
-                metadata=msg.metadata or {},
-            ))
-
-        final_content, tools_used = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
-        )
-
+        final_content, tools_used, reasoning_content = await self._run_agent_loop(initial_messages)
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
-        
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
         
@@ -355,10 +343,9 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
+            reasoning_content=reasoning_content,
             metadata=msg.metadata or {},  # Pass through for channel-specific needs (e.g. Slack thread_ts)
         )
-    
-    async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
         """
         Process a system message (e.g., subagent announce).
         
@@ -493,10 +480,9 @@ Respond with ONLY valid JSON, no markdown fences."""
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
-    ) -> str:
+    ) -> OutboundMessage:
         """
         Process a message directly (for CLI or cron usage).
-        
         Args:
             content: The message content.
             session_key: Session identifier (overrides channel:chat_id for session lookup).
@@ -505,7 +491,7 @@ Respond with ONLY valid JSON, no markdown fences."""
             on_progress: Optional callback for intermediate output.
         
         Returns:
-            The agent's response.
+            OutboundMessage with reasoning_content field populated.
         """
         await self._connect_mcp()
         msg = InboundMessage(
@@ -514,6 +500,5 @@ Respond with ONLY valid JSON, no markdown fences."""
             chat_id=chat_id,
             content=content
         )
-        
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
-        return response.content if response else ""
+        return response if response else OutboundMessage(channel=channel, chat_id=chat_id, content="")
