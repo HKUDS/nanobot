@@ -119,6 +119,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # SiliconFlow (硅基流动): OpenAI-compatible gateway, model names keep org prefix
+    ProviderSpec(
+        name="siliconflow",
+        keywords=("siliconflow",),
+        env_key="OPENAI_API_KEY",
+        display_name="SiliconFlow",
+        litellm_prefix="openai",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="siliconflow",
+        default_api_base="https://api.siliconflow.cn/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # === Standard providers (matched by model-name keywords) ===============
 
     # Anthropic: LiteLLM recognizes "claude-*" natively, no prefix needed.
