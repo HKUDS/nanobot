@@ -29,7 +29,7 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
-    
+  
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
         msg = {
@@ -42,32 +42,15 @@ class Session:
         self.updated_at = datetime.now()
     
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """
-        Get recent messages in LLM format.
-
-        Preserves tool call metadata so sessions can be replayed accurately.
-        """
-        history: list[dict[str, Any]] = []
-        for msg in self.messages[-max_messages:]:
-            llm_msg: dict[str, Any] = {
-                "role": msg["role"],
-                "content": msg.get("content", ""),
-            }
-
-            # Preserve assistant tool call descriptors.
-            if msg["role"] == "assistant" and "tool_calls" in msg:
-                llm_msg["tool_calls"] = msg["tool_calls"]
-
-            # Preserve tool response linkage for tool role messages.
-            if msg["role"] == "tool":
-                if "tool_call_id" in msg:
-                    llm_msg["tool_call_id"] = msg["tool_call_id"]
-                if "name" in msg:
-                    llm_msg["name"] = msg["name"]
-
-            history.append(llm_msg)
-
-        return history
+        """Get recent messages in LLM format, preserving tool metadata."""
+        out: list[dict[str, Any]] = []
+        for m in self.messages[-max_messages:]:
+            entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
+            for k in ("tool_calls", "tool_call_id", "name"):
+                if k in m:
+                    entry[k] = m[k]
+            out.append(entry)
+        return out
     
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
@@ -85,13 +68,19 @@ class SessionManager:
 
     def __init__(self, workspace: Path):
         self.workspace = workspace
-        self.sessions_dir = ensure_dir(Path.home() / ".nanobot" / "sessions")
+        self.sessions_dir = ensure_dir(self.workspace / "sessions")
+        self.legacy_sessions_dir = Path.home() / ".nanobot" / "sessions"
         self._cache: dict[str, Session] = {}
     
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
         safe_key = safe_filename(key.replace(":", "_"))
         return self.sessions_dir / f"{safe_key}.jsonl"
+
+    def _get_legacy_session_path(self, key: str) -> Path:
+        """Legacy global session path (~/.nanobot/sessions/)."""
+        safe_key = safe_filename(key.replace(":", "_"))
+        return self.legacy_sessions_dir / f"{safe_key}.jsonl"
     
     def get_or_create(self, key: str) -> Session:
         """
@@ -116,6 +105,12 @@ class SessionManager:
     def _load(self, key: str) -> Session | None:
         """Load a session from disk."""
         path = self._get_session_path(key)
+        if not path.exists():
+            legacy_path = self._get_legacy_session_path(key)
+            if legacy_path.exists():
+                import shutil
+                shutil.move(str(legacy_path), str(path))
+                logger.info(f"Migrated session {key} from legacy path")
 
         if not path.exists():
             return None

@@ -1,6 +1,7 @@
 """LiteLLM provider implementation for multi-provider support."""
 
 import json
+import json_repair
 import os
 from typing import Any
 
@@ -53,6 +54,9 @@ class LiteLLMProvider(LLMProvider):
         """Set environment variables based on detected provider."""
         spec = self._gateway or find_by_model(model)
         if not spec:
+            return
+        if not spec.env_key:
+            # OAuth/provider-only specs (for example: openai_codex)
             return
 
         # Gateway/local overrides existing env; standard provider doesn't
@@ -173,10 +177,7 @@ class LiteLLMProvider(LLMProvider):
                 # Parse arguments from JSON string if needed
                 args = tc.function.arguments
                 if isinstance(args, str):
-                    try:
-                        args = json.loads(args)
-                    except json.JSONDecodeError:
-                        args = {"raw": args}
+                    args = json_repair.loads(args)
                 
                 tool_calls.append(ToolCallRequest(
                     id=tc.id,
