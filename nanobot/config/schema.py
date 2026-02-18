@@ -165,6 +165,15 @@ class QQConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
 
+class OpenAIConfig(Base):
+    """OpenAI-compatible API channel configuration."""
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 18791
+    api_key: str = ""
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -177,6 +186,7 @@ class ChannelsConfig(Base):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
 
 
 class AgentDefaults(Base):

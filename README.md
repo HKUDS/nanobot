@@ -169,6 +169,7 @@ Connect nanobot to your favorite chat platform.
 | **Slack** | Bot token + App-Level token |
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
+| **OpenAI-compatible frontends** (Open WebUI, ChatBox, ...) | Host + Port + Optional API key |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -557,6 +558,57 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 
 ```bash
 nanobot gateway
+```
+
+</details>
+
+<details>
+<summary><b>OpenAI-compatible frontends (Open WebUI, ChatBox, ...)</b></summary>
+
+Exposes an OpenAI-compatible `/v1/chat/completions` endpoint, allowing you to connect nanobot to any OpenAI-compatible frontend (Open WebUI, ChatBox, etc.).
+
+Can be used to add nanobot as a conversation agent in Home Assistant using the [Extended OpenAI Conversation](https://www.home-assistant.io/integrations/openai_conversation/) integration.
+
+**1. Configure**
+
+```json
+{
+  "channels": {
+    "openai": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 18791,
+      "apiKey": "your-secret-key"
+    }
+  }
+}
+```
+
+> - `host`: Server bind address (default: `127.0.0.1`)
+> - `port`: Server port (default: `18791`)
+> - `apiKey`: Optional Bearer token for authentication. Leave empty (`""`) to disable auth.
+
+**2. Run**
+
+```bash
+nanobot gateway
+```
+
+**3. Connect from any OpenAI-compatible client**
+
+- **Base URL**: `http://127.0.0.1:18791/v1`
+- **API Key**: Your configured `apiKey` (or anything if auth is disabled)
+- **Model**: `nanobot`
+
+Example with curl:
+```bash
+curl http://127.0.0.1:18791/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret-key" \
+  -d '{
+    "model": "nanobot",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
 ```
 
 </details>

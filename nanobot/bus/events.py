@@ -2,7 +2,14 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Any
+
+
+class MessageType(Enum):
+    """Type of outbound message."""
+    RESPONSE = "response"
+    PROGRESS = "progress"
 
 
 @dataclass
@@ -33,5 +40,4 @@ class OutboundMessage:
     reply_to: str | None = None
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-
-
+    type: MessageType = MessageType.RESPONSE
