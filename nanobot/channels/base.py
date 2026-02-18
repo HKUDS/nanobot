@@ -69,11 +69,13 @@ class BaseChannel(ABC):
             True if allowed, False otherwise.
         """
         allow_list = getattr(self.config, "allow_from", [])
-        
-        # If no allow list, allow everyone
+        public_access = bool(getattr(self.config, "public_access", False))
+
+        # Fail closed by default: empty allowlist means "deny all" unless
+        # explicitly opened with public_access.
         if not allow_list:
-            return True
-        
+            return public_access
+
         sender_str = str(sender_id)
         if sender_str in allow_list:
             return True
@@ -104,9 +106,21 @@ class BaseChannel(ABC):
             metadata: Optional channel-specific metadata.
         """
         if not self.is_allowed(sender_id):
+            allow_list = getattr(self.config, "allow_from", [])
+            public_access = bool(getattr(self.config, "public_access", False))
+            if not allow_list and not public_access:
+                reason = (
+                    "No allowFrom configured and publicAccess is false. "
+                    "Set allowFrom or enable publicAccess to allow inbound messages."
+                )
+            else:
+                reason = (
+                    "Sender is not present in allowFrom list. "
+                    "Add the sender ID to allowFrom to grant access."
+                )
             logger.warning(
                 f"Access denied for sender {sender_id} on channel {self.name}. "
-                f"Add them to allowFrom list in config to grant access."
+                f"{reason}"
             )
             return
         

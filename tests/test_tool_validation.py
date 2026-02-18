@@ -1,7 +1,15 @@
+import os
 from typing import Any
+
+import pytest
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.shell import ExecTool
+from nanobot.bus.events import OutboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.channels.base import BaseChannel
+from nanobot.config.schema import TelegramConfig
 
 
 class SampleTool(Tool):
@@ -38,6 +46,17 @@ class SampleTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         return "ok"
+
+
+class DummyChannel(BaseChannel):
+    async def start(self) -> None:
+        self._running = True
+
+    async def stop(self) -> None:
+        self._running = False
+
+    async def send(self, msg: OutboundMessage) -> None:
+        _ = msg
 
 
 def test_validate_params_missing_required() -> None:
@@ -86,3 +105,76 @@ async def test_registry_returns_validation_error() -> None:
     reg.register(SampleTool())
     result = await reg.execute("sample", {"query": "hi"})
     assert "Invalid parameters" in result
+
+
+def test_guard_blocks_python_rmtree_script() -> None:
+    tool = ExecTool()
+    result = tool._guard_command(
+        "python -c \"import shutil; shutil.rmtree('tmp', ignore_errors=True)\"",
+        os.getcwd(),
+    )
+    assert result is not None
+    assert "blocked" in result.lower()
+
+
+def test_guard_blocks_wrapper_interpreter_script() -> None:
+    tool = ExecTool()
+    result = tool._guard_command(
+        "uv run python -c \"import os; os.remove('x.txt')\"",
+        os.getcwd(),
+    )
+    assert result is not None
+    assert "blocked" in result.lower()
+
+
+def test_guard_allows_non_destructive_python_script() -> None:
+    tool = ExecTool()
+    result = tool._guard_command("python -c \"print('ok')\"", os.getcwd())
+    assert result is None
+
+
+def test_guard_blocks_nonexistent_python_script_file() -> None:
+    tool = ExecTool()
+    result = tool._guard_command("python cleanup.py", os.getcwd())
+    assert result is not None
+    assert "blocked" in result.lower()
+
+
+def test_guard_blocks_destructive_python_script_file(tmp_path) -> None:
+    script = tmp_path / "wipe.py"
+    script.write_text("import os\nos.remove('x.txt')\n", encoding="utf-8")
+
+    tool = ExecTool()
+    result = tool._guard_command(f'python "{script}"', os.getcwd())
+    assert result is not None
+    assert "blocked" in result.lower()
+
+
+def test_guard_allows_safe_python_script_file(tmp_path) -> None:
+    script = tmp_path / "safe.py"
+    script.write_text("print('ok')\n", encoding="utf-8")
+
+    tool = ExecTool()
+    result = tool._guard_command(f'python "{script}"', os.getcwd())
+    assert result is None
+
+
+def test_is_allowed_denies_when_allowlist_empty_by_default() -> None:
+    channel = DummyChannel(TelegramConfig(), MessageBus())
+    assert channel.is_allowed("123") is False
+
+
+def test_is_allowed_allows_when_public_access_enabled() -> None:
+    channel = DummyChannel(TelegramConfig(public_access=True), MessageBus())
+    assert channel.is_allowed("123") is True
+
+
+@pytest.mark.asyncio
+async def test_handle_message_is_dropped_when_not_allowed() -> None:
+    channel = DummyChannel(TelegramConfig(), MessageBus())
+    await channel._handle_message(
+        sender_id="123",
+        chat_id="c1",
+        content="hello",
+    )
+    assert channel.bus.inbound_size == 0

@@ -363,14 +363,15 @@ Uses **WebSocket** long connection — no public IP required.
       "appSecret": "xxx",
       "encryptKey": "",
       "verificationToken": "",
-      "allowFrom": []
+      "allowFrom": ["ou_xxx"]
     }
   }
 }
 ```
 
 > `encryptKey` and `verificationToken` are optional for Long Connection mode.
-> `allowFrom`: Leave empty to allow all users, or add `["ou_xxx"]` to restrict access.
+> `allowFrom`: If empty, access is denied by default. Add `["ou_xxx"]` to allow specific users.
+> To open access intentionally, set `"publicAccess": true`.
 
 **3. Run**
 
@@ -400,7 +401,8 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
 
 **3. Configure**
 
-> - `allowFrom`: Leave empty for public access, or add user openids to restrict. You can find openids in the nanobot logs when a user messages the bot.
+> - `allowFrom`: If empty, access is denied by default. Add user openids to allow them.
+> - To open access intentionally, set `"publicAccess": true`.
 > - For production: submit a review in the bot console and publish. See [QQ Bot Docs](https://bot.q.qq.com/wiki/) for the full publishing flow.
 
 ```json
@@ -410,7 +412,7 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
       "enabled": true,
       "appId": "YOUR_APP_ID",
       "secret": "YOUR_APP_SECRET",
-      "allowFrom": []
+      "allowFrom": ["YOUR_OPENID"]
     }
   }
 }
@@ -449,13 +451,14 @@ Uses **Stream Mode** — no public IP required.
       "enabled": true,
       "clientId": "YOUR_APP_KEY",
       "clientSecret": "YOUR_APP_SECRET",
-      "allowFrom": []
+      "allowFrom": ["staffId"]
     }
   }
 }
 ```
 
-> `allowFrom`: Leave empty to allow all users, or add `["staffId"]` to restrict access.
+> `allowFrom`: If empty, access is denied by default. Add `["staffId"]` to allow specific users.
+> To open access intentionally, set `"publicAccess": true`.
 
 **3. Run**
 
@@ -523,7 +526,8 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 **2. Configure**
 
 > - `consentGranted` must be `true` to allow mailbox access. This is a safety gate — set `false` to fully disable.
-> - `allowFrom`: Leave empty to accept emails from anyone, or restrict to specific senders.
+> - `allowFrom`: If empty, access is denied by default. Add allowed sender emails explicitly.
+> - To accept emails from anyone intentionally, set `"publicAccess": true`.
 > - `smtpUseTls` and `smtpUseSsl` default to `true` / `false` respectively, which is correct for Gmail (port 587 + STARTTLS). No need to set them explicitly.
 > - Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
 
@@ -777,7 +781,9 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | Option | Default | Description |
 |--------|---------|-------------|
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
-| `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
+| `tools.exec.blockDestructiveScripts` | `true` | Blocks script-based destructive operations (e.g. `python -c "shutil.rmtree(...)"` or unsafe script file execution). |
+| `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies by default; non-empty = only listed users can interact. |
+| `channels.*.publicAccess` | `false` | Optional override for open bots. When `true`, empty `allowFrom` allows all users. |
 
 
 ## CLI Reference
