@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 from loguru import logger
-from telegram import BotCommand, Update
+from telegram import BotCommand, Update, ReplyParameters
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
@@ -224,6 +224,15 @@ class TelegramChannel(BaseChannel):
             logger.error(f"Invalid chat_id: {msg.chat_id}")
             return
 
+        # Build reply parameters (Will reply to the message if it exists)
+        reply_to_message_id = msg.metadata.get("message_id")
+        reply_params = None
+        if reply_to_message_id:
+            reply_params = ReplyParameters(
+                message_id=reply_to_message_id,
+                allow_sending_without_reply=True
+            )
+
         # Send media files
         for media_path in (msg.media or []):
             try:
@@ -235,22 +244,39 @@ class TelegramChannel(BaseChannel):
                 }.get(media_type, self._app.bot.send_document)
                 param = "photo" if media_type == "photo" else media_type if media_type in ("voice", "audio") else "document"
                 with open(media_path, 'rb') as f:
-                    await sender(chat_id=chat_id, **{param: f})
+                    await sender(
+                        chat_id=chat_id, 
+                        **{param: f},
+                        reply_parameters=reply_params
+                    )
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
                 logger.error(f"Failed to send media {media_path}: {e}")
-                await self._app.bot.send_message(chat_id=chat_id, text=f"[Failed to send: {filename}]")
+                await self._app.bot.send_message(
+                    chat_id=chat_id, 
+                    text=f"[Failed to send: {filename}]",
+                    reply_parameters=reply_params
+                )
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
             for chunk in _split_message(msg.content):
                 try:
                     html = _markdown_to_telegram_html(chunk)
-                    await self._app.bot.send_message(chat_id=chat_id, text=html, parse_mode="HTML")
+                    await self._app.bot.send_message(
+                        chat_id=chat_id, 
+                        text=html, 
+                        parse_mode="HTML",
+                        reply_parameters=reply_params
+                    )
                 except Exception as e:
                     logger.warning(f"HTML parse failed, falling back to plain text: {e}")
                     try:
-                        await self._app.bot.send_message(chat_id=chat_id, text=chunk)
+                        await self._app.bot.send_message(
+                            chat_id=chat_id, 
+                            text=chunk,
+                            reply_parameters=reply_params
+                        )
                     except Exception as e2:
                         logger.error(f"Error sending Telegram message: {e2}")
     
