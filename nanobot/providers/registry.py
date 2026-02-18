@@ -213,11 +213,11 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_oauth=True,                      # OAuth-based authentication
     ),
 
-    # Z.AI Coding Plan: GLM-4.7 and GLM-4.7-Flash
+    # Z.AI Coding Plan: GLM-5, GLM-4.7 and GLM-4.7-Flash
     # Uses custom API base for coding-specific endpoint
     ProviderSpec(
         name="zai",
-        keywords=("zai", "glm-4.7", "glm-4"),
+        keywords=("zai", "glm-5", "glm-4.7", "glm-4"),
         env_key="ZAI_API_KEY",
         display_name="Z.AI Coding Plan",
         litellm_prefix="zai",
