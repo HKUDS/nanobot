@@ -331,7 +331,21 @@ class AgentLoop:
         final_content, tools_used, reasoning_content = await self._run_agent_loop(initial_messages)
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
-    async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
+        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+        logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
+        
+        session.add_message("user", msg.content)
+        session.add_message("assistant", final_content,
+                            tools_used=tools_used if tools_used else None)
+        self.sessions.save(session)
+        
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=final_content,
+            reasoning_content=reasoning_content,
+            metadata=msg.metadata or {},  # Pass through for channel-specific needs (e.g. Slack thread_ts)
+        )
         """
         Process a system message (e.g., subagent announce).
         
