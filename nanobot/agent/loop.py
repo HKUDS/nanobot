@@ -146,7 +146,11 @@ class AgentLoop:
             if isinstance(cron_tool, CronTool):
                 cron_tool.set_context(channel, chat_id)
 
-    async def _run_agent_loop(self, initial_messages: list[dict]) -> tuple[str | None, list[str]]:
+    async def _run_agent_loop(
+        self,
+        initial_messages: list[dict],
+        session: Session | None = None,
+    ) -> tuple[str | None, list[str]]:
         """
         Run the agent iteration loop.
 
@@ -188,6 +192,12 @@ class AgentLoop:
                     messages, response.content, tool_call_dicts,
                     reasoning_content=response.reasoning_content,
                 )
+                if session is not None:
+                    session.add_message(
+                        "assistant",
+                        response.content or "",
+                        tool_calls=tool_call_dicts,
+                    )
 
                 for tool_call in response.tool_calls:
                     tools_used.append(tool_call.name)
@@ -197,6 +207,13 @@ class AgentLoop:
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+                    if session is not None:
+                        session.add_message(
+                            "tool",
+                            result,
+                            tool_call_id=tool_call.id,
+                            name=tool_call.name,
+                        )
                 messages.append({"role": "user", "content": "Reflect on the results and decide next steps."})
             else:
                 final_content = response.content
@@ -297,7 +314,7 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
         )
-        final_content, tools_used = await self._run_agent_loop(initial_messages)
+        final_content, tools_used = await self._run_agent_loop(initial_messages, session=session)
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
@@ -345,7 +362,7 @@ class AgentLoop:
             channel=origin_channel,
             chat_id=origin_chat_id,
         )
-        final_content, _ = await self._run_agent_loop(initial_messages)
+        final_content, _ = await self._run_agent_loop(initial_messages, session=session)
 
         if final_content is None:
             final_content = "Background task completed."
