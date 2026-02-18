@@ -574,7 +574,7 @@ Config file: `~/.nanobot/config.json`
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
-| `custom` | Any OpenAI-compatible endpoint | — |
+| `custom` | Any OpenAI-compatible endpoint (direct, no LiteLLM) | — |
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
@@ -623,7 +623,7 @@ nanobot agent -m "Hello!"
 <details>
 <summary><b>Custom Provider (Any OpenAI-compatible API)</b></summary>
 
-If your provider is not listed above but exposes an **OpenAI-compatible API** (e.g. Together AI, Fireworks, Azure OpenAI, self-hosted endpoints), use the `custom` provider:
+Connects directly to any OpenAI-compatible endpoint — LM Studio, llama.cpp, Together AI, Fireworks, Azure OpenAI, or any self-hosted server. Bypasses LiteLLM; model name is passed as-is.
 
 ```json
 {
@@ -641,7 +641,7 @@ If your provider is not listed above but exposes an **OpenAI-compatible API** (e
 }
 ```
 
-> The `custom` provider routes through LiteLLM's OpenAI-compatible path. It works with any endpoint that follows the OpenAI chat completions API format. The model name is passed directly to the endpoint without any prefix.
+> For local servers that don't require a key, set `apiKey` to any non-empty string (e.g. `"no-key"`).
 
 </details>
 

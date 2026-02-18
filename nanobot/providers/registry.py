@@ -54,6 +54,9 @@ class ProviderSpec:
     # OAuth-based providers (e.g., OpenAI Codex) don't use API keys
     is_oauth: bool = False                   # if True, uses OAuth flow instead of API key
 
+    # Direct providers bypass LiteLLM entirely (e.g., CustomProvider)
+    is_direct: bool = False
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -65,18 +68,14 @@ class ProviderSpec:
 
 PROVIDERS: tuple[ProviderSpec, ...] = (
 
-    # === Custom (user-provided OpenAI-compatible endpoint) =================
-    # No auto-detection — only activates when user explicitly configures "custom".
-
+    # === Custom (direct OpenAI-compatible endpoint, bypasses LiteLLM) ======
     ProviderSpec(
         name="custom",
         keywords=(),
-        env_key="OPENAI_API_KEY",
+        env_key="",
         display_name="Custom",
-        litellm_prefix="openai",
-        skip_prefixes=("openai/",),
-        is_gateway=True,
-        strip_model_prefix=True,
+        litellm_prefix="",
+        is_direct=True,
     ),
 
     # === Gateways (detected by api_key / api_base, not model name) =========

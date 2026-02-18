@@ -280,17 +280,26 @@ This file stores important information that should persist across sessions.
 
 
 def _make_provider(config: Config):
-    """Create LiteLLMProvider from config. Exits if no API key found."""
+    """Create the appropriate LLM provider from config."""
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+    from nanobot.providers.custom_provider import CustomProvider
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
 
-    # OpenAI Codex (OAuth): don't route via LiteLLM; use the dedicated implementation.
+    # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         return OpenAICodexProvider(default_model=model)
+
+    # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
+    if provider_name == "custom":
+        return CustomProvider(
+            api_key=p.api_key if p else "no-key",
+            api_base=config.get_api_base(model) or "http://localhost:8000/v1",
+            default_model=model,
+        )
 
     from nanobot.providers.registry import find_by_name
     spec = find_by_name(provider_name)

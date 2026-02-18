@@ -152,13 +152,15 @@ class SlackChannel(BaseChannel):
 
         text = self._strip_bot_mention(text)
 
-        thread_ts = event.get("thread_ts") or event.get("ts")
+        thread_ts = event.get("thread_ts")
+        if self.config.reply_in_thread and not thread_ts:
+            thread_ts = event.get("ts")
         # Add :eyes: reaction to the triggering message (best-effort)
         try:
             if self._web_client and event.get("ts"):
                 await self._web_client.reactions_add(
                     channel=chat_id,
-                    name="eyes",
+                    name=self.config.react_emoji,
                     timestamp=event.get("ts"),
                 )
         except Exception as e:
