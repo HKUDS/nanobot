@@ -20,6 +20,7 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.reasoning import ReasoningTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
@@ -122,6 +123,9 @@ class AgentLoop:
         # Cron tool (for scheduling)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+        # Reasoning tool (scratchpad)
+        self.tools.register(ReasoningTool(workspace=self.workspace))
     
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
