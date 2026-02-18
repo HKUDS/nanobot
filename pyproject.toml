@@ -25,6 +25,7 @@ dependencies = [
     "websocket-client>=1.6.0",
     "httpx>=0.25.0",
     "oauth-cli-kit>=0.1.1",
+    "ddgs>=9.5",
     "loguru>=0.7.0",
     "readability-lxml>=0.8.0",
     "rich>=13.0.0",
