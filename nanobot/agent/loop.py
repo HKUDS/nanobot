@@ -133,11 +133,11 @@ class AgentLoop:
         await self._mcp_stack.__aenter__()
         await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
 
-    def _set_tool_context(self, channel: str, chat_id: str) -> None:
+    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
-                message_tool.set_context(channel, chat_id)
+                message_tool.set_context(channel, chat_id, message_id)
 
         if spawn_tool := self.tools.get("spawn"):
             if isinstance(spawn_tool, SpawnTool):
@@ -321,7 +321,7 @@ class AgentLoop:
         if len(session.messages) > self.memory_window:
             asyncio.create_task(self._consolidate_memory(session))
 
-        self._set_tool_context(msg.channel, msg.chat_id)
+        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         initial_messages = self.context.build_messages(
             history=session.get_history(max_messages=self.memory_window),
             current_message=msg.content,
@@ -379,7 +379,7 @@ class AgentLoop:
         
         session_key = f"{origin_channel}:{origin_chat_id}"
         session = self.sessions.get_or_create(session_key)
-        self._set_tool_context(origin_channel, origin_chat_id)
+        self._set_tool_context(origin_channel, origin_chat_id, msg.metadata.get("message_id"))
         initial_messages = self.context.build_messages(
             history=session.get_history(max_messages=self.memory_window),
             current_message=msg.content,
