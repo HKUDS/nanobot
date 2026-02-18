@@ -119,16 +119,13 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
-    # SiliconFlow (硅基流动): OpenAI-compatible gateway hosting multiple models.
-    # strip_model_prefix=False: SiliconFlow model names include org prefix
-    # (e.g. "Qwen/Qwen2.5-14B-Instruct", "deepseek-ai/DeepSeek-V3")
-    # which is part of the model ID and must NOT be stripped.
+    # SiliconFlow (硅基流动): OpenAI-compatible gateway, model names keep org prefix
     ProviderSpec(
         name="siliconflow",
         keywords=("siliconflow",),
-        env_key="OPENAI_API_KEY",            # OpenAI-compatible
+        env_key="OPENAI_API_KEY",
         display_name="SiliconFlow",
-        litellm_prefix="openai",             # → openai/{model}
+        litellm_prefix="openai",
         skip_prefixes=(),
         env_extras=(),
         is_gateway=True,
