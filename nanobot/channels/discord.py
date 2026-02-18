@@ -197,6 +197,11 @@ class DiscordChannel(BaseChannel):
         if not self.is_allowed(sender_id):
             return
 
+        # Channel-based filtering: only respond in allowed channels
+        allow_channels = getattr(self.config, "allow_channels", [])
+        if allow_channels and channel_id not in allow_channels:
+            return
+
         content_parts = [content] if content else []
         media_paths: list[str] = []
         media_dir = Path.home() / ".nanobot" / "media"
