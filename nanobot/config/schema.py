@@ -259,6 +259,17 @@ class MCPServerConfig(Base):
     url: str = ""  # HTTP: streamable HTTP endpoint URL
 
 
+class TraceConfig(Base):
+    """Configuration for execution tracing."""
+
+    enabled: bool = False
+    dir: str = "traces"  # Relative to workspace
+    max_inline_chars: int = 2000
+    capture_prompt: bool = False
+    llm_preview_chars: int = 600
+
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
@@ -266,6 +277,7 @@ class ToolsConfig(Base):
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
+    trace: TraceConfig = Field(default_factory=TraceConfig)
 
 
 class Config(BaseSettings):
