@@ -54,6 +54,9 @@ class ProviderSpec:
     # OAuth-based providers (e.g., OpenAI Codex) don't use API keys
     is_oauth: bool = False                   # if True, uses OAuth flow instead of API key
 
+    # Direct providers bypass LiteLLM entirely (e.g., CustomProvider)
+    is_direct: bool = False
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -65,18 +68,14 @@ class ProviderSpec:
 
 PROVIDERS: tuple[ProviderSpec, ...] = (
 
-    # === Custom (user-provided OpenAI-compatible endpoint) =================
-    # No auto-detection — only activates when user explicitly configures "custom".
-
+    # === Custom (direct OpenAI-compatible endpoint, bypasses LiteLLM) ======
     ProviderSpec(
         name="custom",
         keywords=(),
-        env_key="OPENAI_API_KEY",
+        env_key="",
         display_name="Custom",
-        litellm_prefix="openai",
-        skip_prefixes=("openai/",),
-        is_gateway=True,
-        strip_model_prefix=True,
+        litellm_prefix="",
+        is_direct=True,
     ),
 
     # === Gateways (detected by api_key / api_base, not model name) =========
@@ -129,6 +128,14 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Synthetic",
         litellm_prefix="synthetic",
         skip_prefixes=("synthetic/",),
+    # SiliconFlow (硅基流动): OpenAI-compatible gateway, model names keep org prefix
+    ProviderSpec(
+        name="siliconflow",
+        keywords=("siliconflow",),
+        env_key="OPENAI_API_KEY",
+        display_name="SiliconFlow",
+        litellm_prefix="openai",
+        skip_prefixes=(),
         env_extras=(),
         is_gateway=True,
         is_local=False,
@@ -136,6 +143,9 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="synthetic",
         default_api_base="https://api.synthetic.new/openai/v1",
         strip_model_prefix=False,           # model IDs like hf:org/name must stay intact
+        detect_by_base_keyword="siliconflow",
+        default_api_base="https://api.siliconflow.cn/v1",
+        strip_model_prefix=False,
         model_overrides=(),
     ),
 
@@ -191,6 +201,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_key_prefix="",
         detect_by_base_keyword="codex",
         default_api_base="https://chatgpt.com/backend-api",
+        strip_model_prefix=False,
+        model_overrides=(),
+        is_oauth=True,                      # OAuth-based authentication
+    ),
+
+    # Github Copilot: uses OAuth, not API key.
+    ProviderSpec(
+        name="github_copilot",
+        keywords=("github_copilot", "copilot"),
+        env_key="",                         # OAuth-based, no API key
+        display_name="Github Copilot",
+        litellm_prefix="github_copilot",   # github_copilot/model → github_copilot/model
+        skip_prefixes=("github_copilot/",),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
         strip_model_prefix=False,
         model_overrides=(),
         is_oauth=True,                      # OAuth-based authentication
