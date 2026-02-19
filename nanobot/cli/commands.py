@@ -284,6 +284,7 @@ def _make_provider(config: Config):
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.custom_provider import CustomProvider
+    from nanobot.providers.google_gemini_cli_provider import GoogleGeminiCliProvider
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
@@ -292,6 +293,10 @@ def _make_provider(config: Config):
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         return OpenAICodexProvider(default_model=model)
+
+    # Google Gemini CLI (OAuth)
+    if provider_name == "google_gemini_cli" or model.startswith("google-gemini-cli/"):
+        return GoogleGeminiCliProvider(default_model=model)
 
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     if provider_name == "custom":
@@ -937,7 +942,7 @@ def _register_login(name: str):
 
 @provider_app.command("login")
 def provider_login(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot', 'google-gemini-cli')"),
 ):
     """Authenticate with an OAuth provider."""
     from nanobot.providers.registry import PROVIDERS
@@ -997,6 +1002,79 @@ def _login_github_copilot() -> None:
         console.print("[green]✓ Authenticated with GitHub Copilot[/green]")
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@_register_login("google_gemini_cli")
+def _login_google_gemini_cli() -> None:
+    """Verify Google Gemini CLI (Code Assist) authentication."""
+    from pathlib import Path
+
+    GEMINI_OAUTH_CREDS_FILE = Path.home() / ".gemini" / "oauth_creds.json"
+    GEMINI_PROJECTS_FILE = Path.home() / ".gemini" / "projects.json"
+
+    console.print("[cyan]Checking Google Gemini CLI (Code Assist) authentication...[/cyan]\n")
+
+    if not GEMINI_OAUTH_CREDS_FILE.exists():
+        console.print("[yellow]⚠ No Gemini CLI authentication found.[/yellow]")
+        console.print("\nTo set up Gemini CLI for Code Assist:\n")
+        console.print("  1. Install: brew install gemini-cli (or npm install -g @google/gemini-cli)\n")
+        console.print("  2. Run: gemini (this will open interactive mode for login)\n")
+        console.print("  3. Then run: nanobot provider login google-gemini-cli\n")
+        raise typer.Exit(1)
+
+    try:
+        import json
+        import time
+
+        # Check token file
+        data = json.loads(GEMINI_OAUTH_CREDS_FILE.read_text())
+
+        # Check if token is expired
+        expiry = data.get("expiry_date")
+        current = int(time.time() * 1000)
+
+        if expiry and current >= expiry:
+            console.print("[yellow]⚠ Gemini CLI token has expired.[/yellow]")
+            console.print("\nTo refresh your token:\n")
+            console.print("  Run: gemini (this will open interactive mode for login)\n")
+            raise typer.Exit(1)
+
+        console.print(f"[green]✓ Gemini CLI authentication found[/green]")
+
+        # Show user info
+        try:
+            id_token = data.get("id_token")
+            if id_token:
+                import base64
+                parts = id_token.split(".")
+                if len(parts) >= 2:
+                    payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=="))
+                    email = payload.get("email")
+                    if email:
+                        console.print(f"  [dim]Email: {email}[/dim]")
+        except Exception:
+            pass
+
+        # Show project info
+        if GEMINI_PROJECTS_FILE.exists():
+            try:
+                project_data = json.loads(GEMINI_PROJECTS_FILE.read_text())
+                project = project_data.get("active") or project_data.get("project_id")
+                if project:
+                    console.print(f"  [dim]Project: {project}[/dim]")
+            except Exception:
+                pass
+
+        console.print("\n[green]✓ Ready to use Code Assist API[/green]")
+        console.print("\nYou can now use Gemini models with nanobot:")
+        console.print("  nanobot agent -m \"Hello\"")
+        console.print("  nanobot chat --provider google-gemini-cli --model gemini-3-pro-preview")
+
+    except json.JSONDecodeError:
+        console.print("[red]✗ Gemini CLI token file is corrupted.[/red]")
+        console.print("\nPlease re-authenticate:\n")
+        console.print("  gemini auth login\n")
         raise typer.Exit(1)
 
 

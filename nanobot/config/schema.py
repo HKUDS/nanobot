@@ -222,6 +222,7 @@ class ProvidersConfig(Base):
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动) API gateway
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+    google_gemini_cli: ProviderConfig = Field(default_factory=ProviderConfig)  # Google Gemini CLI (OAuth)
 
 
 class GatewayConfig(Base):

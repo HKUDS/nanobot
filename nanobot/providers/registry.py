@@ -213,6 +213,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_oauth=True,                      # OAuth-based authentication
     ),
 
+    # Google Gemini CLI: uses OAuth, not API key.
+    ProviderSpec(
+        name="google_gemini_cli",
+        keywords=("google-gemini-cli", "gemini-cli", "gemini_cli"),
+        env_key="",                         # OAuth-based, no API key
+        display_name="Google Gemini CLI",
+        litellm_prefix="",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="gemini-cli",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+        is_oauth=True,                      # OAuth-based authentication
+    ),
+
     # DeepSeek: needs "deepseek/" prefix for LiteLLM routing.
     ProviderSpec(
         name="deepseek",

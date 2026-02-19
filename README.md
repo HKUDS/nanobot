@@ -20,6 +20,7 @@
 
 ## 📢 News
 
+- **2026-02-20** 🔑 nanobot now supports Google Gemini CLI provider with OAuth login for Code Assist API access.
 - **2026-02-17** 🎉 Released **v0.1.4** — MCP support, progress streaming, new providers, and multiple channel improvements. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4) for details.
 - **2026-02-16** 🦞 nanobot now integrates a [ClawHub](https://clawhub.ai) skill — search and install public agent skills.
 - **2026-02-15** 🔑 nanobot now supports OpenAI Codex provider with OAuth login support.
@@ -597,6 +598,7 @@ Config file: `~/.nanobot/config.json`
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
+| `google_gemini_cli` | LLM (Gemini CLI / Code Assist, OAuth) | `nanobot provider login google-gemini-cli` |
 
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>
@@ -625,6 +627,55 @@ nanobot agent -m "Hello!"
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
+
+</details>
+
+<details>
+<summary><b>Google Gemini CLI (Code Assist, OAuth)</b></summary>
+
+Uses your existing Gemini CLI authentication to access Google Cloud Code Assist API. Supports Gemini 2.0 Flash, 2.5 Flash, and 3 Flash Preview models.
+
+**Prerequisites:**
+- Install and login to Gemini CLI:
+```bash
+brew install gemini-cli  # or: npm install -g @google/gemini-cli
+gemini  # This opens interactive mode for login
+```
+
+**1. Set project ID** (required):
+```bash
+export GOOGLE_CLOUD_PROJECT=your-project-id
+```
+
+**2. Verify authentication:**
+```bash
+nanobot provider login google-gemini-cli
+```
+
+**3. Set model** (merge into `~/.nanobot/config.json`):
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "google-gemini-cli/gemini-3-pro-preview"
+    }
+  }
+}
+```
+
+**Available models:**
+- `google-gemini-cli/gemini-3-pro-preview` (default)
+- `google-gemini-cli/gemini-3-flash-preview`
+- `google-gemini-cli/gemini-2.5-pro`
+- `google-gemini-cli/gemini-2.5-flash`
+- `google-gemini-cli/gemini-2.5-flash-lite`
+
+**4. Chat:**
+```bash
+nanobot agent -m "Hello!"
+```
+
+> This provider uses OAuth tokens from `~/.gemini/oauth_creds.json` and requires the `GOOGLE_CLOUD_PROJECT` environment variable to be set.
 
 </details>
 
