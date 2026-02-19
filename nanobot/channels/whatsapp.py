@@ -87,7 +87,7 @@ class WhatsAppChannel(BaseChannel):
                 "to": msg.chat_id,
                 "text": msg.content
             }
-            await self._ws.send(json.dumps(payload))
+            await self._ws.send(json.dumps(payload, ensure_ascii=False))
         except Exception as e:
             logger.error(f"Error sending WhatsApp message: {e}")
     
