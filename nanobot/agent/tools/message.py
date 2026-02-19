@@ -1,6 +1,6 @@
 """Message tool for sending messages to users."""
 
-from typing import Any, Callable, Awaitable
+from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool
 from nanobot.bus.events import OutboundMessage
@@ -34,8 +34,12 @@ class MessageTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Send a message to the user. Use this when you want to communicate something."
-    
+        return (
+            "Send a message to the user. Use this when you want to communicate something. "
+            "To send files (PDF, images, documents, etc.), include the file paths in the 'media' parameter. "
+            "Either 'content' or 'media' must be provided."
+        )
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -43,7 +47,7 @@ class MessageTool(Tool):
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "The message content to send"
+                    "description": "The message content to send (optional if media is provided)"
                 },
                 "channel": {
                     "type": "string",
@@ -59,13 +63,13 @@ class MessageTool(Tool):
                     "description": "Optional: list of file paths to attach (images, audio, documents)"
                 }
             },
-            "required": ["content"]
+            "required": []
         }
     
     async def execute(
-        self, 
-        content: str, 
-        channel: str | None = None, 
+        self,
+        content: str | None = None,
+        channel: str | None = None,
         chat_id: str | None = None,
         media: list[str] | None = None,
         **kwargs: Any
@@ -78,11 +82,14 @@ class MessageTool(Tool):
         
         if not self._send_callback:
             return "Error: Message sending not configured"
-        
+
+        if not content and not media:
+            return "Error: Either content or media must be provided"
+
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
-            content=content,
+            content=content or "",
             media=media or []
         )
         
