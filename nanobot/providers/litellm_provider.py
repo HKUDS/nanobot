@@ -102,6 +102,26 @@ class LiteLLMProvider(LLMProvider):
                 if pattern in model_lower:
                     kwargs.update(overrides)
                     return
+
+    def _build_headers(self, model: str) -> dict[str, str] | None:
+        """Build headers by merging provider defaults with user extra_headers.
+
+        Provider default_headers are applied first, then user extra_headers override them.
+        """
+        spec = find_by_model(model)
+        if not spec:
+            return self.extra_headers if self.extra_headers else None
+
+        # Start with provider defaults
+        headers: dict[str, str] = {}
+        if spec.default_headers:
+            headers.update(dict(spec.default_headers))
+
+        # User extra_headers override defaults
+        if self.extra_headers:
+            headers.update(self.extra_headers)
+
+        return headers if headers else None
     
     async def chat(
         self,
@@ -147,10 +167,11 @@ class LiteLLMProvider(LLMProvider):
         # Pass api_base for custom endpoints
         if self.api_base:
             kwargs["api_base"] = self.api_base
-        
-        # Pass extra headers (e.g. APP-Code for AiHubMix)
-        if self.extra_headers:
-            kwargs["extra_headers"] = self.extra_headers
+
+        # Build and pass headers (merges provider defaults with user extra_headers)
+        headers = self._build_headers(model)
+        if headers:
+            kwargs["extra_headers"] = headers
         
         if tools:
             kwargs["tools"] = tools

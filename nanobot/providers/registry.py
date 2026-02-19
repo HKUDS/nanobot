@@ -57,6 +57,10 @@ class ProviderSpec:
     # Direct providers bypass LiteLLM entirely (e.g., CustomProvider)
     is_direct: bool = False
 
+    # Default headers to add to every request (e.g., (("User-Agent", "KimiCLI/0.77"),))
+    # User-provided extra_headers override these defaults
+    default_headers: tuple[tuple[str, str], ...] = ()
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -311,6 +315,29 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(
             ("kimi-k2.5", {"temperature": 1.0}),
         ),
+    ),
+
+    # Kimi Code: Moonshot's coding-optimized API (kimi-for-coding models).
+    # Uses a separate endpoint (api.kimi.com/coding/v1) from standard Moonshot.
+    # Automatically adds User-Agent header required by the API.
+    ProviderSpec(
+        name="kimi_code",
+        keywords=("kimi-code", "kimi-for-coding"),
+        env_key="KIMI_CODE_API_KEY",
+        display_name="Kimi Code",
+        litellm_prefix="openai",            # kimi-for-coding → openai/kimi-for-coding
+        skip_prefixes=("openai/",),
+        env_extras=(
+            ("OPENAI_API_BASE", "{api_base}"),
+        ),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="kimi.com/coding",
+        default_api_base="https://api.kimi.com/coding/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+        default_headers=(("User-Agent", "KimiCLI/0.77"),),
     ),
 
     # MiniMax: needs "minimax/" prefix for LiteLLM routing.
