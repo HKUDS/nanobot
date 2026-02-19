@@ -189,10 +189,17 @@ class AgentDefaults(Base):
     memory_window: int = 50
 
 
+class SubAgentDefaults(AgentDefaults):
+    """Subagents configuration, inherited from AgentDefaults"""
+    role: str = "common"
+    enabled: bool = False
+    
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    subagents: list[SubAgentDefaults] = Field(default_factory=list)
 
 
 class ProviderConfig(Base):
