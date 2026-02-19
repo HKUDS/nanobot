@@ -384,10 +384,24 @@ def find_by_model(model: str) -> ProviderSpec | None:
     """Match a standard provider by model-name keyword (case-insensitive).
     Skips gateways/local — those are matched by api_key/api_base instead."""
     model_lower = model.lower()
+    model_normalized = model_lower.replace("-", "_")
+    model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
+    normalized_prefix = model_prefix.replace("-", "_")
+
+    # Prefer explicit provider prefix in model name.
     for spec in PROVIDERS:
         if spec.is_gateway or spec.is_local:
             continue
-        if any(kw in model_lower for kw in spec.keywords):
+        if model_prefix and normalized_prefix == spec.name:
+            return spec
+
+    for spec in PROVIDERS:
+        if spec.is_gateway or spec.is_local:
+            continue
+        if any(
+            kw in model_lower or kw.replace("-", "_") in model_normalized
+            for kw in spec.keywords
+        ):
             return spec
     return None
 
