@@ -912,6 +912,35 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 </p>
 
 
+---
+
+## 🪪 SAID Protocol Identity
+
+nanobot integrates with [SAID Protocol](https://saidprotocol.com) — on-chain identity and reputation for AI agents on Solana.
+
+When configured, your nanobot agent:
+- **Registers automatically** on startup (free, no SOL required)
+- **Builds reputation** with every interaction — qualifying for Layer 2 verification after 30 days and 50+ interactions
+- **Gets a public profile** at `saidprotocol.com/agents`
+
+Add to `~/.nanobot/config.json`:
+
+```json
+{
+  "agents": {
+    "said": {
+      "enabled": true,
+      "wallet": "<your-solana-wallet-pubkey>",
+      "agentName": "My Nanobot"
+    }
+  }
+}
+```
+
+View your agent's profile: `https://saidprotocol.com/agent.html?wallet=<your-wallet>`
+
+---
+
 <p align="center">
   <sub>nanobot is for educational, research, and technical exchange purposes only</sub>
 </p>

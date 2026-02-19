@@ -54,6 +54,7 @@ class AgentLoop:
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
+        said_config: "SAIDConfig | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
@@ -90,6 +91,20 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._register_default_tools()
+
+        # SAID Protocol — on-chain identity (registers on startup if configured)
+        self._said = None
+        if said_config and said_config.enabled and said_config.wallet:
+            try:
+                from nanobot.said import SAIDIdentity
+                self._said = SAIDIdentity(
+                    wallet=said_config.wallet,
+                    agent_name=said_config.agent_name or str(workspace.name),
+                    description=said_config.description,
+                )
+                self._said.register()
+            except Exception as _e:
+                logger.debug(f"SAID identity setup skipped: {_e}")
     
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -293,7 +308,14 @@ class AgentLoop:
         
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info(f"Processing message from {msg.channel}:{msg.sender_id}: {preview}")
-        
+
+        # SAID: increment activity on each interaction (feeds L2 verification)
+        if self._said:
+            try:
+                self._said.ping()
+            except Exception:
+                pass
+
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
         

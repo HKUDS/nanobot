@@ -189,10 +189,20 @@ class AgentDefaults(Base):
     memory_window: int = 50
 
 
+class SAIDConfig(Base):
+    """SAID Protocol on-chain identity configuration."""
+
+    enabled: bool = True
+    wallet: str = ""
+    agent_name: str = ""
+    description: str = ""
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    said: SAIDConfig = Field(default_factory=SAIDConfig)
 
 
 class ProviderConfig(Base):
