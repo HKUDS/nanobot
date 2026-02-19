@@ -19,16 +19,38 @@ class MessageBus:
     def __init__(self):
         self.inbound: asyncio.Queue[InboundMessage] = asyncio.Queue()
         self.outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue()
+        self._inbound_subscribers: dict[str, list[Callable[[InboundMessage], Awaitable[None]]]] = {}
         self._outbound_subscribers: dict[str, list[Callable[[OutboundMessage], Awaitable[None]]]] = {}
         self._running = False
     
     async def publish_inbound(self, msg: InboundMessage) -> None:
         """Publish a message from a channel to the agent."""
         await self.inbound.put(msg)
+        # Also notify inbound subscribers
+        subscribers = self._inbound_subscribers.get("inbound.message", [])
+        for callback in subscribers:
+            try:
+                await callback(msg)
+            except Exception as e:
+                logger.error(f"Error notifying inbound subscriber: {e}")
     
     async def consume_inbound(self) -> InboundMessage:
         """Consume the next inbound message (blocks until available)."""
         return await self.inbound.get()
+    
+    def subscribe(
+        self,
+        channel: str,
+        callback: Callable[..., Awaitable[None]]
+    ) -> None:
+        """Subscribe to messages for a specific channel."""
+        if channel == "inbound.message":
+            if channel not in self._inbound_subscribers:
+                self._inbound_subscribers[channel] = []
+            self._inbound_subscribers[channel].append(callback)
+        elif channel not in self._outbound_subscribers:
+            self._outbound_subscribers[channel] = []
+        self._outbound_subscribers[channel].append(callback)
     
     async def publish_outbound(self, msg: OutboundMessage) -> None:
         """Publish a response from the agent to channels."""
