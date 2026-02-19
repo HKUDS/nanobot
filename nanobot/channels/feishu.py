@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import re
 import threading
 from collections import OrderedDict
@@ -267,7 +268,6 @@ class FeishuChannel(BaseChannel):
             before = protected[last_end:m.start()].strip()
             if before:
                 elements.append({"tag": "markdown", "content": before})
-            level = len(m.group(1))
             text = m.group(2).strip()
             elements.append({
                 "tag": "div",
@@ -288,13 +288,8 @@ class FeishuChannel(BaseChannel):
 
         return elements or [{"tag": "markdown", "content": content}]
 
-    # Image file extensions
     _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif"}
-
-    # Audio file extensions (Feishu only supports opus for audio messages)
     _AUDIO_EXTS = {".opus"}
-
-    # File type mapping for Feishu file upload API
     _FILE_TYPE_MAP = {
         ".opus": "opus", ".mp4": "mp4", ".pdf": "pdf", ".doc": "doc", ".docx": "doc",
         ".xls": "xls", ".xlsx": "xls", ".ppt": "ppt", ".pptx": "ppt",
@@ -302,7 +297,6 @@ class FeishuChannel(BaseChannel):
 
     def _upload_image_sync(self, file_path: str) -> str | None:
         """Upload an image to Feishu and return the image_key."""
-        import os
         try:
             with open(file_path, "rb") as f:
                 request = CreateImageRequest.builder() \
@@ -326,7 +320,6 @@ class FeishuChannel(BaseChannel):
 
     def _upload_file_sync(self, file_path: str) -> str | None:
         """Upload a file to Feishu and return the file_key."""
-        import os
         ext = os.path.splitext(file_path)[1].lower()
         file_type = self._FILE_TYPE_MAP.get(ext, "stream")
         file_name = os.path.basename(file_path)
@@ -384,65 +377,35 @@ class FeishuChannel(BaseChannel):
             return
 
         try:
-            import os
-
-            # Determine receive_id_type based on chat_id format
-            # open_id starts with "ou_", chat_id starts with "oc_"
-            if msg.chat_id.startswith("oc_"):
-                receive_id_type = "chat_id"
-            else:
-                receive_id_type = "open_id"
-
+            receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
             loop = asyncio.get_running_loop()
 
-            # --- Send media attachments first ---
-            if msg.media:
-                for file_path in msg.media:
-                    if not os.path.isfile(file_path):
-                        logger.warning(f"Media file not found: {file_path}")
-                        continue
+            for file_path in msg.media:
+                if not os.path.isfile(file_path):
+                    logger.warning(f"Media file not found: {file_path}")
+                    continue
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext in self._IMAGE_EXTS:
+                    key = await loop.run_in_executor(None, self._upload_image_sync, file_path)
+                    if key:
+                        await loop.run_in_executor(
+                            None, self._send_message_sync,
+                            receive_id_type, msg.chat_id, "image", json.dumps({"image_key": key}),
+                        )
+                else:
+                    key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
+                    if key:
+                        media_type = "audio" if ext in self._AUDIO_EXTS else "file"
+                        await loop.run_in_executor(
+                            None, self._send_message_sync,
+                            receive_id_type, msg.chat_id, media_type, json.dumps({"file_key": key}),
+                        )
 
-                    ext = os.path.splitext(file_path)[1].lower()
-                    if ext in self._IMAGE_EXTS:
-                        # Upload and send as image
-                        image_key = await loop.run_in_executor(None, self._upload_image_sync, file_path)
-                        if image_key:
-                            content = json.dumps({"image_key": image_key})
-                            await loop.run_in_executor(
-                                None, self._send_message_sync,
-                                receive_id_type, msg.chat_id, "image", content,
-                            )
-                    elif ext in self._AUDIO_EXTS:
-                        # Upload and send as audio (voice message)
-                        file_key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
-                        if file_key:
-                            content = json.dumps({"file_key": file_key})
-                            await loop.run_in_executor(
-                                None, self._send_message_sync,
-                                receive_id_type, msg.chat_id, "audio", content,
-                            )
-                    else:
-                        # Upload and send as file
-                        file_key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
-                        if file_key:
-                            content = json.dumps({"file_key": file_key})
-                            await loop.run_in_executor(
-                                None, self._send_message_sync,
-                                receive_id_type, msg.chat_id, "file", content,
-                            )
-
-            # --- Send text content (if any) ---
             if msg.content and msg.content.strip():
-                # Build card with markdown + table support
-                elements = self._build_card_elements(msg.content)
-                card = {
-                    "config": {"wide_screen_mode": True},
-                    "elements": elements,
-                }
-                content = json.dumps(card, ensure_ascii=False)
+                card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
                 await loop.run_in_executor(
                     None, self._send_message_sync,
-                    receive_id_type, msg.chat_id, "interactive", content,
+                    receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
                 )
 
         except Exception as e:
