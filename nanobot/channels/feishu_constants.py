@@ -61,3 +61,20 @@ IMAGE_EXTENSIONS: set[str] = {
     ".tiff",
     ".tif",
 }
+
+AUDIO_EXTENSIONS: set[str] = {
+    ".opus",
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".aac",
+    ".flac",
+}
+
+VIDEO_EXTENSIONS: set[str] = {
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".webm",
+}

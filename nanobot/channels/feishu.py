@@ -14,7 +14,12 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.channels.feishu_constants import FILE_TYPE_MAP, IMAGE_EXTENSIONS
+from nanobot.channels.feishu_constants import (
+    FILE_TYPE_MAP,
+    IMAGE_EXTENSIONS,
+    AUDIO_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+)
 from nanobot.config.schema import Config, FeishuConfig
 
 try:
@@ -398,6 +403,10 @@ class FeishuChannel(BaseChannel):
                 response = self._client.im.v1.file.create(request)
                 if response.success() and response.data and response.data.file_key:
                     logger.debug(f"File uploaded: {file_name}")
+                    if ext in VIDEO_EXTENSIONS:
+                        return response.data.file_key, "media"
+                    if ext in AUDIO_EXTENSIONS:
+                        return response.data.file_key, "audio"
                     return response.data.file_key, "file"
                 logger.error(f"Failed to upload file {file_name}: code={response.code}, msg={response.msg}")
                 return None, "file"
