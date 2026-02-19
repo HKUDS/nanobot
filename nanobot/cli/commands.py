@@ -281,11 +281,16 @@ This file stores important information that should persist across sessions.
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
+    model = config.agents.defaults.model
+
+    return _make_model_provider(config, model)
+
+
+def _make_model_provider(config: Config, model: str):
+    """Create the appropriate LLM provider from config depending on the model. """
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.custom_provider import CustomProvider
-
-    model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
 
@@ -346,6 +351,7 @@ def gateway(
     config = load_config()
     bus = MessageBus()
     provider = _make_provider(config)
+    [setattr(k, 'provider', _make_model_provider(config, k.model)) for k in config.agents.subagents if k.enabled]
     session_manager = SessionManager(config.workspace_path)
     
     # Create cron service first (callback set after agent creation)

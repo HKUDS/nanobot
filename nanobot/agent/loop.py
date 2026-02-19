@@ -93,7 +93,7 @@ class AgentLoop:
             for sub_agent_config in self.sub_agents_config:
                 if sub_agent_config.enabled:
                     sub_agent = SubagentManager(
-                        provider=provider,
+                        provider=sub_agent_config.provider,
                         workspace=workspace,
                         bus=bus,
                         model=sub_agent_config.model,

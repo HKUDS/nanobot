@@ -193,6 +193,7 @@ class SubAgentDefaults(AgentDefaults):
     """Subagents configuration, inherited from AgentDefaults"""
     role: str = "common"
     enabled: bool = False
+    provider: object = None # placeholder, will be replaced by actual provider object
     
 
 class AgentsConfig(Base):
