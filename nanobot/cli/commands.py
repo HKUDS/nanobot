@@ -336,23 +336,29 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
-    
+    from nanobot.nodes.service import NodeServer
+
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
-    
+
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    
+
     config = load_config()
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
-    
+
+    # Create node server if enabled
+    node_server = None
+    if config.nodes.server.enabled:
+        node_server = NodeServer(config.nodes.server)
+
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
-    
-    # Create agent with cron service
+
+    # Create agent with cron service and node server
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -368,6 +374,7 @@ def gateway(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
+        node_server=node_server,
     )
     
     # Set cron callback (needs agent)
@@ -414,11 +421,18 @@ def gateway(
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
     
     console.print(f"[green]✓[/green] Heartbeat: every 30m")
-    
+
+    if node_server:
+        console.print(f"[green]✓[/green] Node server: enabled on port {config.nodes.server.port}")
+    else:
+        console.print("[dim]Node server: disabled[/dim]")
+
     async def run():
         try:
             await cron.start()
             await heartbeat.start()
+            if node_server:
+                await node_server.start()
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
@@ -431,6 +445,8 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            if node_server:
+                await node_server.stop()
     
     asyncio.run(run())
 
@@ -713,6 +729,70 @@ def channels_login():
 
 cron_app = typer.Typer(help="Manage scheduled tasks")
 app.add_typer(cron_app, name="cron")
+
+
+# ============================================================================
+# Node Commands
+# ============================================================================
+
+node_app = typer.Typer(help="Manage remote nodes")
+app.add_typer(node_app, name="node")
+
+
+@node_app.command("run")
+def node_run(
+    name: str = typer.Option(..., "--name", "-n", help="Node name"),
+    server: str = typer.Option(..., "--server", "-s", help="Server WebSocket URL (e.g., ws://host:18792)"),
+    token: str = typer.Option(..., "--token", "-t", help="Authentication token"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """Run as a node client and connect to the main server."""
+    if verbose:
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+
+    from nanobot.nodes.service import NodeClient
+    from nanobot.nodes.types import NodeClientConfig
+
+    config = NodeClientConfig(
+        enabled=True,
+        name=name,
+        server_url=server,
+        token=token
+    )
+
+    client = NodeClient(config)
+    client._running = True
+
+    console.print(f"{__logo__} Connecting to server as node '{name}'...")
+
+    try:
+        asyncio.run(client.run())
+    except KeyboardInterrupt:
+        console.print("\nShutting down...")
+    finally:
+        asyncio.run(client.stop())
+
+
+@node_app.command("list")
+def node_list():
+    """List connected nodes (requires node server to be running)."""
+    from nanobot.config.loader import load_config
+    from nanobot.nodes.service import NodeServer
+
+    config = load_config()
+
+    if not config.nodes.server.enabled:
+        console.print("[yellow]Node server is not enabled in config[/yellow]")
+        console.print("Enable it by setting nodes.server.enabled = true in config.json")
+        return
+
+    # Note: This is a simple status check. For real-time status, the node server must be running.
+    console.print(f"{__logo__} Node Server Status\n")
+    console.print(f"Node server: {'[green]enabled[/green]' if config.nodes.server.enabled else '[dim]disabled[/dim]'}")
+    console.print(f"Port: {config.nodes.server.port}")
+    console.print("\n[dim]To see connected nodes, the node server must be running via 'nanobot gateway'[/dim]")
+    console.print("[dim]Use the 'nodes' tool in the agent to list connected nodes[/dim]")
 
 
 @cron_app.command("list")
