@@ -187,8 +187,6 @@ class SessionManager:
                     if first_line:
                         data = json.loads(first_line)
                         if data.get("_type") == "metadata":
-                            # Prefer the key stored in metadata; fall back to
-                            # filename-based heuristic for legacy files.
                             key = data.get("key") or path.stem.replace("_", ":", 1)
                             sessions.append({
                                 "key": key,
