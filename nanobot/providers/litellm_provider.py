@@ -88,11 +88,55 @@ class LiteLLMProvider(LLMProvider):
         # Standard mode: auto-prefix for known providers
         spec = find_by_model(model)
         if spec and spec.litellm_prefix:
+            model = self._canonicalize_explicit_prefix(model, spec.name, spec.litellm_prefix)
             if not any(model.startswith(s) for s in spec.skip_prefixes):
                 model = f"{spec.litellm_prefix}/{model}"
-        
+
         return model
+
+    @staticmethod
+    def _canonicalize_explicit_prefix(model: str, spec_name: str, canonical_prefix: str) -> str:
+        """Normalize explicit provider prefixes like `github-copilot/...`."""
+        if "/" not in model:
+            return model
+        prefix, remainder = model.split("/", 1)
+        if prefix.lower().replace("-", "_") != spec_name:
+            return model
+        return f"{canonical_prefix}/{remainder}"
     
+    def _supports_cache_control(self, model: str) -> bool:
+        """Return True when the provider supports cache_control on content blocks."""
+        if self._gateway is not None:
+            return False
+        spec = find_by_model(model)
+        return spec is not None and spec.supports_prompt_caching
+
+    def _apply_cache_control(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
+        """Return copies of messages and tools with cache_control injected."""
+        new_messages = []
+        for msg in messages:
+            if msg.get("role") == "system":
+                content = msg["content"]
+                if isinstance(content, str):
+                    new_content = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+                else:
+                    new_content = list(content)
+                    new_content[-1] = {**new_content[-1], "cache_control": {"type": "ephemeral"}}
+                new_messages.append({**msg, "content": new_content})
+            else:
+                new_messages.append(msg)
+
+        new_tools = tools
+        if tools:
+            new_tools = list(tools)
+            new_tools[-1] = {**new_tools[-1], "cache_control": {"type": "ephemeral"}}
+
+        return new_messages, new_tools
+
     def _apply_model_overrides(self, model: str, kwargs: dict[str, Any]) -> None:
         """Apply model-specific parameter overrides from the registry."""
         model_lower = model.lower()
@@ -124,8 +168,12 @@ class LiteLLMProvider(LLMProvider):
         Returns:
             LLMResponse with content and/or tool calls.
         """
-        model = self._resolve_model(model or self.default_model)
-        
+        original_model = model or self.default_model
+        model = self._resolve_model(original_model)
+
+        if self._supports_cache_control(original_model):
+            messages, tools = self._apply_cache_control(messages, tools)
+
         # Clamp max_tokens to at least 1 — negative or zero values cause
         # LiteLLM to reject the request with "max_tokens must be at least 1".
         max_tokens = max(1, max_tokens)

@@ -243,7 +243,7 @@ Information about the user goes here.
     for filename, content in templates.items():
         file_path = workspace / filename
         if not file_path.exists():
-            file_path.write_text(content)
+            file_path.write_text(content, encoding="utf-8")
             console.print(f"  [dim]Created {filename}[/dim]")
     
     # Create memory directory and MEMORY.md
@@ -266,12 +266,12 @@ This file stores important information that should persist across sessions.
 ## Important Notes
 
 (Things to remember)
-""")
+""", encoding="utf-8")
         console.print("  [dim]Created memory/MEMORY.md[/dim]")
     
     history_file = memory_dir / "HISTORY.md"
     if not history_file.exists():
-        history_file.write_text("")
+        history_file.write_text("", encoding="utf-8")
         console.print("  [dim]Created memory/HISTORY.md[/dim]")
 
     # Create skills directory for custom user skills
@@ -805,15 +805,19 @@ def cron_add(
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
     
-    job = service.add_job(
-        name=name,
-        schedule=schedule,
-        message=message,
-        deliver=deliver,
-        to=to,
-        channel=channel,
-    )
-    
+    try:
+        job = service.add_job(
+            name=name,
+            schedule=schedule,
+            message=message,
+            deliver=deliver,
+            to=to,
+            channel=channel,
+        )
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1) from e
+
     console.print(f"[green]✓[/green] Added job '{job.name}' ({job.id})")
 
 
