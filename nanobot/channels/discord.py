@@ -125,10 +125,7 @@ class DiscordChannel(BaseChannel):
     async def _send_payload(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
     ) -> bool:
-        """Send a single Discord API payload with retry on rate-limit.
-
-        Returns True on success, False if all attempts failed.
-        """
+        """Send a single Discord API payload with retry on rate-limit. Returns True on success."""
         for attempt in range(3):
             try:
                 response = await self._http.post(url, headers=headers, json=payload)
