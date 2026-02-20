@@ -184,6 +184,7 @@ class AgentLoop:
         iteration = 0
         final_content = None
         first_text_content = None  # Fallback: first text response before retry
+        print("DEBUG: first_text_content initialized =", first_text_content)
         tools_used: list[str] = []
         text_only_retried = False
 
@@ -229,9 +230,11 @@ class AgentLoop:
                     )
             else:
                 final_content = self._strip_think(response.content)
+                print("DEBUG: model returned final_content =", repr(final_content))
                 # Some models send an interim text response before tool calls.
                 # Give them one retry; don't forward the text to avoid duplicates.
                 if not tools_used and not text_only_retried and final_content:
+                    print("DEBUG: retry firing, saving first_text_content =", repr(final_content))
                     text_only_retried = True
                     first_text_content = final_content  # Save in case retry yields nothing
                     logger.debug("Interim text response (no tools used yet), retrying: {}", final_content[:80])
@@ -247,6 +250,8 @@ class AgentLoop:
         if final_content is None and first_text_content:
             final_content = first_text_content
 
+        print("DEBUG: exiting loop with final_content =", repr(final_content))
+        print("DEBUG: exiting loop with first_text_content =", repr(first_text_content))
         return final_content, tools_used
 
     async def run(self) -> None:
