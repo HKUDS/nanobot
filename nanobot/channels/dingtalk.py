@@ -208,7 +208,7 @@ class DingTalkChannel(BaseChannel):
             "msgParam": json.dumps({
                 "text": msg.content,
                 "title": "Nanobot Reply",
-            }),
+            }, ensure_ascii=False),
         }
 
         if not self._http:
