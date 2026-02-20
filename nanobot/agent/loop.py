@@ -24,6 +24,7 @@ from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import Session, SessionManager
+from nanobot.config.loader import load_config
 
 
 class AgentLoop:
@@ -354,6 +355,22 @@ class AgentLoop:
         )
 
         async def _bus_progress(content: str) -> None:
+            # Reload config per progress message to get the latest config
+            config = load_config()
+            thinkingToolUseStreamingConfig = config.tools.thinkingToolUseStreaming
+
+            if thinkingToolUseStreamingConfig.enabled:
+                possibleToolName = content.split("(")[0]
+                tool = self.tools.get(possibleToolName)
+                if tool:
+                    content = thinkingToolUseStreamingConfig.toolUsageTemplate.replace("{{tool}}", content)
+                    if msg.channel in thinkingToolUseStreamingConfig.channelsBlacklist or tool.name in thinkingToolUseStreamingConfig.toolsBlacklist or "*" in thinkingToolUseStreamingConfig.toolsBlacklist:
+                        return
+                else:
+                    content = thinkingToolUseStreamingConfig.thinkingTemplate.replace("{{thought}}", content)
+                    if msg.channel in thinkingToolUseStreamingConfig.channelsBlacklist or "thinking" in thinkingToolUseStreamingConfig.toolsBlacklist:
+                        return
+            
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content,
                 metadata=msg.metadata or {},

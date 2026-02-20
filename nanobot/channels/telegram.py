@@ -9,6 +9,10 @@ from telegram import BotCommand, Update, ReplyParameters
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import CallbackQueryHandler
+
+from nanobot.config.loader import load_config, save_config
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -148,6 +152,8 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("new", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
         
+        await self.registerThinkingAndToolsStreamingConfigCommand()
+
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
             MessageHandler(
@@ -175,7 +181,7 @@ class TelegramChannel(BaseChannel):
         
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
-            allowed_updates=["message"],
+            allowed_updates=["message", "callback_query"],
             drop_pending_updates=True  # Ignore old messages on startup
         )
         
@@ -455,3 +461,94 @@ class TelegramChannel(BaseChannel):
         
         type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
         return type_map.get(media_type, "")
+
+
+
+    async def registerThinkingAndToolsStreamingConfigCommand(self) -> None:
+        """Register the /tatstreaming command."""
+        COMMAND_STRING = "Wanna toggle thoughts and tools streaming?"
+
+        # Register the /tatstreaming command if not already registered
+        existing_command_names = [cmd.command for cmd in self.BOT_COMMANDS]
+        if "tatstreaming" not in existing_command_names:
+            new_command = BotCommand("tatstreaming", "Toggle thoughts and tools streaming")
+            self.BOT_COMMANDS.append(new_command)
+
+
+        def _saveConfig(thinking: bool, tools: bool, userId: int | None = None) -> None:
+            config = load_config()
+            ttus = config.tools.thinkingToolUseStreaming
+
+            if str(userId) not in config.channels.telegram.allow_from:
+                return
+
+            if thinking and "thinking" in ttus.toolsBlacklist:
+                ttus.toolsBlacklist = [item for item in ttus.toolsBlacklist if item != "thinking"]
+            elif not thinking and "thinking" not in ttus.toolsBlacklist:
+                ttus.toolsBlacklist.append("thinking")
+
+            if tools and "*" in ttus.toolsBlacklist:
+                ttus.toolsBlacklist = [item for item in ttus.toolsBlacklist if item != "*"]
+            elif not tools and "*" not in ttus.toolsBlacklist:
+                ttus.toolsBlacklist.append("*")
+
+            ttus.enabled = True
+
+            save_config(config)
+
+
+        def _getThoughtsAndToolsStreamingKeyboard() -> InlineKeyboardMarkup:
+            config = load_config()
+            thinkingToolUseStreamingConfig = config.tools.thinkingToolUseStreaming
+            keyboard = []
+
+            if "thinking" in thinkingToolUseStreamingConfig.toolsBlacklist:
+                keyboard.append([InlineKeyboardButton('Enable Thoughts Streaming', callback_data='enableThoughtsStreaming')])
+            else:
+                keyboard.append([InlineKeyboardButton('Disable Thoughts Streaming', callback_data='disableThoughtsStreaming')])
+
+            if "*" in thinkingToolUseStreamingConfig.toolsBlacklist:
+                keyboard.append([InlineKeyboardButton('Enable Tools Use Streaming', callback_data='enableToolsUseStreaming')])
+            else:
+                keyboard.append([InlineKeyboardButton('Disable Tools Use Streaming', callback_data='disableToolsUseStreaming')])
+
+            return InlineKeyboardMarkup(keyboard)
+
+
+        async def enableThoughtsStreaming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+            config = load_config()
+            thinkingToolUseStreamingConfig = config.tools.thinkingToolUseStreaming
+            _saveConfig(True, "*" not in thinkingToolUseStreamingConfig.toolsBlacklist, update.effective_user.id)
+            await update.callback_query.edit_message_text("Thoughts streaming enabled!\n\n" + COMMAND_STRING, reply_markup=_getThoughtsAndToolsStreamingKeyboard())
+
+        async def disableThoughtsStreaming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+            config = load_config()
+            thinkingToolUseStreamingConfig = config.tools.thinkingToolUseStreaming
+            _saveConfig(False, "*" not in thinkingToolUseStreamingConfig.toolsBlacklist, update.effective_user.id)
+            await update.callback_query.edit_message_text("Thoughts streaming disabled!\n\n" + COMMAND_STRING, reply_markup=_getThoughtsAndToolsStreamingKeyboard())
+        
+        async def enableToolsUseStreaming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+            config = load_config()
+            thinkingToolUseStreamingConfig = config.tools.thinkingToolUseStreaming
+            _saveConfig("thinking" not in thinkingToolUseStreamingConfig.toolsBlacklist, True, update.effective_user.id)
+            await update.callback_query.edit_message_text("Tool use streaming enabled!\n\n" + COMMAND_STRING, reply_markup=_getThoughtsAndToolsStreamingKeyboard())
+
+        async def disableToolsUseStreaming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+            config = load_config()
+            thinkingToolUseStreamingConfig = config.tools.thinkingToolUseStreaming
+            _saveConfig("thinking" not in thinkingToolUseStreamingConfig.toolsBlacklist, False, update.effective_user.id)
+            await update.callback_query.edit_message_text("Tool use streaming disabled!\n\n" + COMMAND_STRING, reply_markup=_getThoughtsAndToolsStreamingKeyboard())
+
+        self._app.add_handler(CallbackQueryHandler(enableThoughtsStreaming, pattern='enableThoughtsStreaming'))
+        self._app.add_handler(CallbackQueryHandler(disableThoughtsStreaming, pattern='disableThoughtsStreaming'))
+        self._app.add_handler(CallbackQueryHandler(enableToolsUseStreaming, pattern='enableToolsUseStreaming'))
+        self._app.add_handler(CallbackQueryHandler(disableToolsUseStreaming, pattern='disableToolsUseStreaming'))
+
+
+        async def _onThoughtsAndToolsStreamingConfigCommandCallback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+            await update.message.reply_text(
+                COMMAND_STRING, 
+                reply_markup=_getThoughtsAndToolsStreamingKeyboard()
+            )
+
+        self._app.add_handler(CommandHandler("tatstreaming", _onThoughtsAndToolsStreamingConfigCommandCallback))
