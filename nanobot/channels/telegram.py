@@ -146,7 +146,7 @@ class TelegramChannel(BaseChannel):
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
-        self._app.add_handler(CommandHandler("help", self._forward_command))
+        self._app.add_handler(CommandHandler("help", self._on_help))
         
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
@@ -258,14 +258,24 @@ class TelegramChannel(BaseChannel):
         """Handle /start command."""
         if not update.message or not update.effective_user:
             return
-        
+
         user = update.effective_user
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
             "Send me a message and I'll respond!\n"
             "Type /help to see available commands."
         )
-    
+
+    async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /help command, bypassing ACL so all users can access it."""
+        if not update.message:
+            return
+        await update.message.reply_text(
+            "🐈 nanobot commands:\n"
+            "/new — Start a new conversation\n"
+            "/help — Show available commands"
+        )
+
     @staticmethod
     def _sender_id(user) -> str:
         """Build sender_id with username for allowlist matching."""
