@@ -117,7 +117,6 @@ class LiteLLMProvider(LLMProvider):
         tools: list[dict[str, Any]] | None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
         """Return copies of messages and tools with cache_control injected."""
-        # Transform the system message
         new_messages = []
         for msg in messages:
             if msg.get("role") == "system":
@@ -131,7 +130,6 @@ class LiteLLMProvider(LLMProvider):
             else:
                 new_messages.append(msg)
 
-        # Add cache_control to the last tool definition
         new_tools = tools
         if tools:
             new_tools = list(tools)
