@@ -75,7 +75,7 @@ async def connect_mcp_servers(
                         streamable_http_client(cfg.url)
                     )
             else:
-                logger.warning(f"MCP server '{name}': no command or url configured, skipping")
+                logger.warning("MCP server '{}': no command or url configured, skipping", name)
                 continue
 
             session = await stack.enter_async_context(ClientSession(read, write))
@@ -85,8 +85,8 @@ async def connect_mcp_servers(
             for tool_def in tools.tools:
                 wrapper = MCPToolWrapper(session, name, tool_def)
                 registry.register(wrapper)
-                logger.debug(f"MCP: registered tool '{wrapper.name}' from server '{name}'")
+                logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
 
-            logger.info(f"MCP server '{name}': connected, {len(tools.tools)} tools registered")
+            logger.info("MCP server '{}': connected, {} tools registered", name, len(tools.tools))
         except Exception as e:
-            logger.error(f"MCP server '{name}': failed to connect: {e}")
+            logger.error("MCP server '{}': failed to connect: {}", name, e)

@@ -26,7 +26,8 @@ class ExecTool(Tool):
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
             r"\brmdir\s+/s\b",               # rmdir /s
-            r"\b(format|mkfs|diskpart)\b",   # disk operations
+            r"(?:^|[;&|]\s*)format\b",       # format (as standalone command only)
+            r"\b(mkfs|diskpart)\b",          # disk operations
             r"\bdd\s+if=",                   # dd
             r">\s*/dev/sd",                  # write to disk
             r"\b(shutdown|reboot|poweroff)\b",  # system power
@@ -81,6 +82,12 @@ class ExecTool(Tool):
                 )
             except asyncio.TimeoutError:
                 process.kill()
+                # Wait for the process to fully terminate so pipes are
+                # drained and file descriptors are released.
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    pass
                 return f"Error: Command timed out after {self.timeout} seconds"
             
             output_parts = []
