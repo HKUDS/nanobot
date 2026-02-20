@@ -200,7 +200,9 @@ class AgentLoop:
             if response.has_tool_calls:
                 if on_progress:
                     clean = self._strip_think(response.content)
-                    await on_progress(clean or self._tool_hint(response.tool_calls))
+                    if clean:
+                        await on_progress(clean)
+                    await on_progress(self._tool_hint(response.tool_calls))
 
                 tool_call_dicts = [
                     {
