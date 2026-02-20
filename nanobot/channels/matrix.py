@@ -1,3 +1,5 @@
+"""Matrix channel implementation for inbound sync and outbound message/media delivery."""
+
 import asyncio
 import logging
 import mimetypes
@@ -238,6 +240,7 @@ class MatrixChannel(BaseChannel):
         restrict_to_workspace: bool = False,
         workspace: Path | None = None,
     ):
+        """Store Matrix client settings, task handles, and outbound media policy flags."""
         super().__init__(config, bus)
         self.client: AsyncClient | None = None
         self._sync_task: asyncio.Task | None = None
@@ -605,6 +608,7 @@ class MatrixChannel(BaseChannel):
         return None
 
     async def send(self, msg: OutboundMessage) -> None:
+        """Send message text and optional attachments to a Matrix room, then clear typing state."""
         if not self.client:
             return
 
@@ -812,7 +816,7 @@ class MatrixChannel(BaseChannel):
         content = source.get("content")
         return content if isinstance(content, dict) else {}
 
-    def _event_thread_root_id(self, event: Any) -> str | None:
+    def _event_thread_root_id(self, event: RoomMessage) -> str | None:
         """Return thread root event_id if this message is inside a thread."""
         content = self._event_source_content(event)
         relates_to = content.get("m.relates_to")
@@ -823,7 +827,7 @@ class MatrixChannel(BaseChannel):
         root_id = relates_to.get("event_id")
         return root_id if isinstance(root_id, str) and root_id else None
 
-    def _thread_metadata(self, event: Any) -> dict[str, str] | None:
+    def _thread_metadata(self, event: RoomMessage) -> dict[str, str] | None:
         """Build metadata used to reply within a thread."""
         root_id = self._event_thread_root_id(event)
         if not root_id:
@@ -852,7 +856,7 @@ class MatrixChannel(BaseChannel):
             "is_falling_back": True,
         }
 
-    def _event_attachment_type(self, event: Any) -> str:
+    def _event_attachment_type(self, event: MatrixMediaEvent) -> str:
         """Map Matrix event payload/type to a stable attachment kind."""
         msgtype = self._event_source_content(event).get("msgtype")
         if msgtype == "m.image":
@@ -1131,7 +1135,7 @@ class MatrixChannel(BaseChannel):
         content_parts.extend(markers)
 
         # TODO: Optionally add audio transcription support for Matrix attachments,
-        # similar to Telegram's voice/audio flow, behind explicit config.
+        # behind explicit config.
 
         await self._start_typing_keepalive(room.room_id)
         try:
