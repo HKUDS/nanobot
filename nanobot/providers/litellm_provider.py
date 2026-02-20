@@ -111,7 +111,7 @@ class LiteLLMProvider(LLMProvider):
     def _supports_cache_control(self, model: str) -> bool:
         """Return True when the provider supports cache_control on content blocks."""
         if self._gateway is not None:
-            return False
+            return self._gateway.supports_prompt_caching
         spec = find_by_model(model)
         return spec is not None and spec.supports_prompt_caching
 

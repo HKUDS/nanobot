@@ -100,6 +100,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://openrouter.ai/api/v1",
         strip_model_prefix=False,
         model_overrides=(),
+        supports_prompt_caching=True,
     ),
 
     # AiHubMix: global gateway, OpenAI-compatible interface.
