@@ -1037,7 +1037,8 @@ def _login_google_gemini_cli() -> None:
         if expiry and current >= expiry:
             console.print("[yellow]⚠ Gemini CLI token has expired.[/yellow]")
             console.print("\nTo refresh your token:\n")
-            console.print("  Run: gemini (this will open interactive mode for login)\n")
+            console.print("  1. Run: gemini (this will open interactive mode for login)\n")
+            console.print("  2. Then run: nanobot provider login google-gemini-cli\n")
             raise typer.Exit(1)
 
         console.print(f"[green]✓ Gemini CLI authentication found[/green]")

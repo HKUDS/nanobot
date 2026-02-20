@@ -75,14 +75,14 @@ def _load_credentials() -> dict[str, str]:
     if not data:
         raise RuntimeError(
             "Google Gemini CLI credentials not found. "
-            "Please run: nanobot login google-gemini-cli"
+            "Please run: nanobot provider login google-gemini-cli"
         )
 
     # Check if token is expired (with 5 min buffer)
     expires_at = data.get("expires_at", 0)
     now_ms = int(time.time() * 1000)
     if expires_at < now_ms:
-        # TODO: Implement token refresh
+        # TODO: Implement token refresh using refresh_token
         raise RuntimeError(
             "Google Gemini CLI token has expired. "
             "Please log in to gemini CLI interactively, then run: nanobot provider login google-gemini-cli"
@@ -117,6 +117,13 @@ def _load_credentials() -> dict[str, str]:
             except (json.JSONDecodeError, IOError, FileNotFoundError):
                 pass
 
+    # Validate that we have a project_id
+    if not project_id:
+        raise RuntimeError(
+            "Google Cloud project ID not found. "
+            "Please set the GOOGLE_CLOUD_PROJECT environment variable."
+        )
+
     return {
         "access_token": data["access_token"],
         "project_id": project_id,
@@ -124,9 +131,10 @@ def _load_credentials() -> dict[str, str]:
 
 
 def _strip_model_prefix(model: str) -> str:
-    """Strip 'google-gemini-cli/' prefix from model name."""
-    if model.startswith("google-gemini-cli/"):
-        return model.split("/", 1)[1]
+    """Strip 'google-gemini-cli/' or 'google_gemini_cli/' prefix from model name."""
+    for prefix in ("google-gemini-cli/", "google_gemini_cli/"):
+        if model.startswith(prefix):
+            return model.split("/", 1)[1]
     return model
 
 
@@ -162,30 +170,8 @@ def _convert_messages_to_gemini_format(messages: list[dict[str, Any]]) -> list[d
 
         # Build parts
         parts = []
-        if isinstance(content, str):
-            parts.append({"text": content})
-        elif isinstance(content, list):
-            for item in content:
-                if isinstance(item, dict):
-                    if item.get("type") == "text":
-                        parts.append({"text": item.get("text", "")})
 
-        # Handle tool calls in assistant messages
-        if role == "assistant":
-            for tool_call in msg.get("tool_calls", []) or []:
-                fn = tool_call.get("function", {})
-                args = fn.get("arguments", {})
-                if isinstance(args, str):
-                    args = json.loads(args)
-
-                parts.append({
-                    "functionCall": {
-                        "name": fn.get("name", ""),
-                        "args": args,
-                    }
-                })
-
-        # Handle tool results
+        # Handle tool results first (don't add text content for tool messages)
         if role == "tool":
             tool_name = msg.get("name", "tool")
             response_content = json.dumps(content) if isinstance(content, dict) else str(content)
@@ -197,6 +183,30 @@ def _convert_messages_to_gemini_format(messages: list[dict[str, Any]]) -> list[d
                     }
                 }
             })
+        else:
+            # Add text content for user/assistant messages
+            if isinstance(content, str):
+                parts.append({"text": content})
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get("type") == "text":
+                            parts.append({"text": item.get("text", "")})
+
+            # Handle tool calls in assistant messages
+            if role == "assistant":
+                for tool_call in msg.get("tool_calls", []) or []:
+                    fn = tool_call.get("function", {})
+                    args = fn.get("arguments", {})
+                    if isinstance(args, str):
+                        args = json.loads(args)
+
+                    parts.append({
+                        "functionCall": {
+                            "name": fn.get("name", ""),
+                            "args": args,
+                        }
+                    })
 
         if parts:
             gemini_messages.append({
@@ -360,7 +370,7 @@ class GoogleGeminiCliProvider(LLMProvider):
                         try:
                             error_json = json.loads(error_text)
                             logger.error(f"Code Assist API error {response.status_code}: {json.dumps(error_json, indent=2)}")
-                        except:
+                        except Exception:
                             logger.error(f"Code Assist API error {response.status_code}: {error_text}")
                         return LLMResponse(
                             content=f"API error: {response.status_code}",
@@ -400,7 +410,7 @@ class GoogleGeminiCliProvider(LLMProvider):
                                             ToolCallRequest(
                                                 id=str(uuid.uuid4()),
                                                 name=fc.get("name", ""),
-                                                arguments=json.dumps(fc.get("args", {})),
+                                                arguments=fc.get("args", {}),
                                             )
                                         )
 
