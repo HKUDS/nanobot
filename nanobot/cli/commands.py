@@ -1075,7 +1075,7 @@ def _login_google_gemini_cli() -> None:
     except json.JSONDecodeError:
         console.print("[red]✗ Gemini CLI token file is corrupted.[/red]")
         console.print("\nPlease re-authenticate:\n")
-        console.print("  gemini auth login\n")
+        console.print("  Run: gemini (this will open interactive mode for login)\n")
         raise typer.Exit(1)
 
 
