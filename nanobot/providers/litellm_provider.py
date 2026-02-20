@@ -12,6 +12,10 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
 
 
+# Standard OpenAI chat-completion message keys; extras (e.g. reasoning_content) are stripped for strict providers.
+_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name"})
+
+
 class LiteLLMProvider(LLMProvider):
     """
     LLM provider using LiteLLM for multi-provider support.
@@ -147,6 +151,18 @@ class LiteLLMProvider(LLMProvider):
                     kwargs.update(overrides)
                     return
     
+    @staticmethod
+    def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Strip non-standard keys and ensure assistant messages have a content key."""
+        sanitized = []
+        for msg in messages:
+            clean = {k: v for k, v in msg.items() if k in _ALLOWED_MSG_KEYS}
+            # Strict providers require "content" even when assistant only has tool_calls
+            if clean.get("role") == "assistant" and "content" not in clean:
+                clean["content"] = None
+            sanitized.append(clean)
+        return sanitized
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -180,7 +196,7 @@ class LiteLLMProvider(LLMProvider):
         
         kwargs: dict[str, Any] = {
             "model": model,
-            "messages": messages,
+            "messages": self._sanitize_messages(messages),
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
