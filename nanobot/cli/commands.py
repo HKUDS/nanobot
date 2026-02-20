@@ -519,6 +519,28 @@ def agent(
         signal.signal(signal.SIGINT, _exit_on_sigint)
         
         async def run_interactive():
+            # Start bus consumer in background so subagent results are
+            # picked up and processed (they publish to bus.inbound).
+            bus_consumer_task = asyncio.create_task(agent_loop.run())
+
+            # Consume outbound messages produced by the bus consumer
+            # (e.g. subagent result summaries) and print them to the CLI.
+            async def _print_bus_outbound():
+                while True:
+                    try:
+                        msg = await asyncio.wait_for(
+                            bus.consume_outbound(), timeout=1.0
+                        )
+                        if msg.content:
+                            console.print()
+                            _print_agent_response(msg.content, render_markdown=markdown)
+                    except asyncio.TimeoutError:
+                        continue
+                    except asyncio.CancelledError:
+                        break
+
+            outbound_printer_task = asyncio.create_task(_print_bus_outbound())
+
             try:
                 while True:
                     try:
@@ -532,7 +554,7 @@ def agent(
                             _restore_terminal()
                             console.print("\nGoodbye!")
                             break
-                        
+
                         with _thinking_ctx():
                             response = await agent_loop.process_direct(user_input, session_id, on_progress=_cli_progress)
                         _print_agent_response(response, render_markdown=markdown)
@@ -545,6 +567,12 @@ def agent(
                         console.print("\nGoodbye!")
                         break
             finally:
+                agent_loop.stop()
+                outbound_printer_task.cancel()
+                await asyncio.gather(
+                    bus_consumer_task, outbound_printer_task,
+                    return_exceptions=True,
+                )
                 await agent_loop.close_mcp()
         
         asyncio.run(run_interactive())
