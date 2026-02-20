@@ -500,9 +500,7 @@ class MatrixChannel(BaseChannel):
     ) -> str | None:
         """Upload one local file to Matrix and send it as a media message."""
         if not self.client:
-            return MATRIX_ATTACHMENT_UPLOAD_FAILED_TEMPLATE.format(
-                path.name or MATRIX_DEFAULT_ATTACHMENT_NAME
-            )
+            return MATRIX_ATTACHMENT_UPLOAD_FAILED_TEMPLATE.format(path.name or MATRIX_DEFAULT_ATTACHMENT_NAME)
 
         resolved = path.expanduser().resolve(strict=False)
         filename = safe_filename(resolved.name) or MATRIX_DEFAULT_ATTACHMENT_NAME
@@ -1027,7 +1025,10 @@ class MatrixChannel(BaseChannel):
 
         limit_bytes = await self._effective_media_limit_bytes()
         declared_size = self._event_declared_size_bytes(event)
-        if declared_size is not None and declared_size > limit_bytes:
+        if (
+            declared_size is not None
+            and declared_size > limit_bytes
+        ):
             logger.warning(
                 "Matrix attachment skipped in room {}: declared size {} exceeds limit {}",
                 room.room_id,
