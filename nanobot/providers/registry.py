@@ -140,6 +140,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # VolcEngine (火山引擎): OpenAI-compatible gateway
+    ProviderSpec(
+        name="volcengine",
+        keywords=("volcengine", "volces", "ark"),
+        env_key="OPENAI_API_KEY",
+        display_name="VolcEngine",
+        litellm_prefix="openai",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="volces",
+        default_api_base="https://ark.cn-beijing.volces.com/api/v3",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # === Standard providers (matched by model-name keywords) ===============
 
     # Anthropic: LiteLLM recognizes "claude-*" natively, no prefix needed.
