@@ -7,6 +7,7 @@ import json_repair
 from pathlib import Path
 import re
 from typing import Any, Awaitable, Callable
+from datetime import datetime
 
 from loguru import logger
 
@@ -24,6 +25,7 @@ from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import Session, SessionManager
+from nanobot.config.loader import load_config
 
 
 class AgentLoop:
@@ -169,6 +171,7 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        session: Session | None = None,
     ) -> tuple[str | None, list[str]]:
         """
         Run the agent iteration loop.
@@ -176,6 +179,7 @@ class AgentLoop:
         Args:
             initial_messages: Starting messages for the LLM conversation.
             on_progress: Optional callback to push intermediate content to the user.
+            session: Optional session to record intermediate tool messages.
 
         Returns:
             Tuple of (final_content, list_of_tools_used).
@@ -224,7 +228,30 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+
+                    # Record message tool usage in corresponding session
+                    if tool_call.name == "message" and result is not None:
+                        content = tool_call.arguments.get("content")
+                        if content:
+
+                            # Find the session id of the session the message was sent to (wasn't available as tool call argument, for some reason)
+                            match = re.search(r"Message sent to (\S+)", result) # Example: Message sent to telegram:123456789 with 1 attachments
+                            finalMessageSessionId = match.group(1) if match else None
+
+                            if (
+                                finalMessageSessionId is not None and
+                                any(s.get("key") == finalMessageSessionId for s in self.sessions.list_sessions())
+                            ):
+                                finalMessageSession = self.sessions.get_or_create(finalMessageSessionId)
+                            else:
+                                finalMessageSession = session # If the session id is not found, use the current session as fallback
+                            
+                            if finalMessageSession is not None:
+                                finalMessageSession.add_message("assistant", content, via_tool="message")
+                                self.sessions.save(finalMessageSession)
+                    
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -345,14 +372,27 @@ class AgentLoop:
             asyncio.create_task(_consolidate_and_unlock())
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        
+        config = load_config()
+        speechConfig = config.speech or {}
+
+        userMessageToModel = msg.content
+
+        if speechConfig.enabled and (speechConfig.always_answer_with_audio or msg.metadata.get("wasAudio")):
+            userMessageToModel = "[AUDIO ANSWER]\n\n"+userMessageToModel
+
         initial_messages = self.context.build_messages(
             history=session.get_history(max_messages=self.memory_window),
-            current_message=msg.content,
+            current_message=userMessageToModel,
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
         )
 
+        # Add user message to session
+        session.add_message("user", msg.content)
+        self.sessions.save(session)
+        
         async def _bus_progress(content: str) -> None:
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content,
@@ -360,16 +400,29 @@ class AgentLoop:
             ))
 
         final_content, tools_used = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages, on_progress=on_progress or _bus_progress, session=session
         )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
+
+        sendMessageAsText = True
+        if speechConfig.enabled and final_content and (speechConfig.always_answer_with_audio or msg.metadata.get("wasAudio")):
+            from nanobot.providers.speech import EdgeTextToSpeechProvider
+            tts = EdgeTextToSpeechProvider(voice=speechConfig.voice, rate=speechConfig.rate)
+
+            audioFilePath = f"tts_{msg.session_key.replace(':', '_')}_{int(datetime.now().timestamp() * 1000)}.ogg"
+            audio_path = Path.home() / ".nanobot" / "media" / audioFilePath
+            result = await tts.synthesize(final_content, audio_path)
+            if result:
+                msg.metadata["audioFilePath"] = str(result)
+
+                if not speechConfig.send_transcription:
+                    sendMessageAsText = False
         
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
         
-        session.add_message("user", msg.content)
         session.add_message("assistant", final_content,
                             tools_used=tools_used if tools_used else None)
         self.sessions.save(session)
@@ -377,8 +430,9 @@ class AgentLoop:
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
-            content=final_content,
+            content=final_content if sendMessageAsText else "[empty message]",
             metadata=msg.metadata or {},  # Pass through for channel-specific needs (e.g. Slack thread_ts)
+            media=[msg.metadata["audioFilePath"]] if msg.metadata.get("audioFilePath") else [],
         )
     
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
@@ -403,18 +457,22 @@ class AgentLoop:
         session_key = f"{origin_channel}:{origin_chat_id}"
         session = self.sessions.get_or_create(session_key)
         self._set_tool_context(origin_channel, origin_chat_id, msg.metadata.get("message_id"))
+        
+        # Add system message to session immediately
+        session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
+        self.sessions.save(session)
+        
         initial_messages = self.context.build_messages(
             history=session.get_history(max_messages=self.memory_window),
             current_message=msg.content,
             channel=origin_channel,
             chat_id=origin_chat_id,
         )
-        final_content, _ = await self._run_agent_loop(initial_messages)
+        final_content, _ = await self._run_agent_loop(initial_messages, session=session)
 
         if final_content is None:
             final_content = "Background task completed."
         
-        session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
         session.add_message("assistant", final_content)
         self.sessions.save(session)
         

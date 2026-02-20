@@ -41,6 +41,7 @@ dependencies = [
     "python-socks[asyncio]>=2.8.0,<3.0.0",
     "prompt-toolkit>=3.0.50,<4.0.0",
     "mcp>=1.26.0,<2.0.0",
+    "edge-tts>=6.1.0",
     "json-repair>=0.57.0,<1.0.0",
 ]
 

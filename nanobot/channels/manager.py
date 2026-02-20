@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -199,6 +200,15 @@ class ChannelManager:
                         await channel.send(msg)
                     except Exception as e:
                         logger.error("Error sending to {}: {}", msg.channel, e)
+                    finally:
+                        if msg.metadata.get("audioFilePath"):
+                            audioFilePath = msg.metadata["audioFilePath"]
+                            audio_path = Path(audioFilePath)
+                            if audio_path.exists():
+                                try:
+                                    audio_path.unlink()
+                                except Exception:
+                                    pass
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
                     
