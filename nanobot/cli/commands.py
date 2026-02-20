@@ -243,7 +243,7 @@ Information about the user goes here.
     for filename, content in templates.items():
         file_path = workspace / filename
         if not file_path.exists():
-            file_path.write_text(content)
+            file_path.write_text(content, encoding="utf-8")
             console.print(f"  [dim]Created {filename}[/dim]")
     
     # Create memory directory and MEMORY.md
@@ -266,12 +266,12 @@ This file stores important information that should persist across sessions.
 ## Important Notes
 
 (Things to remember)
-""")
+""", encoding="utf-8")
         console.print("  [dim]Created memory/MEMORY.md[/dim]")
     
     history_file = memory_dir / "HISTORY.md"
     if not history_file.exists():
-        history_file.write_text("")
+        history_file.write_text("", encoding="utf-8")
         console.print("  [dim]Created memory/HISTORY.md[/dim]")
 
     # Create skills directory for custom user skills
@@ -805,15 +805,19 @@ def cron_add(
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
     
-    job = service.add_job(
-        name=name,
-        schedule=schedule,
-        message=message,
-        deliver=deliver,
-        to=to,
-        channel=channel,
-    )
-    
+    try:
+        job = service.add_job(
+            name=name,
+            schedule=schedule,
+            message=message,
+            deliver=deliver,
+            to=to,
+            channel=channel,
+        )
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1) from e
+
     console.print(f"[green]✓[/green] Added job '{job.name}' ({job.id})")
 
 
@@ -860,17 +864,56 @@ def cron_run(
     force: bool = typer.Option(False, "--force", "-f", help="Run even if disabled"),
 ):
     """Manually run a job."""
-    from nanobot.config.loader import get_data_dir
+    from loguru import logger
+    from nanobot.config.loader import load_config, get_data_dir
     from nanobot.cron.service import CronService
-    
+    from nanobot.cron.types import CronJob
+    from nanobot.bus.queue import MessageBus
+    from nanobot.agent.loop import AgentLoop
+    logger.disable("nanobot")
+
+    config = load_config()
+    provider = _make_provider(config)
+    bus = MessageBus()
+    agent_loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=config.workspace_path,
+        model=config.agents.defaults.model,
+        temperature=config.agents.defaults.temperature,
+        max_tokens=config.agents.defaults.max_tokens,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        memory_window=config.agents.defaults.memory_window,
+        brave_api_key=config.tools.web.search.api_key or None,
+        exec_config=config.tools.exec,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        mcp_servers=config.tools.mcp_servers,
+    )
+
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
-    
+
+    result_holder = []
+
+    async def on_job(job: CronJob) -> str | None:
+        response = await agent_loop.process_direct(
+            job.payload.message,
+            session_key=f"cron:{job.id}",
+            channel=job.payload.channel or "cli",
+            chat_id=job.payload.to or "direct",
+        )
+        result_holder.append(response)
+        return response
+
+    service.on_job = on_job
+
     async def run():
         return await service.run_job(job_id, force=force)
-    
+
     if asyncio.run(run()):
-        console.print(f"[green]✓[/green] Job executed")
+        console.print("[green]✓[/green] Job executed")
+        if result_holder:
+            _print_agent_response(result_holder[0], render_markdown=True)
     else:
         console.print(f"[red]Failed to run job {job_id}[/red]")
 
