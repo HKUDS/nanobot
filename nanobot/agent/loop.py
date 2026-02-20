@@ -277,8 +277,9 @@ class AgentLoop:
                 )
                 try:
                     response = await self._process_message(msg)
-                    if response:
-                        await self.bus.publish_outbound(response)
+                    await self.bus.publish_outbound(response or OutboundMessage(
+                        channel=msg.channel, chat_id=msg.chat_id, content="",
+                    ))
                 except Exception as e:
                     logger.error("Error processing message: {}", e)
                     await self.bus.publish_outbound(OutboundMessage(
@@ -376,9 +377,11 @@ class AgentLoop:
         )
 
         async def _bus_progress(content: str) -> None:
+            meta = dict(msg.metadata or {})
+            meta["_progress"] = True
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content,
-                metadata=msg.metadata or {},
+                metadata=meta,
             ))
 
         final_content, tools_used = await self._run_agent_loop(
