@@ -1,6 +1,8 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
+from typing import Literal
+
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
@@ -58,6 +60,26 @@ class DiscordConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
+
+
+class MatrixConfig(Base):
+    """Matrix (Element) channel configuration."""
+
+    enabled: bool = False
+    homeserver: str = "https://matrix.org"
+    access_token: str = ""
+    user_id: str = ""  # @bot:matrix.org
+    device_id: str = ""
+    # Enable Matrix E2EE support (encryption + encrypted room handling).
+    e2ee_enabled: bool = True
+    # Max seconds to wait for sync_forever to stop gracefully before cancellation fallback.
+    sync_stop_grace_seconds: int = 2
+    # Max attachment size accepted for Matrix media handling (inbound + outbound).
+    max_media_bytes: int = 20 * 1024 * 1024
+    allow_from: list[str] = Field(default_factory=list)
+    group_policy: Literal["open", "mention", "allowlist"] = "open"
+    group_allow_from: list[str] = Field(default_factory=list)
+    allow_room_mentions: bool = False
 
 
 class EmailConfig(Base):
@@ -176,6 +198,7 @@ class ChannelsConfig(Base):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
 class AgentDefaults(Base):

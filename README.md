@@ -302,6 +302,73 @@ nanobot gateway
 </details>
 
 <details>
+<summary><b>Matrix (Element)</b></summary>
+
+Uses Matrix sync via `matrix-nio` (inbound media + outbound file attachments).
+
+**1. Create/choose a Matrix account**
+
+- Create or reuse a Matrix account on your homeserver (for example `matrix.org`).
+- Confirm you can log in with Element.
+
+**2. Get credentials**
+
+- You need:
+  - `userId` (example: `@nanobot:matrix.org`)
+  - `accessToken`
+  - `deviceId` (recommended so sync tokens can be restored across restarts)
+- You can obtain these from your homeserver login API (`/_matrix/client/v3/login`) or from your client's advanced session settings.
+
+**3. Configure**
+
+```json
+{
+  "channels": {
+    "matrix": {
+      "enabled": true,
+      "homeserver": "https://matrix.org",
+      "userId": "@nanobot:matrix.org",
+      "accessToken": "syt_xxx",
+      "deviceId": "NANOBOT01",
+      "e2eeEnabled": true,
+      "allowFrom": [],
+      "groupPolicy": "open",
+      "groupAllowFrom": [],
+      "allowRoomMentions": false,
+      "maxMediaBytes": 20971520
+    }
+  }
+}
+```
+
+> `allowFrom`: Empty allows all senders; set user IDs to restrict access.
+> `groupPolicy`: `open`, `mention`, or `allowlist`.
+> `groupAllowFrom`: Room allowlist used when `groupPolicy` is `allowlist`.
+> `allowRoomMentions`: If `true`, accepts `@room` (`m.mentions.room`) in mention mode.
+> `e2eeEnabled`: Enables Matrix E2EE support (default `true`); set `false` only for plaintext-only setups.
+> `maxMediaBytes`: Max attachment size in bytes (default `20MB`) for inbound and outbound media handling; set to `0` to block all inbound and outbound attachment uploads.
+
+> [!NOTE]
+> Matrix E2EE implications:
+>
+> - Keep a persistent `matrix-store` and stable `deviceId`; otherwise encrypted session state can be lost after restart.
+> - In newly joined encrypted rooms, initial messages may fail until Olm/Megolm sessions are established.
+> - With `e2eeEnabled=false`, encrypted room messages may be undecryptable and E2EE send safeguards are not applied.
+> - With `e2eeEnabled=true`, the bot sends with `ignore_unverified_devices=true` (more compatible, less strict than verified-only sending).
+> - Changing `accessToken`/`deviceId` effectively creates a new device and may require session re-establishment.
+> - Outbound attachments are sent from `OutboundMessage.media`.
+> - Effective media limit (inbound + outbound) uses the stricter value of local `maxMediaBytes` and homeserver `m.upload.size` (if advertised).
+> - If `tools.restrictToWorkspace=true`, Matrix outbound attachments are limited to files inside the workspace.
+
+**4. Run**
+
+```bash
+nanobot gateway
+```
+
+</details>
+
+<details>
 <summary><b>WhatsApp</b></summary>
 
 Requires **Node.js ≥18**.
