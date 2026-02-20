@@ -89,6 +89,7 @@ class AgentLoop:
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
+        self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._register_default_tools()
     
     def _register_default_tools(self) -> None:
@@ -330,8 +331,16 @@ class AgentLoop:
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
         
-        if len(session.messages) > self.memory_window:
-            asyncio.create_task(self._consolidate_memory(session))
+        if len(session.messages) > self.memory_window and session.key not in self._consolidating:
+            self._consolidating.add(session.key)
+
+            async def _consolidate_and_unlock():
+                try:
+                    await self._consolidate_memory(session)
+                finally:
+                    self._consolidating.discard(session.key)
+
+            asyncio.create_task(_consolidate_and_unlock())
 
         self._set_tool_context(msg.channel, msg.chat_id)
         initial_messages = self.context.build_messages(
