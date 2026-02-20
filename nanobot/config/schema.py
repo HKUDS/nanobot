@@ -250,6 +250,18 @@ class ExecToolConfig(Base):
     timeout: int = 60
 
 
+class BrowserToolConfig(Base):
+    """Browser automation tool configuration (Playwright). Optional; requires [browser] extra."""
+
+    enabled: bool = False
+    headless: bool = True
+    timeout_ms: int = 30000  # Navigation and action timeout
+    # Proxy for browser traffic (Chromium does not use HTTP_PROXY/HTTPS_PROXY by default). Empty = no proxy; fallback to env if unset.
+    proxy_server: str = ""
+    # Storage state (cookies, localStorage) path. Empty = use workspace/browser/cookie.json.
+    storage_state_path: str = ""
+
+
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -264,6 +276,7 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    browser: BrowserToolConfig = Field(default_factory=BrowserToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 

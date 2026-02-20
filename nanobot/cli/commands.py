@@ -368,6 +368,7 @@ def gateway(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
+        browser_config=config.tools.browser,
     )
     
     # Set cron callback (needs agent)
@@ -426,7 +427,7 @@ def gateway(
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
-            await agent.close_mcp()
+            await agent.close()
             heartbeat.stop()
             cron.stop()
             agent.stop()
@@ -484,6 +485,7 @@ def agent(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
+        browser_config=config.tools.browser,
     )
     
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -503,21 +505,14 @@ def agent(
             with _thinking_ctx():
                 response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
             _print_agent_response(response, render_markdown=markdown)
-            await agent_loop.close_mcp()
+            await agent_loop.close()
         
         asyncio.run(run_once())
     else:
-        # Interactive mode
+        # Interactive mode (no custom SIGINT handler so Ctrl+C lets finally run and agent_loop.close() saves browser state)
         _init_prompt_session()
         console.print(f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n")
 
-        def _exit_on_sigint(signum, frame):
-            _restore_terminal()
-            console.print("\nGoodbye!")
-            os._exit(0)
-
-        signal.signal(signal.SIGINT, _exit_on_sigint)
-        
         async def run_interactive():
             try:
                 while True:
@@ -540,12 +535,16 @@ def agent(
                         _restore_terminal()
                         console.print("\nGoodbye!")
                         break
+                    except asyncio.CancelledError:
+                        _restore_terminal()
+                        console.print("\nGoodbye!")
+                        break
                     except EOFError:
                         _restore_terminal()
                         console.print("\nGoodbye!")
                         break
             finally:
-                await agent_loop.close_mcp()
+                await agent_loop.close()
         
         asyncio.run(run_interactive())
 
