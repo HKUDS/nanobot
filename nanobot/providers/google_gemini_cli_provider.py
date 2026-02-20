@@ -285,8 +285,8 @@ class GoogleGeminiCliProvider(LLMProvider):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         model: str | None = None,
-        max_tokens: int = 8192,
-        temperature: float = 0.7,
+        max_tokens: int = 1048576,
+        temperature: float = 1.0,
     ) -> LLMResponse:
         """Make a chat completion request to Code Assist API.
 
