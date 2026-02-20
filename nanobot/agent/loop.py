@@ -183,6 +183,7 @@ class AgentLoop:
         messages = initial_messages
         iteration = 0
         final_content = None
+        first_text_content = None  # Fallback: first text response before retry
         tools_used: list[str] = []
         text_only_retried = False
 
@@ -232,6 +233,7 @@ class AgentLoop:
                 # Give them one retry; don't forward the text to avoid duplicates.
                 if not tools_used and not text_only_retried and final_content:
                     text_only_retried = True
+                    first_text_content = final_content  # Save in case retry yields nothing
                     logger.debug("Interim text response (no tools used yet), retrying: {}", final_content[:80])
                     messages = self.context.add_assistant_message(
                         messages, response.content,
@@ -240,6 +242,10 @@ class AgentLoop:
                     final_content = None
                     continue
                 break
+
+        # If retry discarded the first text response and nothing better came back, restore it
+        if final_content is None and first_text_content:
+            final_content = first_text_content
 
         return final_content, tools_used
 
