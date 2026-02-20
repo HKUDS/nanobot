@@ -448,6 +448,7 @@ def agent(
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    trace: bool = typer.Option(None, "--trace/--no-trace", help="Enable execution tracing (overrides config)"),
 ):
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config, get_data_dir
@@ -470,6 +471,11 @@ def agent(
     else:
         logger.disable("nanobot")
     
+    # Apply CLI override to trace config
+    trace_config = config.tools.trace
+    if trace is not None:
+        trace_config.enabled = trace
+
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -484,6 +490,7 @@ def agent(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
+        trace_config=trace_config,
     )
     
     # Show spinner when logs are off (no output to miss); skip when logs are on

@@ -54,12 +54,15 @@ class AgentLoop:
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
+        trace_config: "TraceConfig | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
         self.bus = bus
         self.provider = provider
         self.workspace = workspace
+        self.trace_config = trace_config
+
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.temperature = temperature
@@ -167,6 +170,7 @@ class AgentLoop:
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
+        session_id: str = "unknown",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str]]:
         """
@@ -179,54 +183,115 @@ class AgentLoop:
         Returns:
             Tuple of (final_content, list_of_tools_used).
         """
+        if self.trace_config and self.trace_config.enabled:
+            from nanobot.agent.trace import TraceWriter
+            # session_id unavailable here in pure loop, will be patched in higher layers or we accept partial data
+            # Actually, we can get session_id if we change signature, but let's just use a placeholder or derived one if not passed.
+            # Ideally _run_agent_loop should know the session.
+            pass
+
+        # We need to access the trace writer.
+        # Since _run_agent_loop is internal, we can rely on the caller to set up tracing,
+        # OR we can instantiate it here if we had session info.
+        # Given limitations, let's instantiate TraceWriter here if trace is enabled, 
+        # but we need session info.
+        
+        # Refactoring: _run_agent_loop doesn't see session_id.
+        # We'll rely on the caller (process_message) to handle trace scope?
+        # No, the requirement is "Integrate trace hooks into nanobot/agent/loop.py, inside the main agent loop".
+        
+        # Let's add session_id to _run_agent_loop signature in a separate step if needed,
+        # OR just use "unknown" for now and fix it in process_message.
+        
+        # Wait, better approach:
+        # 1. Add trace_writer as optional arg to _run_agent_loop?
+        # 2. Or just ignoring session_id here and using a fresh writer per run?
+        # The prompt says: "On run start... instantiate TraceWriter"
+        
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        
+        # Trace setup
+        trace_writer = None
+        if self.trace_config and self.trace_config.enabled:
+            from nanobot.agent.trace import TraceWriter
+            trace_writer = TraceWriter(self.workspace, self.trace_config, session_id=session_id, model=self.model)
+            
+        try:
+            while iteration < self.max_iterations:
+                iteration += 1
+                
+                if trace_writer:
+                    trace_writer.log_iteration_start(iteration, messages)
 
-        while iteration < self.max_iterations:
-            iteration += 1
-
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-
-            if response.has_tool_calls:
-                if on_progress:
-                    clean = self._strip_think(response.content)
-                    await on_progress(clean or self._tool_hint(response.tool_calls))
-
-                tool_call_dicts = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments)
-                        }
-                    }
-                    for tc in response.tool_calls
-                ]
-                messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts,
-                    reasoning_content=response.reasoning_content,
+                response = await self.provider.chat(
+                    messages=messages,
+                    tools=self.tools.get_definitions(),
+                    model=self.model,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
                 )
+                
+                if trace_writer:
+                    trace_writer.log_llm_response(response.content, response.tool_calls)
 
-                for tool_call in response.tool_calls:
-                    tools_used.append(tool_call.name)
-                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                    logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
+                if response.has_tool_calls:
+                    if on_progress:
+                        clean = self._strip_think(response.content)
+                        await on_progress(clean or self._tool_hint(response.tool_calls))
+
+                    tool_call_dicts = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": json.dumps(tc.arguments)
+                            }
+                        }
+                        for tc in response.tool_calls
+                    ]
+                    messages = self.context.add_assistant_message(
+                        messages, response.content, tool_call_dicts,
+                        reasoning_content=response.reasoning_content,
                     )
-            else:
-                final_content = self._strip_think(response.content)
-                break
+
+                    for tool_call in response.tool_calls:
+                        tools_used.append(tool_call.name)
+                        args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                        logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
+                        
+                        try:
+                            result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                        except Exception as e:
+                            result = f"Error executing tool: {e}"
+                        
+                        if trace_writer:
+                            trace_writer.log_tool_execution(tool_call.name, tool_call.arguments, result)
+                            
+                        messages = self.context.add_tool_result(
+                            messages, tool_call.id, tool_call.name, result
+                        )
+                else:
+                    final_content = self._strip_think(response.content)
+                    if trace_writer:
+                        # Fallback: some providers surface errors as content string
+                        if final_content and final_content.startswith("Error calling LLM:"):
+                            trace_writer.close("error", final_content)
+                        else:
+                            trace_writer.close("final_answer", final_content)
+                    break
+            
+            if iteration >= self.max_iterations and final_content is None:
+                 if trace_writer:
+                     trace_writer.close("max_iterations")
+
+        except Exception as e:
+            if trace_writer:
+                trace_writer.close("error", str(e))
+            raise e
 
         return final_content, tools_used
 
@@ -337,7 +402,9 @@ class AgentLoop:
             ))
 
         final_content, tools_used = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages,
+            session_id=key,
+            on_progress=on_progress or _bus_progress,
         )
 
         if final_content is None:
@@ -386,7 +453,7 @@ class AgentLoop:
             channel=origin_channel,
             chat_id=origin_chat_id,
         )
-        final_content, _ = await self._run_agent_loop(initial_messages)
+        final_content, _ = await self._run_agent_loop(initial_messages, session_id=session_key)
 
         if final_content is None:
             final_content = "Background task completed."

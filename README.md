@@ -788,6 +788,7 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `nanobot agent -m "..."` | Chat with the agent |
 | `nanobot agent` | Interactive chat mode |
 | `nanobot agent --no-markdown` | Show plain-text replies |
+| `nanobot agent --trace` | Writes a run trace to workspace/traces/… |
 | `nanobot agent --logs` | Show runtime logs during chat |
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
