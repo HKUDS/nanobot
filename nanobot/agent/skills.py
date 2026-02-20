@@ -1,10 +1,14 @@
 """Skills loader for agent capabilities."""
 
+import importlib.util
 import json
 import os
 import re
 import shutil
+import sys
 from pathlib import Path
+
+from nanobot.agent.tools.skill import SkillFunctionTool
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
@@ -123,7 +127,7 @@ class SkillsLoader:
             skill_meta = self._get_skill_meta(s["name"])
             available = self._check_requirements(skill_meta)
             
-            lines.append(f"  <skill available=\"{str(available).lower()}\">")
+            lines.append(f'  <skill available="{str(available).lower()}">')
             lines.append(f"    <name>{name}</name>")
             lines.append(f"    <description>{desc}</description>")
             lines.append(f"    <location>{path}</location>")
@@ -167,10 +171,10 @@ class SkillsLoader:
         return content
     
     def _parse_nanobot_metadata(self, raw: str) -> dict:
-        """Parse nanobot metadata JSON from frontmatter."""
+        """Parse skill metadata JSON from frontmatter (supports nanobot and openclaw keys)."""
         try:
             data = json.loads(raw)
-            return data.get("nanobot", {}) if isinstance(data, dict) else {}
+            return data.get("nanobot", data.get("openclaw", {})) if isinstance(data, dict) else {}
         except (json.JSONDecodeError, TypeError):
             return {}
     
@@ -222,7 +226,81 @@ class SkillsLoader:
                 for line in match.group(1).split("\n"):
                     if ":" in line:
                         key, value = line.split(":", 1)
-                        metadata[key.strip()] = value.strip().strip('"\'')
+                        metadata[key.strip()] = value.strip().strip('"\')
                 return metadata
         
         return None
+
+    def load_skill_tools(self) -> list[SkillFunctionTool]:
+        """
+        Load tools from skill.py modules in available skills.
+
+        Discovers skill.py in each skill directory (workspace and builtin),
+        imports callable functions (excluding private names), and wraps them
+        as SkillFunctionTool instances.
+
+        Returns:
+            List of SkillFunctionTool instances.
+        """
+        tools: list[SkillFunctionTool] = []
+        seen_skill_dirs: set[Path] = set()
+
+        def _try_load_skill_module(skill_dir: Path, skill_name: str) -> None:
+            if skill_dir in seen_skill_dirs:
+                return
+            seen_skill_dirs.add(skill_dir)
+            skill_py = skill_dir / "skill.py"
+            if not skill_py.exists():
+                return
+            # Check requirements before loading
+            skill_meta = self._get_skill_meta(skill_name)
+            if not self._check_requirements(skill_meta):
+                return
+            try:
+                spec = importlib.util.spec_from_file_location(
+                    f"skill_{skill_name}", skill_py
+                )
+                if not spec or not spec.loader:
+                    return
+                module = importlib.util.module_from_spec(spec)
+                # Ensure skill dir is on path for imports from same skill
+                skill_dir_str = str(skill_dir)
+                if skill_dir_str not in sys.path:
+                    sys.path.insert(0, skill_dir_str)
+                spec.loader.exec_module(module)
+                mod_name = getattr(module, "__name__", "")
+                for attr_name in dir(module):
+                    if attr_name.startswith("_"):
+                        continue
+                    obj = getattr(module, attr_name)
+                    if not (callable(obj) and not isinstance(obj, type)):
+                        continue
+                    # Only register functions defined in this module (not imports)
+                    if getattr(obj, "__module__", "") != mod_name:
+                        continue
+                    tools.append(
+                        SkillFunctionTool(
+                            skill_name=skill_name,
+                            func=obj,
+                            working_dir=skill_dir,
+                        )
+                    )
+            except Exception:
+                pass  # Skip skills that fail to load
+
+        # Workspace skills first (highest priority)
+        workspace_skill_names: set[str] = set()
+        if self.workspace_skills.exists():
+            for skill_dir in self.workspace_skills.iterdir():
+                if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists():
+                    workspace_skill_names.add(skill_dir.name)
+                    _try_load_skill_module(skill_dir, skill_dir.name)
+
+        # Built-in skills (skip if workspace overrides)
+        if self.builtin_skills and self.builtin_skills.exists():
+            for skill_dir in self.builtin_skills.iterdir():
+                if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists():
+                    if skill_dir.name not in workspace_skill_names:
+                        _try_load_skill_module(skill_dir, skill_dir.name)
+
+        return tools
