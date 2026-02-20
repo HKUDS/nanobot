@@ -267,11 +267,7 @@ class TelegramChannel(BaseChannel):
         )
 
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /help command directly, bypassing access control.
-
-        /help is informational and should be accessible to all users,
-        even those not in the allowFrom list.
-        """
+        """Handle /help command, bypassing ACL so all users can access it."""
         if not update.message:
             return
         await update.message.reply_text(
