@@ -391,8 +391,9 @@ class AgentLoop:
 
         if suppress_final_reply:
             logger.info(
-                "Skipping final auto-reply because message tool already sent to "
-                f"{msg.channel}:{msg.chat_id} in this turn"
+                "Skipping final auto-reply because message tool already sent to {}:{} in this turn",
+                msg.channel,
+                msg.chat_id,
             )
             return None
 
