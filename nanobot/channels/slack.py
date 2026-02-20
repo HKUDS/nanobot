@@ -84,11 +84,24 @@ class SlackChannel(BaseChannel):
             channel_type = slack_meta.get("channel_type")
             # Only reply in thread for channel/group messages; DMs don't use threads
             use_thread = thread_ts and channel_type != "im"
-            await self._web_client.chat_postMessage(
-                channel=msg.chat_id,
-                text=self._to_mrkdwn(msg.content),
-                thread_ts=thread_ts if use_thread else None,
-            )
+            thread_ts_param = thread_ts if use_thread else None
+
+            if msg.content:
+                await self._web_client.chat_postMessage(
+                    channel=msg.chat_id,
+                    text=self._to_mrkdwn(msg.content),
+                    thread_ts=thread_ts_param,
+                )
+
+            for media_path in msg.media or []:
+                try:
+                    await self._web_client.files_upload_v2(
+                        channel=msg.chat_id,
+                        file=media_path,
+                        thread_ts=thread_ts_param,
+                    )
+                except Exception as e:
+                    logger.error("Failed to upload file {}: {}", media_path, e)
         except Exception as e:
             logger.error("Error sending Slack message: {}", e)
 
