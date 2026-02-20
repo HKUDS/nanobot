@@ -37,4 +37,4 @@ RUN mkdir -p /root/.nanobot
 EXPOSE 18790
 
 ENTRYPOINT ["nanobot"]
-CMD ["status"]
+CMD ["gateway"]
