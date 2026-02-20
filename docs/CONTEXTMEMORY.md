@@ -13,7 +13,7 @@ ContextMemory is a CLI tool that helps developers save and restore their working
 
 This can be useful when working with AI coding assistants such as ChatGPT, Claude, or Cursor, allowing contributors to resume work without manually reconstructing project context.
 
-ContextMemory does not modify OpenClaw source code and is entirely optional.
+ContextMemory does not modify nanobot source code and is entirely optional.
 
 ---
 
@@ -33,9 +33,9 @@ contextmemory --help
 
 ---
 
-## Initialize in OpenClaw Repository
+## Initialize in nanobot Repository
 
-From the OpenClaw project root directory:
+From the nanobot project root directory:
 
 ```bash
 contextmemory init
@@ -57,10 +57,10 @@ This directory is local to your development environment.
 
 ## Saving Development Context
 
-To save your current OpenClaw development state:
+To save your current nanobot development state:
 
 ```bash
-contextmemory save "Working on OpenClaw feature implementation"
+contextmemory save "Working on nanobot feature implementation"
 ```
 
 This records relevant information such as:
@@ -107,7 +107,7 @@ This allows compatible tools to access stored context automatically.
 
 ---
 
-## Example Use Cases in OpenClaw Development
+## Example Use Cases in nanobot Development
 
 ContextMemory may be useful for:
 
@@ -122,7 +122,7 @@ ContextMemory may be useful for:
 ## Notes
 
 - ContextMemory is optional  
-- It does not change OpenClaw functionality  
+- It does not change nanobot functionality  
 - It stores context locally in your development environment  
 - It can be safely ignored if not needed  
 
@@ -130,5 +130,5 @@ ContextMemory may be useful for:
 
 ## Related Links
 
-- [View package on npm](https://www.npmjs.com/package/...)
-- [View profile on GitHub](https://github.com/AkashKobal/...)
+- [View package on npm](https://www.npmjs.com/package/@akashkobal/contextmemory)
+- [View profile on GitHub](https://github.com/AkashKobal/contextmemory)
