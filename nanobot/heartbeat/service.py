@@ -49,11 +49,13 @@ class HeartbeatService:
         on_heartbeat: Callable[[str], Coroutine[Any, Any, str]] | None = None,
         interval_s: int = DEFAULT_HEARTBEAT_INTERVAL_S,
         enabled: bool = True,
+        run_on_start: bool = False,
     ):
         self.workspace = workspace
         self.on_heartbeat = on_heartbeat
         self.interval_s = interval_s
         self.enabled = enabled
+        self.run_on_start = run_on_start
         self._running = False
         self._task: asyncio.Task | None = None
     
@@ -89,6 +91,12 @@ class HeartbeatService:
     
     async def _run_loop(self) -> None:
         """Main heartbeat loop."""
+        if self.run_on_start:
+            try:
+                logger.info("Heartbeat: running startup tick")
+                await self._tick()
+            except Exception as e:
+                logger.error(f"Heartbeat startup tick error: {e}")
         while self._running:
             try:
                 await asyncio.sleep(self.interval_s)
