@@ -48,6 +48,7 @@ class AgentLoop:
         temperature: float = 0.7,
         max_tokens: int = 4096,
         memory_window: int = 50,
+        sub_agents_config: list = [],
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
@@ -65,6 +66,7 @@ class AgentLoop:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.memory_window = memory_window
+        self.sub_agents_config = sub_agents_config
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -84,6 +86,24 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
+        if len(self.sub_agents_config) > 0:
+            self.subagents = {
+                "default": self.subagents
+            }
+            for sub_agent_config in self.sub_agents_config:
+                if sub_agent_config.enabled:
+                    sub_agent = SubagentManager(
+                        provider=sub_agent_config.provider,
+                        workspace=workspace,
+                        bus=bus,
+                        model=sub_agent_config.model,
+                        temperature=sub_agent_config.temperature,
+                        max_tokens=sub_agent_config.max_tokens,
+                        brave_api_key=brave_api_key,
+                        exec_config=self.exec_config,
+                        restrict_to_workspace=restrict_to_workspace,
+                    )
+                    self.subagents[sub_agent_config.model] = sub_agent
         
         self._running = False
         self._mcp_servers = mcp_servers or {}
