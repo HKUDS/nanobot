@@ -54,6 +54,9 @@ class ProviderSpec:
     # OAuth-based providers (e.g., OpenAI Codex) don't use API keys
     is_oauth: bool = False                   # if True, uses OAuth flow instead of API key
 
+    # Direct providers bypass LiteLLM entirely (e.g., CustomProvider)
+    is_direct: bool = False
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -65,18 +68,14 @@ class ProviderSpec:
 
 PROVIDERS: tuple[ProviderSpec, ...] = (
 
-    # === Custom (user-provided OpenAI-compatible endpoint) =================
-    # No auto-detection — only activates when user explicitly configures "custom".
-
+    # === Custom (direct OpenAI-compatible endpoint, bypasses LiteLLM) ======
     ProviderSpec(
         name="custom",
         keywords=(),
-        env_key="OPENAI_API_KEY",
+        env_key="",
         display_name="Custom",
-        litellm_prefix="openai",
-        skip_prefixes=("openai/",),
-        is_gateway=True,
-        strip_model_prefix=True,
+        litellm_prefix="",
+        is_direct=True,
     ),
 
     # === Gateways (detected by api_key / api_base, not model name) =========
@@ -117,6 +116,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="aihubmix",
         default_api_base="https://aihubmix.com/v1",
         strip_model_prefix=True,            # anthropic/claude-3 → claude-3 → openai/claude-3
+        model_overrides=(),
+    ),
+
+    # SiliconFlow (硅基流动): OpenAI-compatible gateway, model names keep org prefix
+    ProviderSpec(
+        name="siliconflow",
+        keywords=("siliconflow",),
+        env_key="OPENAI_API_KEY",
+        display_name="SiliconFlow",
+        litellm_prefix="openai",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="siliconflow",
+        default_api_base="https://api.siliconflow.cn/v1",
+        strip_model_prefix=False,
         model_overrides=(),
     ),
 
@@ -367,10 +384,18 @@ def find_by_model(model: str) -> ProviderSpec | None:
     """Match a standard provider by model-name keyword (case-insensitive).
     Skips gateways/local — those are matched by api_key/api_base instead."""
     model_lower = model.lower()
-    for spec in PROVIDERS:
-        if spec.is_gateway or spec.is_local:
-            continue
-        if any(kw in model_lower for kw in spec.keywords):
+    model_normalized = model_lower.replace("-", "_")
+    model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
+    normalized_prefix = model_prefix.replace("-", "_")
+    std_specs = [s for s in PROVIDERS if not s.is_gateway and not s.is_local]
+
+    # Prefer explicit provider prefix — prevents `github-copilot/...codex` matching openai_codex.
+    for spec in std_specs:
+        if model_prefix and normalized_prefix == spec.name:
+            return spec
+
+    for spec in std_specs:
+        if any(kw in model_lower or kw.replace("-", "_") in model_normalized for kw in spec.keywords):
             return spec
     return None
 

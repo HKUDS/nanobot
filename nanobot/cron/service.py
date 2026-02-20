@@ -80,7 +80,7 @@ class CronService:
         
         if self.store_path.exists():
             try:
-                data = json.loads(self.store_path.read_text())
+                data = json.loads(self.store_path.read_text(encoding="utf-8"))
                 jobs = []
                 for j in data.get("jobs", []):
                     jobs.append(CronJob(
@@ -113,7 +113,7 @@ class CronService:
                     ))
                 self._store = CronStore(jobs=jobs)
             except Exception as e:
-                logger.warning(f"Failed to load cron store: {e}")
+                logger.warning("Failed to load cron store: {}", e)
                 self._store = CronStore()
         else:
             self._store = CronStore()
@@ -162,7 +162,7 @@ class CronService:
             ]
         }
         
-        self.store_path.write_text(json.dumps(data, indent=2))
+        self.store_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     
     async def start(self) -> None:
         """Start the cron service."""
@@ -171,7 +171,7 @@ class CronService:
         self._recompute_next_runs()
         self._save_store()
         self._arm_timer()
-        logger.info(f"Cron service started with {len(self._store.jobs if self._store else [])} jobs")
+        logger.info("Cron service started with {} jobs", len(self._store.jobs if self._store else []))
     
     def stop(self) -> None:
         """Stop the cron service."""
@@ -236,7 +236,7 @@ class CronService:
     async def _execute_job(self, job: CronJob) -> None:
         """Execute a single job."""
         start_ms = _now_ms()
-        logger.info(f"Cron: executing job '{job.name}' ({job.id})")
+        logger.info("Cron: executing job '{}' ({})", job.name, job.id)
         
         try:
             response = None
@@ -245,12 +245,12 @@ class CronService:
             
             job.state.last_status = "ok"
             job.state.last_error = None
-            logger.info(f"Cron: job '{job.name}' completed")
+            logger.info("Cron: job '{}' completed", job.name)
             
         except Exception as e:
             job.state.last_status = "error"
             job.state.last_error = str(e)
-            logger.error(f"Cron: job '{job.name}' failed: {e}")
+            logger.error("Cron: job '{}' failed: {}", job.name, e)
         
         job.state.last_run_at_ms = start_ms
         job.updated_at_ms = _now_ms()
@@ -311,7 +311,7 @@ class CronService:
         self._save_store()
         self._arm_timer()
         
-        logger.info(f"Cron: added job '{name}' ({job.id})")
+        logger.info("Cron: added job '{}' ({})", name, job.id)
         return job
     
     def remove_job(self, job_id: str) -> bool:
@@ -324,7 +324,7 @@ class CronService:
         if removed:
             self._save_store()
             self._arm_timer()
-            logger.info(f"Cron: removed job {job_id}")
+            logger.info("Cron: removed job {}", job_id)
         
         return removed
     
