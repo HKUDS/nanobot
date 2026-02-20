@@ -16,7 +16,7 @@
 
 ⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
 
-📏 Real-time line count: **3,761 lines** (run `bash core_agent_lines.sh` to verify anytime)
+📏 Real-time line count: **3,827 lines** (run `bash core_agent_lines.sh` to verify anytime)
 
 ## 📢 News
 
@@ -578,6 +578,7 @@ Config file: `~/.nanobot/config.json`
 > - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
+> - **VolcEngine Coding Plan**: If you're on VolcEngine's coding plan, set `"apiBase": "https://ark.cn-beijing.volces.com/api/coding/v3"` in your volcengine provider config.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -590,7 +591,8 @@ Config file: `~/.nanobot/config.json`
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `minimax` | LLM (MiniMax direct) | [platform.minimax.io](https://platform.minimax.io) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
-| `siliconflow` | LLM (SiliconFlow/硅基流动, API gateway) | [siliconflow.cn](https://siliconflow.cn) |
+| `siliconflow` | LLM (SiliconFlow/硅基流动) | [siliconflow.cn](https://siliconflow.cn) |
+| `volcengine` | LLM (VolcEngine/火山引擎) | [volcengine.com](https://www.volcengine.com) |
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
@@ -751,6 +753,12 @@ Add MCP servers to your `config.json`:
       "filesystem": {
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+      },
+      "my-remote-mcp": {
+        "url": "https://example.com/mcp/",
+        "headers": {
+          "Authorization": "Bearer xxxxx"
+        }
       }
     }
   }
@@ -762,7 +770,7 @@ Two transport modes are supported:
 | Mode | Config | Example |
 |------|--------|---------|
 | **Stdio** | `command` + `args` | Local process via `npx` / `uvx` |
-| **HTTP** | `url` | Remote endpoint (`https://mcp.example.com/sse`) |
+| **HTTP** | `url` + `headers` (optional) | Remote endpoint (`https://mcp.example.com/sse`) |
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
