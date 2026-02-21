@@ -6,6 +6,7 @@ import imaplib
 import re
 import smtplib
 import ssl
+from collections import OrderedDict
 from datetime import date
 from email import policy
 from email.header import decode_header, make_header
@@ -55,7 +56,7 @@ class EmailChannel(BaseChannel):
         self.config: EmailConfig = config
         self._last_subject_by_chat: dict[str, str] = {}
         self._last_message_id_by_chat: dict[str, str] = {}
-        self._processed_uids: set[str] = set()  # Capped to prevent unbounded growth
+        self._processed_uids: OrderedDict[str, None] = OrderedDict()  # Bounded dedup cache
         self._MAX_PROCESSED_UIDS = 100000
 
     async def start(self) -> None:
@@ -301,10 +302,12 @@ class EmailChannel(BaseChannel):
                 )
 
                 if dedupe and uid:
-                    self._processed_uids.add(uid)
-                    # mark_seen is the primary dedup; this set is a safety net
+                    self._processed_uids[uid] = None
                     if len(self._processed_uids) > self._MAX_PROCESSED_UIDS:
-                        self._processed_uids.clear()
+                        # Evict oldest 20% instead of clearing everything
+                        evict_count = self._MAX_PROCESSED_UIDS // 5
+                        for _ in range(evict_count):
+                            self._processed_uids.popitem(last=False)
 
                 if mark_seen:
                     client.store(imap_id, "+FLAGS", "\\Seen")
