@@ -188,6 +188,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 20
     memory_window: int = 50
     context_window: int = 128000
+    total_api_calls: int = 0
 
 
 class AgentsConfig(Base):

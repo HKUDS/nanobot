@@ -170,7 +170,7 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[[str], Awaitable[None]] | None = None,
-    ) -> tuple[str | None, list[str], dict[str, int]]:
+    ) -> tuple[str | None, list[str], dict[str, int], int]:
         """
         Run the agent iteration loop.
 
@@ -179,16 +179,18 @@ class AgentLoop:
             on_progress: Optional callback to push intermediate content to the user.
 
         Returns:
-            Tuple of (final_content, list_of_tools_used, final_usage).
+            Tuple of (final_content, list_of_tools_used, final_usage, api_calls).
         """
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
         final_usage: dict[str, int] = {}
+        api_calls = 0
 
         while iteration < self.max_iterations:
             iteration += 1
+            api_calls += 1
 
             response = await self.provider.chat(
                 messages=messages,
@@ -246,7 +248,7 @@ class AgentLoop:
                 final_content = self._strip_think(response.content)
                 break
 
-        return final_content, tools_used, final_usage
+        return final_content, tools_used, final_usage, api_calls
 
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -361,7 +363,7 @@ class AgentLoop:
                 metadata=msg.metadata or {},
             ))
 
-        final_content, tools_used, usage = await self._run_agent_loop(
+        final_content, tools_used, usage, api_calls = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
@@ -375,6 +377,28 @@ class AgentLoop:
         session.add_message("assistant", final_content,
                             tools_used=tools_used if tools_used else None)
         self.sessions.save(session)
+        
+        # Update global API calls in config
+        config_path = Path.home() / ".nanobot" / "config.json"
+        total_calls = api_calls
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    cfg_data = json.load(f)
+                
+                if "agents" not in cfg_data:
+                    cfg_data["agents"] = {}
+                if "defaults" not in cfg_data["agents"]:
+                    cfg_data["agents"]["defaults"] = {}
+                
+                current_total = cfg_data["agents"]["defaults"].get("totalApiCalls", 0)
+                total_calls = current_total + api_calls
+                cfg_data["agents"]["defaults"]["totalApiCalls"] = total_calls
+                
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(cfg_data, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                logger.error(f"Failed to update totalApiCalls: {e}")
         
         # Append token stats to outbound message (but not to memory)
         display_content = final_content
@@ -390,7 +414,7 @@ class AgentLoop:
             gray = "\033[90m"
             reset = "\033[0m"
             
-            stats_line = f"\n\n{gray}{self.model} | tokens {total_str}/{limit_str} ({percent}%){reset}"
+            stats_line = f"\n\n{gray}{self.model} | calls {total_calls} | tokens {total_str}/{limit_str} ({percent}%){reset}"
             display_content += stats_line
         
         return OutboundMessage(
@@ -428,7 +452,7 @@ class AgentLoop:
             channel=origin_channel,
             chat_id=origin_chat_id,
         )
-        final_content, _, _ = await self._run_agent_loop(initial_messages)
+        final_content, _, _, _ = await self._run_agent_loop(initial_messages)
 
         if final_content is None:
             final_content = "Background task completed."
