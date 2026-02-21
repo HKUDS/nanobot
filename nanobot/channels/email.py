@@ -304,7 +304,9 @@ class EmailChannel(BaseChannel):
                     self._processed_uids.add(uid)
                     # mark_seen is the primary dedup; this set is a safety net
                     if len(self._processed_uids) > self._MAX_PROCESSED_UIDS:
-                        self._processed_uids.clear()
+                        # Evict oldest half instead of clearing entirely
+                        to_keep = list(self._processed_uids)[len(self._processed_uids) // 2:]
+                        self._processed_uids = set(to_keep)
 
                 if mark_seen:
                     client.store(imap_id, "+FLAGS", "\\Seen")
