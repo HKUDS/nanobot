@@ -11,7 +11,7 @@ from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.base import BaseChannel
+from nanobot.channels.base import BaseChannel, cleanup_old_media
 from nanobot.config.schema import DiscordConfig
 
 
@@ -258,6 +258,10 @@ class DiscordChannel(BaseChannel):
             except Exception as e:
                 logger.warning("Failed to download Discord attachment: {}", e)
                 content_parts.append(f"[attachment: {filename} - download failed]")
+
+        # Clean up old media files to prevent unbounded disk growth
+        if media_paths:
+            cleanup_old_media()
 
         reply_to = (payload.get("referenced_message") or {}).get("id")
 

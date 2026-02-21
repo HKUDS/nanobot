@@ -1,12 +1,31 @@
 """Base channel interface for chat platforms."""
 
+import time
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+
+# Media directory shared across channels
+MEDIA_DIR = Path.home() / ".nanobot" / "media"
+MEDIA_MAX_AGE_SECS = 3600  # Clean up files older than 1 hour
+
+
+def cleanup_old_media() -> None:
+    """Delete media files older than MEDIA_MAX_AGE_SECS."""
+    if not MEDIA_DIR.exists():
+        return
+    cutoff = time.time() - MEDIA_MAX_AGE_SECS
+    for f in MEDIA_DIR.iterdir():
+        try:
+            if f.is_file() and f.stat().st_mtime < cutoff:
+                f.unlink()
+        except Exception:
+            pass
 
 
 class BaseChannel(ABC):

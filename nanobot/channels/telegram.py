@@ -11,7 +11,7 @@ from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.base import BaseChannel
+from nanobot.channels.base import BaseChannel, cleanup_old_media
 from nanobot.config.schema import TelegramConfig
 
 
@@ -393,7 +393,11 @@ class TelegramChannel(BaseChannel):
                 content_parts.append(f"[{media_type}: download failed]")
         
         content = "\n".join(content_parts) if content_parts else "[empty message]"
-        
+
+        # Clean up old media files to prevent unbounded disk growth
+        if media_paths:
+            cleanup_old_media()
+
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
         
         str_chat_id = str(chat_id)
