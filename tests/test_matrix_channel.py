@@ -332,7 +332,7 @@ async def test_typing_keepalive_refreshes_periodically(monkeypatch) -> None:
     channel.client = client
     channel._running = True
 
-    monkeypatch.setattr(matrix_module, "TYPING_KEEPALIVE_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(matrix_module, "TYPING_KEEPALIVE_INTERVAL_MS", 10)
 
     await channel._start_typing_keepalive("!room:matrix.org")
     await asyncio.sleep(0.03)

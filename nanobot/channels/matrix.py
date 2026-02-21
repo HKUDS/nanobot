@@ -43,7 +43,7 @@ TYPING_NOTICE_TIMEOUT_MS = 30_000
 # https://spec.matrix.org/v1.17/client-server-api/#typing-notifications
 # Keepalive interval must stay below TYPING_NOTICE_TIMEOUT_MS so the typing
 # indicator does not expire while the agent is still processing.
-TYPING_KEEPALIVE_INTERVAL_SECONDS = 20.0
+TYPING_KEEPALIVE_INTERVAL_MS = 20_000
 MATRIX_HTML_FORMAT = "org.matrix.custom.html"
 MATRIX_ATTACHMENT_MARKER_TEMPLATE = "[attachment: {}]"
 MATRIX_ATTACHMENT_TOO_LARGE_TEMPLATE = "[attachment: {} - too large]"
@@ -715,7 +715,7 @@ class MatrixChannel(BaseChannel):
         async def _typing_loop() -> None:
             try:
                 while self._running:
-                    await asyncio.sleep(TYPING_KEEPALIVE_INTERVAL_SECONDS)
+                    await asyncio.sleep(TYPING_KEEPALIVE_INTERVAL_MS / 1000)
                     await self._set_typing(room_id, True)
             except asyncio.CancelledError:
                 pass
