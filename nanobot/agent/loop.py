@@ -348,6 +348,10 @@ class AgentLoop:
         async def _bus_progress(content: str) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
+            # Skip internal tool call hints for chat channels (e.g. 'web_search("...")')
+            # These are useful in CLI but leak implementation details in user chat
+            if "(" in content and content.endswith(")") and not content.startswith("["):
+                return
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
