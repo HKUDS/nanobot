@@ -227,7 +227,18 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
+                    
+                    if on_progress:
+                        await on_progress(f"🔧 [执行动作]: `{tool_call.name}` 参数: {args_str[:100]}" + ("..." if len(args_str) > 100 else ""))
+                        
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    
+                    if on_progress:
+                        res_str = str(result).strip().replace('\n', ' ')
+                        if len(res_str) > 100:
+                            res_str = res_str[:100] + "..."
+                        await on_progress(f"📄 [执行结果]: {res_str}")
+                        
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -263,14 +274,21 @@ class AgentLoop:
             except asyncio.TimeoutError:
                 continue
     
-    async def close_mcp(self) -> None:
-        """Close MCP connections."""
+    async def close(self) -> None:
+        """Close MCP connections and provider resources."""
         if self._mcp_stack:
             try:
                 await self._mcp_stack.aclose()
             except (RuntimeError, BaseExceptionGroup):
                 pass  # MCP SDK cancel scope cleanup is noisy but harmless
             self._mcp_stack = None
+            
+        if hasattr(self.provider, "close"):
+            await self.provider.close()
+
+    async def close_mcp(self) -> None:
+        """Close MCP connections (deprecated, use close())."""
+        await self.close()
 
     def stop(self) -> None:
         """Stop the agent loop."""

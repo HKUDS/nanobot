@@ -505,7 +505,7 @@ def agent(
             with _thinking_ctx():
                 response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
             _print_agent_response(response, render_markdown=markdown)
-            await agent_loop.close_mcp()
+            await agent_loop.close()
         
         asyncio.run(run_once())
     else:
@@ -547,7 +547,7 @@ def agent(
                         console.print("\nGoodbye!")
                         break
             finally:
-                await agent_loop.close_mcp()
+                await agent_loop.close()
         
         asyncio.run(run_interactive())
 

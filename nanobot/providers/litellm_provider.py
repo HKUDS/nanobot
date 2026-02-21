@@ -217,3 +217,27 @@ class LiteLLMProvider(LLMProvider):
     def get_default_model(self) -> str:
         """Get the default model."""
         return self.default_model
+
+    async def close(self) -> None:
+        """Close the underlying HTTP sessions."""
+        import litellm
+        
+        # Close async session
+        if getattr(litellm, "aclient_session", None) is not None:
+            if hasattr(litellm.aclient_session, "close"):
+                await litellm.aclient_session.close()
+            litellm.aclient_session = None
+            
+        # Close sync session if it exists (though we primarily use async)
+        if getattr(litellm, "client_session", None) is not None:
+            if hasattr(litellm.client_session, "close"):
+                import asyncio
+                # client_session might be a requests.Session, which has a sync close()
+                # or an aiohttp session. To be safe, try to close it appropriately.
+                try:
+                    res = litellm.client_session.close()
+                    if asyncio.iscoroutine(res):
+                        await res
+                except Exception:
+                    pass
+            litellm.client_session = None
