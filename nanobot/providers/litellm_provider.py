@@ -10,6 +10,8 @@ from litellm import acompletion
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
+from nanobot.providers.opencode import is_opencode_model, strip_opencode_prefix, chat_opencode
+from nanobot.providers.custom.kilocode import is_kilocode_model, resolve_kilocode_model
 
 
 # Standard OpenAI chat-completion message keys; extras (e.g. reasoning_content) are stripped for strict providers.
@@ -170,6 +172,9 @@ class LiteLLMProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        job_id: str | None = None,
+        channel: str | None = None,
+        chat_id: str | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -180,6 +185,9 @@ class LiteLLMProvider(LLMProvider):
             model: Model identifier (e.g., 'anthropic/claude-sonnet-4-5').
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
+            job_id: Optional job ID for timeline tracking.
+            channel: Optional channel name for timeline tracking.
+            chat_id: Optional chat ID for timeline tracking.
         
         Returns:
             LLMResponse with content and/or tool calls.
@@ -193,7 +201,48 @@ class LiteLLMProvider(LLMProvider):
         # Clamp max_tokens to at least 1 — negative or zero values cause
         # LiteLLM to reject the request with "max_tokens must be at least 1".
         max_tokens = max(1, max_tokens)
-        
+
+        # Route OpenCode models FIRST (before resolving) - uses separate OpenAI client
+        if is_opencode_model(original_model):
+            return await chat_opencode(
+                model=strip_opencode_prefix(original_model),
+                messages=messages,
+                tools=tools,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                job_id=job_id,
+                channel=channel,
+                chat_id=chat_id,
+            )
+
+        # Route Kilo Code models (requires custom headers)
+        if is_kilocode_model(original_model):
+            from nanobot.providers.custom.kilocode import chat_kilocode
+            content, tool_calls, finish_reason, usage, thinking = await chat_kilocode(
+                model=resolve_kilocode_model(original_model),
+                messages=messages,
+                tools=tools,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                api_key=self.api_key or "",
+            )
+            # Convert tuple response to LLMResponse
+            tool_call_requests = []
+            for tc in tool_calls:
+                tool_call_requests.append(ToolCallRequest(
+                    id=tc.get("id", ""),
+                    name=tc.get("name", ""),
+                    arguments=tc.get("arguments", {})
+                ))
+            return LLMResponse(
+                content=content,
+                tool_calls=tool_call_requests,
+                finish_reason=finish_reason,
+                usage=usage,
+                thinking=thinking,
+            )
+
+        model = self._resolve_model(original_model)
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": self._sanitize_messages(messages),
@@ -234,7 +283,7 @@ class LiteLLMProvider(LLMProvider):
         """Parse LiteLLM response into our standard format."""
         choice = response.choices[0]
         message = choice.message
-        
+
         tool_calls = []
         if hasattr(message, "tool_calls") and message.tool_calls:
             for tc in message.tool_calls:
@@ -242,13 +291,12 @@ class LiteLLMProvider(LLMProvider):
                 args = tc.function.arguments
                 if isinstance(args, str):
                     args = json_repair.loads(args)
-                
                 tool_calls.append(ToolCallRequest(
                     id=tc.id,
                     name=tc.function.name,
                     arguments=args,
                 ))
-        
+
         usage = {}
         if hasattr(response, "usage") and response.usage:
             usage = {
@@ -256,15 +304,38 @@ class LiteLLMProvider(LLMProvider):
                 "completion_tokens": response.usage.completion_tokens,
                 "total_tokens": response.usage.total_tokens,
             }
-        
-        reasoning_content = getattr(message, "reasoning_content", None)
-        
+
+        # Extract thinking/reasoning content from various places
+        thinking_content = None
+        if hasattr(message, "thinking") and message.thinking:
+            thinking_content = message.thinking
+        elif hasattr(message, "reasoning_content") and message.reasoning_content:
+            thinking_content = message.reasoning_content
+        elif hasattr(message, "reasoning") and message.reasoning:
+            thinking_content = message.reasoning
+
+        # Check provider_specific_fields for thinking content
+        if not thinking_content and hasattr(response, "provider_specific_fields"):
+            psf = response.provider_specific_fields
+            if psf:
+                if "thinking" in psf:
+                    thinking_content = psf["thinking"]
+                elif "reasoning_content" in psf:
+                    thinking_content = psf["reasoning_content"]
+
+        content = message.content
+        if not content and thinking_content:
+            # Use thinking as main content if content is empty
+            content = thinking_content
+            thinking_content = None
+
         return LLMResponse(
-            content=message.content,
+            content=content,
             tool_calls=tool_calls,
             finish_reason=choice.finish_reason or "stop",
             usage=usage,
-            reasoning_content=reasoning_content,
+            reasoning_content=thinking_content,
+            thinking=thinking_content,
         )
     
     def get_default_model(self) -> str:

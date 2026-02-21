@@ -29,6 +29,11 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
+    total_tokens: int = 0  # Track cumulative token usage for context management
+    
+    def estimate_tokens(self, text: str) -> int:
+        """Rough token estimation: ~4 characters per token."""
+        return len(text) // 4 + 1
     
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
@@ -39,6 +44,8 @@ class Session:
             **kwargs
         }
         self.messages.append(msg)
+        # Track tokens for context management
+        self.total_tokens += self.estimate_tokens(content)
         self.updated_at = datetime.now()
     
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
@@ -194,7 +201,8 @@ class SessionManager:
                                 "updated_at": data.get("updated_at"),
                                 "path": str(path)
                             })
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to read session file {path}: {e}")
                 continue
         
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)

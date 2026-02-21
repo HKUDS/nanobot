@@ -4,6 +4,10 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 
+# Enum for delivery target
+DeliverTo = Literal["agent", "telegram", "both"]
+
+
 @dataclass
 class CronSchedule:
     """Schedule definition for a cron job."""
@@ -23,10 +27,12 @@ class CronPayload:
     """What to do when the job runs."""
     kind: Literal["system_event", "agent_turn"] = "agent_turn"
     message: str = ""
-    # Deliver response to channel
-    deliver: bool = False
+    # Delivery target: "agent" (process through agent), "telegram" (send directly), "both" (do both)
+    deliver_to: DeliverTo = "agent"
     channel: str | None = None  # e.g. "whatsapp"
     to: str | None = None  # e.g. phone number
+    # Model to use for this job (overrides default model)
+    model: str | None = None
 
 
 @dataclass

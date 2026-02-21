@@ -15,19 +15,22 @@ class MessageTool(Tool):
         default_channel: str = "",
         default_chat_id: str = "",
         default_message_id: str | None = None,
+        default_thread_id: int | None = None
     ):
         self._send_callback = send_callback
         self._default_channel = default_channel
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
+        self._default_thread_id = default_thread_id
         self._sent_in_turn: bool = False
 
-    def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def set_context(self, channel: str, chat_id: str, message_id: str | None = None, thread_id: int | None = None) -> None:
         """Set the current message context."""
         self._default_channel = channel
         self._default_chat_id = chat_id
         self._default_message_id = message_id
-
+        self._default_thread_id = thread_id
+    
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""
         self._send_callback = callback
@@ -65,6 +68,10 @@ class MessageTool(Tool):
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Optional: list of file paths to attach (images, audio, documents)"
+                },
+                "thread_id": {
+                    "type": "integer",
+                    "description": "Optional: Telegram thread ID for forum topics"
                 }
             },
             "required": ["content"]
@@ -77,26 +84,33 @@ class MessageTool(Tool):
         chat_id: str | None = None,
         message_id: str | None = None,
         media: list[str] | None = None,
+        thread_id: int | None = None,
         **kwargs: Any
     ) -> str:
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
         message_id = message_id or self._default_message_id
-
+        thread_id = thread_id if thread_id is not None else self._default_thread_id
+        
         if not channel or not chat_id:
             return "Error: No target channel/chat specified"
 
         if not self._send_callback:
             return "Error: Message sending not configured"
-
+        
+        # Build metadata with message_id and thread_id if provided
+        metadata = {}
+        if message_id:
+            metadata["message_id"] = message_id
+        if thread_id is not None:
+            metadata["thread_id"] = thread_id
+        
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
             content=content,
             media=media or [],
-            metadata={
-                "message_id": message_id,
-            }
+            metadata=metadata if metadata else None
         )
 
         try:
