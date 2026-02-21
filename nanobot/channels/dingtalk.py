@@ -58,7 +58,8 @@ class NanobotDingTalkHandler(CallbackHandler):
 
             if not content:
                 logger.warning(
-                    f"Received empty or unsupported message type: {chatbot_msg.message_type}"
+                    "Received empty or unsupported message type: {}",
+                    chatbot_msg.message_type,
                 )
                 return AckMessage.STATUS_OK, "OK"
 
@@ -126,7 +127,8 @@ class DingTalkChannel(BaseChannel):
             self._http = httpx.AsyncClient()
 
             logger.info(
-                f"Initializing DingTalk Stream Client with Client ID: {self.config.client_id}..."
+                "Initializing DingTalk Stream Client with Client ID: {}...",
+                self.config.client_id,
             )
             credential = Credential(self.config.client_id, self.config.client_secret)
             self._client = DingTalkStreamClient(credential)
