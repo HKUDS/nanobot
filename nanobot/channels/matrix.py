@@ -606,13 +606,14 @@ class MatrixChannel(BaseChannel):
         return None
 
     async def send(self, msg: OutboundMessage) -> None:
-        """Send message text and optional attachments to a Matrix room, then clear typing state."""
+        """Send Matrix outbound content and clear typing only for non-progress messages."""
         if not self.client:
             return
 
         text = msg.content or ""
         candidates = self._collect_outbound_media_candidates(msg.media)
         relates_to = self._build_thread_relates_to(msg.metadata)
+        is_progress = bool((msg.metadata or {}).get("_progress"))
 
         try:
             failures: list[str] = []
@@ -641,7 +642,8 @@ class MatrixChannel(BaseChannel):
                     content["m.relates_to"] = relates_to
                 await self._send_room_content(msg.chat_id, content)
         finally:
-            await self._stop_typing_keepalive(msg.chat_id, clear_typing=True)
+            if not is_progress:
+                await self._stop_typing_keepalive(msg.chat_id, clear_typing=True)
 
     def _register_event_callbacks(self) -> None:
         """Register Matrix event callbacks used by this channel."""
