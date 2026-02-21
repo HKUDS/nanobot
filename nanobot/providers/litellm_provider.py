@@ -152,6 +152,34 @@ class LiteLLMProvider(LLMProvider):
                     return
     
     @staticmethod
+    def _format_exception(exc: Exception) -> str:
+        """Build a compact but informative error message from nested exceptions."""
+        parts = [f"{exc.__class__.__name__}: {str(exc).strip() or repr(exc)}"]
+
+        status_code = getattr(exc, "status_code", None)
+        if status_code is not None:
+            parts.append(f"status_code={status_code}")
+
+        error_code = getattr(exc, "code", None)
+        if error_code is not None:
+            parts.append(f"code={error_code}")
+
+        # Include nested cause/context, which often contains the actionable
+        # network/TLS/socket reason hidden behind generic "Connection error.".
+        nested = []
+        current = exc.__cause__ or exc.__context__
+        seen_ids: set[int] = set()
+        while current and id(current) not in seen_ids:
+            seen_ids.add(id(current))
+            nested.append(f"{current.__class__.__name__}: {str(current).strip() or repr(current)}")
+            current = current.__cause__ or current.__context__
+
+        if nested:
+            parts.append("caused_by=" + " -> ".join(nested))
+
+        return " | ".join(parts)
+
+    @staticmethod
     def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Strip non-standard keys and ensure assistant messages have a content key."""
         sanitized = []
@@ -226,7 +254,7 @@ class LiteLLMProvider(LLMProvider):
         except Exception as e:
             # Return error as content for graceful handling
             return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
+                content=f"Error calling LLM: {self._format_exception(e)}",
                 finish_reason="error",
             )
     

@@ -786,8 +786,18 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | Option | Default | Description |
 |--------|---------|-------------|
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
+| `tools.exec.allowPatterns` | `[]` | Optional regex allowlist for shell commands. When non-empty, a command must match at least one pattern (e.g. `^[\s]*curl(?:\s|$).*[\s@\w./:=?&%+,-]*$` to allow curl including `@file`). |
+| `tools.exec.denyPatterns` | built-in defaults | Optional regex denylist for shell commands. When non-empty, it overrides the built-in dangerous-command patterns. |
 | `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
 
+Example allowlist:
+
+```json
+"allowPatterns": [
+  "^\\s*curl(?:\\s|$).*[\\s@\\w./:=?&%+,-]*$",
+  "^\\s*git\\s+status(?:\\s|$).*$"
+]
+```
 
 ## CLI Reference
 

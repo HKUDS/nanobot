@@ -128,3 +128,39 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+class _LowLevelSocketError(Exception):
+    pass
+
+
+class _ConnectionError(Exception):
+    pass
+
+
+class _LiteLLMStyleError(Exception):
+    def __init__(self, message: str, status_code: int, code: str):
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
+
+
+def test_litellm_provider_format_exception_includes_status_code_and_code():
+    err = _LiteLLMStyleError("Connection error.", status_code=502, code="bad_gateway")
+
+    details = LiteLLMProvider._format_exception(err)
+
+    assert "_LiteLLMStyleError: Connection error." in details
+    assert "status_code=502" in details
+    assert "code=bad_gateway" in details
+
+
+def test_litellm_provider_format_exception_includes_nested_causes():
+    low = _LowLevelSocketError("EOF while reading from socket")
+    mid = _ConnectionError("Connection error.")
+    mid.__cause__ = low
+
+    details = LiteLLMProvider._format_exception(mid)
+
+    assert "_ConnectionError: Connection error." in details
+    assert "caused_by=_LowLevelSocketError: EOF while reading from socket" in details
