@@ -1,12 +1,15 @@
 """Spawn tool for creating background subagents."""
 
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypedDict
 
 from nanobot.agent.tools.base import Tool
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
 
+class SubagentEntry(TypedDict):
+    manager: "SubagentManager"
+    role: str
 
 class SpawnTool(Tool):
     """
@@ -16,8 +19,8 @@ class SpawnTool(Tool):
     to the main agent when complete.
     """
     
-    def __init__(self, manager: "SubagentManager"):
-        self._manager = manager
+    def __init__(self, subagents: dict[str, SubagentEntry]):
+        self._subagents = subagents
         self._origin_channel = "cli"
         self._origin_chat_id = "direct"
     
@@ -40,6 +43,14 @@ class SpawnTool(Tool):
     
     @property
     def parameters(self) -> dict[str, Any]:
+        model_info = []
+        available_models = []
+        for model_name, entry in self._subagents.items():
+            role = entry.get("role", "general tasks")
+            model_info.append(f"- {model_name}: {role}")
+            available_models.append(model_name)
+        model_description = "Optional model to use for the subagent based on specific tasks.\nAvailable models and their roles:\n" + "\n".join(model_info)
+        
         return {
             "type": "object",
             "properties": {
@@ -57,7 +68,8 @@ class SpawnTool(Tool):
                 },
                 "model": {
                     "type": "string",
-                    "description": "Optional model to use for the subagent based on specific tasks",
+                    "enum": available_models,
+                    "description": model_description,
                 }
             },
             "required": ["task"],
@@ -65,22 +77,17 @@ class SpawnTool(Tool):
     
     async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
         """Spawn a subagent to execute the given task."""
-        media = kwargs.get("media", [])
+        media = kwargs.get("media", None)
         model = kwargs.get("model", None)
-        if isinstance(self._manager, dict):
-            sub_manager = self._manager.get(model, self._manager.get("default"))
-            return await sub_manager.spawn(
-                task=task,
-                label=label,
-                media=media,
-                origin_channel=self._origin_channel,
-                origin_chat_id=self._origin_chat_id,
-            )
-        else:
-            return await self._manager.spawn(
-                task=task,
-                label=label,
-                media=media,
-                origin_channel=self._origin_channel,
-                origin_chat_id=self._origin_chat_id,
-            )
+        entry = self._subagents.get(model) or self._subagents.get("default")
+        if not entry:
+            raise RuntimeError("No suitable subagent manager found.")
+
+        sub_manager = entry["manager"]
+        return await sub_manager.spawn(
+            task=task,
+            label=label,
+            media=media,
+            origin_channel=self._origin_channel,
+            origin_chat_id=self._origin_chat_id,
+        )

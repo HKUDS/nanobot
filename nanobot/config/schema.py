@@ -195,7 +195,7 @@ class AgentDefaults(Base):
 class SubAgentDefaults(AgentDefaults):
     """Subagents configuration, inherited from AgentDefaults"""
     role: str = "common"
-    enabled: bool = False
+    enabled: bool = True
     
 
 class AgentsConfig(Base):

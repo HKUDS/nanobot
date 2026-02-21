@@ -100,7 +100,7 @@ class SubagentManager:
         task_id: str,
         task: str,
         label: str,
-        media: list[str],
+        media: list[str] | None,
         origin: dict[str, str],
     ) -> None:
         """Execute the subagent task and announce the result."""
@@ -124,7 +124,7 @@ class SubagentManager:
             
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)
-            user_content = self.context._build_user_content(task, media=media)
+            user_content = self.context.build_user_content(task, media=media)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
