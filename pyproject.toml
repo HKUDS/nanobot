@@ -1,6 +1,6 @@
 [project]
 name = "nanobot-ai"
-version = "0.1.4"
+version = "0.1.4.post1"
 description = "A lightweight personal AI assistant framework"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -17,37 +17,37 @@ classifiers = [
 ]
 
 dependencies = [
-    "typer>=0.9.0",
-    "litellm>=1.0.0",
-    "pydantic>=2.0.0",
-    "pydantic-settings>=2.0.0",
-    "websockets>=12.0",
-    "websocket-client>=1.6.0",
-    "httpx>=0.25.0",
-    "oauth-cli-kit>=0.1.1",
-    "loguru>=0.7.0",
-    "readability-lxml>=0.8.0",
-    "rich>=13.0.0",
-    "croniter>=2.0.0",
-    "dingtalk-stream>=0.4.0",
-    "python-telegram-bot[socks]>=21.0",
-    "lark-oapi>=1.0.0",
-    "socksio>=1.0.0",
-    "python-socketio>=5.11.0",
-    "msgpack>=1.0.8",
-    "slack-sdk>=3.26.0",
-    "slackify-markdown>=0.2.0",
-    "qq-botpy>=1.0.0",
-    "python-socks[asyncio]>=2.4.0",
-    "prompt-toolkit>=3.0.0",
-    "mcp>=1.0.0",
-    "json-repair>=0.30.0",
+    "typer>=0.20.0,<1.0.0",
+    "litellm>=1.81.5,<2.0.0",
+    "pydantic>=2.12.0,<3.0.0",
+    "pydantic-settings>=2.12.0,<3.0.0",
+    "websockets>=16.0,<17.0",
+    "websocket-client>=1.9.0,<2.0.0",
+    "httpx>=0.28.0,<1.0.0",
+    "oauth-cli-kit>=0.1.3,<1.0.0",
+    "loguru>=0.7.3,<1.0.0",
+    "readability-lxml>=0.8.4,<1.0.0",
+    "rich>=14.0.0,<15.0.0",
+    "croniter>=6.0.0,<7.0.0",
+    "dingtalk-stream>=0.24.0,<1.0.0",
+    "python-telegram-bot[socks]>=22.0,<23.0",
+    "lark-oapi>=1.5.0,<2.0.0",
+    "socksio>=1.0.0,<2.0.0",
+    "python-socketio>=5.16.0,<6.0.0",
+    "msgpack>=1.1.0,<2.0.0",
+    "slack-sdk>=3.39.0,<4.0.0",
+    "slackify-markdown>=0.2.0,<1.0.0",
+    "qq-botpy>=1.2.0,<2.0.0",
+    "python-socks[asyncio]>=2.8.0,<3.0.0",
+    "prompt-toolkit>=3.0.50,<4.0.0",
+    "mcp>=1.26.0,<2.0.0",
+    "json-repair>=0.57.0,<1.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
+    "pytest>=9.0.0,<10.0.0",
+    "pytest-asyncio>=1.3.0,<2.0.0",
     "ruff>=0.1.0",
 ]
 

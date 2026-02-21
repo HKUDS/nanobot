@@ -80,7 +80,7 @@ class OpenAICodexProvider(LLMProvider):
 
 
 def _strip_model_prefix(model: str) -> str:
-    if model.startswith("openai-codex/"):
+    if model.startswith("openai-codex/") or model.startswith("openai_codex/"):
         return model.split("/", 1)[1]
     return model
 
@@ -176,7 +176,7 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[st
 
         if role == "tool":
             call_id, _ = _split_tool_call_id(msg.get("tool_call_id"))
-            output_text = content if isinstance(content, str) else json.dumps(content)
+            output_text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
             input_items.append(
                 {
                     "type": "function_call_output",
