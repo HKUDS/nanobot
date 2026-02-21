@@ -109,6 +109,12 @@ class AgentLoop:
         # Cron tool (for scheduling)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+        # Skill tools (from skill.py files in workspace/builtin skills)
+        from nanobot.agent.skills import SkillsLoader
+        skills_loader = SkillsLoader(self.workspace)
+        for skill_tool in skills_loader.load_skill_tools():
+            self.tools.register(skill_tool)
     
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -399,8 +405,8 @@ class AgentLoop:
         for m in old_messages:
             if not m.get("content"):
                 continue
-            tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
-            lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
+            tools = f" [tools: {\', \'.join(m[\'tools_used\'])}]" if m.get("tools_used") else ""
+            lines.append(f"[{m.get(\'timestamp\', \'?\')[:16]}] {m[\'role\'].upper()}{tools}: {m[\'content\']}")
         conversation = "\n".join(lines)
         current_memory = memory.read_long_term()
 
