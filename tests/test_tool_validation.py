@@ -1,5 +1,7 @@
 from typing import Any
 
+import pytest
+
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 
@@ -82,7 +84,69 @@ def test_validate_params_ignores_unknown_fields() -> None:
 
 
 async def test_registry_returns_validation_error() -> None:
+    """Returns a validation error string when required params are missing."""
     reg = ToolRegistry()
     reg.register(SampleTool())
     result = await reg.execute("sample", {"query": "hi"})
     assert "Invalid parameters" in result
+
+
+def test_validate_params_max_length() -> None:
+    """Rejects strings that exceed maxLength in schema."""
+
+    class MaxLenTool(Tool):
+        @property
+        def name(self) -> str:
+            return "max_len"
+
+        @property
+        def description(self) -> str:
+            return "max length validator"
+
+        @property
+        def parameters(self) -> dict[str, Any]:
+            return {
+                "type": "object",
+                "properties": {"title": {"type": "string", "maxLength": 3}},
+            }
+
+        async def execute(self, **kwargs: Any) -> str:
+            return "ok"
+
+    tool = MaxLenTool()
+    errors = tool.validate_params({"title": "long"})
+    assert any("title must be at most 3 chars" in e for e in errors)
+
+
+def test_validate_params_rejects_non_object_schema() -> None:
+    """Raises ValueError when the root schema type is not object."""
+
+    class InvalidSchemaTool(Tool):
+        @property
+        def name(self) -> str:
+            return "invalid_schema"
+
+        @property
+        def description(self) -> str:
+            return "invalid schema"
+
+        @property
+        def parameters(self) -> dict[str, Any]:
+            return {"type": "array", "items": {"type": "string"}}
+
+        async def execute(self, **kwargs: Any) -> str:
+            return "ok"
+
+    tool = InvalidSchemaTool()
+    with pytest.raises(ValueError, match="Schema must be object type"):
+        tool.validate_params({})
+
+
+def test_to_schema_shape() -> None:
+    """Builds OpenAI function schema with required top-level keys."""
+    tool = SampleTool()
+    schema = tool.to_schema()
+    assert schema["type"] == "function"
+    assert schema["function"]["name"] == tool.name
+    assert schema["function"]["description"] == tool.description
+    assert schema["function"]["parameters"] == tool.parameters
