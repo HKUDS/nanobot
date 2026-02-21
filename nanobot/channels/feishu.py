@@ -27,6 +27,8 @@ try:
         CreateMessageReactionRequest,
         CreateMessageReactionRequestBody,
         Emoji,
+        GetFileRequest,
+        GetImageRequest,
         P2ImMessageReceiveV1,
     )
     FEISHU_AVAILABLE = True
@@ -345,6 +347,80 @@ class FeishuChannel(BaseChannel):
             logger.error("Error uploading file {}: {}", file_path, e)
             return None
 
+    def _download_image_sync(self, image_key: str) -> tuple[bytes | None, str | None]:
+        """Download an image from Feishu by image_key."""
+        try:
+            request = GetImageRequest.builder().image_key(image_key).build()
+            response = self._client.im.v1.image.get(request)
+            if response.success():
+                return response.file, response.file_name
+            else:
+                logger.error("Failed to download image: code={}, msg={}", response.code, response.msg)
+                return None, None
+        except Exception as e:
+            logger.error("Error downloading image {}: {}", image_key, e)
+            return None, None
+
+    def _download_file_sync(self, file_key: str) -> tuple[bytes | None, str | None]:
+        """Download a file from Feishu by file_key."""
+        try:
+            request = GetFileRequest.builder().file_key(file_key).build()
+            response = self._client.im.v1.file.get(request)
+            if response.success():
+                return response.file, response.file_name
+            else:
+                logger.error("Failed to download file: code={}, msg={}", response.code, response.msg)
+                return None, None
+        except Exception as e:
+            logger.error("Error downloading file {}: {}", file_key, e)
+            return None, None
+
+    async def _download_and_save_media(
+        self,
+        msg_type: str,
+        content_json: dict
+    ) -> tuple[str | None, str]:
+        """
+        Download media from Feishu and save to local disk.
+
+        Returns:
+            (file_path, content_text) - file_path is None if download failed
+        """
+        from pathlib import Path
+
+        loop = asyncio.get_running_loop()
+        media_dir = Path.home() / ".nanobot" / "media"
+        media_dir.mkdir(parents=True, exist_ok=True)
+
+        data, filename = None, None
+
+        if msg_type == "image":
+            image_key = content_json.get("image_key")
+            if image_key:
+                data, filename = await loop.run_in_executor(
+                    None, self._download_image_sync, image_key
+                )
+                if not filename:
+                    filename = f"{image_key[:16]}.jpg"
+
+        elif msg_type in ("audio", "file"):
+            file_key = content_json.get("file_key")
+            if file_key:
+                data, filename = await loop.run_in_executor(
+                    None, self._download_file_sync, file_key
+                )
+                if not filename:
+                    ext = ".opus" if msg_type == "audio" else ""
+                    filename = f"{file_key[:16]}{ext}"
+
+        if data and filename:
+            file_path = media_dir / filename
+            file_path.write_bytes(data)
+            logger.debug("Downloaded {} to {}", msg_type, file_path)
+            return str(file_path), f"[{msg_type}: {filename}]"
+
+        return None, f"[{msg_type}: download failed]"
+
     def _send_message_sync(self, receive_id_type: str, receive_id: str, msg_type: str, content: str) -> bool:
         """Send a single message (text/image/file/interactive) synchronously."""
         try:
@@ -425,60 +501,75 @@ class FeishuChannel(BaseChannel):
             event = data.event
             message = event.message
             sender = event.sender
-            
+
             # Deduplication check
             message_id = message.message_id
             if message_id in self._processed_message_ids:
                 return
             self._processed_message_ids[message_id] = None
-            
-            # Trim cache: keep most recent 500 when exceeds 1000
+
+            # Trim cache
             while len(self._processed_message_ids) > 1000:
                 self._processed_message_ids.popitem(last=False)
-            
+
             # Skip bot messages
-            sender_type = sender.sender_type
-            if sender_type == "bot":
+            if sender.sender_type == "bot":
                 return
-            
+
             sender_id = sender.sender_id.open_id if sender.sender_id else "unknown"
             chat_id = message.chat_id
-            chat_type = message.chat_type  # "p2p" or "group"
+            chat_type = message.chat_type
             msg_type = message.message_type
-            
-            # Add reaction to indicate "seen"
+
+            # Add reaction
             await self._add_reaction(message_id, "THUMBSUP")
-            
-            # Parse message content
+
+            # Parse content
+            content_parts = []
+            media_paths = []
+
+            try:
+                content_json = json.loads(message.content) if message.content else {}
+            except json.JSONDecodeError:
+                content_json = {}
+
             if msg_type == "text":
-                try:
-                    content = json.loads(message.content).get("text", "")
-                except json.JSONDecodeError:
-                    content = message.content or ""
+                text = content_json.get("text", "")
+                if text:
+                    content_parts.append(text)
+
             elif msg_type == "post":
-                try:
-                    content_json = json.loads(message.content)
-                    content = _extract_post_text(content_json)
-                except (json.JSONDecodeError, TypeError):
-                    content = message.content or ""
+                text = _extract_post_text(content_json)
+                if text:
+                    content_parts.append(text)
+
+            elif msg_type in ("image", "audio", "file"):
+                file_path, content_text = await self._download_and_save_media(msg_type, content_json)
+                if file_path:
+                    media_paths.append(file_path)
+                content_parts.append(content_text)
+
             else:
-                content = MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]")
-            
-            if not content:
+                content_parts.append(MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]"))
+
+            content = "\n".join(content_parts) if content_parts else ""
+
+            if not content and not media_paths:
                 return
-            
+
             # Forward to message bus
             reply_to = chat_id if chat_type == "group" else sender_id
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=reply_to,
                 content=content,
+                media=media_paths,
                 metadata={
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
                 }
             )
-            
+
         except Exception as e:
             logger.error("Error processing Feishu message: {}", e)
