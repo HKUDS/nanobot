@@ -310,12 +310,19 @@ class AgentLoop:
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
 
-            async def _consolidate_and_cleanup():
-                temp = Session(key=session.key)
-                temp.messages = messages_to_archive
-                await self._consolidate_memory(temp, archive_all=True)
+            if session.key not in self._consolidating:
+                self._consolidating.add(session.key)
 
-            asyncio.create_task(_consolidate_and_cleanup())
+                async def _consolidate_and_cleanup():
+                    try:
+                        temp = Session(key=session.key)
+                        temp.messages = messages_to_archive
+                        await self._consolidate_memory(temp, archive_all=True)
+                    finally:
+                        self._consolidating.discard(session.key)
+
+                asyncio.create_task(_consolidate_and_cleanup())
+
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started. Memory consolidation in progress.")
         if cmd == "/help":
