@@ -48,6 +48,7 @@ class AgentLoop:
         temperature: float = 0.7,
         max_tokens: int = 4096,
         memory_window: int = 50,
+        context_window: int = 128000,
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
@@ -65,6 +66,7 @@ class AgentLoop:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.memory_window = memory_window
+        self.context_window = context_window
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -168,7 +170,7 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[[str], Awaitable[None]] | None = None,
-    ) -> tuple[str | None, list[str]]:
+    ) -> tuple[str | None, list[str], dict[str, int]]:
         """
         Run the agent iteration loop.
 
@@ -177,12 +179,13 @@ class AgentLoop:
             on_progress: Optional callback to push intermediate content to the user.
 
         Returns:
-            Tuple of (final_content, list_of_tools_used).
+            Tuple of (final_content, list_of_tools_used, final_usage).
         """
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        final_usage: dict[str, int] = {}
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -194,6 +197,10 @@ class AgentLoop:
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
+            
+            # Capture usage from the latest response
+            if response.usage:
+                final_usage = response.usage
 
             if response.has_tool_calls:
                 if on_progress:
@@ -228,7 +235,7 @@ class AgentLoop:
                 final_content = self._strip_think(response.content)
                 break
 
-        return final_content, tools_used
+        return final_content, tools_used, final_usage
 
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -336,7 +343,7 @@ class AgentLoop:
                 metadata=msg.metadata or {},
             ))
 
-        final_content, tools_used = await self._run_agent_loop(
+        final_content, tools_used, usage = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
@@ -351,10 +358,27 @@ class AgentLoop:
                             tools_used=tools_used if tools_used else None)
         self.sessions.save(session)
         
+        # Append token stats to outbound message (but not to memory)
+        display_content = final_content
+        if usage:
+            total = usage.get("total_tokens", 0)
+            limit = self.context_window
+            percent = int((total / limit) * 100) if limit > 0 else 0
+            
+            total_str = f"{total/1000:.1f}k" if total > 1000 else str(total)
+            limit_str = f"{limit/1000:.0f}k"
+            
+            # ANSI Dark Gray
+            gray = "\033[90m"
+            reset = "\033[0m"
+            
+            stats_line = f"\n\n{gray}{self.model} | tokens {total_str}/{limit_str} ({percent}%){reset}"
+            display_content += stats_line
+        
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
-            content=final_content,
+            content=display_content,
             metadata=msg.metadata or {},  # Pass through for channel-specific needs (e.g. Slack thread_ts)
         )
     
@@ -386,7 +410,7 @@ class AgentLoop:
             channel=origin_channel,
             chat_id=origin_chat_id,
         )
-        final_content, _ = await self._run_agent_loop(initial_messages)
+        final_content, _, _ = await self._run_agent_loop(initial_messages)
 
         if final_content is None:
             final_content = "Background task completed."
