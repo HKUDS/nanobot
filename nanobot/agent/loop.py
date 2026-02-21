@@ -93,33 +93,12 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
-<<<<<<< HEAD
-
-        if len(self.sub_agents_config) > 0:
-            self.subagents = {
-                "default": self.subagents
-            }
-            for sub_agent_config in self.sub_agents_config:
-                if sub_agent_config.enabled:
-                    sub_agent = SubagentManager(
-                        provider=provider,
-                        workspace=workspace,
-                        bus=bus,
-                        model=sub_agent_config.model,
-                        temperature=sub_agent_config.temperature,
-                        max_tokens=sub_agent_config.max_tokens,
-                        brave_api_key=brave_api_key,
-                        exec_config=self.exec_config,
-                        restrict_to_workspace=restrict_to_workspace,
-                    )
-                    self.subagents[sub_agent_config.model] = sub_agent
-=======
         self.subagents = {"default": {"manager": default_manager, "role": "default"}}
         for sub_agent_config in self.sub_agents_config:
             if sub_agent_config.enabled:
                 sub_agent = SubagentManager(
                     provider=provider,
-                    workspace=Path(self.workspace).expanduser(),
+                    workspace=Path(sub_agent_config.workspace).expanduser(),
                     bus=bus,
                     model=sub_agent_config.model,
                     temperature=sub_agent_config.temperature,
@@ -129,7 +108,6 @@ class AgentLoop:
                     restrict_to_workspace=restrict_to_workspace,
                 )
                 self.subagents[sub_agent_config.model] = {"manager": sub_agent, "role": sub_agent_config.role}
->>>>>>> abfcd6a (fix: address review feedback regarding type safety, mutable defaults, and tool schema about sub-agents)
         
         self._running = False
         self._mcp_servers = mcp_servers or {}
