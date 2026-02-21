@@ -273,9 +273,15 @@ class AgentLoop:
                 )
                 try:
                     response = await self._process_message(msg)
-                    await self.bus.publish_outbound(response or OutboundMessage(
-                        channel=msg.channel, chat_id=msg.chat_id, content="",
-                    ))
+                    if response is not None:
+                        await self.bus.publish_outbound(response)
+                    elif msg.channel == "cli":
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content="",
+                            metadata=msg.metadata or {},
+                        ))
                 except Exception as e:
                     logger.error("Error processing message: {}", e)
                     await self.bus.publish_outbound(OutboundMessage(
