@@ -51,15 +51,36 @@ class SpawnTool(Tool):
                     "type": "string",
                     "description": "Optional short label for the task (for display)",
                 },
+                "media": {
+                    "type": "array",
+                    "description": "Optional media files to attach to the task, e.g. images or videos",
+                },
+                "model": {
+                    "type": "string",
+                    "description": "Optional model to use for the subagent based on specific tasks",
+                }
             },
             "required": ["task"],
         }
     
     async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
         """Spawn a subagent to execute the given task."""
-        return await self._manager.spawn(
-            task=task,
-            label=label,
-            origin_channel=self._origin_channel,
-            origin_chat_id=self._origin_chat_id,
-        )
+        media = kwargs.get("media", [])
+        model = kwargs.get("model", None)
+        if isinstance(self._manager, dict):
+            sub_manager = self._manager.get(model, self._manager.get("default"))
+            return await sub_manager.spawn(
+                task=task,
+                label=label,
+                media=media,
+                origin_channel=self._origin_channel,
+                origin_chat_id=self._origin_chat_id,
+            )
+        else:
+            return await self._manager.spawn(
+                task=task,
+                label=label,
+                media=media,
+                origin_channel=self._origin_channel,
+                origin_chat_id=self._origin_chat_id,
+            )
