@@ -268,6 +268,7 @@ class ToolsConfig(Base):
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
+    include_tool_hints_in_responses: bool = True # If true, the assistant will add tool hints to their responses when they call tools
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 

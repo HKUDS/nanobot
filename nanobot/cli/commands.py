@@ -366,6 +366,7 @@ def gateway(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        include_tool_hints_in_responses=config.tools.include_tool_hints_in_responses,
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
     )
@@ -483,9 +484,10 @@ def agent(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        include_tool_hints_in_responses=config.tools.include_tool_hints_in_responses,
         mcp_servers=config.tools.mcp_servers,
     )
-    
+
     # Show spinner when logs are off (no output to miss); skip when logs are on
     def _thinking_ctx():
         if logs:
@@ -932,6 +934,7 @@ def cron_run(
         memory_window=config.agents.defaults.memory_window,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
+        include_tool_hints_in_responses=config.tools.include_tool_hints_in_responses,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
     )
