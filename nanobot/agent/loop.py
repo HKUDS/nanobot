@@ -203,6 +203,7 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
         text_only_retried = False
+        interim_content: str | None = None  # Fallback if retry produces nothing
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -249,12 +250,18 @@ class AgentLoop:
             else:
                 final_content = self._strip_think(response.content)
                 # Some models send an interim text response before tool calls.
-                # Give them one retry; don't forward the text to avoid duplicates.
+                # Give them one retry; save the content as fallback in case
+                # the retry produces nothing useful (e.g. model already answered).
                 if not tools_used and not text_only_retried and final_content:
                     text_only_retried = True
+                    interim_content = final_content
                     logger.debug("Interim text response (no tools used yet), retrying: {}", final_content[:80])
                     final_content = None
                     continue
+                # Fall back to interim content if retry produced nothing
+                # and no tools were used (if tools ran, interim was truly interim)
+                if not final_content and interim_content and not tools_used:
+                    final_content = interim_content
                 break
 
         return final_content, tools_used
