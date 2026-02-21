@@ -72,6 +72,7 @@ class CronService:
         self._store: CronStore | None = None
         self._timer_task: asyncio.Task | None = None
         self._running = False
+        self._executing: set[str] = set()  # Job IDs currently executing
     
     def _load_store(self) -> CronStore:
         """Load jobs from disk."""
@@ -235,23 +236,30 @@ class CronService:
     
     async def _execute_job(self, job: CronJob) -> None:
         """Execute a single job."""
+        if job.id in self._executing:
+            logger.debug("Cron: skipping job '{}' — already executing", job.name)
+            return
+        self._executing.add(job.id)
+
         start_ms = _now_ms()
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
-        
+
         try:
             response = None
             if self.on_job:
                 response = await self.on_job(job)
-            
+
             job.state.last_status = "ok"
             job.state.last_error = None
             logger.info("Cron: job '{}' completed", job.name)
-            
+
         except Exception as e:
             job.state.last_status = "error"
             job.state.last_error = str(e)
             logger.error("Cron: job '{}' failed: {}", job.name, e)
-        
+        finally:
+            self._executing.discard(job.id)
+
         job.state.last_run_at_ms = start_ms
         job.updated_at_ms = _now_ms()
         
