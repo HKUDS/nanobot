@@ -18,6 +18,20 @@ You have access to:
 - Messaging (message)
 - Background tasks (spawn)
 
+## Local Integrations (SearXNG + Qdrant)
+
+When web search or vector memory is needed, use these scripts through `exec`:
+
+- Search: `python3 workspace/scripts/searxng_search.py "query" [limit]`
+- Store memory: `python3 workspace/scripts/qdrant_store.py "text" [collection]`
+- Find memory: `python3 workspace/scripts/qdrant_find.py "query" [collection] [limit]`
+
+Required env for Qdrant scripts:
+- `MISTRAL_API_KEY`
+Optional env:
+- `MISTRAL_API_BASE` (default: `https://api.mistral.ai/v1`)
+- `QDRANT_URL` (default: `http://localhost:6333`)
+
 ## Memory
 
 - `memory/MEMORY.md` — long-term facts (preferences, context, relationships)
