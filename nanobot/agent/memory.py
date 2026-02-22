@@ -74,8 +74,11 @@ class MemoryStore:
         *,
         archive_all: bool = False,
         memory_window: int = 50,
-    ) -> None:
-        """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call."""
+    ) -> bool:
+        """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
+
+        Returns True on success (including no-op), False on failure.
+        """
         if archive_all:
             old_messages = session.messages
             keep_count = 0
@@ -83,12 +86,12 @@ class MemoryStore:
         else:
             keep_count = memory_window // 2
             if len(session.messages) <= keep_count:
-                return
+                return True
             if len(session.messages) - session.last_consolidated <= 0:
-                return
+                return True
             old_messages = session.messages[session.last_consolidated:-keep_count]
             if not old_messages:
-                return
+                return True
             logger.info("Memory consolidation: {} to consolidate, {} keep", len(old_messages), keep_count)
 
         lines = []
@@ -119,7 +122,7 @@ class MemoryStore:
 
             if not response.has_tool_calls:
                 logger.warning("Memory consolidation: LLM did not call save_memory, skipping")
-                return
+                return False
 
             args = response.tool_calls[0].arguments
             if entry := args.get("history_entry"):
@@ -134,5 +137,7 @@ class MemoryStore:
 
             session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
             logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)
-        except Exception as e:
-            logger.error("Memory consolidation failed: {}", e)
+            return True
+        except Exception:
+            logger.exception("Memory consolidation failed")
+            return False
