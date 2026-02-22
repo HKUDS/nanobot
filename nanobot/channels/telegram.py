@@ -17,6 +17,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
 from nanobot.utils.helpers import split_message
+from nanobot.providers.transcription import TranscriptionProvider
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 
@@ -167,11 +168,11 @@ class TelegramChannel(BaseChannel):
         self,
         config: TelegramConfig,
         bus: MessageBus,
-        groq_api_key: str = "",
+        transcription_service: TranscriptionProvider | None = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
-        self.groq_api_key = groq_api_key
+        self.transcription_service = transcription_service
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -547,10 +548,8 @@ class TelegramChannel(BaseChannel):
                 media_paths.append(str(file_path))
 
                 # Handle voice transcription
-                if media_type == "voice" or media_type == "audio":
-                    from nanobot.providers.transcription import GroqTranscriptionProvider
-                    transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
-                    transcription = await transcriber.transcribe(file_path)
+                if (media_type == "voice" or media_type == "audio") and self.transcription_service:
+                    transcription = await self.transcription_service.transcribe(file_path)
                     if transcription:
                         logger.info("Transcribed {}: {}...", media_type, transcription[:50])
                         content_parts.append(f"[transcription: {transcription}]")

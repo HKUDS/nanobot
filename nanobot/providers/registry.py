@@ -60,6 +60,9 @@ class ProviderSpec:
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
 
+    # Provider is supported by LiteLLM for audio transcription (litellm.atranscription)
+    supports_litellm_transcription: bool = False
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -197,6 +200,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="",
         strip_model_prefix=False,
         model_overrides=(),
+        supports_litellm_transcription=True,
     ),
     # OpenAI Codex: uses OAuth, not API key.
     ProviderSpec(
@@ -323,6 +327,31 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(("kimi-k2.5", {"temperature": 1.0}),),
     ),
+
+    # Mistral AI: needs "mistral/" prefix for LiteLLM routing.
+    # Keywords cover "mistral-*" and "open-mistral-*" families.
+    # Use explicit "mistral/<model>" prefix for other families (mixtral, codestral, etc.)
+    ProviderSpec(
+        name="mistral",
+        keywords=("mistral",),
+        env_key="MISTRAL_API_KEY",
+        display_name="Mistral AI",
+        litellm_prefix="mistral",  # mistral-large-latest → mistral/mistral-large-latest
+        skip_prefixes=("mistral/",),  # avoid double-prefix
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        # LiteLLM handles Mistral chat internally and doesn't need this.
+        # Voxtral transcription bypasses LiteLLM (not yet supported) and uses
+        # this URL for the direct AsyncOpenAI client path.
+        # See: https://github.com/BerriAI/litellm/discussions/12952
+        default_api_base="https://api.mistral.ai/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # MiniMax: needs "minimax/" prefix for LiteLLM routing.
     # Uses OpenAI-compatible API at api.minimax.io/v1.
     ProviderSpec(
@@ -378,6 +407,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="",
         strip_model_prefix=False,
         model_overrides=(),
+        supports_litellm_transcription=True,
     ),
 )
 
