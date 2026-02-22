@@ -3,9 +3,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
-from nanobot.cli.commands import app
+from nanobot.cli.commands import (
+    _ensure_explicit_model_provider_configured,
+    _make_provider,
+    app,
+)
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
@@ -128,3 +133,37 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_explicit_provider_model_requires_its_own_api_key():
+    config = Config()
+    config.agents.defaults.model = "anthropic/claude-opus-4-5"
+    config.providers.zhipu.api_key = "zhipu-key"
+
+    with pytest.raises(typer.Exit):
+        _ensure_explicit_model_provider_configured(config, config.agents.defaults.model)
+
+
+def test_explicit_provider_model_passes_when_key_is_set():
+    config = Config()
+    config.agents.defaults.model = "anthropic/claude-opus-4-5"
+    config.providers.anthropic.api_key = "anthropic-key"
+
+    _ensure_explicit_model_provider_configured(config, config.agents.defaults.model)
+
+
+def test_model_without_explicit_prefix_skips_strict_provider_check():
+    config = Config()
+    config.agents.defaults.model = "claude-opus-4-5"
+    config.providers.openrouter.api_key = "sk-or-v1-test"
+
+    _ensure_explicit_model_provider_configured(config, config.agents.defaults.model)
+
+
+def test_make_provider_fails_fast_on_explicit_prefix_mismatch():
+    config = Config()
+    config.agents.defaults.model = "anthropic/claude-opus-4-5"
+    config.providers.zhipu.api_key = "zhipu-key"
+
+    with pytest.raises(typer.Exit):
+        _make_provider(config)
