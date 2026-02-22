@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 from loguru import logger
-from telegram import BotCommand, Update, ReplyParameters
+from telegram import BotCommand, Update, ReplyParameters, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
@@ -233,6 +233,13 @@ class TelegramChannel(BaseChannel):
                     allow_sending_without_reply=True
                 )
 
+        # Build inline keyboard from metadata
+        reply_markup = None
+        inline_buttons = msg.metadata.get("inline_buttons")
+        if inline_buttons:
+            reply_markup = self._build_inline_keyboard(inline_buttons)
+            logger.debug("Sending message with inline keyboard: {}", inline_buttons)
+
         # Send media files
         for media_path in (msg.media or []):
             try:
@@ -255,7 +262,8 @@ class TelegramChannel(BaseChannel):
                 await self._app.bot.send_message(
                     chat_id=chat_id,
                     text=f"[Failed to send: {filename}]",
-                    reply_parameters=reply_params
+                    reply_parameters=reply_params,
+                    reply_markup=reply_markup
                 )
 
         # Send text content
@@ -267,7 +275,8 @@ class TelegramChannel(BaseChannel):
                         chat_id=chat_id, 
                         text=html, 
                         parse_mode="HTML",
-                        reply_parameters=reply_params
+                        reply_parameters=reply_params,
+                        reply_markup=reply_markup
                     )
                 except Exception as e:
                     logger.warning("HTML parse failed, falling back to plain text: {}", e)
@@ -275,7 +284,8 @@ class TelegramChannel(BaseChannel):
                         await self._app.bot.send_message(
                             chat_id=chat_id, 
                             text=chunk,
-                            reply_parameters=reply_params
+                            reply_parameters=reply_params,
+                            reply_markup=reply_markup
                         )
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
@@ -455,3 +465,43 @@ class TelegramChannel(BaseChannel):
         
         type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
         return type_map.get(media_type, "")
+
+    def _build_inline_keyboard(self, buttons: list[dict]) -> InlineKeyboardMarkup | None:
+        """Build InlineKeyboardMarkup from button definitions.
+        
+        Button format:
+        [
+            {"label": "Button Text", "callback_data": "data"},
+            {"label": "URL Button", "url": "https://example.com"}
+        ]
+        Or with rows:
+        [
+            [{"label": "A", "callback_data": "a"}, {"label": "B", "callback_data": "b"}],
+            [{"label": "Website", "url": "https://example.com"}]
+        ]
+        """
+        if not buttons:
+            return None
+        
+        keyboard: list[list[InlineKeyboardButton]] = []
+        
+        for item in buttons:
+            if isinstance(item, list):
+                row = []
+                for btn in item:
+                    row.append(self._create_button(btn))
+                keyboard.append(row)
+            elif isinstance(item, dict):
+                keyboard.append([self._create_button(item)])
+        
+        return InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
+    
+    def _create_button(self, btn: dict) -> InlineKeyboardButton:
+        """Create an InlineKeyboardButton from a dict."""
+        text = btn.get("label", btn.get("text", ""))
+        if "callback_data" in btn:
+            return InlineKeyboardButton(text=text, callback_data=btn["callback_data"])
+        elif "url" in btn:
+            return InlineKeyboardButton(text=text, url=btn["url"])
+        else:
+            return InlineKeyboardButton(text=text)
