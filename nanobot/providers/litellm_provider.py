@@ -12,6 +12,10 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
 
 
+# Standard OpenAI chat-completion message keys; extras (e.g. reasoning_content) are stripped for strict providers.
+_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name"})
+
+
 class LiteLLMProvider(LLMProvider):
     """
     LLM provider using LiteLLM for multi-provider support.
@@ -104,6 +108,39 @@ class LiteLLMProvider(LLMProvider):
             return model
         return f"{canonical_prefix}/{remainder}"
     
+    def _supports_cache_control(self, model: str) -> bool:
+        """Return True when the provider supports cache_control on content blocks."""
+        if self._gateway is not None:
+            return self._gateway.supports_prompt_caching
+        spec = find_by_model(model)
+        return spec is not None and spec.supports_prompt_caching
+
+    def _apply_cache_control(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
+        """Return copies of messages and tools with cache_control injected."""
+        new_messages = []
+        for msg in messages:
+            if msg.get("role") == "system":
+                content = msg["content"]
+                if isinstance(content, str):
+                    new_content = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+                else:
+                    new_content = list(content)
+                    new_content[-1] = {**new_content[-1], "cache_control": {"type": "ephemeral"}}
+                new_messages.append({**msg, "content": new_content})
+            else:
+                new_messages.append(msg)
+
+        new_tools = tools
+        if tools:
+            new_tools = list(tools)
+            new_tools[-1] = {**new_tools[-1], "cache_control": {"type": "ephemeral"}}
+
+        return new_messages, new_tools
+
     def _apply_model_overrides(self, model: str, kwargs: dict[str, Any]) -> None:
         """Apply model-specific parameter overrides from the registry."""
         model_lower = model.lower()
@@ -114,6 +151,18 @@ class LiteLLMProvider(LLMProvider):
                     kwargs.update(overrides)
                     return
     
+    @staticmethod
+    def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Strip non-standard keys and ensure assistant messages have a content key."""
+        sanitized = []
+        for msg in messages:
+            clean = {k: v for k, v in msg.items() if k in _ALLOWED_MSG_KEYS}
+            # Strict providers require "content" even when assistant only has tool_calls
+            if clean.get("role") == "assistant" and "content" not in clean:
+                clean["content"] = None
+            sanitized.append(clean)
+        return sanitized
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -135,15 +184,19 @@ class LiteLLMProvider(LLMProvider):
         Returns:
             LLMResponse with content and/or tool calls.
         """
-        model = self._resolve_model(model or self.default_model)
-        
+        original_model = model or self.default_model
+        model = self._resolve_model(original_model)
+
+        if self._supports_cache_control(original_model):
+            messages, tools = self._apply_cache_control(messages, tools)
+
         # Clamp max_tokens to at least 1 — negative or zero values cause
         # LiteLLM to reject the request with "max_tokens must be at least 1".
         max_tokens = max(1, max_tokens)
         
         kwargs: dict[str, Any] = {
             "model": model,
-            "messages": messages,
+            "messages": self._sanitize_messages(messages),
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
@@ -217,27 +270,3 @@ class LiteLLMProvider(LLMProvider):
     def get_default_model(self) -> str:
         """Get the default model."""
         return self.default_model
-
-    async def close(self) -> None:
-        """Close the underlying HTTP sessions."""
-        import litellm
-        
-        # Close async session
-        if getattr(litellm, "aclient_session", None) is not None:
-            if hasattr(litellm.aclient_session, "close"):
-                await litellm.aclient_session.close()
-            litellm.aclient_session = None
-            
-        # Close sync session if it exists (though we primarily use async)
-        if getattr(litellm, "client_session", None) is not None:
-            if hasattr(litellm.client_session, "close"):
-                import asyncio
-                # client_session might be a requests.Session, which has a sync close()
-                # or an aiohttp session. To be safe, try to close it appropriately.
-                try:
-                    res = litellm.client_session.close()
-                    if asyncio.iscoroutine(res):
-                        await res
-                except Exception:
-                    pass
-            litellm.client_session = None

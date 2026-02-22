@@ -68,8 +68,3 @@ class LLMProvider(ABC):
     def get_default_model(self) -> str:
         """Get the default model for this provider."""
         pass
-
-    async def close(self) -> None:
-        """Close any resources used by the provider."""
-        pass
-

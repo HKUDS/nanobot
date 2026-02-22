@@ -110,7 +110,7 @@ class SessionManager:
             if legacy_path.exists():
                 import shutil
                 shutil.move(str(legacy_path), str(path))
-                logger.info(f"Migrated session {key} from legacy path")
+                logger.info("Migrated session {} from legacy path", key)
 
         if not path.exists():
             return None
@@ -144,7 +144,7 @@ class SessionManager:
                 last_consolidated=last_consolidated
             )
         except Exception as e:
-            logger.warning(f"Failed to load session {key}: {e}")
+            logger.warning("Failed to load session {}: {}", key, e)
             return None
     
     def save(self, session: Session) -> None:
@@ -154,6 +154,7 @@ class SessionManager:
         with open(path, "w", encoding="utf-8") as f:
             metadata_line = {
                 "_type": "metadata",
+                "key": session.key,
                 "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(),
                 "metadata": session.metadata,
@@ -186,8 +187,9 @@ class SessionManager:
                     if first_line:
                         data = json.loads(first_line)
                         if data.get("_type") == "metadata":
+                            key = data.get("key") or path.stem.replace("_", ":", 1)
                             sessions.append({
-                                "key": path.stem.replace("_", ":"),
+                                "key": key,
                                 "created_at": data.get("created_at"),
                                 "updated_at": data.get("updated_at"),
                                 "path": str(path)
