@@ -503,28 +503,29 @@ class FeishuChannel(BaseChannel):
             logger.error("Error downloading image {}: {}", image_key, e)
             return None, None
 
-    def _download_file_sync(self, message_id: str, file_key: str, resource_type: str = "file") -> tuple[
-        bytes | None, str | None]:
-        """Download a file or audio from a Feishu message by message_id and file_key."""
+    def _download_file_sync(
+        self, message_id: str, file_key: str, resource_type: str = "file"
+    ) -> tuple[bytes | None, str | None]:
+        """Download a file/audio/media from a Feishu message by message_id and file_key."""
         try:
-            request = GetMessageResourceRequest.builder() \
-                .message_id(message_id) \
-                .file_key(file_key) \
-                .type(resource_type) \
+            request = (
+                GetMessageResourceRequest.builder()
+                .message_id(message_id)
+                .file_key(file_key)
+                .type(resource_type)
                 .build()
+            )
             response = self._client.im.v1.message_resource.get(request)
-
             if response.success():
                 file_data = response.file
-                # GetMessageResourceRequest 返回的是类似 BytesIO 的对象，需要 read()
-                if hasattr(file_data, 'read'):
+                if hasattr(file_data, "read"):
                     file_data = file_data.read()
                 return file_data, response.file_name
             else:
                 logger.error("Failed to download {}: code={}, msg={}", resource_type, response.code, response.msg)
                 return None, None
-        except Exception as e:
-            logger.error("Error downloading {} {}: {}", resource_type, file_key, e)
+        except Exception:
+            logger.exception("Error downloading {} {}", resource_type, file_key)
             return None, None
 
     async def _download_and_save_media(
@@ -554,30 +555,20 @@ class FeishuChannel(BaseChannel):
                 if not filename:
                     filename = f"{image_key[:16]}.jpg"
 
-
-
         elif msg_type in ("audio", "file", "media"):
             file_key = content_json.get("file_key")
             if file_key and message_id:
                 data, filename = await loop.run_in_executor(
-                    None, self._download_file_sync, message_id, file_key
+                    None, self._download_file_sync, message_id, file_key, msg_type
                 )
                 if not filename:
-                    if msg_type == "audio":
-                        ext = ".opus"
-                    elif msg_type == "media":
-                        ext = ".mp4"
-                    else:
-                        ext = ""
+                    ext = {"audio": ".opus", "media": ".mp4"}.get(msg_type, "")
                     filename = f"{file_key[:16]}{ext}"
 
         if data and filename:
             file_path = media_dir / filename
-
             file_path.write_bytes(data)
-
             logger.debug("Downloaded {} to {}", msg_type, file_path)
-
             return str(file_path), f"[{msg_type}: {filename}]"
 
         return None, f"[{msg_type}: download failed]"
