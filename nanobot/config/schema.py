@@ -186,7 +186,7 @@ class AgentDefaults(Base):
     model: str = "anthropic/claude-opus-4-5"
     max_tokens: int = 8192
     temperature: float = 0.7
-    max_tool_iterations: int = 20
+    max_tool_iterations: int = 100
     memory_window: int = 50
 
 
@@ -202,6 +202,24 @@ class ProviderConfig(Base):
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+
+
+class VisionProviderConfig(Base):
+    """Vision (VLM) provider configuration for image analysis."""
+
+    api_key: str = ""
+    api_base: str = "https://api.openai.com/v1"  # Default to OpenAI
+    model: str = "gpt-4o"  # Default vision model
+
+
+class TranscriptionProviderConfig(Base):
+    """Voice transcription provider configuration."""
+
+    enabled: bool = True
+    provider: str = "siliconflow"  # "siliconflow", "groq", "openai", "custom"
+    api_key: str = ""
+    api_base: str = ""  # Optional, for custom providers
+    model: str = ""  # Optional, defaults based on provider
 
 
 class ProvidersConfig(Base):
@@ -224,6 +242,8 @@ class ProvidersConfig(Base):
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎) API gateway
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+    vision: VisionProviderConfig = Field(default_factory=VisionProviderConfig)  # Vision (VLM) provider
+    transcription: TranscriptionProviderConfig = Field(default_factory=TranscriptionProviderConfig)  # Voice transcription
 
 
 class GatewayConfig(Base):

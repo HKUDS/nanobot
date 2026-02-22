@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -17,7 +18,9 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
+from nanobot.agent.tools.vision import VisionTool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.config.loader import load_config
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
@@ -110,6 +113,14 @@ class AgentLoop:
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
+        # VisionTool: read config from providers.vision
+        config = load_config()
+        vision_config = config.providers.vision
+        self.tools.register(VisionTool(
+            api_key=vision_config.api_key or None,
+            api_base=vision_config.api_base if vision_config.api_base else None,
+            model=vision_config.model if vision_config.model else None,
+        ))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
@@ -338,10 +349,33 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
+        # Pre-process images: use VisionTool to analyze, then send text to main model
+        current_message = msg.content
+        if msg.media:
+            # Only process image files (jpg, jpeg, png, gif, webp, bmp)
+            image_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+            image_paths = [
+                p for p in msg.media 
+                if Path(p).suffix.lower() in image_extensions
+            ]
+            
+            if image_paths:
+                vision_tool = self.tools.get("vision_analyze")
+                if vision_tool:
+                    image_descriptions = []
+                    for img_path in image_paths:
+                        logger.info("Analyzing image with VisionTool: {}", img_path)
+                        desc = await vision_tool.execute(img_path, None)
+                        image_descriptions.append(f"[图片: {Path(img_path).name}]\n{desc}")
+                    if image_descriptions:
+                        current_message = f"{msg.content}\n\n--- 图片分析结果 ---\n" + "\n\n".join(image_descriptions)
+                else:
+                    logger.warning("VisionTool not available, skipping image analysis")
+
         initial_messages = self.context.build_messages(
             history=session.get_history(max_messages=self.memory_window),
-            current_message=msg.content,
-            media=msg.media if msg.media else None,
+            current_message=current_message,
+            media=None,  # Images already processed by VisionTool
             channel=msg.channel, chat_id=msg.chat_id,
         )
 

@@ -12,7 +12,7 @@ from telegram.request import HTTPXRequest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import TelegramConfig
+from nanobot.config.schema import TelegramConfig, TranscriptionProviderConfig
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -118,11 +118,11 @@ class TelegramChannel(BaseChannel):
         self,
         config: TelegramConfig,
         bus: MessageBus,
-        groq_api_key: str = "",
+        transcription_config: TranscriptionProviderConfig | None = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
-        self.groq_api_key = groq_api_key
+        self.transcription_config = transcription_config
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -374,11 +374,10 @@ class TelegramChannel(BaseChannel):
                 
                 media_paths.append(str(file_path))
                 
-                # Handle voice transcription
+                # Handle voice transcription (configurable provider)
                 if media_type == "voice" or media_type == "audio":
-                    from nanobot.providers.transcription import GroqTranscriptionProvider
-                    transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
-                    transcription = await transcriber.transcribe(file_path)
+                    transcription = await self._transcribe_audio(file_path)
+                    
                     if transcription:
                         logger.info("Transcribed {}: {}...", media_type, transcription[:50])
                         content_parts.append(f"[transcription: {transcription}]")
@@ -455,3 +454,67 @@ class TelegramChannel(BaseChannel):
         
         type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
         return type_map.get(media_type, "")
+    
+    async def _transcribe_audio(self, file_path: str) -> str:
+        """Transcribe audio using configured provider."""
+        if not self.transcription_config or not self.transcription_config.enabled:
+            return ""
+        
+        provider = self.transcription_config.provider.lower()
+        api_key = self.transcription_config.api_key
+        model = self.transcription_config.model
+        
+        # Provider-specific defaults and endpoints
+        if provider == "siliconflow":
+            from nanobot.providers.siliconflow_transcription import SiliconFlowTranscriptionProvider
+            transcriber = SiliconFlowTranscriptionProvider(api_key=api_key)
+            return await transcriber.transcribe(file_path)
+        
+        elif provider == "groq":
+            from nanobot.providers.transcription import GroqTranscriptionProvider
+            transcriber = GroqTranscriptionProvider(api_key=api_key)
+            return await transcriber.transcribe(file_path)
+        
+        elif provider == "openai":
+            # OpenAI Whisper API
+            import httpx
+            api_base = self.transcription_config.api_base or "https://api.openai.com/v1"
+            model = model or "whisper-1"
+            
+            async with httpx.AsyncClient() as client:
+                from pathlib import Path
+                path = Path(file_path)
+                with open(path, "rb") as f:
+                    response = await client.post(
+                        f"{api_base}/audio/transcriptions",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                        files={"file": (path.name, f)},
+                        data={"model": model},
+                        timeout=60.0
+                    )
+                    response.raise_for_status()
+                    return response.json().get("text", "")
+        
+        elif provider == "custom" and self.transcription_config.api_base:
+            # Custom OpenAI-compatible endpoint
+            import httpx
+            from pathlib import Path
+            api_base = self.transcription_config.api_base
+            model = model or "whisper-1"
+            
+            async with httpx.AsyncClient() as client:
+                path = Path(file_path)
+                with open(path, "rb") as f:
+                    response = await client.post(
+                        f"{api_base}/audio/transcriptions",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                        files={"file": (path.name, f)},
+                        data={"model": model},
+                        timeout=60.0
+                    )
+                    response.raise_for_status()
+                    return response.json().get("text", "")
+        
+        else:
+            logger.warning("Unknown transcription provider: {}", provider)
+            return ""
