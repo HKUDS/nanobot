@@ -233,7 +233,6 @@ class WebhookChannel(BaseChannel):
         for header_name in (
             "x-clawdentity-agent-did",
             "x-clawdentity-to-agent-did",
-            "x-clawdentity-verified",
         ):
             value = self._header(headers, header_name)
             if value:
