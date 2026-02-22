@@ -159,6 +159,27 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # Fireworks AI: gateway hosting models from many providers.
+    # User writes fireworks/deepseek-v3 → strip to deepseek-v3 → fireworks_ai/deepseek-v3.
+    ProviderSpec(
+        name="fireworks",
+        keywords=("fireworks",),
+        env_key="FIREWORKS_AI_API_KEY",
+        display_name="Fireworks AI",
+        litellm_prefix="fireworks_ai",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="fireworks",
+        default_api_base="https://api.fireworks.ai/inference/v1",
+        strip_model_prefix=True,
+        model_overrides=(),
+        supports_prompt_caching=True,
+        stream=True,
+    ),
+
     # === Standard providers (matched by model-name keywords) ===============
 
     # Anthropic: LiteLLM recognizes "claude-*" natively, no prefix needed.
