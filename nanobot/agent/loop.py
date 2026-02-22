@@ -171,12 +171,13 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[[str], Awaitable[None]] | None = None,
-    ) -> tuple[str | None, list[str]]:
-        """Run the agent iteration loop. Returns (final_content, tools_used)."""
+    ) -> tuple[str | None, list[str], dict[str, int]]:
+        """Run the agent iteration loop. Returns (final_content, tools_used, usage)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -188,6 +189,11 @@ class AgentLoop:
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
+
+            if response.usage:
+                total_usage["prompt_tokens"] += response.usage.get("prompt_tokens", 0)
+                total_usage["completion_tokens"] += response.usage.get("completion_tokens", 0)
+                total_usage["total_tokens"] += response.usage.get("total_tokens", 0)
 
             if response.has_tool_calls:
                 if on_progress:
@@ -202,8 +208,8 @@ class AgentLoop:
                         "type": "function",
                         "function": {
                             "name": tc.name,
-                            "arguments": json.dumps(tc.arguments, ensure_ascii=False)
-                        }
+                            "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                        },
                     }
                     for tc in response.tool_calls
                 ]
@@ -224,7 +230,16 @@ class AgentLoop:
                 final_content = self._strip_think(response.content)
                 break
 
-        return final_content, tools_used
+        if total_usage["total_tokens"] > 0:
+            logger.info(
+                "Tokens used: prompt={} completion={} total={} model={}",
+                total_usage["prompt_tokens"],
+                total_usage["completion_tokens"],
+                total_usage["total_tokens"],
+                self.model,
+            )
+
+        return final_content, tools_used, total_usage
 
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -289,12 +304,16 @@ class AgentLoop:
                 history=session.get_history(max_messages=self.memory_window),
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
-            final_content, _ = await self._run_agent_loop(messages)
+            final_content, _, usage = await self._run_agent_loop(messages)
             session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
             session.add_message("assistant", final_content or "Background task completed.")
             self.sessions.save(session)
-            return OutboundMessage(channel=channel, chat_id=chat_id,
-                                  content=final_content or "Background task completed.")
+            return OutboundMessage(
+                channel=channel,
+                chat_id=chat_id,
+                content=final_content or "Background task completed.",
+                usage=usage,
+            )
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
@@ -352,8 +371,9 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, tools_used = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+        final_content, tools_used, usage = await self._run_agent_loop(
+            initial_messages,
+            on_progress=on_progress or _bus_progress,
         )
 
         if final_content is None:
@@ -372,8 +392,11 @@ class AgentLoop:
                 return None
 
         return OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content=final_content,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=final_content,
             metadata=msg.metadata or {},
+            usage=usage,
         )
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> None:
