@@ -14,11 +14,13 @@ class CronTool(Tool):
         self._cron = cron_service
         self._channel = ""
         self._chat_id = ""
+        self._metadata: dict | None = None
     
-    def set_context(self, channel: str, chat_id: str) -> None:
+    def set_context(self, channel: str, chat_id: str, metadata: dict | None = None) -> None:
         """Set the current session context for delivery."""
         self._channel = channel
         self._chat_id = chat_id
+        self._metadata = metadata
     
     @property
     def name(self) -> str:
@@ -61,6 +63,10 @@ class CronTool(Tool):
                 "job_id": {
                     "type": "string",
                     "description": "Job ID (for remove)"
+                },
+                "metadata": {
+                    "type": "object",
+                    "description": "Channel-specific metadata (e.g. {\"slack\": {\"thread_ts\": \"...\"}})"
                 }
             },
             "required": ["action"]
@@ -75,10 +81,11 @@ class CronTool(Tool):
         tz: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
+        metadata: dict | None = None,
         **kwargs: Any
     ) -> str:
         if action == "add":
-            return self._add_job(message, every_seconds, cron_expr, tz, at)
+            return self._add_job(message, every_seconds, cron_expr, tz, at, metadata=metadata)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -92,6 +99,7 @@ class CronTool(Tool):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
+        metadata: dict | None = None,
     ) -> str:
         if not message:
             return "Error: message is required for add"
@@ -121,6 +129,14 @@ class CronTool(Tool):
         else:
             return "Error: either every_seconds, cron_expr, or at is required"
         
+        # Merge explicit metadata with session context metadata
+        effective_metadata = self._metadata
+        if metadata is not None:
+            if effective_metadata is not None:
+                effective_metadata = {**effective_metadata, **metadata}
+            else:
+                effective_metadata = metadata
+
         job = self._cron.add_job(
             name=message[:30],
             schedule=schedule,
@@ -129,6 +145,7 @@ class CronTool(Tool):
             channel=self._channel,
             to=self._chat_id,
             delete_after_run=delete_after,
+            metadata=effective_metadata,
         )
         return f"Created job '{job.name}' (id: {job.id})"
     

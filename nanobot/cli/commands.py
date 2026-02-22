@@ -335,7 +335,8 @@ def gateway(
             await bus.publish_outbound(OutboundMessage(
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to,
-                content=response or ""
+                content=response or "",
+                metadata=job.payload.metadata or {},
             ))
         return response
     cron.on_job = on_cron_job
@@ -838,15 +839,29 @@ def cron_add(
     deliver: bool = typer.Option(False, "--deliver", "-d", help="Deliver response to channel"),
     to: str = typer.Option(None, "--to", help="Recipient for delivery"),
     channel: str = typer.Option(None, "--channel", help="Channel for delivery (e.g. 'telegram', 'whatsapp')"),
+    metadata: str | None = typer.Option(None, "--metadata", help="Channel metadata as JSON (e.g. '{\"slack\": {\"thread_ts\": \"...\"}}')")
 ):
     """Add a scheduled job."""
     from nanobot.config.loader import get_data_dir
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronSchedule
     
+    import json as _json
+
     if tz and not cron_expr:
         console.print("[red]Error: --tz can only be used with --cron[/red]")
         raise typer.Exit(1)
+
+    parsed_metadata: dict | None = None
+    if metadata is not None:
+        try:
+            parsed_metadata = _json.loads(metadata)
+        except _json.JSONDecodeError as e:
+            console.print(f"[red]Error: Invalid JSON for --metadata: {e}[/red]")
+            raise typer.Exit(1) from e
+        if not isinstance(parsed_metadata, dict):
+            console.print("[red]Error: --metadata must be a JSON object[/red]")
+            raise typer.Exit(1)
 
     # Determine schedule type
     if every:
@@ -872,6 +887,7 @@ def cron_add(
             deliver=deliver,
             to=to,
             channel=channel,
+            metadata=parsed_metadata,
         )
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
