@@ -126,7 +126,17 @@ class TelegramChannel(BaseChannel):
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
-    
+
+    async def init_send(self) -> None:
+        if self._app or not self.config.token:
+            return
+        req = HTTPXRequest(connection_pool_size=4, connect_timeout=30.0, read_timeout=30.0)
+        builder = Application.builder().token(self.config.token).request(req)
+        if self.config.proxy:
+            builder = builder.proxy(self.config.proxy)
+        self._app = builder.build()
+        await self._app.initialize()
+
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
         if not self.config.token:

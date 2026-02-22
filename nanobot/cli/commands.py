@@ -416,12 +416,29 @@ def gateway(
 # ============================================================================
 
 
+async def _init_channel_for_send(config, bus, channel_name):
+    """Instantiate a channel with just enough state to call send()."""
+    if channel_name == "slack":
+        from nanobot.channels.slack import SlackChannel
+        ch = SlackChannel(config.channels.slack, bus)
+    elif channel_name == "telegram":
+        from nanobot.channels.telegram import TelegramChannel
+        ch = TelegramChannel(config.channels.telegram, bus, groq_api_key=config.providers.groq.api_key)
+    else:
+        return None
+    await ch.init_send()
+    return ch
+
+
 @app.command()
 def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    channel: str = typer.Option(None, "--channel", help="Deliver response to channel (e.g. 'slack', 'telegram')"),
+    to: str = typer.Option(None, "--to", help="Recipient chat_id for channel delivery"),
+    metadata: str | None = typer.Option(None, "--metadata", help="Channel metadata as JSON (e.g. '{\"slack\": {\"thread_ts\": \"...\"}}')")
 ):
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config, get_data_dir
@@ -429,8 +446,28 @@ def agent(
     from nanobot.agent.loop import AgentLoop
     from nanobot.cron.service import CronService
     from loguru import logger
-    
+
     config = load_config()
+
+    # Validate --channel / --to / --metadata flags
+    if channel and not to:
+        console.print("[red]Error: --channel requires --to[/red]")
+        raise typer.Exit(1)
+    if to and not channel:
+        console.print("[red]Error: --to requires --channel[/red]")
+        raise typer.Exit(1)
+
+    import json as _json
+    parsed_metadata: dict | None = None
+    if metadata is not None:
+        try:
+            parsed_metadata = _json.loads(metadata)
+        except _json.JSONDecodeError as e:
+            console.print(f"[red]Error: Invalid JSON for --metadata: {e}[/red]")
+            raise typer.Exit(1) from e
+        if not isinstance(parsed_metadata, dict):
+            console.print("[red]Error: --metadata must be a JSON object[/red]")
+            raise typer.Exit(1)
     
     bus = MessageBus()
     provider = _make_provider(config)
@@ -481,8 +518,30 @@ def agent(
         # Single message mode — direct call, no bus needed
         async def run_once():
             with _thinking_ctx():
-                response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
+                response = await agent_loop.process_direct(
+                    message,
+                    session_id,
+                    channel=channel or "cli",
+                    chat_id=to or "direct",
+                    on_progress=_cli_progress,
+                )
             _print_agent_response(response, render_markdown=markdown)
+
+            # Deliver to channel if requested
+            if channel and to:
+                from nanobot.bus.events import OutboundMessage
+                ch = await _init_channel_for_send(config, bus, channel)
+                if ch is None:
+                    console.print(f"[red]Error: Unknown channel '{channel}'[/red]")
+                else:
+                    await ch.send(OutboundMessage(
+                        channel=channel,
+                        chat_id=to,
+                        content=response or "",
+                        metadata=parsed_metadata or {},
+                    ))
+                    console.print(f"[green]✓[/green] Delivered to {channel}:{to}")
+
             await agent_loop.close_mcp()
 
         asyncio.run(run_once())
