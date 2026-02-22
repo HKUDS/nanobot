@@ -867,10 +867,15 @@ docker run -v ~/.nanobot:/root/.nanobot --rm nanobot status
 
 ## 🐧 Linux Service
 
-Run the gateway as a systemd user service so it starts automatically and restarts on failure. Below example is for a 
-`pip` based installation.
+Run the gateway as a systemd user service so it starts automatically and restarts on failure.
 
-**1. Create the service file** at `~/.config/systemd/user/nanobot-gateway.service`:
+**1. Find the nanobot binary path:**
+
+```bash
+which nanobot   # e.g. /home/user/.local/bin/nanobot
+```
+
+**2. Create the service file** at `~/.config/systemd/user/nanobot-gateway.service` (replace `ExecStart` path if needed):
 
 ```ini
 [Unit]
@@ -890,27 +895,24 @@ ReadWritePaths=%h
 WantedBy=default.target
 ```
 
-**2. Enable and start:**
+**3. Enable and start:**
 
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now nanobot-gateway
 ```
 
-**After config changes**, restart:
+**Common operations:**
 
 ```bash
-systemctl --user restart nanobot-gateway
+systemctl --user status nanobot-gateway        # check status
+systemctl --user restart nanobot-gateway       # restart after config changes
+journalctl --user -u nanobot-gateway -f        # follow logs
 ```
 
-If you modify the `.service` file itself, reload the unit before restarting:
+If you edit the `.service` file itself, run `systemctl --user daemon-reload` before restarting.
 
-```bash
-systemctl --user daemon-reload
-systemctl --user restart nanobot-gateway
-```
-
-> **Note:** By default, user services only run while you are logged in. To keep the gateway running after you log out, enable lingering:
+> **Note:** User services only run while you are logged in. To keep the gateway running after logout, enable lingering:
 >
 > ```bash
 > loginctl enable-linger $USER
