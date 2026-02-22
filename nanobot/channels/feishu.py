@@ -503,18 +503,28 @@ class FeishuChannel(BaseChannel):
             logger.error("Error downloading image {}: {}", image_key, e)
             return None, None
 
-    def _download_file_sync(self, file_key: str) -> tuple[bytes | None, str | None]:
-        """Download a file from Feishu by file_key."""
+    def _download_file_sync(self, message_id: str, file_key: str, resource_type: str = "file") -> tuple[
+        bytes | None, str | None]:
+        """Download a file or audio from a Feishu message by message_id and file_key."""
         try:
-            request = GetFileRequest.builder().file_key(file_key).build()
-            response = self._client.im.v1.file.get(request)
+            request = GetMessageResourceRequest.builder() \
+                .message_id(message_id) \
+                .file_key(file_key) \
+                .type(resource_type) \
+                .build()
+            response = self._client.im.v1.message_resource.get(request)
+
             if response.success():
-                return response.file, response.file_name
+                file_data = response.file
+                # GetMessageResourceRequest 返回的是类似 BytesIO 的对象，需要 read()
+                if hasattr(file_data, 'read'):
+                    file_data = file_data.read()
+                return file_data, response.file_name
             else:
-                logger.error("Failed to download file: code={}, msg={}", response.code, response.msg)
+                logger.error("Failed to download {}: code={}, msg={}", resource_type, response.code, response.msg)
                 return None, None
         except Exception as e:
-            logger.error("Error downloading file {}: {}", file_key, e)
+            logger.error("Error downloading {} {}: {}", resource_type, file_key, e)
             return None, None
 
     async def _download_and_save_media(
@@ -544,14 +554,18 @@ class FeishuChannel(BaseChannel):
                 if not filename:
                     filename = f"{image_key[:16]}.jpg"
 
+
         elif msg_type in ("audio", "file"):
+
             file_key = content_json.get("file_key")
-            if file_key:
+
+            if file_key and message_id:
                 data, filename = await loop.run_in_executor(
-                    None, self._download_file_sync, file_key
+                    None, self._download_file_sync, message_id, file_key, msg_type
                 )
                 if not filename:
                     ext = ".opus" if msg_type == "audio" else ""
+
                     filename = f"{file_key[:16]}{ext}"
 
         if data and filename:
