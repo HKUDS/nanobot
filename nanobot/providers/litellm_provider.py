@@ -219,9 +219,19 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
-        
+
+        # Some providers require stream=true for large max_tokens (e.g. Fireworks)
+        need_stream = (self._gateway and self._gateway.stream) or (
+            not self._gateway and (spec := find_by_model(original_model)) is not None and spec.stream
+        )
+        if need_stream:
+            kwargs["stream"] = True
+
         try:
             response = await acompletion(**kwargs)
+            if need_stream:
+                chunks = [chunk async for chunk in response]
+                response = litellm.stream_chunk_builder(chunks)
             return self._parse_response(response)
         except Exception as e:
             # Return error as content for graceful handling

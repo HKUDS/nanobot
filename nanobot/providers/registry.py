@@ -82,7 +82,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Custom",
         litellm_prefix="",
         is_direct=True,
-        stream=True,
     ),
 
     # === Gateways (detected by api_key / api_base, not model name) =========
