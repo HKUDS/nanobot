@@ -344,6 +344,7 @@ def gateway(
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     
     config = load_config()
+    progress_channels = config.get_progress_channels()
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
@@ -368,6 +369,7 @@ def gateway(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
+        progress_channels=progress_channels,
     )
     
     # Set cron callback (needs agent)
@@ -457,6 +459,7 @@ def agent(
     from loguru import logger
     
     config = load_config()
+    progress_channels = config.get_progress_channels()
     
     bus = MessageBus()
     provider = _make_provider(config)
@@ -484,6 +487,7 @@ def agent(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
+        progress_channels=progress_channels,
     )
     
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -946,6 +950,7 @@ def cron_run(
     logger.disable("nanobot")
 
     config = load_config()
+    progress_channels = config.get_progress_channels()
     provider = _make_provider(config)
     bus = MessageBus()
     agent_loop = AgentLoop(
@@ -961,6 +966,7 @@ def cron_run(
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
+        progress_channels=progress_channels,
     )
 
     store_path = get_data_dir() / "cron" / "jobs.json"

@@ -19,6 +19,7 @@ class WhatsAppConfig(Base):
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""  # Shared token for bridge auth (optional, recommended)
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
+    progress: bool | None = None
 
 
 class TelegramConfig(Base):
@@ -29,6 +30,7 @@ class TelegramConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     reply_to_message: bool = False  # If true, bot replies quote the original message
+    progress: bool | None = None
 
 
 class FeishuConfig(Base):
@@ -40,6 +42,7 @@ class FeishuConfig(Base):
     encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
     verification_token: str = ""  # Verification Token for event subscription (optional)
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
+    progress: bool | None = None
 
 
 class DingTalkConfig(Base):
@@ -49,6 +52,7 @@ class DingTalkConfig(Base):
     client_id: str = ""  # AppKey
     client_secret: str = ""  # AppSecret
     allow_from: list[str] = Field(default_factory=list)  # Allowed staff_ids
+    progress: bool | None = None
 
 
 class DiscordConfig(Base):
@@ -59,6 +63,7 @@ class DiscordConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
+    progress: bool | None = None
 
 
 class EmailConfig(Base):
@@ -91,6 +96,7 @@ class EmailConfig(Base):
     max_body_chars: int = 12000
     subject_prefix: str = "Re: "
     allow_from: list[str] = Field(default_factory=list)  # Allowed sender email addresses
+    progress: bool | None = None
 
 
 class MochatMentionConfig(Base):
@@ -130,6 +136,7 @@ class MochatConfig(Base):
     groups: dict[str, MochatGroupRule] = Field(default_factory=dict)
     reply_delay_mode: str = "non-mention"  # off | non-mention
     reply_delay_ms: int = 120000
+    progress: bool | None = None
 
 
 class SlackDMConfig(Base):
@@ -154,6 +161,7 @@ class SlackConfig(Base):
     group_policy: str = "mention"  # "mention", "open", "allowlist"
     group_allow_from: list[str] = Field(default_factory=list)  # Allowed channel IDs if allowlist
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
+    progress: bool | None = None
 
 
 class QQConfig(Base):
@@ -163,6 +171,7 @@ class QQConfig(Base):
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
+    progress: bool | None = None
 
 
 class ChannelsConfig(Base):
@@ -353,5 +362,15 @@ class Config(BaseSettings):
             if spec and spec.is_gateway and spec.default_api_base:
                 return spec.default_api_base
         return None
+
+    def get_progress_channels(self) -> dict[str, bool]:
+        """Build per-channel progress mode mapping from channel configs."""
+        channels: dict[str, bool] = {}
+        for name in type(self.channels).model_fields:
+            cfg = getattr(self.channels, name)
+            mode = getattr(cfg, "progress", None)
+            if mode is not None:
+                channels[name] = mode
+        return channels
 
     model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")

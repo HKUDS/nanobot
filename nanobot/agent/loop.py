@@ -59,6 +59,7 @@ class AgentLoop:
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
+        progress_channels: dict[str, bool] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -88,6 +89,7 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
+        self.progress_channels = progress_channels or {}
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -383,6 +385,8 @@ class AgentLoop:
         )
 
         async def _bus_progress(content: str) -> None:
+            if self.progress_channels.get(msg.channel) is False:
+                return
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             await self.bus.publish_outbound(OutboundMessage(
