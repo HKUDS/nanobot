@@ -55,7 +55,6 @@ class QQChannel(BaseChannel):
         self.config: QQConfig = config
         self._client: "botpy.Client | None" = None
         self._processed_ids: deque = deque(maxlen=1000)
-        self._bot_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         """Start the QQ bot."""
@@ -88,11 +87,10 @@ class QQChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the QQ bot."""
         self._running = False
-        if self._bot_task:
-            self._bot_task.cancel()
+        if self._client:
             try:
-                await self._bot_task
-            except asyncio.CancelledError:
+                await self._client.close()
+            except Exception:
                 pass
         logger.info("QQ bot stopped")
 
@@ -130,5 +128,5 @@ class QQChannel(BaseChannel):
                 content=content,
                 metadata={"message_id": data.id},
             )
-        except Exception as e:
-            logger.error("Error handling QQ message: {}", e)
+        except Exception:
+            logger.exception("Error handling QQ message")
