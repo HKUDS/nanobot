@@ -165,6 +165,20 @@ class QQConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
 
+class WebhookConfig(Base):
+    """Generic webhook channel configuration."""
+
+    enabled: bool = False
+    webhook_host: str = "127.0.0.1"
+    webhook_port: int = 18794
+    webhook_path: str = "/v1/inbound"
+    send_path: str = "/v1/outbound"
+    connector_url: str = "http://127.0.0.1:19400/v1/outbound"
+    connector_timeout_seconds: float = 10.0
+    token: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -177,6 +191,7 @@ class ChannelsConfig(Base):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    webhook: WebhookConfig = Field(default_factory=WebhookConfig)
 
 
 class AgentDefaults(Base):
