@@ -82,12 +82,7 @@ Skills with available="false" need dependencies installed first - you can try in
         
         return f"""# nanobot 🐈
 
-You are nanobot, a helpful AI assistant. You have access to tools that allow you to:
-- Read, write, and edit files
-- Execute shell commands
-- Search the web and fetch web pages
-- Send messages to users on chat channels
-- Spawn subagents for complex background tasks
+You are nanobot, a helpful AI assistant. 
 
 ## Current Time
 {now} ({tz})
@@ -106,6 +101,7 @@ Only use the 'message' tool when you need to send a message to a specific chat c
 For normal conversation, just respond with text - do not call the message tool.
 
 Always be helpful, accurate, and concise. Before calling tools, briefly tell the user what you're about to do (one short sentence in the user's language).
+If you need to use tools, call them directly — never send a preliminary message like "Let me check" without actually calling a tool.
 When remembering something important, write to {workspace_path}/memory/MEMORY.md
 To recall past events, grep {workspace_path}/memory/HISTORY.md"""
     
@@ -227,15 +223,15 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         """
         msg: dict[str, Any] = {"role": "assistant"}
 
-        # Omit empty content — some backends reject empty text blocks
-        if content:
-            msg["content"] = content
+        # Always include content — some providers (e.g. StepFun) reject
+        # assistant messages that omit the key entirely.
+        msg["content"] = content
 
         if tool_calls:
             msg["tool_calls"] = tool_calls
 
         # Include reasoning content when provided (required by some thinking models)
-        if reasoning_content:
+        if reasoning_content is not None:
             msg["reasoning_content"] = reasoning_content
 
         messages.append(msg)
