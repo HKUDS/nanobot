@@ -26,16 +26,18 @@ class LiteLLMProvider(LLMProvider):
     """
     
     def __init__(
-        self, 
-        api_key: str | None = None, 
+        self,
+        api_key: str | None = None,
         api_base: str | None = None,
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
+        extra_body: dict[str, Any] | None = None,
         provider_name: str | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self.extra_body = extra_body or {}
         
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -215,6 +217,10 @@ class LiteLLMProvider(LLMProvider):
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
+
+        # Pass extra body params (e.g. OpenRouter provider routing: {"provider": {"only": [...]}})
+        if self.extra_body:
+            kwargs["extra_body"] = self.extra_body
         
         if tools:
             kwargs["tools"] = tools
