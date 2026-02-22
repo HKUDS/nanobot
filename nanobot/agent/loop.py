@@ -196,7 +196,8 @@ class AgentLoop:
                     clean = self._strip_think(response.content)
                     if clean:
                         await on_progress(clean)
-                    await on_progress(self._tool_hint(response.tool_calls))
+                    else:
+                        await on_progress(self._tool_hint(response.tool_calls))
 
                 tool_call_dicts = [
                     {
