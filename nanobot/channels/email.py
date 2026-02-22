@@ -304,7 +304,8 @@ class EmailChannel(BaseChannel):
                     self._processed_uids.add(uid)
                     # mark_seen is the primary dedup; this set is a safety net
                     if len(self._processed_uids) > self._MAX_PROCESSED_UIDS:
-                        self._processed_uids.clear()
+                        # Evict a random half to cap memory; mark_seen is the primary dedup
+                        self._processed_uids = set(list(self._processed_uids)[len(self._processed_uids) // 2:])
 
                 if mark_seen:
                     client.store(imap_id, "+FLAGS", "\\Seen")
