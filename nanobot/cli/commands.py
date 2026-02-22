@@ -494,8 +494,34 @@ def agent(
         # Animated spinner is safe to use with prompt_toolkit input handling
         return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
 
-    async def _cli_progress(content: str) -> None:
-        console.print(f"  [dim]↳ {content}[/dim]")
+    async def _cli_progress(content: str, is_result: bool = False) -> None:
+        if is_result:
+            result_str = content.strip()
+            lines = result_str.split('\n')
+            first_line = lines[0].strip() if lines else ""
+            
+            if len(lines) > 1:
+                display_str = f"{first_line[:80]}... (+{len(lines)-1} lines)"
+            else:
+                display_str = first_line[:100] + ("..." if len(first_line) > 100 else "")
+            
+            is_error = False
+            if result_str.startswith("Exit code:"):
+                import re
+                match = re.search(r"Exit code:\s*(\d+)", result_str)
+                if match:
+                    exit_code = int(match.group(1))
+                    if exit_code != 0:
+                        is_error = True
+            elif result_str.startswith("Error:") or result_str.startswith("Exception:"):
+                is_error = True
+
+            if is_error:
+                console.print(f"  [dim red]✖ {display_str}[/dim red]")
+            else:
+                console.print(f"  [dim green]✔ {display_str}[/dim green]")
+        else:
+            console.print(Markdown(f"  ▶ {content}", style="dim"))
 
     if message:
         # Single message mode — direct call, no bus needed
@@ -535,7 +561,34 @@ def agent(
                     try:
                         msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
                         if msg.metadata.get("_progress"):
-                            console.print(f"  [dim]↳ {msg.content}[/dim]")
+                            # Render tool execution progress with Markdown
+                            console.print(Markdown(f"  ▶ {msg.content}", style="dim"))
+                        elif msg.metadata.get("_tool_result"):
+                            # Render tool execution result
+                            result_str = msg.content.strip()
+                            lines = result_str.split('\n')
+                            first_line = lines[0].strip() if lines else ""
+                            
+                            if len(lines) > 1:
+                                display_str = f"{first_line[:80]}... (+{len(lines)-1} lines)"
+                            else:
+                                display_str = first_line[:100] + ("..." if len(first_line) > 100 else "")
+                            
+                            is_error = False
+                            if result_str.startswith("Exit code:"):
+                                import re
+                                match = re.search(r"Exit code:\s*(\d+)", result_str)
+                                if match:
+                                    exit_code = int(match.group(1))
+                                    if exit_code != 0:
+                                        is_error = True
+                            elif result_str.startswith("Error:") or result_str.startswith("Exception:"):
+                                is_error = True
+
+                            if is_error:
+                                console.print(f"  [dim red]✖ {display_str}[/dim red]")
+                            else:
+                                console.print(f"  [dim green]✔ {display_str}[/dim green]")
                         elif not turn_done.is_set():
                             if msg.content:
                                 turn_response.append(msg.content)

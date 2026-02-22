@@ -170,17 +170,20 @@ class AgentLoop:
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
-    ) -> tuple[str | None, list[str]]:
+        on_progress: Callable[[str, bool], Awaitable[None]] | None = None,
+    ) -> tuple[str | None, list[str], int, int]:
         """Run the agent iteration loop. Returns (final_content, tools_used)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        api_calls = 0
+        last_prompt_tokens = 0
 
         while iteration < self.max_iterations:
             iteration += 1
 
+            api_calls += 1
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
@@ -188,13 +191,16 @@ class AgentLoop:
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
+            if response.usage:
+                last_prompt_tokens = response.usage.get("prompt_tokens", 0)
 
             if response.has_tool_calls:
                 if on_progress:
                     clean = self._strip_think(response.content)
                     if clean:
-                        await on_progress(clean)
-                    await on_progress(self._tool_hint(response.tool_calls))
+                        await on_progress(clean, False)
+                    # We skip tool_hint here because we'll show each tool call in the loop below
+                    # await on_progress(self._tool_hint(response.tool_calls), False)
 
                 tool_call_dicts = [
                     {
@@ -216,7 +222,32 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    
+                    if on_progress:
+                        # Format arguments for display
+                        args = tool_call.arguments
+                        if tool_call.name == "exec":
+                            cmd = args.get("command", "")
+                            lines = [line for line in cmd.strip().split('\n') if line.strip()]
+                            if len(lines) > 1:
+                                short_args = f'command="{lines[0][:60]}..." (+{len(lines)-1} lines)'
+                            else:
+                                short_args = f'command="{lines[0][:80]}"' if lines else 'command=""'
+                        elif tool_call.name in ("read_file", "list_dir"):
+                            short_args = f'path="{args.get("path", "")}"'
+                        elif tool_call.name in ("write_file", "edit_file"):
+                            short_args = f'path="{args.get("path", "")}"'
+                        else:
+                            short_args = args_str.replace('\n', ' ').strip()
+                            if len(short_args) > 100:
+                                short_args = short_args[:100] + "..."
+                        await on_progress(f"**{tool_call.name}**({short_args})", False)
+                        
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    
+                    if on_progress:
+                        await on_progress(str(result), True)
+                        
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -224,7 +255,7 @@ class AgentLoop:
                 final_content = self._strip_think(response.content)
                 break
 
-        return final_content, tools_used
+        return final_content, tools_used, api_calls, last_prompt_tokens
 
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -274,7 +305,7 @@ class AgentLoop:
         self,
         msg: InboundMessage,
         session_key: str | None = None,
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[[str, bool], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -289,7 +320,7 @@ class AgentLoop:
                 history=session.get_history(max_messages=self.memory_window),
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
-            final_content, _ = await self._run_agent_loop(messages)
+            final_content, _, _, _ = await self._run_agent_loop(messages)
             session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
             session.add_message("assistant", final_content or "Background task completed.")
             self.sessions.save(session)
@@ -345,14 +376,17 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id,
         )
 
-        async def _bus_progress(content: str) -> None:
+        async def _bus_progress(content: str, is_result: bool = False) -> None:
             meta = dict(msg.metadata or {})
-            meta["_progress"] = True
+            if is_result:
+                meta["_tool_result"] = True
+            else:
+                meta["_progress"] = True
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, tools_used = await self._run_agent_loop(
+        final_content, tools_used, api_calls, prompt_tokens = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
@@ -370,6 +404,41 @@ class AgentLoop:
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
                 return None
+
+        from nanobot.config.loader import load_config, save_config
+        config = load_config()
+        config.agents.defaults.total_api_calls += api_calls
+        save_config(config)
+
+        limit = config.agents.defaults.context_window
+        model_display = self.model.replace("openai/", "")
+        
+        # calculate percentage
+        if limit > 0:
+            percent = int((prompt_tokens / limit) * 100)
+        else:
+            percent = 0
+            
+        # format tokens
+        if prompt_tokens >= 1000:
+            tokens_str = f"{prompt_tokens/1000:.1f}k"
+        else:
+            tokens_str = str(prompt_tokens)
+            
+        if limit >= 1000:
+            limit_str = f"{limit//1000}k"
+        else:
+            limit_str = str(limit)
+
+        dashboard = f"\n\n[90m{model_display} | calls {config.agents.defaults.total_api_calls} | tokens {tokens_str}/{limit_str} ({percent}%)[0m"
+        
+        # Wait, the CLI might not support ANSI escape codes if it uses Markdown...
+        # In the previous working version, they used ANSI or rich dim?
+        # The user said: "使用 ANSI 深灰色 (\033[90m) 将其追加在回复末尾。"
+        # "而且如果我再执行工具，进度提示里的 Markdown 应该也能正常显示了。"
+        # So ANSI is fine.
+        
+        final_content += dashboard
 
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
@@ -389,7 +458,7 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[[str, bool], Awaitable[None]] | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()

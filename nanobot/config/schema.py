@@ -186,6 +186,8 @@ class AgentDefaults(Base):
     model: str = "anthropic/claude-opus-4-5"
     max_tokens: int = 8192
     temperature: float = 0.7
+    context_window: int = 128000
+    total_api_calls: int = 0
     max_tool_iterations: int = 20
     memory_window: int = 50
 
