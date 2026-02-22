@@ -668,6 +668,33 @@ def channels_status():
         slack_config
     )
 
+    # DingTalk
+    dt = config.channels.dingtalk
+    dt_config = f"client_id: {dt.client_id[:10]}..." if dt.client_id else "[dim]not configured[/dim]"
+    table.add_row(
+        "DingTalk",
+        "✓" if dt.enabled else "✗",
+        dt_config
+    )
+
+    # QQ
+    qq = config.channels.qq
+    qq_config = f"app_id: {qq.app_id[:10]}..." if qq.app_id else "[dim]not configured[/dim]"
+    table.add_row(
+        "QQ",
+        "✓" if qq.enabled else "✗",
+        qq_config
+    )
+
+    # Email
+    em = config.channels.email
+    em_config = em.imap_host if em.imap_host else "[dim]not configured[/dim]"
+    table.add_row(
+        "Email",
+        "✓" if em.enabled else "✗",
+        em_config
+    )
+
     console.print(table)
 
 
