@@ -656,7 +656,6 @@ Connects directly to any OpenAI-compatible endpoint — LM Studio, llama.cpp, To
 ```
 
 > For local servers that don't require a key, set `apiKey` to any non-empty string (e.g. `"no-key"`).
-
 </details>
 
 <details>
@@ -737,6 +736,7 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 | `detect_by_key_prefix` | Detect gateway by API key prefix | `"sk-or-"` |
 | `detect_by_base_keyword` | Detect gateway by API base URL | `"openrouter"` |
 | `strip_model_prefix` | Strip existing prefix before re-prefixing | `True` (for AiHubMix) |
+| `stream` | Always use streaming for API calls | `True` (for custom providers, e.g. Fireworks) |
 
 </details>
 

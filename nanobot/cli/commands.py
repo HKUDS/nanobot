@@ -295,10 +295,13 @@ def _make_provider(config: Config):
 
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     if provider_name == "custom":
+        from nanobot.providers.registry import find_by_name
+        spec = find_by_name("custom")
         return CustomProvider(
             api_key=p.api_key if p else "no-key",
             api_base=config.get_api_base(model) or "http://localhost:8000/v1",
             default_model=model,
+            stream=spec.stream if spec else False,
         )
 
     from nanobot.providers.registry import find_by_name

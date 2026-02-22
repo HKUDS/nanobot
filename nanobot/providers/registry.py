@@ -60,6 +60,9 @@ class ProviderSpec:
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
 
+    # Streaming mode
+    stream: bool = False
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -79,6 +82,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Custom",
         litellm_prefix="",
         is_direct=True,
+        stream=True,
     ),
 
     # === Gateways (detected by api_key / api_base, not model name) =========
