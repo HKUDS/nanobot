@@ -4,7 +4,7 @@ import asyncio
 import json
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from loguru import logger
 
@@ -16,16 +16,30 @@ from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFile
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 
+if TYPE_CHECKING:
+    from nanobot.config.schema import SubagentProfile
+
+# Map from tool names used in profiles to the classes that implement them.
+TOOL_NAME_MAP: dict[str, type] = {
+    "read_file": ReadFileTool,
+    "write_file": WriteFileTool,
+    "edit_file": EditFileTool,
+    "list_dir": ListDirTool,
+    "exec": ExecTool,
+    "web_search": WebSearchTool,
+    "web_fetch": WebFetchTool,
+}
+
 
 class SubagentManager:
     """
     Manages background subagent execution.
-    
+
     Subagents are lightweight agent instances that run in the background
     to handle specific tasks. They share the same LLM provider but have
     isolated context and a focused system prompt.
     """
-    
+
     def __init__(
         self,
         provider: LLMProvider,
@@ -37,6 +51,7 @@ class SubagentManager:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        profiles: dict[str, "SubagentProfile"] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.provider = provider
@@ -48,6 +63,7 @@ class SubagentManager:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.profiles = profiles or {}
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
     
     async def spawn(
@@ -56,84 +72,121 @@ class SubagentManager:
         label: str | None = None,
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
+        profile: str | None = None,
     ) -> str:
         """
         Spawn a subagent to execute a task in the background.
-        
+
         Args:
             task: The task description for the subagent.
             label: Optional human-readable label for the task.
             origin_channel: The channel to announce results to.
             origin_chat_id: The chat ID to announce results to.
-        
+            profile: Optional profile name from config to customize the subagent.
+
         Returns:
             Status message indicating the subagent was started.
         """
+        if profile and profile not in self.profiles:
+            return f"Error: Unknown subagent profile '{profile}'. Available profiles: {', '.join(self.profiles) or '(none)'}"
+
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
-        
+
         origin = {
             "channel": origin_channel,
             "chat_id": origin_chat_id,
         }
-        
+
+        resolved_profile = self.profiles.get(profile) if profile else None
+
         # Create background task
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin)
+            self._run_subagent(task_id, task, display_label, origin, resolved_profile)
         )
         self._running_tasks[task_id] = bg_task
-        
+
         # Cleanup when done
         bg_task.add_done_callback(lambda _: self._running_tasks.pop(task_id, None))
-        
-        logger.info("Spawned subagent [{}]: {}", task_id, display_label)
+
+        profile_info = f", profile: {profile}" if profile else ""
+        logger.info("Spawned subagent [{}]: {}{}", task_id, display_label, profile_info)
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
     
+    def _build_tools(self, profile: "SubagentProfile | None" = None) -> ToolRegistry:
+        """Build a ToolRegistry for a subagent, optionally filtered by profile."""
+        tools = ToolRegistry()
+        allowed_dir = self.workspace if self.restrict_to_workspace else None
+
+        # All available subagent tools with their instantiation args
+        tool_factories: dict[str, Any] = {
+            "read_file": lambda: ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir),
+            "write_file": lambda: WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir),
+            "edit_file": lambda: EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir),
+            "list_dir": lambda: ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir),
+            "exec": lambda: ExecTool(
+                working_dir=str(self.workspace),
+                timeout=self.exec_config.timeout,
+                restrict_to_workspace=self.restrict_to_workspace,
+            ),
+            "web_search": lambda: WebSearchTool(api_key=self.brave_api_key),
+            "web_fetch": lambda: WebFetchTool(),
+        }
+
+        if profile and profile.tools is not None:
+            allowed = set(profile.tools)
+            for name in profile.tools:
+                if name in tool_factories:
+                    tools.register(tool_factories[name]())
+                else:
+                    logger.warning("Unknown tool '{}' in subagent profile, skipping", name)
+        else:
+            for factory in tool_factories.values():
+                tools.register(factory())
+
+        return tools
+
     async def _run_subagent(
         self,
         task_id: str,
         task: str,
         label: str,
         origin: dict[str, str],
+        profile: "SubagentProfile | None" = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
-        
+
         try:
-            # Build subagent tools (no message tool, no spawn tool)
-            tools = ToolRegistry()
-            allowed_dir = self.workspace if self.restrict_to_workspace else None
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-            ))
-            tools.register(WebSearchTool(api_key=self.brave_api_key))
-            tools.register(WebFetchTool())
-            
+            tools = self._build_tools(profile)
+
+            # Load skills content if profile specifies them
+            skills_content = ""
+            if profile and profile.skills:
+                from nanobot.agent.skills import SkillsLoader
+                loader = SkillsLoader(self.workspace)
+                skills_content = loader.load_skills_for_context(profile.skills)
+
             # Build messages with subagent-specific prompt
-            system_prompt = self._build_subagent_prompt(task)
+            system_prompt = self._build_subagent_prompt(task, tools, skills_content)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
             ]
-            
-            # Run agent loop (limited iterations)
-            max_iterations = 15
+
+            # Resolve model and iteration limit (profile overrides defaults)
+            model = (profile.model if profile and profile.model else self.model)
+            max_iterations = (profile.max_iterations if profile and profile.max_iterations else 15)
             iteration = 0
             final_result: str | None = None
-            
+
             while iteration < max_iterations:
                 iteration += 1
                 
                 response = await self.provider.chat(
                     messages=messages,
                     tools=tools.get_definitions(),
-                    model=self.model,
+                    model=model,
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                 )
@@ -215,12 +268,21 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         await self.bus.publish_inbound(msg)
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
     
-    def _build_subagent_prompt(self, task: str) -> str:
+    def _build_subagent_prompt(
+        self, task: str, tools: ToolRegistry | None = None, skills_content: str = "",
+    ) -> str:
         """Build a focused system prompt for the subagent."""
         from datetime import datetime
         import time as _time
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         tz = _time.strftime("%Z") or "UTC"
+
+        tool_names = tools.tool_names if tools else []
+        capabilities = "\n".join(f"- {name}" for name in tool_names) if tool_names else "- (no tools available)"
+
+        skills_section = ""
+        if skills_content:
+            skills_section = f"\n\n## Pre-loaded Skills\n\n{skills_content}"
 
         return f"""# Subagent
 
@@ -235,11 +297,8 @@ You are a subagent spawned by the main agent to complete a specific task.
 3. Do not initiate conversations or take on side tasks
 4. Be concise but informative in your findings
 
-## What You Can Do
-- Read and write files in the workspace
-- Execute shell commands
-- Search the web and fetch web pages
-- Complete the task thoroughly
+## Available Tools
+{capabilities}
 
 ## What You Cannot Do
 - Send messages directly to users (no message tool available)
@@ -248,7 +307,7 @@ You are a subagent spawned by the main agent to complete a specific task.
 
 ## Workspace
 Your workspace is at: {self.workspace}
-Skills are available at: {self.workspace}/skills/ (read SKILL.md files as needed)
+Skills are available at: {self.workspace}/skills/ (read SKILL.md files as needed){skills_section}
 
 When you have completed the task, provide a clear summary of your findings or actions."""
     

@@ -368,6 +368,7 @@ def gateway(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
+        subagent_profiles=config.agents.subagent_profiles,
     )
     
     # Set cron callback (needs agent)
@@ -484,8 +485,9 @@ def agent(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
+        subagent_profiles=config.agents.subagent_profiles,
     )
-    
+
     # Show spinner when logs are off (no output to miss); skip when logs are on
     def _thinking_ctx():
         if logs:

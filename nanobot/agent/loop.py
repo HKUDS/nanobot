@@ -59,6 +59,7 @@ class AgentLoop:
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
+        subagent_profiles: dict | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -87,6 +88,7 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            profiles=subagent_profiles,
         )
 
         self._running = False

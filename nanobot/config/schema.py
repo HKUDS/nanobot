@@ -190,10 +190,20 @@ class AgentDefaults(Base):
     memory_window: int = 50
 
 
+class SubagentProfile(Base):
+    """Named subagent profile with configurable tools, skills, model, and iteration limit."""
+
+    tools: list[str] | None = None  # Tool allow-list; None means all default tools
+    skills: list[str] = Field(default_factory=list)  # Skills to pre-load into subagent prompt
+    model: str | None = None  # Model override (e.g. "anthropic/claude-haiku-4-5")
+    max_iterations: int | None = None  # Iteration limit override
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    subagent_profiles: dict[str, SubagentProfile] = Field(default_factory=dict)
 
 
 class ProviderConfig(Base):
