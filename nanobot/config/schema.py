@@ -233,6 +233,16 @@ class GatewayConfig(Base):
     port: int = 18790
 
 
+class ThinkingToolUseStreamingConfig(Base):
+    """Thinking tool use streaming configuration."""
+
+    enabled: bool = True
+    toolUsageTemplate: str = "\u2699\uFE0F: `{{tool}}`"
+    thinkingTemplate: str = "\uD83E\uDDE0: `{{thought}}`"
+    toolsBlacklist: list[str] = Field(default_factory=list)
+    channelsBlacklist: list[str] = Field(default_factory=list)
+
+
 class WebSearchConfig(Base):
     """Web search tool configuration."""
 
@@ -266,6 +276,7 @@ class MCPServerConfig(Base):
 class ToolsConfig(Base):
     """Tools configuration."""
 
+    thinkingToolUseStreaming: ThinkingToolUseStreamingConfig = Field(default_factory=ThinkingToolUseStreamingConfig)
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory

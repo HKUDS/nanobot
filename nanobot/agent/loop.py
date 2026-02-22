@@ -25,6 +25,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
+from nanobot.config.loader import load_config
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ExecToolConfig
@@ -382,7 +383,21 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id,
         )
 
+        config = load_config()
+        thinkingToolUseStreamingConfig = config.tools.thinkingToolUseStreaming
         async def _bus_progress(content: str) -> None:
+            if thinkingToolUseStreamingConfig.enabled:
+                posibleToolName = content.split("(")[0]
+                tool = self.tools.get(posibleToolName)
+                if tool:
+                    content = thinkingToolUseStreamingConfig.toolUsageTemplate.replace("{{tool}}", content)
+                    if msg.channel in thinkingToolUseStreamingConfig.channelsBlacklist or tool.name in thinkingToolUseStreamingConfig.toolsBlacklist or "*" in thinkingToolUseStreamingConfig.toolsBlacklist:
+                        return
+                else:
+                    content = thinkingToolUseStreamingConfig.thinkingTemplate.replace("{{thought}}", content)
+                    if msg.channel in thinkingToolUseStreamingConfig.channelsBlacklist or "thinking" in thinkingToolUseStreamingConfig.toolsBlacklist:
+                        return
+            
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             await self.bus.publish_outbound(OutboundMessage(
