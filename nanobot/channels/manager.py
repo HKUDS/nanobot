@@ -37,11 +37,12 @@ class ChannelManager:
         # Telegram channel
         if self.config.channels.telegram.enabled:
             try:
+                from nanobot.providers.transcription import create_transcription_service
                 from nanobot.channels.telegram import TelegramChannel
                 self.channels["telegram"] = TelegramChannel(
                     self.config.channels.telegram,
                     self.bus,
-                    groq_api_key=self.config.providers.groq.api_key,
+                    transcription_service=create_transcription_service(self.config.providers),
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:
