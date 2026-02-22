@@ -7,7 +7,7 @@ import json
 import re
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
@@ -95,6 +95,8 @@ class AgentLoop:
         self._mcp_connected = False
         self._mcp_connecting = False
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
+        self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
+        self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -194,7 +196,8 @@ class AgentLoop:
                     clean = self._strip_think(response.content)
                     if clean:
                         await on_progress(clean)
-                    await on_progress(self._tool_hint(response.tool_calls))
+                    else:
+                        await on_progress(self._tool_hint(response.tool_calls))
 
                 tool_call_dicts = [
                     {
@@ -270,6 +273,18 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
 
+    def _get_consolidation_lock(self, session_key: str) -> asyncio.Lock:
+        lock = self._consolidation_locks.get(session_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._consolidation_locks[session_key] = lock
+        return lock
+
+    def _prune_consolidation_lock(self, session_key: str, lock: asyncio.Lock) -> None:
+        """Drop lock entry if no longer in use."""
+        if not lock.locked():
+            self._consolidation_locks.pop(session_key, None)
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -305,33 +320,55 @@ class AgentLoop:
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            messages_to_archive = session.messages.copy()
+            lock = self._get_consolidation_lock(session.key)
+            self._consolidating.add(session.key)
+            try:
+                async with lock:
+                    snapshot = session.messages[session.last_consolidated:]
+                    if snapshot:
+                        temp = Session(key=session.key)
+                        temp.messages = list(snapshot)
+                        if not await self._consolidate_memory(temp, archive_all=True):
+                            return OutboundMessage(
+                                channel=msg.channel, chat_id=msg.chat_id,
+                                content="Memory archival failed, session not cleared. Please try again.",
+                            )
+            except Exception:
+                logger.exception("/new archival failed for {}", session.key)
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="Memory archival failed, session not cleared. Please try again.",
+                )
+            finally:
+                self._consolidating.discard(session.key)
+                self._prune_consolidation_lock(session.key, lock)
+
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
-
-            async def _consolidate_and_cleanup():
-                temp = Session(key=session.key)
-                temp.messages = messages_to_archive
-                await self._consolidate_memory(temp, archive_all=True)
-
-            asyncio.create_task(_consolidate_and_cleanup())
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started. Memory consolidation in progress.")
+                                  content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
 
         if len(session.messages) > self.memory_window and session.key not in self._consolidating:
             self._consolidating.add(session.key)
+            lock = self._get_consolidation_lock(session.key)
 
             async def _consolidate_and_unlock():
                 try:
-                    await self._consolidate_memory(session)
+                    async with lock:
+                        await self._consolidate_memory(session)
                 finally:
                     self._consolidating.discard(session.key)
+                    self._prune_consolidation_lock(session.key, lock)
+                    _task = asyncio.current_task()
+                    if _task is not None:
+                        self._consolidation_tasks.discard(_task)
 
-            asyncio.create_task(_consolidate_and_unlock())
+            _task = asyncio.create_task(_consolidate_and_unlock())
+            self._consolidation_tasks.add(_task)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
@@ -376,9 +413,9 @@ class AgentLoop:
             metadata=msg.metadata or {},
         )
 
-    async def _consolidate_memory(self, session, archive_all: bool = False) -> None:
-        """Delegate to MemoryStore.consolidate()."""
-        await MemoryStore(self.workspace).consolidate(
+    async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
+        """Delegate to MemoryStore.consolidate(). Returns True on success."""
+        return await MemoryStore(self.workspace).consolidate(
             session, self.provider, self.model,
             archive_all=archive_all, memory_window=self.memory_window,
         )

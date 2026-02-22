@@ -179,18 +179,21 @@ class SlackChannel(BaseChannel):
         except Exception as e:
             logger.debug("Slack reactions_add failed: {}", e)
 
-        await self._handle_message(
-            sender_id=sender_id,
-            chat_id=chat_id,
-            content=text,
-            metadata={
-                "slack": {
-                    "event": event,
-                    "thread_ts": thread_ts,
-                    "channel_type": channel_type,
-                }
-            },
-        )
+        try:
+            await self._handle_message(
+                sender_id=sender_id,
+                chat_id=chat_id,
+                content=text,
+                metadata={
+                    "slack": {
+                        "event": event,
+                        "thread_ts": thread_ts,
+                        "channel_type": channel_type,
+                    }
+                },
+            )
+        except Exception:
+            logger.exception("Error handling Slack message from {}", sender_id)
 
     def _is_allowed(self, sender_id: str, chat_id: str, channel_type: str) -> bool:
         if channel_type == "im":

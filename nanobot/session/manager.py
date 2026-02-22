@@ -1,6 +1,7 @@
 """Session management for conversation history."""
 
 import json
+import shutil
 from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -108,9 +109,11 @@ class SessionManager:
         if not path.exists():
             legacy_path = self._get_legacy_session_path(key)
             if legacy_path.exists():
-                import shutil
-                shutil.move(str(legacy_path), str(path))
-                logger.info("Migrated session {} from legacy path", key)
+                try:
+                    shutil.move(str(legacy_path), str(path))
+                    logger.info("Migrated session {} from legacy path", key)
+                except Exception:
+                    logger.exception("Failed to migrate session {}", key)
 
         if not path.exists():
             return None

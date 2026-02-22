@@ -16,7 +16,7 @@
 
 ⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
 
-📏 Real-time line count: **3,806 lines** (run `bash core_agent_lines.sh` to verify anytime)
+📏 Real-time line count: **3,862 lines** (run `bash core_agent_lines.sh` to verify anytime)
 
 ## 📢 News
 
@@ -34,6 +34,7 @@
 
 <details>
 <summary>Earlier news</summary>
+
 - **2026-02-10** 🎉 Released **v0.1.3.post6** with improvements! Check the updates [notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post6) and our [roadmap](https://github.com/HKUDS/nanobot/discussions/431).
 - **2026-02-09** 💬 Added Slack, Email, and QQ support — nanobot now supports multiple chat platforms!
 - **2026-02-08** 🔧 Refactored Providers—adding a new LLM provider now takes just 2 simple steps! Check [here](#providers).
@@ -43,6 +44,7 @@
 - **2026-02-04** 🚀 Released **v0.1.3.post4** with multi-provider & Docker support! Check [here](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post4) for details.
 - **2026-02-03** ⚡ Integrated vLLM for local LLM support and improved natural language task scheduling!
 - **2026-02-02** 🎉 nanobot officially launched! Welcome to try 🐈 nanobot!
+
 </details>
 
 ## Key Features of nanobot:
@@ -774,6 +776,21 @@ Two transport modes are supported:
 | **Stdio** | `command` + `args` | Local process via `npx` / `uvx` |
 | **HTTP** | `url` + `headers` (optional) | Remote endpoint (`https://mcp.example.com/sse`) |
 
+Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "my-slow-server": {
+        "url": "https://example.com/mcp/",
+        "toolTimeout": 120
+      }
+    }
+  }
+}
+```
+
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
 
@@ -862,6 +879,59 @@ docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
 docker run -v ~/.nanobot:/root/.nanobot --rm nanobot agent -m "Hello!"
 docker run -v ~/.nanobot:/root/.nanobot --rm nanobot status
 ```
+
+## 🐧 Linux Service
+
+Run the gateway as a systemd user service so it starts automatically and restarts on failure.
+
+**1. Find the nanobot binary path:**
+
+```bash
+which nanobot   # e.g. /home/user/.local/bin/nanobot
+```
+
+**2. Create the service file** at `~/.config/systemd/user/nanobot-gateway.service` (replace `ExecStart` path if needed):
+
+```ini
+[Unit]
+Description=Nanobot Gateway
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/nanobot gateway
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=%h
+
+[Install]
+WantedBy=default.target
+```
+
+**3. Enable and start:**
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now nanobot-gateway
+```
+
+**Common operations:**
+
+```bash
+systemctl --user status nanobot-gateway        # check status
+systemctl --user restart nanobot-gateway       # restart after config changes
+journalctl --user -u nanobot-gateway -f        # follow logs
+```
+
+If you edit the `.service` file itself, run `systemctl --user daemon-reload` before restarting.
+
+> **Note:** User services only run while you are logged in. To keep the gateway running after logout, enable lingering:
+>
+> ```bash
+> loginctl enable-linger $USER
+> ```
 
 ## 📁 Project Structure
 

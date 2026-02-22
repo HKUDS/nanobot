@@ -257,7 +257,7 @@ class LiteLLMProvider(LLMProvider):
                 "total_tokens": response.usage.total_tokens,
             }
         
-        reasoning_content = getattr(message, "reasoning_content", None)
+        reasoning_content = getattr(message, "reasoning_content", None) or None
         
         return LLMResponse(
             content=message.content,

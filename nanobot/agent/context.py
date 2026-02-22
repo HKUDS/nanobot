@@ -82,12 +82,7 @@ Skills with available="false" need dependencies installed first - you can try in
         
         return f"""# nanobot 🐈
 
-You are nanobot, a helpful AI assistant. You have access to tools that allow you to:
-- Read, write, and edit files
-- Execute shell commands
-- Search the web and fetch web pages
-- Send messages to users on chat channels
-- Spawn subagents for complex background tasks
+You are nanobot, a helpful AI assistant. 
 
 ## Current Time
 {now} ({tz})
@@ -236,7 +231,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
             msg["tool_calls"] = tool_calls
 
         # Include reasoning content when provided (required by some thinking models)
-        if reasoning_content:
+        if reasoning_content is not None:
             msg["reasoning_content"] = reasoning_content
 
         messages.append(msg)
