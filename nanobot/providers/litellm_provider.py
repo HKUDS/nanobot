@@ -13,7 +13,7 @@ from nanobot.providers.registry import find_by_model, find_gateway
 
 
 # Standard OpenAI chat-completion message keys; extras (e.g. reasoning_content) are stripped for strict providers.
-_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name"})
+_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
 
 
 class LiteLLMProvider(LLMProvider):

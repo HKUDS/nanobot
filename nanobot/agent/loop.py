@@ -59,6 +59,7 @@ class AgentLoop:
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
+        show_tool_progress: bool = True,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -73,6 +74,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.show_tool_progress = show_tool_progress
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -353,7 +355,7 @@ class AgentLoop:
             ))
 
         final_content, tools_used = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages, on_progress=on_progress or (_bus_progress if self.show_tool_progress else None),
         )
 
         if final_content is None:

@@ -188,6 +188,7 @@ class AgentDefaults(Base):
     temperature: float = 0.7
     max_tool_iterations: int = 20
     memory_window: int = 50
+    show_tool_progress: bool = True
 
 
 class AgentsConfig(Base):
