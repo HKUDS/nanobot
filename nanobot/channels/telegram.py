@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import re
+from uuid import uuid4
 from loguru import logger
-from telegram import BotCommand, Update, ReplyParameters
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import BotCommand, Update, ReplyParameters, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
@@ -127,6 +128,7 @@ class TelegramChannel(BaseChannel):
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
+        self._pending_callbacks: dict[str, dict] = {}  # callback_id -> {buttons, message_ids}
     
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -158,6 +160,9 @@ class TelegramChannel(BaseChannel):
             )
         )
         
+        # Add callback query handler for inline button clicks
+        self._app.add_handler(CallbackQueryHandler(self._on_callback_query))
+        
         logger.info("Starting Telegram bot (polling mode)...")
         
         # Initialize and start polling
@@ -176,7 +181,7 @@ class TelegramChannel(BaseChannel):
         
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
-            allowed_updates=["message"],
+            allowed_updates=["message", "callback_query"],
             drop_pending_updates=True  # Ignore old messages on startup
         )
         
@@ -234,6 +239,18 @@ class TelegramChannel(BaseChannel):
                     allow_sending_without_reply=True
                 )
 
+        # Build inline keyboard from metadata
+        reply_markup = None
+        callback_id = None
+        inline_buttons = msg.metadata.get("inline_buttons")
+        if inline_buttons:
+            # Get or generate callback_id
+            callback_id = msg.metadata.get("callback_id")
+            if not callback_id:
+                callback_id = uuid4().hex[:8]
+            reply_markup = self._build_inline_keyboard(inline_buttons, callback_id)
+            logger.debug("Sending message with inline keyboard: {} callback_id={}", inline_buttons, callback_id)
+
         # Send media files
         for media_path in (msg.media or []):
             try:
@@ -256,7 +273,8 @@ class TelegramChannel(BaseChannel):
                 await self._app.bot.send_message(
                     chat_id=chat_id,
                     text=f"[Failed to send: {filename}]",
-                    reply_parameters=reply_params
+                    reply_parameters=reply_params,
+                    reply_markup=reply_markup
                 )
 
         # Send text content
@@ -264,20 +282,27 @@ class TelegramChannel(BaseChannel):
             for chunk in _split_message(msg.content):
                 try:
                     html = _markdown_to_telegram_html(chunk)
-                    await self._app.bot.send_message(
+                    sent_msg = await self._app.bot.send_message(
                         chat_id=chat_id, 
                         text=html, 
                         parse_mode="HTML",
-                        reply_parameters=reply_params
+                        reply_parameters=reply_params,
+                        reply_markup=reply_markup
                     )
+                    # Store button definitions for callback handling
+                    if inline_buttons and sent_msg:
+                        self._store_callback(callback_id, inline_buttons, sent_msg.message_id)
                 except Exception as e:
                     logger.warning("HTML parse failed, falling back to plain text: {}", e)
                     try:
-                        await self._app.bot.send_message(
+                        sent_msg = await self._app.bot.send_message(
                             chat_id=chat_id, 
                             text=chunk,
-                            reply_parameters=reply_params
+                            reply_parameters=reply_params,
+                            reply_markup=reply_markup
                         )
+                        if inline_buttons and sent_msg:
+                            self._store_callback(callback_id, inline_buttons, sent_msg.message_id)
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
     
@@ -457,3 +482,109 @@ class TelegramChannel(BaseChannel):
         
         type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
         return type_map.get(media_type, "")
+
+    def _build_inline_keyboard(self, buttons: list[dict], callback_id: str) -> InlineKeyboardMarkup | None:
+        """Build InlineKeyboardMarkup from button definitions.
+        
+        Button format:
+        [
+            {"id": "btn_id", "label": "Button Text", "data": "instructions", "metadata": {...}},
+            {"label": "URL Button", "url": "https://example.com"}
+        ]
+        Or with rows:
+        [
+            [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}],
+            [{"label": "Website", "url": "https://example.com"}]
+        ]
+        """
+        if not buttons:
+            return None
+        
+        keyboard: list[list[InlineKeyboardButton]] = []
+        
+        for item in buttons:
+            if isinstance(item, list):
+                row = []
+                for btn in item:
+                    row.append(self._create_button(btn, callback_id))
+                keyboard.append(row)
+            elif isinstance(item, dict):
+                keyboard.append([self._create_button(item, callback_id)])
+        
+        return InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
+    
+    def _create_button(self, btn: dict, callback_id: str) -> InlineKeyboardButton:
+        """Create an InlineKeyboardButton from a dict."""
+        text = btn.get("label", btn.get("text", ""))
+        
+        if "url" in btn:
+            return InlineKeyboardButton(text=text, url=btn["url"])
+        else:
+            # Callback button: encode as "callback_id:button_id"
+            button_id = btn.get("id", text.lower().replace(" ", "_"))
+            callback_data = f"{callback_id}:{button_id}"
+            return InlineKeyboardButton(text=text, callback_data=callback_data)
+
+    def _store_callback(self, callback_id: str, buttons: list[dict], message_id: int) -> None:
+        """Store button definitions for callback handling."""
+        if callback_id not in self._pending_callbacks:
+            self._pending_callbacks[callback_id] = {
+                "buttons": {},
+                "message_ids": []
+            }
+        
+        # Store each button by its id
+        for item in buttons:
+            if isinstance(item, list):
+                for btn in item:
+                    if isinstance(btn, dict) and "id" in btn:
+                        self._pending_callbacks[callback_id]["buttons"][btn["id"]] = btn
+            elif isinstance(item, dict) and "id" in item:
+                self._pending_callbacks[callback_id]["buttons"][item["id"]] = item
+        
+        self._pending_callbacks[callback_id]["message_ids"].append(message_id)
+        logger.debug("Stored callback {} with message_id={}", callback_id, message_id)
+
+    def _get_callback(self, callback_id: str, button_id: str) -> dict | None:
+        """Retrieve button definition for a callback."""
+        cb = self._pending_callbacks.get(callback_id)
+        if cb:
+            return cb["buttons"].get(button_id)
+        return None
+
+    async def _on_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle inline button clicks."""
+        query = update.callback_query
+        await query.answer()
+        
+        # Parse callback_data: "callback_id:button_id"
+        parts = query.data.split(":", 1)
+        if len(parts) != 2:
+            logger.warning("Invalid callback_data format: {}", query.data)
+            return
+        
+        callback_id, button_id = parts
+        button_def = self._get_callback(callback_id, button_id)
+        
+        if not button_def:
+            logger.warning("Callback not found: {} / {}", callback_id, button_id)
+            button_def = {"id": button_id, "label": query.data}
+        
+        # Build metadata for agent
+        sender_id = self._sender_id(query.from_user)
+        chat_id = str(query.message.chat_id)
+        
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=chat_id,
+            content="",
+            metadata={
+                "event_type": "callback_query",
+                "callback_id": callback_id,
+                "button": button_def,
+                "message_id": query.message.message_id,
+                "user_id": query.from_user.id,
+                "username": query.from_user.username,
+                "first_name": query.from_user.first_name,
+            }
+        )

@@ -65,6 +65,25 @@ class MessageTool(Tool):
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Optional: list of file paths to attach (images, audio, documents)"
+                },
+                "callback_id": {
+                    "type": "string",
+                    "description": "Optional: logical ID to group callback buttons (auto-generated if not provided)"
+                },
+                "inline_buttons": {
+                    "type": "array",
+                    "description": "Optional: inline buttons for Telegram. Format: [{\"id\": \"btn\", \"label\": \"Label\", \"data\": \"instructions\", \"metadata\": {...}}] or [{\"label\": \"Link\", \"url\": \"https://...\"}]",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string", "description": "Button identifier for callback"},
+                            "label": {"type": "string", "description": "Button text shown to user"},
+                            "data": {"type": "string", "description": "Instructions for the agent when button is clicked"},
+                            "metadata": {"type": "object", "description": "Additional structured data"},
+                            "url": {"type": "string", "description": "URL for link buttons (no callback)"}
+                        },
+                        "required": ["label"]
+                    }
                 }
             },
             "required": ["content"]
@@ -77,6 +96,8 @@ class MessageTool(Tool):
         chat_id: str | None = None,
         message_id: str | None = None,
         media: list[str] | None = None,
+        callback_id: str | None = None,
+        inline_buttons: list[dict] | None = None,
         **kwargs: Any
     ) -> str:
         channel = channel or self._default_channel
@@ -89,20 +110,26 @@ class MessageTool(Tool):
         if not self._send_callback:
             return "Error: Message sending not configured"
 
+        # Build metadata
+        metadata: dict[str, Any] = {"message_id": message_id}
+        if callback_id:
+            metadata["callback_id"] = callback_id
+        if inline_buttons:
+            metadata["inline_buttons"] = inline_buttons
+
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
             content=content,
             media=media or [],
-            metadata={
-                "message_id": message_id,
-            }
+            metadata=metadata
         )
 
         try:
             await self._send_callback(msg)
             self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
-            return f"Message sent to {channel}:{chat_id}{media_info}"
+            buttons_info = f" with {len(inline_buttons)} inline buttons" if inline_buttons else ""
+            return f"Message sent to {channel}:{chat_id}{media_info}{buttons_info}"
         except Exception as e:
             return f"Error sending message: {str(e)}"
