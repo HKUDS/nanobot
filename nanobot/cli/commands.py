@@ -1324,14 +1324,15 @@ def _show_cache_by_session(days: int, gap: int):
 
     # Session table
     if stats.get("sessions"):
-        session_table = Table(title="Sessions")
+        session_table = Table(title="Sessions (hit rate based on tokens)")
         session_table.add_column("#", style="dim")
         session_table.add_column("Reqs", style="green")
-        session_table.add_column("Hits", style="yellow")
-        session_table.add_column("Misses", style="red")
+        session_table.add_column("Hit Tokens", style="yellow")
+        session_table.add_column("Miss Tokens", style="red")
         session_table.add_column("Hit Rate", style="cyan")
-        session_table.add_column("Tokens", style="blue")
-        session_table.add_column("Start Time", style="magenta")
+        session_table.add_column("Saved", style="magenta")
+        session_table.add_column("Total", style="blue")
+        session_table.add_column("Start", style="magenta")
 
         for s in stats["sessions"]:
             hit_rate = s.get("hit_rate", 0)
@@ -1340,9 +1341,10 @@ def _show_cache_by_session(days: int, gap: int):
             session_table.add_row(
                 str(s["session_id"]),
                 str(s["requests"]),
-                str(s["hits"]),
-                str(s["misses"]),
+                f"{s['hit_tokens']:,}",
+                f"{s['miss_tokens']:,}",
                 hit_rate_str,
+                f"{s['saved_tokens']:,}",
                 f"{s['total_tokens']:,}",
                 s["start_time"][:16] if s.get("start_time") else "N/A",
             )
@@ -1351,17 +1353,20 @@ def _show_cache_by_session(days: int, gap: int):
         console.print()
 
         # Summary stats
-        total_hits = sum(s["hits"] for s in stats["sessions"])
-        total_misses = sum(s["misses"] for s in stats["sessions"])
-        total_all = total_hits + total_misses
-        overall_rate = (total_hits / total_all * 100) if total_all > 0 else 0
+        total_hit_tokens = sum(s["hit_tokens"] for s in stats["sessions"])
+        total_miss_tokens = sum(s["miss_tokens"] for s in stats["sessions"])
+        total_system_tokens = total_hit_tokens + total_miss_tokens
+        overall_rate = (total_hit_tokens / total_system_tokens * 100) if total_system_tokens > 0 else 0
+        total_saved_tokens = sum(s["saved_tokens"] for s in stats["sessions"])
 
-        agg_table = Table(title="Aggregate Stats")
+        agg_table = Table(title="Aggregate Stats (Token-based)")
         agg_table.add_column("Metric", style="cyan")
         agg_table.add_column("Value", style="green")
-        agg_table.add_row("Total Hits (all sessions)", f"{total_hits:,}")
-        agg_table.add_row("Total Misses (all sessions)", f"{total_misses:,}")
-        agg_table.add_row("Overall Hit Rate", f"{overall_rate:.1f}%")
+        agg_table.add_row("Total Hit Tokens (all sessions)", f"{total_hit_tokens:,}")
+        agg_table.add_row("Total Miss Tokens (all sessions)", f"{total_miss_tokens:,}")
+        agg_table.add_row("Total System Tokens", f"{total_system_tokens:,}")
+        agg_table.add_row("Overall Hit Rate (Token-based)", f"{overall_rate:.1f}%")
+        agg_table.add_row("Total Tokens Saved", f"{total_saved_tokens:,}")
         console.print(agg_table)
 
 

@@ -175,9 +175,9 @@ def analyze_cache_by_session(
 
         # Within this session, calculate cache hits
         seen_hashes: set[str] = set()
-        session_hits = 0
-        session_misses = 0
-        session_tokens = 0
+        session_hit_tokens = 0
+        session_miss_tokens = 0
+        session_total_tokens = 0
 
         for req in session:
             prefix_hash = req.get("system_prompt_hash", "")
@@ -185,22 +185,32 @@ def analyze_cache_by_session(
                 continue
 
             total_requests += 1
-            session_tokens += req.get("prompt_tokens", 0)
+            prompt_tokens = req.get("prompt_tokens", 0)
+            session_total_tokens += prompt_tokens
+
+            # Estimate system prompt tokens (roughly 4 chars per token)
+            system_tokens = len(req.get("system_prompt", "")) // 4
 
             if prefix_hash in seen_hashes:
-                session_hits += 1
+                # Cache hit - saved system prompt tokens
+                session_hit_tokens += system_tokens
             else:
-                session_misses += 1
+                # Cache miss - had to compute
+                session_miss_tokens += system_tokens
                 seen_hashes.add(prefix_hash)
 
-        session_total = session_hits + session_misses
+        # Hit rate based on tokens
+        total_system_tokens = session_hit_tokens + session_miss_tokens
+        token_hit_rate = (session_hit_tokens / total_system_tokens * 100) if total_system_tokens > 0 else 0
+
         session_stats.append({
             "session_id": i,
             "requests": len(session),
-            "hits": session_hits,
-            "misses": session_misses,
-            "hit_rate": (session_hits / session_total * 100) if session_total > 0 else 0,
-            "total_tokens": session_tokens,
+            "hit_tokens": session_hit_tokens,
+            "miss_tokens": session_miss_tokens,
+            "hit_rate": token_hit_rate,
+            "total_tokens": session_total_tokens,
+            "saved_tokens": session_hit_tokens,  # Tokens that would be saved with caching
             "start_time": session[0].get("timestamp") if session else None,
             "end_time": session[-1].get("timestamp") if session else None,
             "model": session[0].get("model") if session else "unknown",
