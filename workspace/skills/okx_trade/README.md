@@ -4,12 +4,17 @@ OKX 交易系统技能，支持账户查询、下单、撤单等操作。
 
 ## 配置
 
-1. 复制配置模板：
+1. 在用户工作目录创建配置文件：
    ```bash
-   cp config.example.json config.json
+   mkdir -p ~/.nanobot/workspace/skills/okx_trade
+   cp workspace/skills/okx_trade/config.example.json ~/.nanobot/workspace/skills/okx_trade/config.json
    ```
 
-2. 编辑 `config.json`，填入你的 OKX API 凭证：
+2. 编辑配置文件，填入你的 OKX API 凭证：
+   ```bash
+   nano ~/.nanobot/workspace/skills/okx_trade/config.json
+   ```
+
    ```json
    {
      "api_key": "YOUR_OKX_API_KEY",
@@ -19,6 +24,10 @@ OKX 交易系统技能，支持账户查询、下单、撤单等操作。
      "base_url": "https://www.okx.com"
    }
    ```
+
+**配置文件位置优先级：**
+1. `~/.nanobot/workspace/skills/okx_trade/config.json` (推荐，用户配置)
+2. `workspace/skills/okx_trade/config.json` (备用，项目目录)
 
 ### 获取 API 密钥
 

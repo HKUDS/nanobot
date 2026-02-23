@@ -17,9 +17,20 @@ class OKXTradeSkill:
     def __init__(self, config_path: str | None = None):
         """Initialize OKX trading skill."""
         if config_path is None:
-            config_path = Path(__file__).parent / "config.json"
+            # Try user workspace first, then fall back to package location
+            user_config = Path.home() / ".nanobot" / "workspace" / "skills" / "okx_trade" / "config.json"
+            if user_config.exists():
+                config_path = user_config
+            else:
+                config_path = Path(__file__).parent / "config.json"
         else:
             config_path = Path(config_path)
+
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f"Config file not found at {config_path}. "
+                f"Please copy config.example.json to config.json and fill in your API credentials."
+            )
 
         with open(config_path) as f:
             self.config = json.load(f)
