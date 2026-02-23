@@ -1,5 +1,9 @@
 name: Create Tag and Release
 
+env:
+  GHCR_REGISTRY: "ghcr.io"
+  GHCR_IMAGE_NAME: ${{ github.repository }}
+
 on:
   workflow_dispatch:
     inputs:
