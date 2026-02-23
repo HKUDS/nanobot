@@ -144,7 +144,7 @@ class AgentLoop:
         """Update context for all tools that need routing info."""
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
-                message_tool.set_context(channel, chat_id, message_id)
+                message_tool.set_context(channel, chat_id, message_id, metadata)
 
         if spawn_tool := self.tools.get("spawn"):
             if isinstance(spawn_tool, SpawnTool):
