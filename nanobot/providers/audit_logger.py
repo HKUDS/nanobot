@@ -29,7 +29,7 @@ class APILogEntry:
     completion_tokens: int = 0
     total_tokens: int = 0
 
-    # Messages (truncated for size)
+    # Messages (full content, not truncated)
     request_messages: str | None = None
     response_content: str | None = None
     tool_calls: list[str] | None = None
@@ -43,23 +43,14 @@ class APILogEntry:
     duration_ms: float | None = None
 
     @staticmethod
-    def _truncate(text: str, max_len: int = 2000) -> str:
-        """Truncate text to max length."""
-        if len(text) <= max_len:
-            return text
-        return text[:max_len] + "... [truncated]"
-
-    @staticmethod
     def _format_messages(messages: list[dict[str, Any]]) -> str:
-        """Format messages for logging, truncating long content."""
+        """Format messages for logging - keep full content."""
         formatted = []
         for msg in messages:
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
             if isinstance(content, list):
                 content = json.dumps(content, ensure_ascii=False)
-            if content and len(str(content)) > 500:
-                content = APILogEntry._truncate(str(content), 500)
             formatted.append(f"{role}: {content}")
         return "\n".join(formatted)
 
@@ -89,9 +80,9 @@ class APILogEntry:
     ) -> APILogEntry:
         """Add response data to the entry."""
         if content:
-            self.response_content = self._truncate(content, 2000) if len(content) > 2000 else content
+            self.response_content = content  # Keep full content
         if tool_calls:
-            self.tool_calls = tool_calls[:10]  # Limit to 10 tools
+            self.tool_calls = tool_calls
         if usage:
             self.prompt_tokens = usage.get("prompt_tokens", 0)
             self.completion_tokens = usage.get("completion_tokens", 0)
@@ -103,7 +94,7 @@ class APILogEntry:
     def with_error(self, error: str) -> APILogEntry:
         """Mark entry as failed with error."""
         self.success = False
-        self.error = self._truncate(error, 500) if len(error) > 500 else error
+        self.error = error  # Keep full error
         return self
 
     def to_dict(self) -> dict[str, Any]:
