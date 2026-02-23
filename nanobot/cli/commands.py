@@ -1014,7 +1014,7 @@ def status():
         from nanobot.providers.registry import PROVIDERS
 
         console.print(f"Model: {config.agents.defaults.model}")
-        
+
         # Check API keys from registry
         for spec in PROVIDERS:
             p = getattr(config.providers, spec.name, None)
@@ -1114,6 +1114,120 @@ def _login_github_copilot() -> None:
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
+
+
+# ============================================================================
+# API Statistics
+# ============================================================================
+
+stats_app = typer.Typer(help="API usage statistics and logs")
+app.add_typer(stats_app, name="stats")
+
+
+@stats_app.command("show")
+def stats_show(
+    days: int = typer.Option(7, "--days", "-d", help="Number of days to include"),
+):
+    """Show API usage statistics."""
+    from nanobot.providers.audit_logger import get_stats
+    from rich.table import Table
+
+    stats = get_stats(days=days)
+
+    console.print(f"{__logo__} API Statistics (last {days} days)\n")
+
+    # Summary table
+    summary = Table(title="Summary")
+    summary.add_column("Metric", style="cyan")
+    summary.add_column("Value", style="green")
+    summary.add_row("Total Requests", str(stats.total_requests))
+    summary.add_row("Successful", str(stats.successful_requests))
+    summary.add_row("Failed", str(stats.failed_requests))
+    summary.add_row("Total Tokens", f"{stats.total_tokens:,}")
+    summary.add_row("Prompt Tokens", f"{stats.total_prompt_tokens:,}")
+    summary.add_row("Completion Tokens", f"{stats.total_completion_tokens:,}")
+    if stats.avg_duration_ms:
+        summary.add_row("Avg Duration", f"{stats.avg_duration_ms:.1f} ms")
+
+    console.print(summary)
+    console.print()
+
+    # Model breakdown
+    if stats.model_counts:
+        model_table = Table(title="Usage by Model")
+        model_table.add_column("Model", style="cyan")
+        model_table.add_column("Requests", style="green")
+        for model, count in sorted(stats.model_counts.items(), key=lambda x: -x[1]):
+            model_table.add_row(model, str(count))
+        console.print(model_table)
+        console.print()
+
+    # Provider breakdown
+    if stats.provider_counts:
+        provider_table = Table(title="Usage by Provider")
+        provider_table.add_column("Provider", style="cyan")
+        provider_table.add_column("Requests", style="green")
+        for provider, count in sorted(stats.provider_counts.items(), key=lambda x: -x[1]):
+            provider_table.add_row(provider, str(count))
+        console.print(provider_table)
+
+
+@stats_app.command("logs")
+def stats_logs(
+    limit: int = typer.Option(20, "--limit", "-n", help="Number of entries to show"),
+):
+    """Show recent API log entries."""
+    from nanobot.providers.audit_logger import get_recent_entries
+
+    entries = get_recent_entries(limit=limit)
+
+    console.print(f"{__logo__} Recent API Logs (last {len(entries)} entries)\n")
+
+    for i, entry in enumerate(entries, 1):
+        color = "green" if entry.success else "red"
+        status = "✓" if entry.success else "✗"
+
+        console.print(f"[{color}]{status}[/{color}] {entry.timestamp} | {entry.model} | {entry.provider}")
+        console.print(f"    Tokens: {entry.total_tokens} (prompt: {entry.prompt_tokens}, completion: {entry.completion_tokens})")
+
+        if entry.tool_calls:
+            console.print(f"    Tools: {', '.join(entry.tool_calls)}")
+
+        if entry.error:
+            console.print(f"    [red]Error: {entry.error}[/red]")
+
+        if entry.response_content:
+            content_preview = entry.response_content[:150] + "..." if len(entry.response_content) > 150 else entry.response_content
+            console.print(f"    Response: {content_preview}")
+
+        console.print()
+
+
+@stats_app.command("path")
+def stats_path():
+    """Show the path to API log files."""
+    from nanobot.providers.audit_logger import APILogger
+
+    log_dir = APILogger._get_default_log_dir()
+    console.print(f"{__logo__} API Logs Location\n")
+    console.print(f"Directory: {log_dir}")
+    console.print()
+
+    if log_dir.exists():
+        files = sorted(log_dir.glob("*.jsonl"))
+        if files:
+            table = Table(title="Log Files")
+            table.add_column("File", style="cyan")
+            table.add_column("Size", style="green")
+            for f in files:
+                size = f.stat().st_size
+                size_str = f"{size / 1024:.1f} KB" if size > 1024 else f"{size} B"
+                table.add_row(f.name, size_str)
+            console.print(table)
+        else:
+            console.print("[dim]No log files yet[/dim]")
+    else:
+        console.print("[dim]Log directory does not exist yet[/dim]")
 
 
 if __name__ == "__main__":

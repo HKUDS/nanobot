@@ -53,6 +53,8 @@ class LiteLLMProvider(LLMProvider):
         litellm.suppress_debug_info = True
         # Drop unsupported parameters for providers (e.g., gpt-5 rejects some params)
         litellm.drop_params = True
+
+        self._provider_name = provider_name or "litellm"
     
     def _setup_env(self, api_key: str, api_base: str | None, model: str) -> None:
         """Set environment variables based on detected provider."""
@@ -163,13 +165,13 @@ class LiteLLMProvider(LLMProvider):
             sanitized.append(clean)
         return sanitized
 
-    async def chat(
+    async def _chat_implementation(
         self,
         messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        model: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
+        tools: list[dict[str, Any]] | None,
+        model: str | None,
+        max_tokens: int,
+        temperature: float,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
