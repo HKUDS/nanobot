@@ -83,9 +83,10 @@ jobs:
         id: tags
         shell: bash
         run: |
-          tag="${{ inputs.tag }}"
-          echo "ghcr_tag=${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE_NAME }}:${tag}" >> "$GITHUB_OUTPUT"
-          echo "ghcr_latest=${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
+          tag="$(echo "${{ inputs.tag }}" | tr '[:upper:]' '[:lower:]')"
+          image_name="$(echo "${{ env.GHCR_IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')"
+          echo "ghcr_tag=${{ env.GHCR_REGISTRY }}/${image_name}:${tag}" >> "$GITHUB_OUTPUT"
+          echo "ghcr_latest=${{ env.GHCR_REGISTRY }}/${image_name}:latest" >> "$GITHUB_OUTPUT"
           # echo "dockerhub_tag=${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_IMAGE_NAME }}:${tag}" >> "$GITHUB_OUTPUT"
           # echo "dockerhub_latest=${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
 
