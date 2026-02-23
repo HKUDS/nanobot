@@ -18,5 +18,6 @@ venv/
 __pycache__/
 poetry.lock
 .pytest_cache/
+.worktrees/
 botpy.log
 tests/
