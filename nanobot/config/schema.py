@@ -3,13 +3,13 @@
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Base(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
 
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="allow")
 
 
 class WhatsAppConfig(Base):
@@ -354,4 +354,4 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+    model_config = SettingsConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__", extra="allow")
