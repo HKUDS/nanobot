@@ -821,6 +821,9 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `nanobot provider login openai-codex` | OAuth login for providers |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
+| `nanobot skills list` | List installed skills |
+| `nanobot skills add <url>` | Install skills from GitHub |
+| `nanobot skills remove <name>` | Remove a workspace skill |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
@@ -837,6 +840,22 @@ nanobot cron list
 
 # Remove a job
 nanobot cron remove <job_id>
+```
+
+</details>
+
+<details>
+<summary><b>Skills Management</b></summary>
+
+```bash
+# List installed skills
+nanobot skills list
+
+# Install from GitHub (single skill or marketplace)
+nanobot skills add https://github.com/anthropics/skills
+
+# Remove a workspace skill
+nanobot skills remove <skill_name>
 ```
 
 </details>
