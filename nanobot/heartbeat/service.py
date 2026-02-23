@@ -1,6 +1,7 @@
 """Heartbeat service - periodic agent wake-up to check for tasks."""
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Any, Callable, Coroutine
 
@@ -33,6 +34,15 @@ def _is_heartbeat_empty(content: str | None) -> bool:
         return False  # Found actionable content
     
     return True
+
+
+def _is_heartbeat_ok_response(response: str | None) -> bool:
+    """Return True only for an exact HEARTBEAT_OK token (with simple markdown wrappers)."""
+    if not response:
+        return False
+
+    normalized = re.sub(r"[\s`*_>\-]", "", response).upper()
+    return normalized == HEARTBEAT_OK_TOKEN.replace("_", "")
 
 
 class HeartbeatService:
@@ -75,6 +85,9 @@ class HeartbeatService:
         if not self.enabled:
             logger.info("Heartbeat disabled")
             return
+        if self._running:
+            logger.warning("Heartbeat already running")
+            return
         
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
@@ -115,7 +128,7 @@ class HeartbeatService:
                 response = await self.on_heartbeat(HEARTBEAT_PROMPT)
                 
                 # Check if agent said "nothing to do"
-                if HEARTBEAT_OK_TOKEN.replace("_", "") in response.upper().replace("_", ""):
+                if _is_heartbeat_ok_response(response):
                     logger.info("Heartbeat: OK (no action needed)")
                 else:
                     logger.info("Heartbeat: completed task")
