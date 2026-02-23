@@ -248,6 +248,19 @@ def _make_provider(config: Config):
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         return OpenAICodexProvider(default_model=model)
 
+    # Claude Code CLI (OAuth)
+    if provider_name == "claude_code" or model.startswith("claude-code/"):
+        from nanobot.providers.claude_code_auth import get_claude_code_token
+        from nanobot.providers.claude_code_provider import ClaudeCodeProvider
+
+        oauth_token = get_claude_code_token()
+        if oauth_token:
+            cc_model = config.providers.claude_code.model or model
+            return ClaudeCodeProvider(oauth_token=oauth_token, default_model=cc_model)
+        console.print("[red]Error: CLAUDE_CODE_OAUTH_TOKEN not set.[/red]")
+        console.print("  Run [cyan]claude setup-token[/cyan] and export the token.")
+        raise typer.Exit(1)
+
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     if provider_name == "custom":
         return CustomProvider(
