@@ -40,10 +40,15 @@ def _markdown_to_telegram_html(text: str) -> str:
     
     # 3. Headers # Title -> just the title text
     text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
-    
-    # 4. Blockquotes > text -> just the text (before HTML escaping)
-    text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
-    
+
+    # 4. Blockquotes: collect consecutive > lines, protect with markers (before HTML escaping)
+    def _save_blockquote(m: re.Match) -> str:
+        content = m.group(0).rstrip()
+        lines = [re.sub(r'^> ?', '', line) for line in content.split('\n')]
+        return f"\x00QS\x00{chr(10).join(lines)}\x00QE\x00"
+
+    text = re.sub(r'(?:^> [^\n]*\n?)+', _save_blockquote, text, flags=re.MULTILINE)
+
     # 5. Escape HTML special characters
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     
@@ -63,13 +68,20 @@ def _markdown_to_telegram_html(text: str) -> str:
     # 10. Bullet lists - item -> • item
     text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
     
-    # 11. Restore inline code with HTML tags
+    # 11. Restore blockquotes (content already escaped + formatted)
+    text = re.sub(
+        r'\x00QS\x00([\s\S]*?)\x00QE\x00',
+        r'<blockquote>\1</blockquote>',
+        text,
+    )
+
+    # 12. Restore inline code with HTML tags
     for i, code in enumerate(inline_codes):
         # Escape HTML in code content
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00IC{i}\x00", f"<code>{escaped}</code>")
-    
-    # 12. Restore code blocks with HTML tags
+
+    # 13. Restore code blocks with HTML tags
     for i, code in enumerate(code_blocks):
         # Escape HTML in code content
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
