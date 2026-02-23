@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # OKX Trade Skill - run.sh
-# Usage: bash run.sh <command> [args...]
-# Commands: balance, positions, ticker <inst_id>, order <inst_id> <side> <type> <size> [price], cancel <inst_id> <order_id>, history
+# Usage:
+#   bash run.sh <command> [args...]
+#   ACTION=positions bash run.sh
+# Commands: balance, positions [inst_type], ticker <inst_id>,
+#           order <inst_id> <side> <type> <size> [price],
+#           cancel <inst_id> <order_id>, history [inst_type] [limit]
 
 set -euo pipefail
 
@@ -10,18 +14,10 @@ MEMORY_DIR="$SKILL_DIR/memory"
 mkdir -p "$MEMORY_DIR"
 
 LOG="$MEMORY_DIR/run.log"
-RESULT="$MEMORY_DIR/last_result.json"
-
 log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*" | tee -a "$LOG"; }
 
 # Load secrets
-SECRET_FILE="$SKILL_DIR/secret.env"
-if [[ ! -f "$SECRET_FILE" ]]; then
-  log "ERROR: secret.env not found at $SECRET_FILE"
-  exit 1
-fi
-# shellcheck disable=SC1090
-source "$SECRET_FILE"
+source "$SKILL_DIR/secret.env"
 
 # Load config
 CONFIG_FILE="$SKILL_DIR/config.yaml"
@@ -31,95 +27,93 @@ IS_DEMO="${IS_DEMO:-true}"
 BASE_URL="${BASE_URL:-https://www.okx.com}"
 
 # Validate credentials
-if [[ "$OKX_API_KEY" == "YOUR_OKX_API_KEY" || -z "$OKX_API_KEY" ]]; then
+if [[ -z "${OKX_API_KEY:-}" || "$OKX_API_KEY" == "YOUR_OKX_API_KEY" ]]; then
   log "ERROR: Please fill in your API credentials in secret.env"
   exit 1
 fi
 
-COMMAND="${1:-balance}"
-shift || true
+# Support ACTION env var or positional $1
+COMMAND="${ACTION:-${1:-balance}}"
+[[ $# -gt 0 ]] && shift || true
 
-# Generate OKX signature via Python one-liner (avoids dependency on extra files)
-sign_request() {
-  local method="$1"
-  local path="$2"
-  local body="${3:-}"
-  python3 - "$OKX_SECRET_KEY" "$method" "$path" "$body" <<'PYEOF'
-import sys, hmac, hashlib, base64
-from datetime import datetime, timezone
-secret, method, path, body = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-now = datetime.now(timezone.utc)
-ts = now.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
-prehash = ts + method + path + body
-sig = base64.b64encode(hmac.new(secret.encode(), prehash.encode(), hashlib.sha256).digest()).decode()
-print(ts)
-print(sig)
-PYEOF
+# Generate ISO 8601 timestamp (OKX requirement)
+mk_ts() {
+  python3 -c "from datetime import datetime,timezone; print(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]+'Z')"
 }
 
-# Build curl headers for authenticated requests
-auth_headers() {
-  local method="$1"
-  local path="$2"
-  local body="${3:-}"
-  local out
-  out=$(sign_request "$method" "$path" "$body")
-  TS=$(echo "$out" | sed -n '1p')
-  SIG=$(echo "$out" | sed -n '2p')
-  DEMO_HEADER=""
-  [[ "$IS_DEMO" == "true" ]] && DEMO_HEADER='-H "x-simulated-trading: 1"'
+# Sign: HMAC-SHA256(secret, timestamp+METHOD+path+body) → base64
+# Uses openssl — no Python file dependency
+sign() {
+  local ts="$1" method="$2" path="$3" body="${4:-}"
+  printf '%s' "${ts}${method}${path}${body}" \
+    | openssl dgst -sha256 -hmac "$OKX_SECRET_KEY" -binary \
+    | base64
 }
 
 do_get() {
   local path="$1"
-  auth_headers "GET" "$path"
-  eval curl -s \
-    -H '"Content-Type: application/json"' \
-    -H '"OK-ACCESS-KEY: '"$OKX_API_KEY"'"' \
-    -H '"OK-ACCESS-SIGN: '"$SIG"'"' \
-    -H '"OK-ACCESS-TIMESTAMP: '"$TS"'"' \
-    -H '"OK-ACCESS-PASSPHRASE: '"$OKX_PASSPHRASE"'"' \
-    $DEMO_HEADER \
-    '"'"$BASE_URL$path"'"'
+  local ts sig
+  ts=$(mk_ts)
+  sig=$(sign "$ts" "GET" "$path")
+  local demo_flag=()
+  [[ "$IS_DEMO" == "true" ]] && demo_flag=(-H "x-simulated-trading: 1")
+  curl -s \
+    -H "Content-Type: application/json" \
+    -H "OK-ACCESS-KEY: $OKX_API_KEY" \
+    -H "OK-ACCESS-SIGN: $sig" \
+    -H "OK-ACCESS-TIMESTAMP: $ts" \
+    -H "OK-ACCESS-PASSPHRASE: $OKX_PASSPHRASE" \
+    "${demo_flag[@]}" \
+    "$BASE_URL$path"
 }
 
 do_post() {
-  local path="$1"
-  local body="$2"
-  auth_headers "POST" "$path" "$body"
-  eval curl -s -X POST \
-    -H '"Content-Type: application/json"' \
-    -H '"OK-ACCESS-KEY: '"$OKX_API_KEY"'"' \
-    -H '"OK-ACCESS-SIGN: '"$SIG"'"' \
-    -H '"OK-ACCESS-TIMESTAMP: '"$TS"'"' \
-    -H '"OK-ACCESS-PASSPHRASE: '"$OKX_PASSPHRASE"'"' \
-    $DEMO_HEADER \
-    -d "'$body'" \
-    '"'"$BASE_URL$path"'"'
+  local path="$1" body="$2"
+  local ts sig
+  ts=$(mk_ts)
+  sig=$(sign "$ts" "POST" "$path" "$body")
+  local demo_flag=()
+  [[ "$IS_DEMO" == "true" ]] && demo_flag=(-H "x-simulated-trading: 1")
+  curl -s -X POST \
+    -H "Content-Type: application/json" \
+    -H "OK-ACCESS-KEY: $OKX_API_KEY" \
+    -H "OK-ACCESS-SIGN: $sig" \
+    -H "OK-ACCESS-TIMESTAMP: $ts" \
+    -H "OK-ACCESS-PASSPHRASE: $OKX_PASSPHRASE" \
+    "${demo_flag[@]}" \
+    -d "$body" \
+    "$BASE_URL$path"
+}
+
+save() {
+  local name="$1" resp="$2"
+  echo "$resp" | tee "$MEMORY_DIR/${name}.json"
+  local code
+  code=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin).get('code','?'))" 2>/dev/null || echo "?")
+  if [[ "$code" == "0" ]]; then
+    log "OK → memory/${name}.json"
+  else
+    log "FAILED (code=$code) → memory/${name}.json"
+    echo "$resp" >> "$MEMORY_DIR/trade_error.log"
+  fi
 }
 
 case "$COMMAND" in
   balance)
     log "Getting account balance..."
-    RESP=$(do_get "/api/v5/account/balance")
-    echo "$RESP" | tee "$RESULT"
-    log "Done."
+    save "balance_result" "$(do_get "/api/v5/account/balance")"
     ;;
 
   positions)
     INST_TYPE="${1:-SWAP}"
     log "Getting positions (instType=$INST_TYPE)..."
-    RESP=$(do_get "/api/v5/account/positions?instType=$INST_TYPE")
-    echo "$RESP" | tee "$RESULT"
-    log "Done."
+    save "positions_result" "$(do_get "/api/v5/account/positions?instType=$INST_TYPE")"
     ;;
 
   ticker)
     INST_ID="${1:?Usage: run.sh ticker <inst_id>}"
     log "Getting ticker for $INST_ID..."
-    RESP=$(do_get "/api/v5/market/ticker?instId=$INST_ID")
-    echo "$RESP" | tee "$RESULT"
-    log "Done."
+    save "ticker_result" "$(do_get "/api/v5/market/ticker?instId=$INST_ID")"
     ;;
 
   order)
@@ -132,9 +126,7 @@ case "$COMMAND" in
     [[ -n "$PRICE" ]] && BODY="$BODY,\"px\":\"$PRICE\""
     BODY="$BODY}"
     log "Placing order: $BODY"
-    RESP=$(do_post "/api/v5/trade/order" "$BODY")
-    echo "$RESP" | tee "$RESULT"
-    log "Done."
+    save "order_result" "$(do_post "/api/v5/trade/order" "$BODY")"
     ;;
 
   cancel)
@@ -142,23 +134,21 @@ case "$COMMAND" in
     ORDER_ID="${2:?missing order_id}"
     BODY="{\"instId\":\"$INST_ID\",\"ordId\":\"$ORDER_ID\"}"
     log "Cancelling order $ORDER_ID on $INST_ID..."
-    RESP=$(do_post "/api/v5/trade/cancel-order" "$BODY")
-    echo "$RESP" | tee "$RESULT"
-    log "Done."
+    save "cancel_result" "$(do_post "/api/v5/trade/cancel-order" "$BODY")"
     ;;
 
   history)
     INST_TYPE="${1:-SWAP}"
     LIMIT="${2:-100}"
     log "Getting order history (instType=$INST_TYPE, limit=$LIMIT)..."
-    RESP=$(do_get "/api/v5/trade/orders-history?instType=$INST_TYPE&limit=$LIMIT")
-    echo "$RESP" | tee "$RESULT"
-    log "Done."
+    save "history_result" "$(do_get "/api/v5/trade/orders-history?instType=$INST_TYPE&limit=$LIMIT")"
     ;;
 
   *)
     echo "Unknown command: $COMMAND"
-    echo "Commands: balance, positions [inst_type], ticker <inst_id>, order <inst_id> <side> <type> <size> [price], cancel <inst_id> <order_id>, history [inst_type] [limit]"
+    echo "Commands: balance, positions [inst_type], ticker <inst_id>,"
+    echo "          order <inst_id> <side> <type> <size> [price],"
+    echo "          cancel <inst_id> <order_id>, history [inst_type] [limit]"
     exit 1
     ;;
 esac
