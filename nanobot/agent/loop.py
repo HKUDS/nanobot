@@ -318,7 +318,8 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
 
         # Slash commands
-        cmd = msg.content.strip().lower()
+        raw_cmd = msg.content.strip()
+        cmd = raw_cmd.lower()
         if cmd == "/new":
             lock = self._get_consolidation_lock(session.key)
             self._consolidating.add(session.key)
@@ -348,9 +349,51 @@ class AgentLoop:
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
+        if cmd in {"/subagent list", "/subagent ls", "/subagents"}:
+            running = self.subagents.list_running()
+            if not running:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="No running subagents.",
+                )
+
+            lines = ["Running subagents:"]
+            for item in running:
+                lines.append(
+                    f"- {item['id']} | {item['label']} | {item['status']} | started {item['started_at']}"
+                )
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="\n".join(lines),
+            )
+        if cmd.startswith("/subagent kill"):
+            parts = raw_cmd.split(maxsplit=2)
+            if len(parts) < 3 or not parts[2].strip():
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="Usage: /subagent kill <id>",
+                )
+            _, status_text = await self.subagents.kill(parts[2].strip())
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=status_text,
+            )
         if cmd == "/help":
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    "🐈 nanobot commands:\n"
+                    "/new — Start a new conversation\n"
+                    "/help — Show available commands\n"
+                    "/subagent list — List running subagents\n"
+                    "/subagent kill <id> — Cancel a running subagent"
+                ),
+            )
 
         if len(session.messages) > self.memory_window and session.key not in self._consolidating:
             self._consolidating.add(session.key)

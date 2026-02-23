@@ -3,6 +3,7 @@
 import asyncio
 import json
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,7 @@ class SubagentManager:
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        self._task_meta: dict[str, dict[str, str]] = {}
     
     async def spawn(
         self,
@@ -71,6 +73,7 @@ class SubagentManager:
         """
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
+        started_at = datetime.now(timezone.utc).isoformat()
         
         origin = {
             "channel": origin_channel,
@@ -82,10 +85,19 @@ class SubagentManager:
             self._run_subagent(task_id, task, display_label, origin)
         )
         self._running_tasks[task_id] = bg_task
-        
+        self._task_meta[task_id] = {
+            "label": display_label,
+            "task": task,
+            "started_at": started_at,
+        }
+
         # Cleanup when done
-        bg_task.add_done_callback(lambda _: self._running_tasks.pop(task_id, None))
-        
+        def _cleanup(_: asyncio.Task[None]) -> None:
+            self._running_tasks.pop(task_id, None)
+            self._task_meta.pop(task_id, None)
+
+        bg_task.add_done_callback(_cleanup)
+
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
     
@@ -254,4 +266,55 @@ When you have completed the task, provide a clear summary of your findings or ac
     
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""
-        return len(self._running_tasks)
+        return len(self.list_running())
+
+    def list_running(self) -> list[dict[str, str]]:
+        """List currently running subagents and their metadata."""
+        running: list[dict[str, str]] = []
+        stale_ids: list[str] = []
+
+        for task_id, bg_task in self._running_tasks.items():
+            if bg_task.done():
+                stale_ids.append(task_id)
+                continue
+
+            meta = self._task_meta.get(task_id, {})
+            running.append({
+                "id": task_id,
+                "label": meta.get("label", ""),
+                "task": meta.get("task", ""),
+                "status": "running",
+                "started_at": meta.get("started_at", ""),
+            })
+
+        for task_id in stale_ids:
+            self._running_tasks.pop(task_id, None)
+            self._task_meta.pop(task_id, None)
+
+        running.sort(key=lambda item: item.get("started_at", ""))
+        return running
+
+    async def kill(self, task_id: str) -> tuple[bool, str]:
+        """Cancel a running subagent by task id."""
+        bg_task = self._running_tasks.get(task_id)
+        if bg_task is None:
+            return False, f"Subagent [{task_id}] not found."
+
+        if bg_task.done():
+            self._running_tasks.pop(task_id, None)
+            self._task_meta.pop(task_id, None)
+            return False, f"Subagent [{task_id}] is already finished."
+
+        bg_task.cancel()
+        try:
+            await bg_task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning("Subagent [{}] raised while cancelling: {}", task_id, e)
+        finally:
+            self._running_tasks.pop(task_id, None)
+            self._task_meta.pop(task_id, None)
+
+        logger.info("Cancelled subagent [{}]", task_id)
+        return True, f"Subagent [{task_id}] cancelled."
