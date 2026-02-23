@@ -144,10 +144,18 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("QQ channel not available: {}", e)
 
-    async def _start_channel(self, name: str, channel: BaseChannel) -> None:
+    async def _start_channel(
+        self,
+        name: str,
+        channel: BaseChannel,
+        send_only: bool = False,
+    ) -> None:
         """Start a channel and log any exceptions."""
         try:
-            await channel.start()
+            if send_only and name == "telegram":
+                await channel.start(send_only=True)
+            else:
+                await channel.start()
         except Exception as e:
             logger.error("Failed to start channel {}: {}", name, e)
 
@@ -164,8 +172,10 @@ class ChannelManager:
         tasks = []
         for name, channel in self.channels.items():
             logger.info("Starting {} channel...", name)
-            tasks.append(asyncio.create_task(self._start_channel(name, channel)))
-        
+            tasks.append(
+                asyncio.create_task(self._start_channel(name, channel))
+            )
+
         # Wait for all to complete (they should run forever)
         await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -182,7 +192,9 @@ class ChannelManager:
         self._dispatch_task = asyncio.create_task(self._dispatch_outbound())
         for name, channel in self.channels.items():
             logger.info("Starting {} channel for cron job...", name)
-            asyncio.create_task(self._start_channel(name, channel))
+            asyncio.create_task(
+                self._start_channel(name, channel, send_only=True)
+            )
 
         await asyncio.sleep(5)
 
