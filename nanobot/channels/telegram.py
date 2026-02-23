@@ -21,10 +21,9 @@ from nanobot.utils.language import detect_language, get_bot_message
 
 
 def _format_thinking_message(text: str) -> str:
-    """Format thinking/action messages with <tg-spoiler> for collapsible smaller text."""
+    """Format thinking/action messages with <tg-spoiler> for collapsible text."""
     # Telegram's tg-spoiler element creates collapsible text
-    # Combined with small HTML tag for smaller font
-    return f"<tg-spoiler><small>{text}</small></tg-spoiler>"
+    return f"<tg-spoiler>{text}</tg-spoiler>"
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -308,8 +307,8 @@ class TelegramChannel(BaseChannel):
             return
 
         user = update.effective_user
-        # Detect language from user's language_code if available, otherwise default to English
-        language = 'en'
+        # Detect language from user's language_code if available, otherwise use default from config
+        language = self.config.default_language
         if user.language_code:
             # Map Telegram language codes to our supported languages
             lang_map = {
@@ -321,7 +320,9 @@ class TelegramChannel(BaseChannel):
                 'fr': 'fr', 'fr-FR': 'fr',
                 'de': 'de', 'de-DE': 'de',
             }
-            language = lang_map.get(user.language_code, 'en')
+            detected = lang_map.get(user.language_code)
+            if detected:
+                language = detected
 
         await update.message.reply_text(
             get_bot_message('start', language, bot_name=self.bot_name, name=user.first_name)
@@ -332,8 +333,8 @@ class TelegramChannel(BaseChannel):
         if not update.message:
             return
 
-        # Try to detect language from user's language_code
-        language = 'en'
+        # Try to detect language from user's language_code, otherwise use default from config
+        language = self.config.default_language
         if update.effective_user and update.effective_user.language_code:
             lang_map = {
                 'vi': 'vi', 'vi-VN': 'vi',
@@ -344,7 +345,9 @@ class TelegramChannel(BaseChannel):
                 'fr': 'fr', 'fr-FR': 'fr',
                 'de': 'de', 'de-DE': 'de',
             }
-            language = lang_map.get(update.effective_user.language_code, 'en')
+            detected = lang_map.get(update.effective_user.language_code)
+            if detected:
+                language = detected
 
         await update.message.reply_text(get_bot_message('help', language, bot_name=self.bot_name))
 

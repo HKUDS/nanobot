@@ -29,6 +29,7 @@ class TelegramConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     reply_to_message: bool = False  # If true, bot replies quote the original message
+    default_language: str = "en"  # Default language for bot responses ('vi', 'en', 'zh', etc.)
 
 
 class FeishuConfig(Base):
@@ -165,11 +166,24 @@ class QQConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
 
+class MatrixConfig(Base):
+    """Matrix channel configuration using matrix-nio."""
+
+    enabled: bool = False
+    homeserver: str = "https://matrix.org"  # Matrix homeserver URL
+    user_id: str = ""  # Matrix user ID (e.g. @user:server.com)
+    access_token: str = ""  # Matrix access token
+    auto_join_rooms: list[str] = Field(default_factory=list)  # Rooms to auto-join on startup
+    auto_join_invites: bool = True  # Automatically accept room invites
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs (empty = public access)
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    matrix: MatrixConfig = Field(default_factory=MatrixConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
     mochat: MochatConfig = Field(default_factory=MochatConfig)
@@ -182,6 +196,7 @@ class ChannelsConfig(Base):
 class AgentDefaults(Base):
     """Default agent configuration."""
 
+    bot_name: str = "nanobot"
     workspace: str = "~/.nanobot/workspace"
     model: str = "anthropic/claude-opus-4-5"
     max_tokens: int = 8192
