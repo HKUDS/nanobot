@@ -363,11 +363,17 @@ def gateway(
     async def on_heartbeat(prompt: str) -> str:
         """Execute heartbeat through the agent."""
         channel, chat_id = _pick_heartbeat_target()
+
+        async def _silent(*_args, **_kwargs):
+            pass
+
         return await agent.process_direct(
             prompt,
             session_key="heartbeat",
             channel=channel,
             chat_id=chat_id,
+            # suppress: heartbeat should not push progress to external channels
+            on_progress=_silent,
         )
 
     heartbeat = HeartbeatService(
