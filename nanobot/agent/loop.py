@@ -352,7 +352,8 @@ class AgentLoop:
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
 
-        if len(session.messages) > self.memory_window and session.key not in self._consolidating:
+        unconsolidated = len(session.messages) - session.last_consolidated
+        if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
             self._consolidating.add(session.key)
             lock = self._get_consolidation_lock(session.key)
 
