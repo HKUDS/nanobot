@@ -1,6 +1,7 @@
 """Configuration loading utilities."""
 
 import json
+import os
 from pathlib import Path
 
 from nanobot.config.schema import Config
@@ -9,6 +10,34 @@ from nanobot.config.schema import Config
 def get_config_path() -> Path:
     """Get the default configuration file path."""
     return Path.home() / ".nanobot" / "config.json"
+
+
+def load_dotenv(env_path: Path | None = None) -> None:
+    """Load KEY=VALUE pairs from .env into os.environ (skip existing).
+
+    Search order (first found wins per variable):
+    1. Explicit *env_path* if given
+    2. CWD / .env
+    3. ~/.nanobot/.env
+    """
+    candidates = (
+        [env_path] if env_path else [
+            Path.cwd() / ".env",
+            Path.home() / ".nanobot" / ".env",
+        ]
+    )
+    for path in candidates:
+        if not path.exists():
+            continue
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip("\"'")
+                os.environ.setdefault(key, value)
 
 
 def get_data_dir() -> Path:
@@ -27,6 +56,7 @@ def load_config(config_path: Path | None = None) -> Config:
     Returns:
         Loaded configuration object.
     """
+    load_dotenv()
     path = config_path or get_config_path()
 
     if path.exists():

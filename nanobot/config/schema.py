@@ -185,7 +185,7 @@ class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.nanobot/workspace"
-    model: str = "anthropic/claude-opus-4-5"
+    model: str = "anthropic/claude-opus-4-6"
     max_tokens: int = 8192
     temperature: float = 0.1
     max_tool_iterations: int = 40
@@ -206,9 +206,26 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
+class ClaudeCodeConfig(Base):
+    """Claude Code CLI OAuth authentication."""
+
+    enabled: bool = True   # Auto-detect Claude Code CLI login
+    model: str = ""        # Override model. Empty = use agents.defaults.model
+
+
+class ProxyConfig(Base):
+    """Anthropic API proxy configuration."""
+
+    enabled: bool = True
+    api_key: str = ""      # If set, require in Authorization header. Empty = accept any.
+    model_map: dict[str, str] = Field(default_factory=dict)  # Remap incoming model names
+    default_model: str = ""  # Override default model. Empty = use agents.defaults.model
+
+
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
+    claude_code: ClaudeCodeConfig = Field(default_factory=ClaudeCodeConfig)
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -233,6 +250,7 @@ class GatewayConfig(Base):
 
     host: str = "0.0.0.0"
     port: int = 18790
+    proxy: ProxyConfig = Field(default_factory=ProxyConfig)
 
 
 class WebSearchConfig(Base):
@@ -305,14 +323,14 @@ class Config(BaseSettings):
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
-                if spec.is_oauth or p.api_key:
+                if spec.is_oauth or getattr(p, "api_key", None):
                     return p, spec.name
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
-                if spec.is_oauth or p.api_key:
+                if spec.is_oauth or getattr(p, "api_key", None):
                     return p, spec.name
 
         # Fallback: gateways first, then others (follows registry order)

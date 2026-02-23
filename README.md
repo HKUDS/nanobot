@@ -603,6 +603,37 @@ Config file: `~/.nanobot/config.json`
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
+| `claude_code` | LLM (Claude Code CLI, OAuth) | `claude setup-token` via Claude Code CLI |
+
+<details>
+<summary><b>Claude Code CLI (OAuth)</b></summary>
+
+Uses your existing Claude Code CLI OAuth token to access Anthropic models. Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and logged in.
+
+**1. Login via Claude Code CLI:**
+```bash
+claude setup-token
+```
+
+**2. Set model** (merge into `~/.nanobot/config.json`):
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "claude-code/claude-sonnet-4-20250514"
+    }
+  }
+}
+```
+
+**3. Chat:**
+```bash
+nanobot agent -m "Hello!"
+```
+
+> The Claude Code provider auto-detects your OAuth token — no API key needed. It also exposes a local Anthropic-compatible proxy, so other tools can use it too.
+
+</details>
 
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>

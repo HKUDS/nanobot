@@ -236,6 +236,26 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_oauth=True,                      # OAuth-based authentication
     ),
 
+    # Claude Code CLI: uses OAuth token from `claude setup-token`, bypasses LiteLLM.
+    ProviderSpec(
+        name="claude_code",
+        keywords=("claude-code",),
+        env_key="CLAUDE_CODE_OAUTH_TOKEN",
+        display_name="Claude Code CLI",
+        litellm_prefix="",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="sk-ant-oat",
+        detect_by_base_keyword="",
+        default_api_base="https://api.anthropic.com/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+        is_oauth=True,
+        is_direct=True,
+    ),
+
     # DeepSeek: needs "deepseek/" prefix for LiteLLM routing.
     ProviderSpec(
         name="deepseek",

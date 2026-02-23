@@ -6,6 +6,7 @@ import signal
 from pathlib import Path
 import select
 import sys
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -192,6 +193,7 @@ def onboard():
     console.print("\nNext steps:")
     console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
     console.print("     Get one at: https://openrouter.ai/keys")
+    console.print("     [dim]Or use Claude Code CLI: [cyan]claude setup-token[/cyan] (no API key needed)[/dim]")
     console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
 
@@ -230,7 +232,10 @@ def _create_workspace_templates(workspace: Path):
 
 
 def _make_provider(config: Config):
-    """Create the appropriate LLM provider from config."""
+    """Create the appropriate LLM provider from config.
+
+    Priority: explicit API key > Claude Code OAuth > error.
+    """
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.custom_provider import CustomProvider
@@ -243,6 +248,19 @@ def _make_provider(config: Config):
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         return OpenAICodexProvider(default_model=model)
 
+    # Claude Code CLI (OAuth)
+    if provider_name == "claude_code" or model.startswith("claude-code/"):
+        from nanobot.providers.claude_code_auth import get_claude_code_token
+        from nanobot.providers.claude_code_provider import ClaudeCodeProvider
+
+        oauth_token = get_claude_code_token()
+        if oauth_token:
+            cc_model = config.providers.claude_code.model or model
+            return ClaudeCodeProvider(oauth_token=oauth_token, default_model=cc_model)
+        console.print("[red]Error: CLAUDE_CODE_OAUTH_TOKEN not set.[/red]")
+        console.print("  Run [cyan]claude setup-token[/cyan] and export the token.")
+        raise typer.Exit(1)
+
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     if provider_name == "custom":
         return CustomProvider(
@@ -253,18 +271,33 @@ def _make_provider(config: Config):
 
     from nanobot.providers.registry import find_by_name
     spec = find_by_name(provider_name)
-    if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
-        console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers section")
-        raise typer.Exit(1)
 
-    return LiteLLMProvider(
-        api_key=p.api_key if p else None,
-        api_base=config.get_api_base(model),
-        default_model=model,
-        extra_headers=p.extra_headers if p else None,
-        provider_name=provider_name,
-    )
+    # If we have an explicit API key, use LiteLLM
+    if (p and p.api_key) or model.startswith("bedrock/") or (spec and spec.is_oauth):
+        return LiteLLMProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            provider_name=provider_name,
+        )
+
+    # Fallback: Claude Code CLI OAuth token
+    cc_config = config.providers.claude_code
+    if cc_config.enabled:
+        from nanobot.providers.claude_code_auth import get_claude_code_token
+
+        oauth_token = get_claude_code_token()
+        if oauth_token:
+            from nanobot.providers.claude_code_provider import ClaudeCodeProvider
+
+            cc_model = cc_config.model or model
+            return ClaudeCodeProvider(oauth_token=oauth_token, default_model=cc_model)
+
+    console.print("[red]Error: No API key configured.[/red]")
+    console.print("  1. Run [cyan]claude setup-token[/cyan] and export CLAUDE_CODE_OAUTH_TOKEN")
+    console.print("  2. Or set a key in ~/.nanobot/config.json under providers section")
+    raise typer.Exit(1)
 
 
 # ============================================================================
@@ -1015,12 +1048,22 @@ def status():
         from nanobot.providers.registry import PROVIDERS
 
         console.print(f"Model: {config.agents.defaults.model}")
-        
+
+        # Claude Code CLI status
+        if config.providers.claude_code.enabled:
+            import os
+
+            cc_token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+            cc_status = "[green]✓ token set[/green]" if cc_token else "[yellow]CLAUDE_CODE_OAUTH_TOKEN not set[/yellow]"
+            console.print(f"Claude Code CLI: {cc_status}")
+
         # Check API keys from registry
         for spec in PROVIDERS:
             p = getattr(config.providers, spec.name, None)
             if p is None:
                 continue
+            if spec.name == "claude_code":
+                continue  # Handled above with explicit env var check
             if spec.is_oauth:
                 console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
             elif spec.is_local:
@@ -1032,6 +1075,17 @@ def status():
             else:
                 has_key = bool(p.api_key)
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+
+        # MCP servers
+        mcp_servers = config.tools.mcp_servers
+        if mcp_servers:
+            console.print()
+            console.print(f"MCP Servers: {len(mcp_servers)}")
+            for name, cfg in mcp_servers.items():
+                if cfg.command:
+                    console.print(f"  [green]●[/green] {name} [dim]({cfg.command} {' '.join(cfg.args)})[/dim]")
+                elif cfg.url:
+                    console.print(f"  [green]●[/green] {name} [dim]({cfg.url})[/dim]")
 
 
 # ============================================================================
@@ -1115,6 +1169,57 @@ def _login_github_copilot() -> None:
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
+
+
+@app.command(hidden=True)
+def proxy(
+    port: int = typer.Option(18790, "--port", "-p", help="Proxy port"),
+    host: str = typer.Option("0.0.0.0", "--host", "-H", help="Proxy host"),
+    model: str = typer.Option(None, "--model", "-m", help="Override default model"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """Start standalone Anthropic Messages API proxy (internal)."""
+    from nanobot.config.loader import load_config
+
+    if verbose:
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+
+    config = load_config()
+    provider = _make_provider(config)
+
+    litellm_kwargs: dict[str, Any] = {}
+    if hasattr(provider, "api_key") and provider.api_key:
+        litellm_kwargs["api_key"] = provider.api_key
+    if hasattr(provider, "api_base") and provider.api_base:
+        litellm_kwargs["api_base"] = provider.api_base
+    if model:
+        litellm_kwargs["model"] = model
+    elif hasattr(provider, "default_model"):
+        litellm_kwargs["model"] = provider.default_model
+
+    from nanobot.api.handlers import MessagesHandler
+    from nanobot.api.server import ProxyServer
+
+    handler = MessagesHandler(proxy_config=config.gateway.proxy, litellm_kwargs=litellm_kwargs)
+    server = ProxyServer(host=host, port=port, handler=handler)
+
+    console.print(f"{__logo__} Starting API proxy on http://{host}:{port}")
+    console.print(f"  Endpoints: POST /v1/messages, GET /health")
+    console.print(f"  Connect Claude Code CLI:")
+    console.print(f"    [green]ANTHROPIC_BASE_URL=http://localhost:{port} claude[/green]")
+
+    async def run():
+        await server.start()
+        try:
+            while True:
+                await asyncio.sleep(3600)
+        except KeyboardInterrupt:
+            console.print("\nShutting down proxy...")
+        finally:
+            await server.stop()
+
+    asyncio.run(run())
 
 
 if __name__ == "__main__":
