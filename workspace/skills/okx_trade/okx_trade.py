@@ -49,15 +49,18 @@ class OKXTradeSkill:
     def _sign(self, timestamp: str, method: str, request_path: str, body: str = "") -> str:
         """Generate signature for OKX API request.
 
-        According to OKX docs: timestamp + method + requestPath + body
-        Example: 2024-01-01T00:00:00.000ZGET/api/v5/account/balance
+        According to OKX docs (updated format):
+        timestamp + method + requestPath + body
+
+        Note: Some sources mention newlines and API-KEY field, but the standard
+        format is simple concatenation without newlines.
         """
         # Ensure body is empty string for GET requests
         if not body:
             body = ""
 
         # Build prehash string: timestamp + method + requestPath + body
-        # NO newlines, NO API-KEY field - just simple concatenation
+        # Standard format: simple concatenation
         prehash_string = timestamp + method + request_path + body
 
         # Sign with HMAC-SHA256

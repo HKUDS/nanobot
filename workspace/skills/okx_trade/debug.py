@@ -3,6 +3,7 @@
 
 import asyncio
 import sys
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -30,9 +31,12 @@ async def main():
         now = datetime.now(timezone.utc)
         timestamp = now.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
 
+        print(f"Config loaded from: {Path.home() / '.nanobot' / 'workspace' / 'skills' / 'okx_trade' / 'config.json'}")
         print(f"API Key: {skill.api_key[:8]}...{skill.api_key[-4:]}")
         print(f"Secret Key: {skill.secret_key[:8]}...{skill.secret_key[-4:]}")
         print(f"Passphrase: {skill.passphrase[:4]}...")
+        print(f"Demo Mode: {skill.is_demo}")
+        print(f"Base URL: {skill.base_url}")
         print()
 
         print(f"Timestamp: {timestamp}")
@@ -52,20 +56,54 @@ async def main():
         print(f"Signature: {signature}")
         print()
 
+        # Show headers
+        headers = skill._get_headers(method, request_path, body)
+        print("Request Headers:")
+        for key, value in headers.items():
+            if key == "OK-ACCESS-SIGN":
+                print(f"  {key}: {value[:20]}...")
+            else:
+                print(f"  {key}: {value}")
+        print()
+
         # Test actual API call
         print("=" * 60)
-        print("Testing API Call")
+        print("Testing API Call: Get Account Balance")
         print("=" * 60)
         result = await skill.get_account_balance()
+
+        print(f"Response Code: {result.get('code')}")
+        print(f"Response Message: {result.get('msg')}")
+        print()
+
+        if result.get("code") == "0":
+            print("✓ Success!")
+            print(json.dumps(result, indent=2))
+        else:
+            print(f"✗ Failed!")
+            print(f"Full Response: {json.dumps(result, indent=2)}")
+
+        print()
+        print("=" * 60)
+        print("Testing API Call: Get Positions")
+        print("=" * 60)
+        result = await skill.get_positions()
 
         print(f"Response Code: {result.get('code')}")
         print(f"Response Message: {result.get('msg')}")
 
         if result.get("code") == "0":
             print("✓ Success!")
+            positions = result.get("data", [])
+            if positions:
+                print(f"Found {len(positions)} positions:")
+                for pos in positions:
+                    print(f"  - {pos.get('instId')}: {pos.get('pos')} @ {pos.get('avgPx')}")
+            else:
+                print("No open positions")
         else:
             print(f"✗ Failed!")
-            print(f"Full Response: {result}")
+            print(f"Full Response: {json.dumps(result, indent=2)}")
 
     except Exception as e:
         print(f"✗ Error: {e}")
