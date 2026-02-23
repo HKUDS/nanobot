@@ -1235,12 +1235,13 @@ def stats_cache(
     days: int = typer.Option(7, "--days", "-d", help="Number of days to include"),
     by_session: bool = typer.Option(False, "--session", "-s", help="Group by session/conversation"),
     gap: int = typer.Option(300, "--gap", "-g", help="Session gap in seconds (default: 300 = 5 min)"),
+    accurate: bool = typer.Option(False, "--accurate", "-a", help="Use accurate token-level matching (slower)"),
 ):
     """Analyze prefix cache hit rate from API logs."""
     from rich.table import Table
 
     if by_session:
-        _show_cache_by_session(days, gap)
+        _show_cache_by_session(days, gap, accurate)
     else:
         _show_cache_global(days)
 
@@ -1301,30 +1302,36 @@ def _show_cache_global(days: int):
         console.print(prefix_table)
 
 
-def _show_cache_by_session(days: int, gap: int):
+def _show_cache_by_session(days: int, gap: int, accurate: bool = False):
     """Show cache statistics grouped by session."""
-    from nanobot.providers.cache_analyzer import analyze_cache_by_session
+    from nanobot.providers.audit_logger import APILogger
 
-    stats = analyze_cache_by_session(days=days, gap_threshold_seconds=gap)
+    if accurate:
+        from nanobot.providers.cache_analyzer_acc import load_logs, compute_prefix_match_tokens
 
-    console.print(f"{__logo__} Cache Analysis by Session (last {days} days, gap={gap}s)\n")
+        log_dir = APILogger._get_default_log_dir()
+        entries = load_logs(log_dir=log_dir, days=days)
 
-    if "error" in stats:
-        console.print(f"[red]Error: {stats['error']}[/red]")
-        return
+        if not entries:
+            console.print("[red]No log files found[/red]")
+            return
 
-    # Summary
-    summary = Table(title="Overview")
-    summary.add_column("Metric", style="cyan")
-    summary.add_column("Value", style="green")
-    summary.add_row("Total Sessions", str(stats['total_sessions']))
-    summary.add_row("Total Requests", f"{stats['total_requests']:,}")
-    console.print(summary)
-    console.print()
+        stats = compute_prefix_match_tokens(entries, gap_threshold_seconds=gap)
 
-    # Session table
-    if stats.get("sessions"):
-        session_table = Table(title="Sessions (hit rate based on tokens)")
+        console.print(f"{__logo__} Cache Analysis by Session (Token-level matching, gap={gap}s)\n")
+
+        # Overview
+        overview = Table(title="Overview")
+        overview.add_column("Metric", style="cyan")
+        overview.add_column("Value", style="green")
+        overview.add_row("Total Sessions", str(stats["total_sessions"]))
+        overview.add_row("Total Requests", f"{stats['total_requests']:,}")
+        overview.add_row("Total Prompt Tokens", f"{stats['total_tokens']:,}")
+        console.print(overview)
+        console.print()
+
+        # Session table
+        session_table = Table(title="Sessions (token-level matching)")
         session_table.add_column("#", style="dim")
         session_table.add_column("Reqs", style="green")
         session_table.add_column("Hit Tokens", style="yellow")
@@ -1332,7 +1339,6 @@ def _show_cache_by_session(days: int, gap: int):
         session_table.add_column("Hit Rate", style="cyan")
         session_table.add_column("Saved", style="magenta")
         session_table.add_column("Total", style="blue")
-        session_table.add_column("Start", style="magenta")
 
         for s in stats["sessions"]:
             hit_rate = s.get("hit_rate", 0)
@@ -1346,28 +1352,92 @@ def _show_cache_by_session(days: int, gap: int):
                 hit_rate_str,
                 f"{s['saved_tokens']:,}",
                 f"{s['total_tokens']:,}",
-                s["start_time"][:16] if s.get("start_time") else "N/A",
             )
 
         console.print(session_table)
         console.print()
 
-        # Summary stats
-        total_hit_tokens = sum(s["hit_tokens"] for s in stats["sessions"])
-        total_miss_tokens = sum(s["miss_tokens"] for s in stats["sessions"])
-        total_system_tokens = total_hit_tokens + total_miss_tokens
-        overall_rate = (total_hit_tokens / total_system_tokens * 100) if total_system_tokens > 0 else 0
-        total_saved_tokens = sum(s["saved_tokens"] for s in stats["sessions"])
-
-        agg_table = Table(title="Aggregate Stats (Token-based)")
+        # Aggregate
+        agg_table = Table(title="Aggregate Stats (Token-level)")
         agg_table.add_column("Metric", style="cyan")
         agg_table.add_column("Value", style="green")
-        agg_table.add_row("Total Hit Tokens (all sessions)", f"{total_hit_tokens:,}")
-        agg_table.add_row("Total Miss Tokens (all sessions)", f"{total_miss_tokens:,}")
-        agg_table.add_row("Total System Tokens", f"{total_system_tokens:,}")
-        agg_table.add_row("Overall Hit Rate (Token-based)", f"{overall_rate:.1f}%")
-        agg_table.add_row("Total Tokens Saved", f"{total_saved_tokens:,}")
+        agg_table.add_row("Total Hit Tokens (all sessions)", f"{stats['total_hit_tokens']:,}")
+        agg_table.add_row("Total Miss Tokens (all sessions)", f"{stats['total_miss_tokens']:,}")
+        agg_table.add_row("Total System Tokens", f"{stats['total_system_tokens']:,}")
+        agg_table.add_row("Overall Hit Rate (Token-level)", f"{stats['overall_hit_rate']:.1f}%")
+        agg_table.add_row("Total Tokens Saved", f"{stats['total_saved_tokens']:,}")
         console.print(agg_table)
+
+    else:
+        from nanobot.providers.cache_analyzer import analyze_cache_by_session
+
+        stats = analyze_cache_by_session(days=days, gap_threshold_seconds=gap)
+
+        if "error" in stats:
+            console.print(f"[red]Error: {stats['error']}[/red]")
+            return
+
+        console.print(f"{__logo__} Cache Analysis by Session (last {days} days, gap={gap}s)\n")
+
+        if "error" in stats:
+            console.print(f"[red]Error: {stats['error']}[/red]")
+            return
+
+        # Summary
+        summary = Table(title="Overview")
+        summary.add_column("Metric", style="cyan")
+        summary.add_column("Value", style="green")
+        summary.add_row("Total Sessions", str(stats['total_sessions']))
+        summary.add_row("Total Requests", f"{stats['total_requests']:,}")
+        console.print(summary)
+        console.print()
+
+        # Session table
+        if stats.get("sessions"):
+            session_table = Table(title="Sessions (hit rate based on tokens)")
+            session_table.add_column("#", style="dim")
+            session_table.add_column("Reqs", style="green")
+            session_table.add_column("Hit Tokens", style="yellow")
+            session_table.add_column("Miss Tokens", style="red")
+            session_table.add_column("Hit Rate", style="cyan")
+            session_table.add_column("Saved", style="magenta")
+            session_table.add_column("Total", style="blue")
+            session_table.add_column("Start", style="magenta")
+
+            for s in stats["sessions"]:
+                hit_rate = s.get("hit_rate", 0)
+                hit_rate_str = f"{hit_rate:.1f}%"
+
+                session_table.add_row(
+                    str(s["session_id"]),
+                    str(s["requests"]),
+                    f"{s['hit_tokens']:,}",
+                    f"{s['miss_tokens']:,}",
+                    hit_rate_str,
+                    f"{s['saved_tokens']:,}",
+                    f"{s['total_tokens']:,}",
+                    s["start_time"][:16] if s.get("start_time") else "N/A",
+                )
+
+            console.print(session_table)
+            console.print()
+
+            # Summary stats
+            total_hit_tokens = sum(s["hit_tokens"] for s in stats["sessions"])
+            total_miss_tokens = sum(s["miss_tokens"] for s in stats["sessions"])
+            total_system_tokens = total_hit_tokens + total_miss_tokens
+            overall_rate = (total_hit_tokens / total_system_tokens * 100) if total_system_tokens > 0 else 0
+            total_saved_tokens = sum(s["saved_tokens"] for s in stats["sessions"])
+
+            agg_table = Table(title="Aggregate Stats (Token-based)")
+            agg_table.add_column("Metric", style="cyan")
+            agg_table.add_column("Value", style="green")
+            agg_table.add_row("Total Hit Tokens (all sessions)", f"{total_hit_tokens:,}")
+            agg_table.add_row("Total Miss Tokens (all sessions)", f"{total_miss_tokens:,}")
+            agg_table.add_row("Total System Tokens", f"{total_system_tokens:,}")
+            agg_table.add_row("Overall Hit Rate (Token-based)", f"{overall_rate:.1f}%")
+            agg_table.add_row("Total Tokens Saved", f"{total_saved_tokens:,}")
+            console.print(agg_table)
 
 
 if __name__ == "__main__":
