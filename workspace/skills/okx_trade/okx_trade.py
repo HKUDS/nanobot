@@ -47,18 +47,29 @@ class OKXTradeSkill:
             self.base_url = self.config.get("base_url", "https://www.okx.com")
 
     def _sign(self, timestamp: str, method: str, request_path: str, body: str = "") -> str:
-        """Generate signature for OKX API request."""
-        message = timestamp + method + request_path + body
+        """Generate signature for OKX API request.
+
+        According to OKX docs: timestamp + method + requestPath + body
+        """
+        # Ensure body is empty string for GET requests
+        if not body:
+            body = ""
+
+        # Build prehash string: timestamp + method + requestPath + body
+        prehash_string = timestamp + method + request_path + body
+
+        # Sign with HMAC-SHA256
         mac = hmac.new(
             self.secret_key.encode("utf-8"),
-            message.encode("utf-8"),
+            prehash_string.encode("utf-8"),
             hashlib.sha256
         )
         return base64.b64encode(mac.digest()).decode()
 
     def _get_headers(self, method: str, request_path: str, body: str = "") -> dict[str, str]:
         """Generate headers for OKX API request."""
-        timestamp = datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+        # OKX requires ISO 8601 timestamp format
+        timestamp = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
         signature = self._sign(timestamp, method, request_path, body)
 
         headers = {
