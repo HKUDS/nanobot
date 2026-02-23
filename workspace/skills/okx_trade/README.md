@@ -4,6 +4,22 @@ OKX 交易系统技能，支持账户查询、下单、撤单等操作。
 
 ## 配置
 
+### 自动安装（推荐）
+
+运行安装脚本自动创建配置：
+
+```bash
+python3 workspace/skills/okx_trade/setup.py
+```
+
+然后编辑配置文件填入你的 API 凭证：
+
+```bash
+nano ~/.nanobot/workspace/skills/okx_trade/config.json
+```
+
+### 手动安装
+
 1. 在用户工作目录创建配置文件：
    ```bash
    mkdir -p ~/.nanobot/workspace/skills/okx_trade
