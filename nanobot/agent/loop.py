@@ -365,6 +365,10 @@ class AgentLoop:
         if final_content is None and tool_results:
             final_content = self._generate_tool_summary(tool_results)
 
+        # If still no content after all iterations, provide a helpful fallback
+        if final_content is None:
+            final_content = self._get_fallback_response(initial_messages)
+
         return final_content, tools_used
 
     def _generate_tool_summary(self, tool_results: list[tuple[str, dict, str]]) -> str:
@@ -457,6 +461,30 @@ class AgentLoop:
             # Generic format
             arg_str = ", ".join(f"{k}={v}" for k, v in list(args.items())[:2])
             return f"{tool_name}({arg_str})"
+
+    def _get_fallback_response(self, messages: list[dict]) -> str:
+        """
+        Generate a fallback response when the agent couldn't produce a proper response.
+        Detects language from conversation history to provide appropriate message.
+        """
+        from nanobot.utils.language import detect_language_from_session
+
+        # Detect language from conversation history
+        language = detect_language_from_session(messages)
+
+        # Fallback messages in different languages
+        fallback_messages = {
+            'vi': 'Xin lỗi, mình không chắc cách trả lời câu hỏi này. Bạn có thể thử đặt câu hỏi khác hoặc rõ hơn không?',
+            'zh': '抱歉，我不确定如何回答这个问题。您可以尝试用不同的方式提问吗？',
+            'ja': '申し訳ありませんが、この質問にどう答えるかよく分かりません。別の聞き方を試していただけますか？',
+            'ko': '죄송합니다만, 이 질문에 어떻게 대답해야 할지 잘 모르겠습니다. 다른 방식으로 질문해 주시겠어요?',
+            'es': 'Lo siento, no estoy seguro de cómo responder a esta pregunta. ¿Podrías intentarlo de otra manera?',
+            'fr': 'Désolé, je ne suis pas sûr de savoir comment répondre à cette question. Pouvez-vous essayer autrement?',
+            'de': 'Entschuldigung, ich bin mir nicht sicher, wie ich auf diese Frage antworten soll. Können Sie es anders versuchen?',
+            'en': 'Sorry, I\'m not sure how to help with that. Could you try rephrasing your question?',
+        }
+
+        return fallback_messages.get(language, fallback_messages['en'])
 
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
