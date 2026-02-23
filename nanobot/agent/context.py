@@ -67,15 +67,20 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
-        
-        return "\n\n---\n\n".join(parts)
-    
-    def _get_identity(self) -> str:
-        """Get the core identity section."""
+
+        # Add current date/time
         from datetime import datetime
         import time as _time
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         tz = _time.strftime("%Z") or "UTC"
+        parts.append(f"""
+## Current Time
+{now} ({tz})""")
+       
+        return "\n\n---\n\n".join(parts)
+    
+    def _get_identity(self) -> str:
+        """Get the core identity section."""
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
@@ -83,9 +88,6 @@ Skills with available="false" need dependencies installed first - you can try in
         return f"""# nanobot 🐈
 
 You are nanobot, a helpful AI assistant. 
-
-## Current Time
-{now} ({tz})
 
 ## Runtime
 {runtime}
