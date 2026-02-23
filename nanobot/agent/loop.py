@@ -77,7 +77,11 @@ class AgentLoop:
         from nanobot.cron.service import CronService
         self.bus = bus
         self.provider = provider
-        self.workspace = Path(workspace) if not isinstance(workspace, Path) else workspace
+        # Ensure workspace is expanded from ~ to absolute path
+        if isinstance(workspace, Path):
+            self.workspace = workspace
+        else:
+            self.workspace = Path(workspace).expanduser()
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.temperature = temperature
@@ -89,6 +93,11 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         self._custom_system_prompt = system_prompt
         self.config = config
+
+        # Get bot_name from config or use default
+        bot_name = "nanobot"
+        if config:
+            bot_name = config.agents.defaults.bot_name
 
         # Profile support
         self.profile_name = profile_name
@@ -103,7 +112,7 @@ class AgentLoop:
             self.profile_inherit_base = True
             self.inherit_global_skills = True
 
-        self.context = ContextBuilder(workspace)
+        self.context = ContextBuilder(workspace, bot_name=bot_name)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -217,6 +226,14 @@ class AgentLoop:
 
         # Todo list tool
         self.tools.register(TodoTool(self.workspace, profile=self.profile_name))
+
+        # List skills tool
+        from nanobot.agent.tools.list_skills import ListSkillsTool
+        self.tools.register(ListSkillsTool(workspace=self.workspace))
+
+        # List tools tool (must be registered last so it can see all other tools)
+        from nanobot.agent.tools.list_tools import ListToolsTool
+        self.tools.register(ListToolsTool(registry=self.tools))
     
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -250,8 +267,10 @@ class AgentLoop:
         return re.sub(r"<think>[\s\S]*?</think>", "", text).strip() or None
 
     @staticmethod
-    def _tool_hint(tool_calls: list) -> str:
+    def _tool_hint(tool_calls: list | None) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
+        if not tool_calls:
+            return ""
         def _fmt(tc):
             val = next(iter(tc.arguments.values()), None) if tc.arguments else None
             if not isinstance(val, str):
@@ -331,7 +350,9 @@ class AgentLoop:
                 # Give them one retry; don't forward the text to avoid duplicates.
                 if not tools_used and not text_only_retried and final_content:
                     text_only_retried = True
-                    logger.debug("Interim text response (no tools used yet), retrying: {}", final_content[:80])
+                    # Safe logging: handle None and encoding issues
+                    safe_preview = (final_content[:80] if final_content else '<empty>')
+                    logger.debug("Interim text response (no tools used yet), retrying: {}", safe_preview)
                     messages = self.context.add_assistant_message(
                         messages, response.content,
                         reasoning_content=response.reasoning_content,
@@ -500,8 +521,10 @@ class AgentLoop:
         # System messages route back via chat_id ("channel:chat_id")
         if msg.channel == "system":
             return await self._process_system_message(msg)
-        
-        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
+
+        # Safe preview that handles None content
+        content = msg.content or ""
+        preview = content[:80] + "..." if len(content) > 80 else content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
         
         key = session_key or msg.session_key
@@ -574,12 +597,16 @@ class AgentLoop:
         # final_content will be None only if no tools were used AND no text was generated
         # This can happen for empty/no-op messages
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+        # Safe preview that handles None
+        safe_final = final_content or ""
+        preview = safe_final[:120] + "..." if len(safe_final) > 120 else safe_final
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
-        # Log to monitor
-        self._log_monitor("inbound", msg.content[:200], session.key, msg.channel)
-        self._log_monitor("outbound", final_content[:200], session.key, msg.channel)
+        # Log to monitor with None safety
+        safe_inbound = msg.content or ""
+        safe_outbound = final_content or ""
+        self._log_monitor("inbound", safe_inbound[:200], session.key, msg.channel)
+        self._log_monitor("outbound", safe_outbound[:200], session.key, msg.channel)
 
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content,
