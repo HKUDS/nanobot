@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+
 from loguru import logger
 from telegram import BotCommand, Update, ReplyParameters
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -126,6 +127,9 @@ class TelegramChannel(BaseChannel):
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
+        self._bot_username: str = ""
+        self._bot_user_id: int | None = None
+        self._group_history: dict[str, list[str]] = {}  # chat_id -> buffered group lines
     
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -165,6 +169,8 @@ class TelegramChannel(BaseChannel):
         
         # Get bot info and register command menu
         bot_info = await self._app.bot.get_me()
+        self._bot_username = bot_info.username or ""
+        self._bot_user_id = bot_info.id
         logger.info("Telegram bot @{} connected", bot_info.username)
         
         try:
@@ -308,6 +314,97 @@ class TelegramChannel(BaseChannel):
         sid = str(user.id)
         return f"{sid}|{user.username}" if user.username else sid
 
+    def _group_policy(self) -> str:
+        """Resolve group handling policy."""
+        policy = (self.config.group_policy or "open").strip().lower()
+        if policy in {"open", "mention"}:
+            return policy
+        logger.warning("Invalid Telegram group_policy={}, falling back to open", self.config.group_policy)
+        return "open"
+
+    @staticmethod
+    def _is_group_chat(message) -> bool:
+        return getattr(message.chat, "type", "") != "private"
+
+    def _is_reply_to_bot(self, message) -> bool:
+        if not self.config.mention_by_reply:
+            return False
+        if self._bot_user_id is None:
+            return False
+        reply = getattr(message, "reply_to_message", None)
+        from_user = getattr(reply, "from_user", None) if reply else None
+        return bool(from_user and int(getattr(from_user, "id", 0)) == int(self._bot_user_id))
+
+    def _is_mentioned(self, message, text: str) -> bool:
+        """Check whether the bot is explicitly invoked in a group message."""
+        username = self._bot_username.strip().lstrip("@")
+        if username:
+            pattern = rf"(?<!\w)@{re.escape(username)}(?!\w)"
+            if re.search(pattern, text or "", flags=re.IGNORECASE):
+                return True
+        return self._is_reply_to_bot(message)
+
+    def _strip_bot_mention(self, text: str) -> str:
+        """Remove @botname from text so the model sees only user intent."""
+        username = self._bot_username.strip().lstrip("@")
+        if not text or not username:
+            return text
+        pattern = rf"(?<!\w)@{re.escape(username)}(?!\w)"
+        text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
+        text = re.sub(r"[ \t]{2,}", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    @staticmethod
+    def _sender_label(user) -> str:
+        first_name = (getattr(user, "first_name", "") or "").strip()
+        last_name = (getattr(user, "last_name", "") or "").strip()
+        username = (getattr(user, "username", "") or "").strip()
+        user_id = str(getattr(user, "id", "unknown"))
+        name = " ".join([p for p in (first_name, last_name) if p]).strip()
+        if not name:
+            name = f"@{username}" if username else f"user:{user_id}"
+        if username:
+            return f"{name} (@{username}, id:{user_id})"
+        return f"{name} (id:{user_id})"
+
+    def _format_group_line(self, user, content: str) -> str:
+        text = (content or "").strip() or "[empty message]"
+        return f"{self._sender_label(user)}: {text}"
+
+    @staticmethod
+    def _group_preview(message, raw_text: str) -> str:
+        if raw_text.strip():
+            return raw_text.strip()
+        if message.photo:
+            return "[sent a photo]"
+        if message.voice:
+            return "[sent a voice message]"
+        if message.audio:
+            return "[sent an audio message]"
+        if message.document:
+            return "[sent a file]"
+        return "[sent a message]"
+
+    def _append_group_history(self, chat_id: str, line: str) -> None:
+        limit = max(0, int(self.config.group_history_on_mention))
+        if limit <= 0:
+            return
+        history = self._group_history.setdefault(chat_id, [])
+        history.append(line)
+        if len(history) > limit:
+            del history[:-limit]
+
+    def _pop_group_history(self, chat_id: str) -> list[str]:
+        return self._group_history.pop(chat_id, [])
+
+    def _build_group_content(self, user, content: str, history_lines: list[str]) -> str:
+        current = self._format_group_line(user, content)
+        if not history_lines:
+            return current
+        history = "\n".join(history_lines)
+        return f"Recent group messages before mention:\n{history}\n\nCurrent message:\n{current}"
+
     async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Forward slash commands to the bus for unified handling in AgentLoop."""
         if not update.message or not update.effective_user:
@@ -325,21 +422,49 @@ class TelegramChannel(BaseChannel):
         
         message = update.message
         user = update.effective_user
+        if self._bot_user_id is not None and int(user.id) == int(self._bot_user_id):
+            return
+
         chat_id = message.chat_id
+        str_chat_id = str(chat_id)
+        is_group = self._is_group_chat(message)
+        group_policy = self._group_policy()
+
         sender_id = self._sender_id(user)
         
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
+
+        raw_text_parts: list[str] = []
+        if message.text:
+            raw_text_parts.append(message.text)
+        if message.caption:
+            raw_text_parts.append(message.caption)
+        raw_text = "\n".join(raw_text_parts).strip()
+
+        was_mentioned = is_group and self._is_mentioned(message, raw_text)
+        history_lines: list[str] = []
+        if is_group and group_policy == "mention":
+            if not was_mentioned:
+                preview = self._group_preview(message, raw_text)
+                self._append_group_history(str_chat_id, self._format_group_line(user, preview))
+                logger.debug(
+                    "Skip Telegram group message (not mentioned) chat_id={} sender={}",
+                    str_chat_id,
+                    sender_id,
+                )
+                return
+            history_lines = self._pop_group_history(str_chat_id)
         
         # Build content from text and/or media
-        content_parts = []
-        media_paths = []
-        
-        # Text content
-        if message.text:
-            content_parts.append(message.text)
-        if message.caption:
-            content_parts.append(message.caption)
+        content_parts: list[str] = []
+        media_paths: list[str] = []
+
+        text_content = raw_text
+        if is_group and was_mentioned:
+            text_content = self._strip_bot_mention(text_content)
+        if text_content:
+            content_parts.append(text_content)
         
         # Handle media files
         media_file = None
@@ -393,11 +518,11 @@ class TelegramChannel(BaseChannel):
                 content_parts.append(f"[{media_type}: download failed]")
         
         content = "\n".join(content_parts) if content_parts else "[empty message]"
+        if is_group:
+            content = self._build_group_content(user, content, history_lines)
         
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
-        
-        str_chat_id = str(chat_id)
-        
+
         # Start typing indicator before processing
         self._start_typing(str_chat_id)
         
@@ -412,7 +537,10 @@ class TelegramChannel(BaseChannel):
                 "user_id": user.id,
                 "username": user.username,
                 "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
+                "is_group": is_group,
+                "chat_type": message.chat.type,
+                "was_mentioned": was_mentioned,
+                "group_policy": group_policy,
             }
         )
     
