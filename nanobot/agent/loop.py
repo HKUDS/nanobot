@@ -226,6 +226,7 @@ class AgentLoop:
                     )
             else:
                 final_content = self._strip_think(response.content)
+                messages = self.context.add_assistant_message(messages, final_content)
                 break
 
         if final_content is None and iteration >= self.max_iterations:
