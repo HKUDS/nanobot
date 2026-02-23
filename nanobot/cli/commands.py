@@ -389,20 +389,42 @@ def gateway(
         return response
     cron.on_job = on_cron_job
     
+    # Create channel manager
+    channels = ChannelManager(config, bus)
+
+    def _pick_heartbeat_target() -> tuple[str, str]:
+        """Pick a routable channel/chat target for heartbeat-triggered messages."""
+        enabled = set(channels.enabled_channels)
+        # Prefer the most recently updated non-internal session on an enabled channel.
+        for item in session_manager.list_sessions():
+            key = item.get("key") or ""
+            if ":" not in key:
+                continue
+            channel, chat_id = key.split(":", 1)
+            if channel in {"cli", "system"}:
+                continue
+            if channel in enabled and chat_id:
+                return channel, chat_id
+        # Fallback keeps prior behavior but remains explicit.
+        return "cli", "direct"
+
     # Create heartbeat service
     async def on_heartbeat(prompt: str) -> str:
         """Execute heartbeat through the agent."""
-        return await agent.process_direct(prompt, session_key="heartbeat")
-    
+        channel, chat_id = _pick_heartbeat_target()
+        return await agent.process_direct(
+            prompt,
+            session_key="heartbeat",
+            channel=channel,
+            chat_id=chat_id,
+        )
+
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
         on_heartbeat=on_heartbeat,
         interval_s=30 * 60,  # 30 minutes
         enabled=True
     )
-    
-    # Create channel manager
-    channels = ChannelManager(config, bus)
     
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
