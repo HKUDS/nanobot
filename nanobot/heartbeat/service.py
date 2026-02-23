@@ -9,13 +9,14 @@ from loguru import logger
 # Default interval: 30 minutes
 DEFAULT_HEARTBEAT_INTERVAL_S = 30 * 60
 
-# The prompt sent to agent during heartbeat
-HEARTBEAT_PROMPT = """Read HEARTBEAT.md in your workspace (if it exists).
-Follow any instructions or tasks listed there.
-If nothing needs attention, reply with just: HEARTBEAT_OK"""
-
-# Token that indicates "nothing to do"
+# Token the agent replies with when there is nothing to report
 HEARTBEAT_OK_TOKEN = "HEARTBEAT_OK"
+
+# The prompt sent to agent during heartbeat
+HEARTBEAT_PROMPT = (
+    "Read HEARTBEAT.md in your workspace and follow any instructions listed there. "
+    f"If nothing needs attention, reply with exactly: {HEARTBEAT_OK_TOKEN}"
+)
 
 
 def _is_heartbeat_empty(content: str | None) -> bool:
@@ -38,20 +39,24 @@ def _is_heartbeat_empty(content: str | None) -> bool:
 class HeartbeatService:
     """
     Periodic heartbeat service that wakes the agent to check for tasks.
-    
-    The agent reads HEARTBEAT.md from the workspace and executes any
-    tasks listed there. If nothing needs attention, it replies HEARTBEAT_OK.
+
+    The agent reads HEARTBEAT.md from the workspace and executes any tasks
+    listed there. If it has something to report, the response is forwarded
+    to the user via on_notify. If nothing needs attention, the agent replies
+    HEARTBEAT_OK and the response is silently dropped.
     """
-    
+
     def __init__(
         self,
         workspace: Path,
         on_heartbeat: Callable[[str], Coroutine[Any, Any, str]] | None = None,
+        on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = DEFAULT_HEARTBEAT_INTERVAL_S,
         enabled: bool = True,
     ):
         self.workspace = workspace
         self.on_heartbeat = on_heartbeat
+        self.on_notify = on_notify
         self.interval_s = interval_s
         self.enabled = enabled
         self._running = False
@@ -113,15 +118,14 @@ class HeartbeatService:
         if self.on_heartbeat:
             try:
                 response = await self.on_heartbeat(HEARTBEAT_PROMPT)
-                
-                # Check if agent said "nothing to do"
-                if HEARTBEAT_OK_TOKEN.replace("_", "") in response.upper().replace("_", ""):
-                    logger.info("Heartbeat: OK (no action needed)")
+                if HEARTBEAT_OK_TOKEN in response.upper():
+                    logger.info("Heartbeat: OK (nothing to report)")
                 else:
-                    logger.info("Heartbeat: completed task")
-                    
-            except Exception as e:
-                logger.error("Heartbeat execution failed: {}", e)
+                    logger.info("Heartbeat: completed, delivering response")
+                    if self.on_notify:
+                        await self.on_notify(response)
+            except Exception:
+                logger.exception("Heartbeat execution failed")
     
     async def trigger_now(self) -> str | None:
         """Manually trigger a heartbeat."""

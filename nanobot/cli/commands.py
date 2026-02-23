@@ -372,13 +372,21 @@ def gateway(
             session_key="heartbeat",
             channel=channel,
             chat_id=chat_id,
-            # suppress: heartbeat should not push progress to external channels
-            on_progress=_silent,
+            on_progress=_silent,  # suppress: heartbeat should not push progress to external channels
         )
+
+    async def on_heartbeat_notify(response: str) -> None:
+        """Deliver a heartbeat response to the user's channel."""
+        from nanobot.bus.events import OutboundMessage
+        channel, chat_id = _pick_heartbeat_target()
+        if channel == "cli":
+            return  # No external channel available to deliver to
+        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
 
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
         on_heartbeat=on_heartbeat,
+        on_notify=on_heartbeat_notify,
         interval_s=30 * 60,  # 30 minutes
         enabled=True
     )
