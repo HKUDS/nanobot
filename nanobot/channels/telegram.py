@@ -131,10 +131,12 @@ class TelegramChannel(BaseChannel):
         config: TelegramConfig,
         bus: MessageBus,
         groq_api_key: str = "",
+        bot_name: str = "nanobot",
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
+        self.bot_name = bot_name
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -306,19 +308,45 @@ class TelegramChannel(BaseChannel):
             return
 
         user = update.effective_user
-        # Detect language from user's name or profile (default to English for /start)
-        # For /start, we'll use a simple heuristic based on username or default to English
-        # The language will be detected from actual messages after this
+        # Detect language from user's language_code if available, otherwise default to English
+        language = 'en'
+        if user.language_code:
+            # Map Telegram language codes to our supported languages
+            lang_map = {
+                'vi': 'vi', 'vi-VN': 'vi',
+                'zh': 'zh', 'zh-CN': 'zh', 'zh-TW': 'zh',
+                'ja': 'ja', 'ja-JP': 'ja',
+                'ko': 'ko', 'ko-KR': 'ko',
+                'es': 'es', 'es-ES': 'es', 'es-MX': 'es',
+                'fr': 'fr', 'fr-FR': 'fr',
+                'de': 'de', 'de-DE': 'de',
+            }
+            language = lang_map.get(user.language_code, 'en')
+
         await update.message.reply_text(
-            get_bot_message('start', 'en', name=user.first_name)
+            get_bot_message('start', language, bot_name=self.bot_name, name=user.first_name)
         )
 
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /help command, bypassing ACL so all users can access it."""
         if not update.message:
             return
-        # For /help without context, use English (language detection happens via agent)
-        await update.message.reply_text(get_bot_message('help', 'en'))
+
+        # Try to detect language from user's language_code
+        language = 'en'
+        if update.effective_user and update.effective_user.language_code:
+            lang_map = {
+                'vi': 'vi', 'vi-VN': 'vi',
+                'zh': 'zh', 'zh-CN': 'zh', 'zh-TW': 'zh',
+                'ja': 'ja', 'ja-JP': 'ja',
+                'ko': 'ko', 'ko-KR': 'ko',
+                'es': 'es', 'es-ES': 'es', 'es-MX': 'es',
+                'fr': 'fr', 'fr-FR': 'fr',
+                'de': 'de', 'de-DE': 'de',
+            }
+            language = lang_map.get(update.effective_user.language_code, 'en')
+
+        await update.message.reply_text(get_bot_message('help', language, bot_name=self.bot_name))
 
     @staticmethod
     def _sender_id(user) -> str:

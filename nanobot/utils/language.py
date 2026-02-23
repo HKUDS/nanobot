@@ -111,13 +111,14 @@ def detect_language(text: str, user_md_path: Path | None = None) -> str:
     return 'en'
 
 
-def get_bot_message(key: str, language: str, **kwargs) -> str:
+def get_bot_message(key: str, language: str, bot_name: str = "nanobot", **kwargs) -> str:
     """
     Get a bot message in the specified language.
 
     Args:
         key: The message key (e.g., 'start', 'new_session', 'help')
         language: Language code ('vi', 'zh', 'ja', 'ko', 'es', 'fr', 'de', 'en')
+        bot_name: The name of the bot (default: 'nanobot')
         **kwargs: Optional parameters for string formatting
 
     Returns:
@@ -125,14 +126,14 @@ def get_bot_message(key: str, language: str, **kwargs) -> str:
     """
     messages = {
         'start': {
-            'vi': '👋 Xin chào {name}! Mình là nanobot.\n\nGửi tin nhắn và mình sẽ phản hồi!\nNhập /help để xem các lệnh có sẵn.',
-            'zh': '👋 你好 {name}! 我是 nanobot。\n\n给我发消息，我会回复！\n输入 /help 查看可用命令。',
-            'ja': '👋 こんにちは {name}! さんは nanobot です。\n\nメッセージを送ると返信します！\n/help で利用可能なコマンドを確認してください。',
-            'ko': '👋 안녕하세요 {name}! 저는 nanobot입니다.\n\n메시지를 보내주시면 응답해 드립니다!\n/help로 사용 가능한 명령을 확인하세요.',
-            'es': '👋 ¡Hola {name}! Soy nanobot.\n\n¡Envíame un mensaje y responderé!\nEscribe /help para ver los comandos disponibles.',
-            'fr': '👋 Salut {name}! Je suis nanobot.\n\nEnvoyez-moi un message et je répondrai!\nTapez /help pour voir les commandes disponibles.',
-            'de': '👋 Hallo {name}! Ich bin nanobot.\n\nSenden Sie mir eine Nachricht und ich antworte!\nGeben Sie /help ein, um die verfügbaren Befehle anzuzeigen.',
-            'en': '👋 Hi {name}! I\'m nanobot.\n\nSend me a message and I\'ll respond!\nType /help to see available commands.',
+            'vi': '👋 Xin chào {name}! Mình là {bot_name}.\n\nGửi tin nhắn và mình sẽ phản hồi!\nNhập /help để xem các lệnh có sẵn.',
+            'zh': '👋 你好 {name}! 我是 {bot_name}。\n\n给我发消息，我会回复！\n输入 /help 查看可用命令。',
+            'ja': '👋 こんにちは {name}! さんは {bot_name} です。\n\nメッセージを送ると返信します！\n/help で利用可能なコマンドを確認してください。',
+            'ko': '👋 안녕하세요 {name}! 저는 {bot_name}입니다.\n\n메시지를 보내주시면 응답해 드립니다!\n/help로 사용 가능한 명령을 확인하세요.',
+            'es': '👋 ¡Hola {name}! Soy {bot_name}.\n\n¡Envíame un mensaje y responderé!\nEscribe /help para ver los comandos disponibles.',
+            'fr': '👋 Salut {name}! Je suis {bot_name}.\n\nEnvoyez-moi un message et je répondrai!\nTapez /help pour voir les commandes disponibles.',
+            'de': '👋 Hallo {name}! Ich bin {bot_name}.\n\nSenden Sie mir eine Nachricht und ich antworte!\nGeben Sie /help ein, um die verfügbaren Befehle anzuzeigen.',
+            'en': '👋 Hi {name}! I\'m {bot_name}.\n\nSend me a message and I\'ll respond!\nType /help to see available commands.',
         },
         'new_session': {
             'vi': 'Phiên làm việc mới đã bắt đầu. Đang tiến hành ghi nhớ ngữ cảnh...',
@@ -145,21 +146,23 @@ def get_bot_message(key: str, language: str, **kwargs) -> str:
             'en': 'New session started. Memory consolidation in progress.',
         },
         'help': {
-            'vi': '🐈 Các lệnh của nanobot:\n/new — Bắt đầu cuộc trò chuyện mới\n/help — Hiển thị các lệnh có sẵn',
-            'zh': '🐈 nanobot 命令:\n/new — 开始新对话\n/help — 显示可用命令',
-            'ja': '🐈 nanobot コマンド:\n/new — 新しい会話を開始\n/help — 利用可能なコマンドを表示',
-            'ko': '🐈 nanobot 명령어:\n/new — 새 대화 시작\n/help — 사용 가능한 명령어 표시',
-            'es': '🐈 Comandos de nanobot:\n/new — Iniciar una nueva conversación\n/help — Mostrar comandos disponibles',
-            'fr': '🐈 Commandes nanobot:\n/new — Démarrer une nouvelle conversation\n/help — Afficher les commandes disponibles',
-            'de': '🐈 nanobot-Befehle:\n/new — Neue Unterhaltung starten\n/help — Verfügbare Befehle anzeigen',
-            'en': '🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands',
+            'vi': '🐈 Các lệnh của {bot_name}:\n/new — Bắt đầu cuộc trò chuyện mới\n/help — Hiển thị các lệnh có sẵn',
+            'zh': '🐈 {bot_name} 命令:\n/new — 开始新对话\n/help — 显示可用命令',
+            'ja': '🐈 {bot_name} コマンド:\n/new — 新しい会話を開始\n/help — 利用可能なコマンドを表示',
+            'ko': '🐈 {bot_name} 명령어:\n/new — 새 대화 시작\n/help — 사용 가능한 명령어 표시',
+            'es': '🐈 Comandos de {bot_name}:\n/new — Iniciar una nueva conversación\n/help — Mostrar comandos disponibles',
+            'fr': '🐈 Commandes {bot_name}:\n/new — Démarrer une nouvelle conversation\n/help — Afficher les commandes disponibles',
+            'de': '🐈 {bot_name}-Befehle:\n/new — Neue Unterhaltung starten\n/help — Verfügbare Befehle anzeigen',
+            'en': '🐈 {bot_name} commands:\n/new — Start a new conversation\n/help — Show available commands',
         },
     }
 
     lang_messages = messages.get(key, {})
     message = lang_messages.get(language, lang_messages.get('en', 'Message not found'))
 
-    return message.format(**kwargs) if kwargs else message
+    # Include bot_name in kwargs for formatting
+    format_kwargs = {'bot_name': bot_name, **kwargs}
+    return message.format(**format_kwargs) if format_kwargs else message
 
 
 def detect_language_from_session(history: list[dict[str, str]]) -> str:
