@@ -15,6 +15,19 @@ from datetime import datetime
 from nanobot.providers.audit_logger import APILogger
 
 
+def extract_session_info(request_messages: str) -> dict:
+    """Extract session info from formatted request messages."""
+    info = {"channel": None, "chat_id": None}
+
+    for line in request_messages.split("\n"):
+        if line.startswith("Channel: "):
+            info["channel"] = line[9:].strip()
+        elif line.startswith("Chat ID: "):
+            info["chat_id"] = line[9:].strip()
+
+    return info
+
+
 def extract_system_prompt(request_messages: str) -> str:
     """Extract system prompt from formatted request messages."""
     lines = request_messages.split("\n")
@@ -38,7 +51,174 @@ def compute_prefix_hash(content: str) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
-def analyze_cache_hit_rate(log_dir: Path | None = None, days: int = 7) -> dict:
+def group_requests_into_sessions(
+    requests: list[dict],
+    gap_threshold_seconds: int = 300,  # 5 minutes default
+) -> list[list[dict]]:
+    """
+    Group requests into sessions based on time gaps.
+
+    Args:
+        requests: List of requests with timestamp
+        gap_threshold_seconds: Max gap between requests in same session
+
+    Returns:
+        List of sessions (each session is a list of requests)
+    """
+    if not requests:
+        return []
+
+    # Sort by timestamp
+    sorted_requests = sorted(requests, key=lambda r: r.get("timestamp", ""))
+
+    sessions: list[list[dict]] = []
+    current_session: list[dict] = []
+    last_time: datetime | None = None
+
+    for req in sorted_requests:
+        ts_str = req.get("timestamp", "")
+        try:
+            req_time = datetime.fromisoformat(ts_str)
+        except (ValueError, TypeError):
+            continue
+
+        if last_time is None:
+            # First request
+            current_session = [req]
+        elif (req_time - last_time).total_seconds() <= gap_threshold_seconds:
+            # Same session
+            current_session.append(req)
+        else:
+            # New session
+            sessions.append(current_session)
+            current_session = [req]
+
+        last_time = req_time
+
+    # Don't forget the last session
+    if current_session:
+        sessions.append(current_session)
+
+    return sessions
+
+
+def analyze_cache_by_session(
+    log_dir: Path | None = None,
+    days: int = 7,
+    gap_threshold_seconds: int = 300,
+) -> dict:
+    """
+    Analyze cache hit rate grouped by sessions (conversations).
+
+    Args:
+        log_dir: Log directory path
+        days: Number of days to analyze
+        gap_threshold_seconds: Gap threshold for session separation
+
+    Returns:
+        dict with session-based cache statistics
+    """
+    from datetime import timedelta
+
+    log_dir = log_dir or APILogger._get_default_log_dir()
+
+    if not log_dir.exists():
+        return {"error": "No log files found"}
+
+    cutoff_date = datetime.now() - timedelta(days=days)
+
+    # Collect all requests
+    all_requests: list[dict] = []
+
+    for log_file in sorted(log_dir.glob("api_logs_*.jsonl")):
+        try:
+            date_str = log_file.stem.replace("api_logs_", "")
+            file_date = datetime.strptime(date_str, "%Y-%m-%d")
+
+            if file_date < cutoff_date:
+                continue
+
+            with open(log_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        data = json.loads(line)
+                        request_messages = data.get("request_messages", "")
+                        system_prompt = extract_system_prompt(request_messages)
+
+                        all_requests.append({
+                            "timestamp": data.get("timestamp"),
+                            "model": data.get("model"),
+                            "prompt_tokens": data.get("prompt_tokens", 0),
+                            "system_prompt": system_prompt,
+                            "system_prompt_hash": compute_prefix_hash(system_prompt) if system_prompt else "",
+                            "request_messages": request_messages,
+                        })
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+        except (ValueError, IOError):
+            continue
+
+    # Group into sessions
+    sessions = group_requests_into_sessions(all_requests, gap_threshold_seconds)
+
+    # Analyze each session
+    session_stats = []
+    total_requests = 0
+
+    for i, session in enumerate(sessions, 1):
+        if not session:
+            continue
+
+        # Within this session, calculate cache hits
+        seen_hashes: set[str] = set()
+        session_hits = 0
+        session_misses = 0
+        session_tokens = 0
+
+        for req in session:
+            prefix_hash = req.get("system_prompt_hash", "")
+            if not prefix_hash:
+                continue
+
+            total_requests += 1
+            session_tokens += req.get("prompt_tokens", 0)
+
+            if prefix_hash in seen_hashes:
+                session_hits += 1
+            else:
+                session_misses += 1
+                seen_hashes.add(prefix_hash)
+
+        session_total = session_hits + session_misses
+        session_stats.append({
+            "session_id": i,
+            "requests": len(session),
+            "hits": session_hits,
+            "misses": session_misses,
+            "hit_rate": (session_hits / session_total * 100) if session_total > 0 else 0,
+            "total_tokens": session_tokens,
+            "start_time": session[0].get("timestamp") if session else None,
+            "end_time": session[-1].get("timestamp") if session else None,
+            "model": session[0].get("model") if session else "unknown",
+            "unique_system_prompts": len(seen_hashes),
+        })
+
+    return {
+        "total_sessions": len(sessions),
+        "total_requests": total_requests,
+        "sessions": session_stats,
+        "gap_threshold_seconds": gap_threshold_seconds,
+    }
+
+
+def analyze_cache_hit_rate(
+    log_dir: Path | None = None,
+    days: int = 7,
+) -> dict:
     """
     Analyze potential prefix cache hit rate.
 

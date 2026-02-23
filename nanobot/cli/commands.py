@@ -1233,10 +1233,21 @@ def stats_path():
 @stats_app.command("cache")
 def stats_cache(
     days: int = typer.Option(7, "--days", "-d", help="Number of days to include"),
+    by_session: bool = typer.Option(False, "--session", "-s", help="Group by session/conversation"),
+    gap: int = typer.Option(300, "--gap", "-g", help="Session gap in seconds (default: 300 = 5 min)"),
 ):
     """Analyze prefix cache hit rate from API logs."""
-    from nanobot.providers.cache_analyzer import analyze_cache_hit_rate
     from rich.table import Table
+
+    if by_session:
+        _show_cache_by_session(days, gap)
+    else:
+        _show_cache_global(days)
+
+
+def _show_cache_global(days: int):
+    """Show global cache statistics."""
+    from nanobot.providers.cache_analyzer import analyze_cache_hit_rate
 
     stats = analyze_cache_hit_rate(days=days)
 
@@ -1288,6 +1299,70 @@ def stats_cache(
                 detail["model"][:20],
             )
         console.print(prefix_table)
+
+
+def _show_cache_by_session(days: int, gap: int):
+    """Show cache statistics grouped by session."""
+    from nanobot.providers.cache_analyzer import analyze_cache_by_session
+
+    stats = analyze_cache_by_session(days=days, gap_threshold_seconds=gap)
+
+    console.print(f"{__logo__} Cache Analysis by Session (last {days} days, gap={gap}s)\n")
+
+    if "error" in stats:
+        console.print(f"[red]Error: {stats['error']}[/red]")
+        return
+
+    # Summary
+    summary = Table(title="Overview")
+    summary.add_column("Metric", style="cyan")
+    summary.add_column("Value", style="green")
+    summary.add_row("Total Sessions", str(stats['total_sessions']))
+    summary.add_row("Total Requests", f"{stats['total_requests']:,}")
+    console.print(summary)
+    console.print()
+
+    # Session table
+    if stats.get("sessions"):
+        session_table = Table(title="Sessions")
+        session_table.add_column("#", style="dim")
+        session_table.add_column("Reqs", style="green")
+        session_table.add_column("Hits", style="yellow")
+        session_table.add_column("Misses", style="red")
+        session_table.add_column("Hit Rate", style="cyan")
+        session_table.add_column("Tokens", style="blue")
+        session_table.add_column("Start Time", style="magenta")
+
+        for s in stats["sessions"]:
+            hit_rate = s.get("hit_rate", 0)
+            hit_rate_str = f"{hit_rate:.1f}%"
+
+            session_table.add_row(
+                str(s["session_id"]),
+                str(s["requests"]),
+                str(s["hits"]),
+                str(s["misses"]),
+                hit_rate_str,
+                f"{s['total_tokens']:,}",
+                s["start_time"][:16] if s.get("start_time") else "N/A",
+            )
+
+        console.print(session_table)
+        console.print()
+
+        # Summary stats
+        total_hits = sum(s["hits"] for s in stats["sessions"])
+        total_misses = sum(s["misses"] for s in stats["sessions"])
+        total_all = total_hits + total_misses
+        overall_rate = (total_hits / total_all * 100) if total_all > 0 else 0
+
+        agg_table = Table(title="Aggregate Stats")
+        agg_table.add_column("Metric", style="cyan")
+        agg_table.add_column("Value", style="green")
+        agg_table.add_row("Total Hits (all sessions)", f"{total_hits:,}")
+        agg_table.add_row("Total Misses (all sessions)", f"{total_misses:,}")
+        agg_table.add_row("Overall Hit Rate", f"{overall_rate:.1f}%")
+        console.print(agg_table)
 
 
 if __name__ == "__main__":
