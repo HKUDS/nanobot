@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 from loguru import logger
 
@@ -52,7 +53,7 @@ class MatrixChannel(BaseChannel):
         self.client = AsyncClient(
             self.config.homeserver,
             self.config.user_id,
-            store_path="~/.nanobot/matrix_store"
+            store_path=str(Path.home() / ".nanobot" / "matrix_store")
         )
 
         # Set access token for login
