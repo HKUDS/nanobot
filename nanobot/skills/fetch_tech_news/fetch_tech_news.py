@@ -21,7 +21,7 @@ def fetch_top_stories(limit=30):
         return []
 
 cs_keywords = [
-    'python', 'javascript', 'java', 'rust', 'go', 'c\\+\\+', 'swift', 'kotlin',
+    'python', 'javascript', 'java', 'rust', 'go', 'c++', 'swift', 'kotlin',
     'ai', 'ml', 'machine learning', 'llm', 'api', 'docker', 'kubernetes', 'cloud', 'aws', 'azure', 'gcp',
     'algorithm', 'data structure', 'database', 'sql', 'nosql', 'frontend', 'backend', 'devops', 'security',
     'github', 'gitlab', 'stackoverflow', 'linux', 'windows', 'macos',
@@ -30,13 +30,30 @@ cs_keywords = [
 
 def filter_cs_stories(stories):
     cs_stories = []
+    print(f"Total stories fetched: {len(stories)}")
+    simple_keywords = [
+        'python', 'javascript', 'java', 'rust', 'go', 'c++', 'swift', 'kotlin',
+        'ai', 'ml', 'machine learning', 'llm', 'gpt', 'api', 'docker', 'kubernetes', 'k8s', 'cloud', 'aws', 'azure', 'gcp',
+        'algorithm', 'algorithms', 'data structure', 'data structures', 'database', 'databases', 'sql', 'nosql', 
+        'frontend', 'backend', 'devops', 'security', 'cybersecurity',
+        'github', 'gitlab', 'stackoverflow', 'linux', 'windows', 'macos',
+        'cs', 'computer science', 'coding', 'programming', 'tutorial', 'course', 'learning', 'lean', 'ssh', 'forth', 'language'
+    ]
+    
     for story in stories:
         title_lower = story.get('title', '').lower()
-        if any(re.search(rf'\\b{re.escape(kw)}\\b', title_lower) for kw in cs_keywords):  # Word boundary match
+        matched_keywords = [kw for kw in simple_keywords if kw in title_lower]
+        if matched_keywords:
+            print(f"MATCH: {story.get('title')} -> {matched_keywords}")
             story['score'] = story.get('score', 0)
             story['comments'] = story.get('descendants', 0)
             cs_stories.append(story)
-    return sorted(cs_stories, key=lambda x: x['score'], reverse=True)[:10]
+        else:
+            print(f"NO MATCH: {story.get('title')}")
+    
+    result = sorted(cs_stories, key=lambda x: (x.get('score', 0), x.get('descendants', 0)), reverse=True)[:10]
+    print(f"Final CS stories count: {len(result)}")
+    return result
 
 def format_stories(stories):
     if not stories:
