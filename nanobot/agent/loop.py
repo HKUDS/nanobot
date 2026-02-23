@@ -50,7 +50,7 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         max_iterations: int = 20,
-        temperature: float = 0.7,
+        temperature: float = 0.1,
         max_tokens: int = 4096,
         memory_window: int = 50,
         brave_api_key: str | None = None,
