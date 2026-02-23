@@ -73,6 +73,7 @@ class CronService:
         self._timer_task: asyncio.Task | None = None
         self._running = False
         self._lock = asyncio.Lock()
+        self._running_jobs: set[str] = set()
     
     def _load_store(self) -> CronStore:
         """Load jobs from disk."""
@@ -240,37 +241,48 @@ class CronService:
             self._arm_timer()
     
     async def _execute_job(self, job: CronJob) -> None:
-        """Execute a single job."""
-        start_ms = _now_ms()
-        logger.info("Cron: executing job '{}' ({})", job.name, job.id)
-        
+        """Execute a single job.
+
+        Uses _running_jobs as a per-job guard to prevent duplicate execution
+        when _on_timer and run_job overlap on the same job.
+        """
+        if job.id in self._running_jobs:
+            logger.debug("Cron: job '{}' ({}) already running, skipping", job.name, job.id)
+            return
+        self._running_jobs.add(job.id)
         try:
-            response = None
-            if self.on_job:
-                response = await self.on_job(job)
-            
-            job.state.last_status = "ok"
-            job.state.last_error = None
-            logger.info("Cron: job '{}' completed", job.name)
-            
-        except Exception as e:
-            job.state.last_status = "error"
-            job.state.last_error = str(e)
-            logger.error("Cron: job '{}' failed: {}", job.name, e)
-        
-        job.state.last_run_at_ms = start_ms
-        job.updated_at_ms = _now_ms()
-        
-        # Handle one-shot jobs
-        if job.schedule.kind == "at":
-            if job.delete_after_run:
-                self._store.jobs = [j for j in self._store.jobs if j.id != job.id]
+            start_ms = _now_ms()
+            logger.info("Cron: executing job '{}' ({})", job.name, job.id)
+
+            try:
+                response = None
+                if self.on_job:
+                    response = await self.on_job(job)
+
+                job.state.last_status = "ok"
+                job.state.last_error = None
+                logger.info("Cron: job '{}' completed", job.name)
+
+            except Exception as e:
+                job.state.last_status = "error"
+                job.state.last_error = str(e)
+                logger.error("Cron: job '{}' failed: {}", job.name, e)
+
+            job.state.last_run_at_ms = start_ms
+            job.updated_at_ms = _now_ms()
+
+            # Handle one-shot jobs
+            if job.schedule.kind == "at":
+                if job.delete_after_run:
+                    self._store.jobs = [j for j in self._store.jobs if j.id != job.id]
+                else:
+                    job.enabled = False
+                    job.state.next_run_at_ms = None
             else:
-                job.enabled = False
-                job.state.next_run_at_ms = None
-        else:
-            # Compute next run
-            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+                # Compute next run
+                job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+        finally:
+            self._running_jobs.discard(job.id)
     
     # ========== Public API ==========
     
