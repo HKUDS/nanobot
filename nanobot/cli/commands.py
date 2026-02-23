@@ -1230,5 +1230,65 @@ def stats_path():
         console.print("[dim]Log directory does not exist yet[/dim]")
 
 
+@stats_app.command("cache")
+def stats_cache(
+    days: int = typer.Option(7, "--days", "-d", help="Number of days to include"),
+):
+    """Analyze prefix cache hit rate from API logs."""
+    from nanobot.providers.cache_analyzer import analyze_cache_hit_rate
+    from rich.table import Table
+
+    stats = analyze_cache_hit_rate(days=days)
+
+    console.print(f"{__logo__} Prefix Cache Analysis (last {days} days)\n")
+
+    if "error" in stats:
+        console.print(f"[red]Error: {stats['error']}[/red]")
+        return
+
+    # Summary
+    summary = Table(title="Overview")
+    summary.add_column("Metric", style="cyan")
+    summary.add_column("Value", style="green")
+    summary.add_row("Total Requests", f"{stats['total_requests']:,}")
+    summary.add_row("Total Prompt Tokens", f"{stats['total_prompt_tokens']:,}")
+    summary.add_row("Est. System Tokens", f"{stats['estimated_system_tokens']:,}")
+    summary.add_row("Unique Prefixes", str(stats['unique_prefixes']))
+    console.print(summary)
+    console.print()
+
+    # Cache analysis
+    analysis = stats.get("cache_analysis", {})
+    cache_table = Table(title="Cache Analysis")
+    cache_table.add_column("Metric", style="cyan")
+    cache_table.add_column("Value", style="green")
+    cache_table.add_row("Cache Hits", f"{analysis.get('total_hits', 0):,}")
+    cache_table.add_row("Cache Misses", f"{analysis.get('total_misses', 0):,}")
+    cache_table.add_row("Hit Rate", f"{analysis.get('hit_rate', 0):.1f}%")
+    cache_table.add_row("Potential Token Savings", f"{analysis.get('potential_token_savings', 0):,}")
+    cache_table.add_row("Savings %", f"{analysis.get('savings_percentage', 0):.1f}%")
+    console.print(cache_table)
+    console.print()
+
+    # Top prefixes
+    if stats.get("prefix_details"):
+        prefix_table = Table(title="Top Prefixes by Request Count")
+        prefix_table.add_column("#", style="dim")
+        prefix_table.add_column("Hash", style="cyan")
+        prefix_table.add_column("Reqs", style="green")
+        prefix_table.add_column("Hits", style="yellow")
+        prefix_table.add_column("Model", style="blue")
+
+        for i, detail in enumerate(stats["prefix_details"][:10], 1):
+            prefix_table.add_row(
+                str(i),
+                detail["prefix_hash"][:8] + "...",
+                str(detail["requests"]),
+                str(detail["hits"]),
+                detail["model"][:20],
+            )
+        console.print(prefix_table)
+
+
 if __name__ == "__main__":
     app()
