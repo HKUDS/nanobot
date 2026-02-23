@@ -8,6 +8,7 @@ from typing import Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.utils.language import detect_language, detect_language_from_session
 
 
 class ContextBuilder:
@@ -21,9 +22,9 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     
     def __init__(self, workspace: Path):
-        self.workspace = workspace
-        self.memory = MemoryStore(workspace)
-        self.skills = SkillsLoader(workspace)
+        self.workspace = Path(workspace) if not isinstance(workspace, Path) else workspace
+        self.memory = MemoryStore(self.workspace)
+        self.skills = SkillsLoader(self.workspace)
     
     def build_system_prompt(
         self,
@@ -200,6 +201,22 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
 
         if channel and chat_id:
             final_system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
+
+        # Detect user language and add instruction to respond in that language
+        detected_lang = detect_language_from_session(history + [{"role": "user", "content": current_message}])
+        language_names = {
+            'vi': 'Vietnamese (Tiếng Việt)',
+            'zh': 'Chinese (中文)',
+            'ja': 'Japanese (日本語)',
+            'ko': 'Korean (한국어)',
+            'es': 'Spanish (Español)',
+            'fr': 'French (Français)',
+            'de': 'German (Deutsch)',
+            'en': 'English',
+        }
+        lang_instruction = language_names.get(detected_lang, 'the user\'s language')
+        final_system_prompt += f"\n\n## Language\nIMPORTANT: Respond in {lang_instruction} unless the user explicitly asks for another language."
+
         messages.append({"role": "system", "content": final_system_prompt})
 
         # History

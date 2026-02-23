@@ -37,6 +37,7 @@ from nanobot.agent.tools.workflow import (
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.language import detect_language, detect_language_from_session, get_bot_message
 
 
 class AgentLoop:
@@ -76,7 +77,7 @@ class AgentLoop:
         from nanobot.cron.service import CronService
         self.bus = bus
         self.provider = provider
-        self.workspace = workspace
+        self.workspace = Path(workspace) if not isinstance(workspace, Path) else workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.temperature = temperature
@@ -261,14 +262,15 @@ class AgentLoop:
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[[str, str | None], Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str]]:
         """
         Run the agent iteration loop.
 
         Args:
             initial_messages: Starting messages for the LLM conversation.
-            on_progress: Optional callback to push intermediate content to the user.
+            on_progress: Optional callback(content, message_type) to push intermediate content.
+                        message_type can be "thinking", "action", or None for regular messages.
 
         Returns:
             Tuple of (final_content, list_of_tools_used).
@@ -277,6 +279,7 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        tool_results: list[tuple[str, dict, str]] = []  # (tool_name, args, result)
         text_only_retried = False
 
         while iteration < self.max_iterations:
@@ -294,8 +297,8 @@ class AgentLoop:
                 if on_progress:
                     clean = self._strip_think(response.content)
                     if clean:
-                        await on_progress(clean)
-                    await on_progress(self._tool_hint(response.tool_calls))
+                        await on_progress(clean, message_type="thinking")
+                    await on_progress(self._tool_hint(response.tool_calls), message_type="action")
 
                 tool_call_dicts = [
                     {
@@ -318,6 +321,7 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    tool_results.append((tool_call.name, tool_call.arguments, result))
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -336,7 +340,102 @@ class AgentLoop:
                     continue
                 break
 
+        # Generate summary if tools were used but no final content
+        if final_content is None and tool_results:
+            final_content = self._generate_tool_summary(tool_results)
+
         return final_content, tools_used
+
+    def _generate_tool_summary(self, tool_results: list[tuple[str, dict, str]]) -> str:
+        """
+        Generate a summary of executed tools and their results.
+
+        Args:
+            tool_results: List of (tool_name, args, result) tuples.
+
+        Returns:
+            A formatted summary string.
+        """
+        lines = ["✅ Actions completed:\n"]
+
+        for tool_name, args, result in tool_results:
+            # Format tool name with emoji based on type
+            emoji = self._get_tool_emoji(tool_name)
+
+            # Format the action description
+            action_desc = self._format_tool_action(tool_name, args)
+            lines.append(f"{emoji} {action_desc}")
+
+            # Add success/failure indication
+            if result and isinstance(result, str):
+                if "error" in result.lower() or "failed" in result.lower():
+                    lines.append(f"   ❌ Failed: {result[:100]}{'...' if len(result) > 100 else ''}")
+                elif tool_name in ("edit_file", "write_file"):
+                    # File operations - show what was done
+                    if "edited" in result.lower() or "written" in result.lower() or "success" in result.lower():
+                        lines.append(f"   ✅ Success")
+                elif tool_name == "exec":
+                    # Command execution - show output snippet
+                    if result.strip():
+                        preview = result.strip().split('\n')[0][:80]
+                        lines.append(f"   📤 {preview}{'...' if len(result) > 80 else ''}")
+
+        return "\n".join(lines)
+
+    def _get_tool_emoji(self, tool_name: str) -> str:
+        """Get an emoji for a tool name."""
+        emoji_map = {
+            "read_file": "📖",
+            "write_file": "✍️",
+            "edit_file": "📝",
+            "list_dir": "📁",
+            "exec": "⚡",
+            "web_search": "🔍",
+            "web_fetch": "🌐",
+            "message": "💬",
+            "spawn": "🤖",
+            "cron": "⏰",
+            "research": "🔬",
+        }
+        return emoji_map.get(tool_name, "🔧")
+
+    def _format_tool_action(self, tool_name: str, args: dict) -> str:
+        """Format a tool action into a human-readable description."""
+        if tool_name == "read_file":
+            path = args.get("path", args.get("file_path", "unknown"))
+            return f"Read file: `{path}`"
+        elif tool_name == "write_file":
+            path = args.get("path", args.get("file_path", "unknown"))
+            return f"Wrote file: `{path}`"
+        elif tool_name == "edit_file":
+            path = args.get("path", args.get("file_path", "unknown"))
+            return f"Edited file: `{path}`"
+        elif tool_name == "list_dir":
+            path = args.get("path", ".")
+            return f"Listed directory: `{path}`"
+        elif tool_name == "exec":
+            cmd = args.get("command", "")
+            return f"Executed: `{cmd[:60]}{'...' if len(cmd) > 60 else ''}`"
+        elif tool_name == "web_search":
+            query = args.get("query", "")
+            return f"Searched: \"{query[:40]}{'...' if len(query) > 40 else ''}\""
+        elif tool_name == "web_fetch":
+            url = args.get("url", "")
+            return f"Fetched: `{url[:50]}{'...' if len(url) > 50 else ''}`"
+        elif tool_name == "spawn":
+            agent_type = args.get("agent_type", "subagent")
+            prompt = args.get("prompt", "")[:40]
+            return f"Spawned {agent_type}: \"{prompt}...\""
+        elif tool_name == "cron":
+            schedule = args.get("schedule", args.get("cron_expression", ""))
+            return f"Scheduled cron: `{schedule}`"
+        elif tool_name == "research":
+            query = args.get("query", "")
+            return f"Researched: \"{query[:40]}{'...' if len(query) > 40 else ''}\""
+        else:
+            # Generic format
+            arg_str = ", ".join(f"{k}={v}" for k, v in list(args.items())[:2])
+            return f"{tool_name}({arg_str})"
 
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -382,18 +481,21 @@ class AgentLoop:
         self,
         msg: InboundMessage,
         session_key: str | None = None,
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[[str, str | None], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """
         Process a single inbound message.
-        
+
         Args:
             msg: The inbound message to process.
             session_key: Override session key (used by process_direct).
-            on_progress: Optional callback for intermediate output (defaults to bus publish).
-        
+            on_progress: Optional callback(content, message_type) for intermediate output.
+                        Defaults to bus publish. message_type can be "thinking", "action",
+                        or None for regular messages.
+
         Returns:
-            The response message, or None if no response needed.
+            The response message, or None if no response needed (e.g., tools executed
+            but no text response generated).
         """
         # System messages route back via chat_id ("channel:chat_id")
         if msg.channel == "system":
@@ -408,6 +510,9 @@ class AgentLoop:
         # Handle slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
+            # Detect language from conversation history
+            language = detect_language_from_session(session.messages)
+
             # Capture messages before clearing (avoid race condition with background task)
             messages_to_archive = session.messages.copy()
             session.clear()
@@ -421,10 +526,12 @@ class AgentLoop:
 
             asyncio.create_task(_consolidate_and_cleanup())
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started. Memory consolidation in progress.")
+                                  content=get_bot_message('new_session', language))
         if cmd == "/help":
+            # Detect language from conversation history
+            language = detect_language_from_session(session.messages)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+                                  content=get_bot_message('help', language))
         
         if len(session.messages) > self.memory_window and session.key not in self._consolidating:
             self._consolidating.add(session.key)
@@ -451,18 +558,21 @@ class AgentLoop:
             inherit_global_skills=self.inherit_global_skills,
         )
 
-        async def _bus_progress(content: str) -> None:
+        async def _bus_progress(content: str, message_type: str | None = None) -> None:
+            metadata = msg.metadata.copy() if msg.metadata else {}
+            if message_type:
+                metadata["message_type"] = message_type
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content,
-                metadata=msg.metadata or {},
+                metadata=metadata,
             ))
 
         final_content, tools_used = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
-        if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+        # final_content will be None only if no tools were used AND no text was generated
+        # This can happen for empty/no-op messages
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
@@ -518,13 +628,14 @@ class AgentLoop:
         )
         final_content, _ = await self._run_agent_loop(initial_messages)
 
+        # No response needed if final_content is None
         if final_content is None:
-            final_content = "Background task completed."
-        
+            return None
+
         session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
         session.add_message("assistant", final_content)
         self.sessions.save(session)
-        
+
         return OutboundMessage(
             channel=origin_channel,
             chat_id=origin_chat_id,
@@ -657,18 +768,19 @@ Respond with ONLY valid JSON, no markdown fences."""
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[[str, str | None], Awaitable[None]] | None = None,
     ) -> str:
         """
         Process a message directly (for CLI or cron usage).
-        
+
         Args:
             content: The message content.
             session_key: Session identifier (overrides channel:chat_id for session lookup).
             channel: Source channel (for tool context routing).
             chat_id: Source chat ID (for tool context routing).
-            on_progress: Optional callback for intermediate output.
-        
+            on_progress: Optional callback(content, message_type) for intermediate output.
+                        message_type can be "thinking", "action", or None for regular messages.
+
         Returns:
             The agent's response.
         """

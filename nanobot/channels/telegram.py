@@ -17,6 +17,14 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
 from nanobot.utils.message import split_telegram_message
+from nanobot.utils.language import detect_language, get_bot_message
+
+
+def _format_thinking_message(text: str) -> str:
+    """Format thinking/action messages with <tg-spoiler> for collapsible smaller text."""
+    # Telegram's tg-spoiler element creates collapsible text
+    # Combined with small HTML tag for smaller font
+    return f"<tg-spoiler><small>{text}</small></tg-spoiler>"
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -264,9 +272,17 @@ class TelegramChannel(BaseChannel):
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
+            # Check if this is a thinking/action message
+            message_type = msg.metadata.get("message_type", "")
+
             for chunk in _split_message(msg.content):
                 try:
-                    html = _markdown_to_telegram_html(chunk)
+                    # Apply special formatting for thinking/action messages
+                    if message_type in ("thinking", "action"):
+                        html = _format_thinking_message(chunk)
+                    else:
+                        html = _markdown_to_telegram_html(chunk)
+
                     await self._app.bot.send_message(
                         chat_id=chat_id,
                         text=html,
@@ -290,21 +306,19 @@ class TelegramChannel(BaseChannel):
             return
 
         user = update.effective_user
+        # Detect language from user's name or profile (default to English for /start)
+        # For /start, we'll use a simple heuristic based on username or default to English
+        # The language will be detected from actual messages after this
         await update.message.reply_text(
-            f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
-            "Send me a message and I'll respond!\n"
-            "Type /help to see available commands."
+            get_bot_message('start', 'en', name=user.first_name)
         )
 
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /help command, bypassing ACL so all users can access it."""
         if not update.message:
             return
-        await update.message.reply_text(
-            "🐈 nanobot commands:\n"
-            "/new — Start a new conversation\n"
-            "/help — Show available commands"
-        )
+        # For /help without context, use English (language detection happens via agent)
+        await update.message.reply_text(get_bot_message('help', 'en'))
 
     @staticmethod
     def _sender_id(user) -> str:
