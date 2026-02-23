@@ -1,7 +1,0 @@
-{
-  "api_key": "YOUR_OKX_API_KEY",
-  "secret_key": "YOUR_OKX_SECRET_KEY",
-  "passphrase": "YOUR_OKX_PASSPHRASE",
-  "is_demo": true,
-  "base_url": "https://www.okx.com"
-}

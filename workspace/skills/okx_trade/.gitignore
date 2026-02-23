@@ -1,20 +1,6 @@
-# Ignore API credentials
-config.json
+# Secrets and credentials
+secret.env
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
+# Runtime output
+memory/
 
-# Virtual environments
-venv/
-env/
-ENV/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
