@@ -50,12 +50,14 @@ class OKXTradeSkill:
         """Generate signature for OKX API request.
 
         According to OKX docs: timestamp + method + requestPath + body
+        Example: 2024-01-01T00:00:00.000ZGET/api/v5/account/balance
         """
         # Ensure body is empty string for GET requests
         if not body:
             body = ""
 
         # Build prehash string: timestamp + method + requestPath + body
+        # NO newlines, NO API-KEY field - just simple concatenation
         prehash_string = timestamp + method + request_path + body
 
         # Sign with HMAC-SHA256
@@ -68,8 +70,12 @@ class OKXTradeSkill:
 
     def _get_headers(self, method: str, request_path: str, body: str = "") -> dict[str, str]:
         """Generate headers for OKX API request."""
-        # OKX requires ISO 8601 timestamp format
-        timestamp = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        # OKX requires ISO 8601 timestamp: 2024-01-01T00:00:00.123Z
+        # Must be UTC time with milliseconds
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+        timestamp = now.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+
         signature = self._sign(timestamp, method, request_path, body)
 
         headers = {
