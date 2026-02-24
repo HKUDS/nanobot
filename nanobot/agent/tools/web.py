@@ -58,15 +58,11 @@ class WebSearchTool(Tool):
     }
     
     def __init__(self, api_key: str | None = None, max_results: int = 5):
-        self._config_api_key = api_key
+        self.api_key = api_key
         self.max_results = max_results
 
-    def _resolve_api_key(self) -> str:
-        """Resolve API key on each call to support hot-reload and env var changes."""
-        return self._config_api_key or os.environ.get("BRAVE_API_KEY", "")
-
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        api_key = self._resolve_api_key()
+        api_key = self.api_key or os.environ.get("BRAVE_API_KEY", "")
         if not api_key:
             return (
                 "Error: Brave Search API key not configured. "
