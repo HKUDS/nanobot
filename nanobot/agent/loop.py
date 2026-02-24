@@ -331,6 +331,7 @@ class AgentLoop:
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         system_prompt: str | None = None,
+        model: str | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -495,9 +496,9 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        # Main agent always uses the default model — vision descriptions are now text
+        # Main agent: use per-call model override (e.g. from agent profile) or default
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages, on_progress=on_progress or _bus_progress, model=model,
         )
 
         if final_content is None:
@@ -548,6 +549,7 @@ class AgentLoop:
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         system_prompt: str | None = None,
+        model: str | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage).
 
@@ -555,10 +557,13 @@ class AgentLoop:
             system_prompt: Optional system prompt override.  When provided it is
                 prepended to the default system prompt.  Used by named agent
                 profiles (``cron add --agent <name>``).
+            model: Optional model override for this call only.  Does NOT mutate
+                the agent's default model — safe to use concurrently.
         """
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(
-            msg, session_key=session_key, on_progress=on_progress, system_prompt=system_prompt
+            msg, session_key=session_key, on_progress=on_progress,
+            system_prompt=system_prompt, model=model,
         )
         return response.content if response else ""

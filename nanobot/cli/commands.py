@@ -325,15 +325,14 @@ def gateway(
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
-        # Resolve named agent profile → system_prompt override
+        # Resolve named agent profile → per-call overrides (never mutate agent state)
         system_prompt: str | None = None
+        profile_model: str | None = None
         if job.payload.agent:
             profile = config.agents.profiles.get(job.payload.agent)
             if profile:
                 system_prompt = profile.system_prompt
-                # Override model if the profile specifies one
-                if profile.model:
-                    agent.model = profile.model
+                profile_model = profile.model or None
             else:
                 logger.warning(
                     "Cron job '{}': agent profile '{}' not found in config, using default.",
@@ -347,6 +346,7 @@ def gateway(
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
             system_prompt=system_prompt,
+            model=profile_model,
         )
         if job.payload.deliver and job.payload.to:
             from nanobot.bus.events import OutboundMessage
