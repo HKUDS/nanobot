@@ -1,6 +1,7 @@
 """Session management for conversation history."""
 
 import json
+import shutil
 from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -43,20 +44,11 @@ class Session:
         self.updated_at = datetime.now()
 
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """
-        Get message history for LLM context.
+        """Return unconsolidated messages for LLM input, aligned to a user turn."""
+        unconsolidated = self.messages[self.last_consolidated:]
+        recent = unconsolidated[-max_messages:]
 
-        Args:
-            max_messages: Maximum messages to return.
-
-        Returns:
-            List of messages in LLM format.
-        """
-        # Get recent messages
-        recent = self.messages[-max_messages:] if len(self.messages) > max_messages else self.messages
-
-        # Anthropic (and some gateways) reject malformed history windows that start with
-        # assistant/tool blocks cut from a previous turn. Keep only a turn-aligned suffix.
+        # Drop leading non-user messages to avoid orphaned tool/tool_result blocks.
         trimmed = 0
         while recent and recent[0].get("role") != "user":
             recent = recent[1:]
@@ -64,11 +56,10 @@ class Session:
         if trimmed:
             logger.debug(
                 "Session history window realigned to user boundary "
-                f"(trimmed={trimmed}, window={min(len(self.messages), max_messages)})"
+                f"(trimmed={trimmed}, window={min(len(unconsolidated), max_messages)})"
             )
 
-        # Convert to LLM format (role, content, and optional tool_calls / tool_call_id)
-        history = []
+        history: list[dict[str, Any]] = []
         for m in recent:
             entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
             for k in ("tool_calls", "tool_call_id", "name"):
@@ -134,9 +125,11 @@ class SessionManager:
         if not path.exists():
             legacy_path = self._get_legacy_session_path(key)
             if legacy_path.exists():
-                import shutil
-                shutil.move(str(legacy_path), str(path))
-                logger.info(f"Migrated session {key} from legacy path")
+                try:
+                    shutil.move(str(legacy_path), str(path))
+                    logger.info("Migrated session {} from legacy path", key)
+                except Exception:
+                    logger.exception("Failed to migrate session {}", key)
 
         if not path.exists():
             return None
@@ -148,7 +141,7 @@ class SessionManager:
             last_consolidated = 0
             last_consolidated_at = None
 
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -173,16 +166,17 @@ class SessionManager:
                 last_consolidated_at=last_consolidated_at,
             )
         except Exception as e:
-            logger.warning(f"Failed to load session {key}: {e}")
+            logger.warning("Failed to load session {}: {}", key, e)
             return None
     
     def save(self, session: Session) -> None:
         """Save a session to disk."""
         path = self._get_session_path(session.key)
 
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             metadata_line = {
                 "_type": "metadata",
+                "key": session.key,
                 "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(),
                 "metadata": session.metadata,
@@ -211,13 +205,14 @@ class SessionManager:
         for path in self.sessions_dir.glob("*.jsonl"):
             try:
                 # Read just the metadata line
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     first_line = f.readline().strip()
                     if first_line:
                         data = json.loads(first_line)
                         if data.get("_type") == "metadata":
+                            key = data.get("key") or path.stem.replace("_", ":", 1)
                             sessions.append({
-                                "key": path.stem.replace("_", ":"),
+                                "key": key,
                                 "created_at": data.get("created_at"),
                                 "updated_at": data.get("updated_at"),
                                 "path": str(path)

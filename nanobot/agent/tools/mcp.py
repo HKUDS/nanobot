@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Any
 
+import httpx
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool
+
+
+def _cfg_get(cfg: Any, key: str, default: Any = None) -> Any:
+    """Read config value from either dict or object-style configs."""
+    if isinstance(cfg, dict):
+        return cfg.get(key, default)
+    return getattr(cfg, key, default)
 
 
 class MCPTool(Tool):
@@ -20,12 +29,14 @@ class MCPTool(Tool):
         tool_description: str,
         input_schema: dict[str, Any],
         session: Any,
+        tool_timeout: int = 30,
     ):
         self._server_name = server_name
         self._tool_name = tool_name
         self._tool_description = tool_description
         self._input_schema = input_schema
         self._session = session
+        self._tool_timeout = max(1, int(tool_timeout))
 
     @property
     def name(self) -> str:
@@ -40,15 +51,32 @@ class MCPTool(Tool):
         return self._input_schema
 
     async def execute(self, **kwargs: Any) -> str:
+        from mcp import types
+
         try:
-            result = await self._session.call_tool(self._tool_name, arguments=kwargs)
-            parts: list[str] = []
-            for item in result.content:
-                text = getattr(item, "text", None)
-                parts.append(text if isinstance(text, str) else str(item))
-            return "\n".join(parts) if parts else "(empty result)"
+            result = await asyncio.wait_for(
+                self._session.call_tool(self._tool_name, arguments=kwargs),
+                timeout=self._tool_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "MCP tool '{}:{}' timed out after {}s",
+                self._server_name,
+                self._tool_name,
+                self._tool_timeout,
+            )
+            return f"MCP Error ({self._server_name}/{self._tool_name}): timed out after {self._tool_timeout}s"
         except Exception as e:
             return f"MCP Error ({self._server_name}/{self._tool_name}): {e}"
+
+        parts: list[str] = []
+        for block in result.content:
+            if isinstance(block, types.TextContent):
+                parts.append(block.text)
+                continue
+            text = getattr(block, "text", None)
+            parts.append(text if isinstance(text, str) else str(block))
+        return "\n".join(parts) if parts else "(empty result)"
 
 
 class _ServerHandle:
@@ -66,21 +94,11 @@ class MCPManager:
     """Manage lifecycle of MCP server connections."""
 
     def __init__(self, servers: dict[str, Any]):
-        from nanobot.config.schema import McpServerConfig
-
-        self._configs: dict[str, McpServerConfig] = {}
+        self._configs: dict[str, Any] = {}
         for name, cfg in servers.items():
-            if isinstance(cfg, McpServerConfig):
-                if cfg.enabled:
-                    self._configs[name] = cfg
-            elif isinstance(cfg, dict):
-                sc = McpServerConfig(**cfg)
-                if sc.enabled:
-                    self._configs[name] = sc
-            else:
-                if getattr(cfg, "enabled", True):
-                    self._configs[name] = cfg
-
+            if not _cfg_get(cfg, "enabled", True):
+                continue
+            self._configs[name] = cfg
         self._handles: list[_ServerHandle] = []
 
     @property
@@ -155,6 +173,7 @@ class MCPManager:
                     handle.session = session
 
                     result = await session.list_tools()
+                    tool_timeout = int(_cfg_get(cfg, "tool_timeout", 30))
                     for tool in result.tools:
                         input_schema = getattr(tool, "inputSchema", None) or {
                             "type": "object",
@@ -167,6 +186,7 @@ class MCPManager:
                                 tool_description=tool.description or tool.name,
                                 input_schema=input_schema,
                                 session=session,
+                                tool_timeout=tool_timeout,
                             )
                         )
 
@@ -184,27 +204,60 @@ class MCPManager:
     @staticmethod
     def _create_transport(cfg: Any) -> Any:
         """Create transport context manager based on MCP server config."""
-        transport = cfg.transport
+        transport = str(_cfg_get(cfg, "transport", "") or "").strip().lower()
+        command = _cfg_get(cfg, "command", "")
+        url = _cfg_get(cfg, "url", "")
+        headers = _cfg_get(cfg, "headers", {}) or {}
+
+        if not transport:
+            transport = "stdio" if command else "streamable-http"
 
         if transport == "stdio":
             from mcp.client.stdio import StdioServerParameters, stdio_client
 
             return stdio_client(
                 StdioServerParameters(
-                    command=cfg.command,
-                    args=cfg.args,
-                    env=cfg.env if cfg.env else None,
+                    command=command,
+                    args=_cfg_get(cfg, "args", []),
+                    env=_cfg_get(cfg, "env", {}) or None,
                 )
             )
 
         if transport == "sse":
             from mcp.client.sse import sse_client
 
-            return sse_client(cfg.url)
+            return sse_client(url)
 
-        if transport == "streamable-http":
-            from mcp.client.streamable_http import streamablehttp_client
+        if transport in {"streamable-http", "streamable_http", "http"}:
+            try:
+                from mcp.client.streamable_http import streamable_http_client as _streamable_client
+            except ImportError:
+                from mcp.client.streamable_http import streamablehttp_client as _streamable_client
 
-            return streamablehttp_client(cfg.url)
+            if not headers:
+                return _streamable_client(url)
+
+            @asynccontextmanager
+            async def _with_headers():
+                async with httpx.AsyncClient(headers=headers, follow_redirects=True) as client:
+                    async with _streamable_client(url, http_client=client) as result:
+                        yield result
+
+            return _with_headers()
 
         raise ValueError(f"Unknown MCP transport: {transport}")
+
+
+async def connect_mcp_servers(mcp_servers: dict, registry: Any, stack: Any) -> None:
+    """Backward-compatible connector that registers MCP tools into a registry.
+
+    This keeps compatibility with the upstream loop integration that expects a
+    function-based MCP bootstrap using an external AsyncExitStack.
+    """
+    manager = MCPManager(mcp_servers)
+    tools = await manager.start()
+    for tool in tools:
+        registry.register(tool)
+
+    if hasattr(stack, "push_async_callback"):
+        stack.push_async_callback(manager.stop)

@@ -67,7 +67,8 @@ class NanobotDingTalkHandler(CallbackHandler):
 
             if not content and not image_download_codes:
                 logger.warning(
-                    f"Received empty or unsupported message type: {chatbot_msg.message_type}"
+                    "Received empty or unsupported message type: {}",
+                    chatbot_msg.message_type,
                 )
                 return AckMessage.STATUS_OK, "OK"
 
@@ -113,7 +114,7 @@ class NanobotDingTalkHandler(CallbackHandler):
             return AckMessage.STATUS_OK, "OK"
 
         except Exception as e:
-            logger.error(f"Error processing DingTalk message: {e}")
+            logger.error("Error processing DingTalk message: {}", e)
             # Return OK to avoid retry loop from DingTalk server
             return AckMessage.STATUS_OK, "Error"
 
@@ -161,7 +162,8 @@ class DingTalkChannel(BaseChannel):
             self._http = httpx.AsyncClient()
 
             logger.info(
-                f"Initializing DingTalk Stream Client with Client ID: {self.config.client_id}..."
+                "Initializing DingTalk Stream Client with Client ID: {}...",
+                self.config.client_id,
             )
             credential = Credential(self.config.client_id, self.config.client_secret)
             self._client = DingTalkStreamClient(credential)
@@ -177,13 +179,13 @@ class DingTalkChannel(BaseChannel):
                 try:
                     await self._client.start()
                 except Exception as e:
-                    logger.warning(f"DingTalk stream error: {e}")
+                    logger.warning("DingTalk stream error: {}", e)
                 if self._running:
                     logger.info("Reconnecting DingTalk stream in 5 seconds...")
                     await asyncio.sleep(5)
 
         except Exception as e:
-            logger.exception(f"Failed to start DingTalk channel: {e}")
+            logger.exception("Failed to start DingTalk channel: {}", e)
 
     async def stop(self) -> None:
         """Stop the DingTalk bot."""
@@ -221,7 +223,7 @@ class DingTalkChannel(BaseChannel):
             self._token_expiry = time.time() + int(res_data.get("expireIn", 7200)) - 60
             return self._access_token
         except Exception as e:
-            logger.error(f"Failed to get DingTalk access token: {e}")
+            logger.error("Failed to get DingTalk access token: {}", e)
             return None
 
     async def _download_image(self, download_code: str) -> str | None:
@@ -349,7 +351,7 @@ class DingTalkChannel(BaseChannel):
                 "msgParam": json.dumps({
                     "text": msg.content,
                     "title": "Nanobot Reply",
-                }),
+                }, ensure_ascii=False),
             }
         else:
             # oToMessages/batchSend: sends to individual users (private chat)
@@ -362,7 +364,7 @@ class DingTalkChannel(BaseChannel):
                 "msgParam": json.dumps({
                     "text": msg.content,
                     "title": "Nanobot Reply",
-                }),
+                }, ensure_ascii=False),
             }
 
         if not self._http:
@@ -373,11 +375,11 @@ class DingTalkChannel(BaseChannel):
         try:
             resp = await self._http.post(url, json=data, headers=headers)
             if resp.status_code != 200:
-                logger.error(f"DingTalk send failed: {resp.text}")
+                logger.error("DingTalk send failed: {}", resp.text)
             else:
-                logger.debug(f"DingTalk message sent to {msg.chat_id}")
+                logger.debug("DingTalk message sent to {}", msg.chat_id)
         except Exception as e:
-            logger.error(f"Error sending DingTalk message: {e}")
+            logger.error("Error sending DingTalk message: {}", e)
 
         # Send images (if any)
         for media_path in (msg.media or []):
@@ -449,7 +451,6 @@ class DingTalkChannel(BaseChannel):
             if is_group:
                 prefix = f"[群:{conversation_title}] " if conversation_title else ""
                 effective_content = f"{prefix}{sender_name}: {effective_content}"
-
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=effective_chat_id,
@@ -463,4 +464,4 @@ class DingTalkChannel(BaseChannel):
                 },
             )
         except Exception as e:
-            logger.error(f"Error publishing DingTalk message: {e}")
+            logger.error("Error publishing DingTalk message: {}", e)

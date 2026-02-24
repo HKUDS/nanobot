@@ -160,7 +160,7 @@ class TelegramChannel(BaseChannel):
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
-        self._app.add_handler(CommandHandler("help", self._forward_command))
+        self._app.add_handler(CommandHandler("help", self._on_help))
         
         # Add message handler for text, photos, voice, audio, documents, stickers
         self._app.add_handler(
@@ -186,13 +186,13 @@ class TelegramChannel(BaseChannel):
         
         # Get bot info and register command menu
         bot_info = await self._app.bot.get_me()
-        logger.info(f"Telegram bot @{bot_info.username} connected")
+        logger.info("Telegram bot @{} connected", bot_info.username)
         
         try:
             await self._app.bot.set_my_commands(self.BOT_COMMANDS)
             logger.debug("Telegram bot commands registered")
         except Exception as e:
-            logger.warning(f"Failed to register bot commands: {e}")
+            logger.warning("Failed to register bot commands: {}", e)
         
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
@@ -251,6 +251,13 @@ class TelegramChannel(BaseChannel):
         try:
             chat_id = int(msg.chat_id)
             reply_to_message_id = self._resolve_reply_to_message_id(msg)
+            if reply_to_message_id is None and self.config.reply_to_message:
+                meta_message_id = (msg.metadata or {}).get("message_id")
+                if meta_message_id is not None:
+                    try:
+                        reply_to_message_id = int(meta_message_id)
+                    except (TypeError, ValueError):
+                        logger.debug("Invalid metadata Telegram message_id: {}", meta_message_id)
             logger.debug(
                 "Sending Telegram message to chat_id={} reply_to_message_id={}",
                 chat_id,
@@ -293,10 +300,10 @@ class TelegramChannel(BaseChannel):
                 await self._send_text(chat_id, msg.content, reply_to_message_id)
 
         except ValueError:
-            logger.error(f"Invalid chat_id: {msg.chat_id}")
+            logger.error("Invalid chat_id: {}", msg.chat_id)
             raise
         except Exception as e:
-            logger.error(f"Error sending Telegram message: {e}")
+            logger.error("Error sending Telegram message: {}", e)
             raise
 
     async def _send_text(self, chat_id: int, content: str, reply_to_message_id: int | None) -> None:
@@ -325,7 +332,7 @@ class TelegramChannel(BaseChannel):
                 try:
                     await self._app.bot.send_message(**fallback_kwargs)
                 except Exception as e2:
-                    logger.error(f"Error sending Telegram message: {e2}")
+                    logger.error("Error sending Telegram message: {}", e2)
             # Only reply_to on the first chunk
             reply_to_message_id = None
 
@@ -424,7 +431,7 @@ class TelegramChannel(BaseChannel):
                     await sender(chat_id=chat_id, **{param: f}, **reply_kwargs)
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
-                logger.error(f"Failed to send media {media_path}: {e}")
+                logger.error("Failed to send media {}: {}", media_path, e)
                 await self._app.bot.send_message(chat_id=chat_id, text=f"[Failed to send: {filename}]")
             # Only reply_to on the first media
             reply_kwargs = {}
@@ -454,14 +461,24 @@ class TelegramChannel(BaseChannel):
         """Handle /start command."""
         if not update.message or not update.effective_user:
             return
-        
+
         user = update.effective_user
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
             "Send me a message and I'll respond!\n"
             "Type /help to see available commands."
         )
-    
+
+    async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /help command, bypassing ACL so all users can access it."""
+        if not update.message:
+            return
+        await update.message.reply_text(
+            "🐈 nanobot commands:\n"
+            "/new — Start a new conversation\n"
+            "/help — Show available commands"
+        )
+
     @staticmethod
     def _sender_id(user) -> str:
         """Build sender_id with username for allowlist matching."""
@@ -595,24 +612,24 @@ class TelegramChannel(BaseChannel):
                     transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
                     transcription = await transcriber.transcribe(file_path)
                     if transcription:
-                        logger.info(f"Transcribed {media_type}: {transcription[:50]}...")
+                        logger.info("Transcribed {}: {}...", media_type, transcription[:50])
                         content_parts.append(f"[transcription: {transcription}]")
                     else:
                         content_parts.append(f"[{media_type}: {file_path}]")
                 else:
                     content_parts.append(f"[{media_type}: {file_path}]")
                     
-                logger.debug(f"Downloaded {media_type} to {file_path}")
+                logger.debug("Downloaded {} to {}", media_type, file_path)
             except Exception as e:
-                logger.error(f"Failed to download media: {e}")
+                logger.error("Failed to download media: {}", e)
                 content_parts.append(f"[{media_type}: download failed]")
         
         content = "\n".join(content_parts) if content_parts else "[empty message]"
-        
+
         preview = content[: self._LOG_PREVIEW_LIMIT]
         if len(content) > self._LOG_PREVIEW_LIMIT:
             preview += "...(truncated)"
-        logger.debug(f"Telegram message from {sender_id}: {preview}")
+        logger.debug("Telegram message from {}: {}", sender_id, preview)
 
         # Keep a small per-chat index for reply fallback by message_id.
         self._remember_message(
@@ -621,7 +638,7 @@ class TelegramChannel(BaseChannel):
             sender_display=self._resolve_sender_display(user),
             text=self._build_index_text(message, media_type),
         )
-        
+
         # Start typing indicator before processing
         self._start_typing(str_chat_id)
         
@@ -668,11 +685,11 @@ class TelegramChannel(BaseChannel):
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.debug(f"Typing indicator stopped for {chat_id}: {e}")
+            logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
     
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
-        logger.error(f"Telegram error: {context.error}")
+        logger.error("Telegram error: {}", context.error)
 
     def _get_extension(self, media_type: str, mime_type: str | None) -> str:
         """Get file extension based on media type."""

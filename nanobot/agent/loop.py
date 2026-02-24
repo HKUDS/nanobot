@@ -6,7 +6,6 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-import re
 from typing import Any, Awaitable, Callable
 
 import json_repair
@@ -58,10 +57,12 @@ class AgentLoop:
         thinking_budget: int = 10000,
         effort: str | None = None,
         memory_daily_subdir: str = "",
+        channels_config: "ChannelsConfig | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig
 
         self.bus = bus
+        self.channels_config = channels_config
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
@@ -108,10 +109,10 @@ class AgentLoop:
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         allowed_dir = self.workspace if self.restrict_to_workspace else None
-        self.tools.register(ReadFileTool(allowed_dir=allowed_dir))
-        self.tools.register(WriteFileTool(allowed_dir=allowed_dir))
-        self.tools.register(EditFileTool(allowed_dir=allowed_dir))
-        self.tools.register(ListDirTool(allowed_dir=allowed_dir))
+        self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        self.tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        self.tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        self.tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
 
         self.tools.register(
             ExecTool(
@@ -209,11 +210,16 @@ class AgentLoop:
         """Backward-compatible alias for MCP shutdown."""
         await self.stop_mcp()
 
-    def _set_tool_context(self, channel: str, chat_id: str, metadata: dict | None = None) -> None:
+    def _set_tool_context(
+        self,
+        channel: str,
+        chat_id: str,
+        context: dict[str, Any] | str | int | None = None,
+    ) -> None:
         """Update context for tools that need routing info."""
         message_tool = self.tools.get("message")
         if isinstance(message_tool, MessageTool):
-            message_tool.set_context(channel, chat_id, metadata)
+            message_tool.set_context(channel, chat_id, context)
 
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
@@ -397,7 +403,7 @@ class AgentLoop:
 
     async def _run_agent_loop(
         self, initial_messages: list[dict],
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> tuple[str, str, list[tuple[str, str, str]]]:
         """Run the agent iteration loop and return final content + metadata."""
         messages = initial_messages
@@ -425,7 +431,9 @@ class AgentLoop:
             if response.has_tool_calls:
                 if on_progress:
                     clean = self._strip_think(response.content)
-                    await on_progress(clean or self._tool_hint(response.tool_calls))
+                    if clean:
+                        await on_progress(clean)
+                    await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
                 tool_call_dicts = [
                     {
@@ -433,7 +441,7 @@ class AgentLoop:
                         "type": "function",
                         "function": {
                             "name": tc.name,
-                            "arguments": json.dumps(tc.arguments),
+                            "arguments": json.dumps(tc.arguments, ensure_ascii=False),
                         },
                     }
                     for tc in response.tool_calls
@@ -514,7 +522,7 @@ class AgentLoop:
 
     async def _process_message(
         self, msg: InboundMessage, session_key: str | None = None,
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message."""
         if msg.channel == "system":
@@ -558,6 +566,9 @@ class AgentLoop:
             )
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata)
+        if message_tool := self.tools.get("message"):
+            if isinstance(message_tool, MessageTool):
+                message_tool.start_turn()
         messages = self.context.build_messages(
             history=session.get_history(max_messages=self.memory_window),
             current_message=msg.content,
@@ -568,8 +579,10 @@ class AgentLoop:
             current_metadata=msg.metadata if msg.metadata else None,
         )
 
-        async def _bus_progress(content: str) -> None:
+        async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             progress_metadata = dict(msg.metadata or {})
+            progress_metadata["_progress"] = True
+            progress_metadata["_tool_hint"] = tool_hint
             progress_metadata["message_type"] = "progress"
             progress_metadata["progress_notice"] = True
             await self.bus.publish_outbound(
@@ -614,6 +627,15 @@ class AgentLoop:
                 content="",
                 silent=True,
             )
+
+        if message_tool := self.tools.get("message"):
+            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+                logger.info(
+                    "No outbound message needed for {}:{} (already sent via tool)",
+                    msg.channel,
+                    msg.sender_id,
+                )
+                return None
 
         if not final_content:
             logger.info(
@@ -696,6 +718,14 @@ class AgentLoop:
                 content="",
                 silent=True,
             )
+
+        if message_tool := self.tools.get("message"):
+            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+                logger.info(
+                    "No outbound message needed for system message from {} (already sent via tool)",
+                    msg.sender_id,
+                )
+                return None
 
         if not final_content:
             logger.info(
@@ -834,7 +864,7 @@ Respond with ONLY valid JSON, no markdown fences."""
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self.start_mcp()
