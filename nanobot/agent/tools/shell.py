@@ -66,6 +66,9 @@ class ExecTool(Tool):
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
+
+        env = os.environ.copy()
+        self._inject_node_ca_bundle(env)
         
         try:
             process = await asyncio.create_subprocess_shell(
@@ -73,6 +76,7 @@ class ExecTool(Tool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
+                env=env,
             )
             
             try:
@@ -114,6 +118,23 @@ class ExecTool(Tool):
             
         except Exception as e:
             return f"Error executing command: {str(e)}"
+
+    @staticmethod
+    def _inject_node_ca_bundle(env: dict[str, str]) -> None:
+        """Ensure Node-based CLIs can validate TLS cert chains on Linux hosts."""
+        if env.get("NODE_EXTRA_CA_CERTS"):
+            return
+
+        candidates = [
+            "/etc/ssl/certs/ca-certificates.crt",  # Debian/Ubuntu
+            "/etc/pki/tls/certs/ca-bundle.crt",   # RHEL/CentOS/Fedora
+            "/etc/ssl/cert.pem",                  # Alpine/macOS common path
+        ]
+
+        for bundle_path in candidates:
+            if Path(bundle_path).is_file():
+                env["NODE_EXTRA_CA_CERTS"] = bundle_path
+                return
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
