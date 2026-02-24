@@ -200,6 +200,7 @@ class AgentLoop:
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
         model: str | None = None,
+        provider: "LLMProvider | None" = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
@@ -207,11 +208,12 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
         effective_model = model or self.model
+        effective_provider = provider or self.provider
 
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await self.provider.chat(
+            response = await effective_provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=effective_model,
@@ -332,6 +334,7 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         system_prompt: str | None = None,
         model: str | None = None,
+        provider: "LLMProvider | None" = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -496,9 +499,9 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        # Main agent: use per-call model override (e.g. from agent profile) or default
+        # Main agent: use per-call model/provider override (e.g. from agent profile) or default
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress, model=model,
+            initial_messages, on_progress=on_progress or _bus_progress, model=model, provider=provider,
         )
 
         if final_content is None:
@@ -550,6 +553,7 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         system_prompt: str | None = None,
         model: str | None = None,
+        provider: "LLMProvider | None" = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage).
 
@@ -559,11 +563,13 @@ class AgentLoop:
                 profiles (``cron add --agent <name>``).
             model: Optional model override for this call only.  Does NOT mutate
                 the agent's default model — safe to use concurrently.
+            provider: Optional provider override for this call only.  Required when
+                the profile model belongs to a different provider than the default.
         """
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(
             msg, session_key=session_key, on_progress=on_progress,
-            system_prompt=system_prompt, model=model,
+            system_prompt=system_prompt, model=model, provider=provider,
         )
         return response.content if response else ""

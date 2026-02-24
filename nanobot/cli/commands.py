@@ -229,6 +229,25 @@ def _create_workspace_templates(workspace: Path):
     (workspace / "skills").mkdir(exist_ok=True)
 
 
+def _make_provider_for_model(config: Config, model: str):
+    """Create a provider for a specific model (used for agent profile overrides)."""
+    from nanobot.providers.litellm_provider import LiteLLMProvider
+    from nanobot.providers.registry import find_by_name
+
+    provider_name = config.get_provider_name(model)
+    p = config.get_provider(model)
+    if not p or not p.api_key:
+        raise ValueError(f"no API key configured for model '{model}' (provider: {provider_name})")
+    spec = find_by_name(provider_name) if provider_name else None
+    return LiteLLMProvider(
+        api_key=p.api_key,
+        api_base=config.get_api_base(model),
+        default_model=model,
+        extra_headers=p.extra_headers if p else None,
+        provider_name=provider_name,
+    )
+
+
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.litellm_provider import LiteLLMProvider
@@ -351,6 +370,19 @@ def gateway(
                         job.payload.agent,
                     )
 
+        # If the profile model belongs to a different provider, build a temp provider
+        # for this call only — never mutate the shared agent state.
+        profile_provider = None
+        if profile_model and profile_model != config.agents.defaults.model:
+            try:
+                profile_provider = _make_provider_for_model(config, profile_model)
+            except Exception as e:
+                logger.warning(
+                    "Cron job '{}': cannot build provider for model '{}': {}. Using default.",
+                    job.name, profile_model, e,
+                )
+                profile_model = None  # fall back to default model
+
         response = await agent.process_direct(
             job.payload.message,
             session_key=f"cron:{job.id}",
@@ -358,6 +390,7 @@ def gateway(
             chat_id=job.payload.to or "direct",
             system_prompt=system_prompt,
             model=profile_model,
+            provider=profile_provider,
         )
         if job.payload.deliver and job.payload.to:
             from nanobot.bus.events import OutboundMessage
