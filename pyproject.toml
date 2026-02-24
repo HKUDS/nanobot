@@ -2,7 +2,7 @@
 name = "nanobot-ai"
 version = "0.1.4.post2"
 description = "A lightweight personal AI assistant framework"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "nanobot contributors"}
@@ -14,6 +14,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.10",
 ]
 
 dependencies = [
@@ -24,7 +25,6 @@ dependencies = [
     "websockets>=16.0,<17.0",
     "websocket-client>=1.9.0,<2.0.0",
     "httpx>=0.28.0,<1.0.0",
-    "oauth-cli-kit>=0.1.3,<1.0.0",
     "loguru>=0.7.3,<1.0.0",
     "readability-lxml>=0.8.4,<1.0.0",
     "rich>=14.0.0,<15.0.0",
@@ -45,6 +45,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+oauth = [
+    "oauth-cli-kit>=0.1.3,<1.0.0",
+]
+
 dev = [
     "pytest>=9.0.0,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",
