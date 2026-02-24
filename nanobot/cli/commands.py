@@ -191,7 +191,14 @@ def onboard():
     console.print("\nNext steps:")
     console.print(
         "  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
-    console.print("     Get one at: https://openrouter.ai/keys")
+    console.print("     Choose one provider and fill in its [cyan]apiKey[/cyan]:")
+    console.print("       [dim]providers.openrouter.apiKey[/dim]  → https://openrouter.ai/keys")
+    console.print("       [dim]providers.anthropic.apiKey[/dim]   → https://console.anthropic.com/keys")
+    console.print("       [dim]providers.deepseek.apiKey[/dim]    → https://platform.deepseek.com")
+    console.print("     Then set [cyan]agents.defaults.model[/cyan] to match, e.g.:")
+    console.print("       [dim]openrouter/anthropic/claude-opus-4-5[/dim]  (openrouter)")
+    console.print("       [dim]anthropic/claude-opus-4-5[/dim]             (anthropic)")
+    console.print("       [dim]deepseek/deepseek-chat[/dim]                (deepseek)")
     console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
     console.print(
         "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
