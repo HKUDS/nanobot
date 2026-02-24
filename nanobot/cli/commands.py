@@ -508,6 +508,7 @@ def agent(
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    agent_profile: str = typer.Option(None, "--agent", "-a", help="Agent profile name to use"),
 ):
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config, get_data_dir
@@ -515,9 +516,9 @@ def agent(
     from nanobot.agent.loop import AgentLoop
     from nanobot.cron.service import CronService
     from loguru import logger
-    
+
     config = load_config()
-    
+
     bus = MessageBus()
     provider = _make_provider(config)
 
@@ -529,23 +530,56 @@ def agent(
         logger.enable("nanobot")
     else:
         logger.disable("nanobot")
-    
+
+    # Resolve agent profile (same pattern as cron)
+    system_prompt: str | None = None
+    profile_model: str | None = None
+    profile_provider = None
+    profile_max_iter: int | None = None
+    profile_temperature: float | None = None
+    profile_max_tokens: int | None = None
+    profile_memory_window: int | None = None
+
+    if agent_profile:
+        profile = config.agents.profiles.get(agent_profile)
+        if not profile:
+            profile = config.agents.profiles.get("default")
+            if profile:
+                console.print(f"[yellow]Profile '{agent_profile}' not found, falling back to 'default'.[/yellow]")
+            else:
+                console.print(f"[yellow]Profile '{agent_profile}' not found, using agent defaults.[/yellow]")
+        if profile:
+            system_prompt = profile.system_prompt or None
+            profile_model = profile.model or None
+            profile_max_iter = profile.max_tool_iterations
+            profile_temperature = profile.temperature
+            profile_max_tokens = profile.max_tokens
+            profile_memory_window = profile.memory_window
+
+    if profile_model and profile_model != config.agents.defaults.model:
+        try:
+            profile_provider = _make_provider_for_model(config, profile_model)
+        except Exception as e:
+            console.print(f"[yellow]Cannot build provider for model '{profile_model}': {e}. Using default.[/yellow]")
+            profile_model = None
+
     agent_loop = AgentLoop(
         bus=bus,
-        provider=provider,
+        provider=profile_provider or provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
+        model=profile_model or config.agents.defaults.model,
         vision_model=config.agents.defaults.vision_model or None,
-        temperature=config.agents.defaults.temperature,
-        max_tokens=config.agents.defaults.max_tokens,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
+        temperature=profile_temperature if profile_temperature is not None else config.agents.defaults.temperature,
+        max_tokens=profile_max_tokens if profile_max_tokens is not None else config.agents.defaults.max_tokens,
+        max_iterations=profile_max_iter if profile_max_iter is not None else config.agents.defaults.max_tool_iterations,
+        memory_window=profile_memory_window if profile_memory_window is not None else config.agents.defaults.memory_window,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        system_prompt_prefix=system_prompt,
     )
     
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -568,7 +602,11 @@ def agent(
         # Single message mode — direct call, no bus needed
         async def run_once():
             with _thinking_ctx():
-                response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
+                response = await agent_loop.process_direct(
+                    message, session_id,
+                    on_progress=_cli_progress,
+                    system_prompt=system_prompt,
+                )
             _print_agent_response(response, render_markdown=markdown)
             await agent_loop.close_mcp()
 

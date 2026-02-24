@@ -59,6 +59,7 @@ class SubagentManager:
         model: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        provider: LLMProvider | None = None,
     ) -> str:
         """
         Spawn a subagent to execute a task in the background.
@@ -89,6 +90,7 @@ class SubagentManager:
             self._run_subagent(
                 task_id, task, display_label, origin, effective_model,
                 temperature=temperature, max_tokens=max_tokens,
+                provider=provider,
             )
         )
         self._running_tasks[task_id] = bg_task
@@ -108,13 +110,15 @@ class SubagentManager:
         model: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        provider: LLMProvider | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         effective_model = model or self.model
         effective_temperature = temperature if temperature is not None else self.temperature
         effective_max_tokens = max_tokens if max_tokens is not None else self.max_tokens
+        effective_provider = provider or self.provider
         logger.info("Subagent [{}] starting task: {} (model: {})", task_id, label, effective_model)
-        
+
         try:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
@@ -130,23 +134,23 @@ class SubagentManager:
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
-            
+
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
             ]
-            
+
             # Run agent loop (limited iterations)
             max_iterations = 15
             iteration = 0
             final_result: str | None = None
-            
+
             while iteration < max_iterations:
                 iteration += 1
-                
-                response = await self.provider.chat(
+
+                response = await effective_provider.chat(
                     messages=messages,
                     tools=tools.get_definitions(),
                     model=effective_model,

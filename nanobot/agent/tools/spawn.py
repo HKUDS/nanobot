@@ -6,6 +6,7 @@ from nanobot.agent.tools.base import Tool
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
+    from nanobot.providers.base import LLMProvider
 
 
 class SpawnTool(Tool):
@@ -19,6 +20,7 @@ class SpawnTool(Tool):
         self._profile_model: str | None = None
         self._profile_temperature: float | None = None
         self._profile_max_tokens: int | None = None
+        self._profile_provider: "LLMProvider | None" = None
 
     def set_context(self, channel: str, chat_id: str) -> None:
         """Set the origin context for subagent announcements."""
@@ -30,6 +32,7 @@ class SpawnTool(Tool):
         model: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        provider: "LLMProvider | None" = None,
     ) -> None:
         """Set inherited profile defaults for spawned subagents.
 
@@ -39,6 +42,7 @@ class SpawnTool(Tool):
         self._profile_model = model
         self._profile_temperature = temperature
         self._profile_max_tokens = max_tokens
+        self._profile_provider = provider
     
     @property
     def name(self) -> str:
@@ -92,4 +96,5 @@ class SpawnTool(Tool):
             model=model or self._profile_model,
             temperature=self._profile_temperature,
             max_tokens=self._profile_max_tokens,
+            provider=self._profile_provider,
         )

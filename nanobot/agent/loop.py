@@ -83,6 +83,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        system_prompt_prefix: str | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -99,6 +100,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.system_prompt_prefix = system_prompt_prefix
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -290,7 +292,9 @@ class AgentLoop:
                     timeout=1.0
                 )
                 try:
-                    response = await self._process_message(msg)
+                    response = await self._process_message(
+                        msg, system_prompt=self.system_prompt_prefix
+                    )
                     if response is not None:
                         await self.bus.publish_outbound(response)
                     elif msg.channel == "cli":
@@ -435,6 +439,7 @@ class AgentLoop:
                     model=model,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    provider=provider,
                 )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
