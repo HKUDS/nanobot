@@ -8,7 +8,7 @@ from typing import Any
 import litellm
 from litellm import acompletion
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest, GroundingMetadata
+from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
 
 
@@ -170,19 +170,17 @@ class LiteLLMProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
-        google_search: bool = False,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
-
+        
         Args:
             messages: List of message dicts with 'role' and 'content'.
             tools: Optional list of tool definitions in OpenAI format.
             model: Model identifier (e.g., 'anthropic/claude-sonnet-4-5').
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
-            google_search: Enable Google Search grounding (Gemini only).
-
+        
         Returns:
             LLMResponse with content and/or tool calls.
         """
@@ -195,41 +193,33 @@ class LiteLLMProvider(LLMProvider):
         # Clamp max_tokens to at least 1 — negative or zero values cause
         # LiteLLM to reject the request with "max_tokens must be at least 1".
         max_tokens = max(1, max_tokens)
-
+        
         kwargs: dict[str, Any] = {
             "model": model,
-            "messages": self._sanitize_messages(messages),
+            "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-
+        
         # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
         self._apply_model_overrides(model, kwargs)
-
+        
         # Pass api_key directly — more reliable than env vars alone
         if self.api_key:
             kwargs["api_key"] = self.api_key
-
+        
         # Pass api_base for custom endpoints
         if self.api_base:
             kwargs["api_base"] = self.api_base
-
+        
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
-
-        # Build tools list with Google Search if enabled
-        final_tools = list(tools) if tools else []
-        if google_search:
-            # Check if this is a Gemini model
-            spec = self._gateway or find_by_model(original_model)
-            if spec and spec.name == "gemini":
-                final_tools.append({"google_search": {}})
-
-        if final_tools:
-            kwargs["tools"] = final_tools
+        
+        if tools:
+            kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
-
+        
         try:
             response = await acompletion(**kwargs)
             return self._parse_response(response)
@@ -244,7 +234,7 @@ class LiteLLMProvider(LLMProvider):
         """Parse LiteLLM response into our standard format."""
         choice = response.choices[0]
         message = choice.message
-
+        
         tool_calls = []
         if hasattr(message, "tool_calls") and message.tool_calls:
             for tc in message.tool_calls:
@@ -252,13 +242,13 @@ class LiteLLMProvider(LLMProvider):
                 args = tc.function.arguments
                 if isinstance(args, str):
                     args = json_repair.loads(args)
-
+                
                 tool_calls.append(ToolCallRequest(
                     id=tc.id,
                     name=tc.function.name,
                     arguments=args,
                 ))
-
+        
         usage = {}
         if hasattr(response, "usage") and response.usage:
             usage = {
@@ -266,8 +256,8 @@ class LiteLLMProvider(LLMProvider):
                 "completion_tokens": response.usage.completion_tokens,
                 "total_tokens": response.usage.total_tokens,
             }
-
-        reasoning_content = getattr(message, "reasoning_content", None)
+        
+        reasoning_content = getattr(message, "reasoning_content", None) or None
 
         # Extract Google Search grounding metadata (Gemini)
         grounding_metadata = None

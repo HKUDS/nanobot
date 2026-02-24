@@ -63,6 +63,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         google_search: bool = False,
+        channels_config: ChannelsConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -78,6 +79,7 @@ class AgentLoop:
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self.google_search = google_search
+        self.channels_config = channels_config
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -104,7 +106,10 @@ class AgentLoop:
         
         # Setup tool call logger
         self._tool_logger = self._setup_tool_logger()
-        
+
+        self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
+        self._consolidation_locks: dict[str, asyncio.Lock] = {}
+
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -236,6 +241,7 @@ class AgentLoop:
                     clean = self._strip_think(response.content)
                     if clean:
                         await on_progress(clean)
+                    await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
                 tool_call_dicts = [
                     {
