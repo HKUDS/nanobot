@@ -225,6 +225,12 @@ class AgentLoop:
                         messages, tool_call.id, tool_call.name, result
                     )
             else:
+                messages = self.context.add_assistant_message(
+                    messages,
+                    response.content,
+                    tool_calls=None,
+                    reasoning_content=response.reasoning_content,
+                )
                 final_content = self._strip_think(response.content)
                 break
 

@@ -55,6 +55,17 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
 
     data = config.model_dump(by_alias=True)
 
+    # Merge: preserve keys from existing file that Pydantic doesn't know about
+    # (e.g. manually added providers), so round-tripping doesn't silently drop them.
+    if path.exists():
+        try:
+            with open(path, encoding="utf-8") as f:
+                existing = json.load(f)
+            if isinstance(existing, dict):
+                data = {**existing, **data}
+        except (json.JSONDecodeError, OSError):
+            pass  # file corrupt or unreadable, overwrite entirely
+
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
