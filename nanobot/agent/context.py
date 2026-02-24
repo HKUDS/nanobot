@@ -80,7 +80,7 @@ Skills with available="false" need dependencies installed first - you can try in
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
         
-        return f"""# nanobot 🐈
+        return f"""# nanobot
 
 You are nanobot, a helpful AI assistant. 
 
@@ -92,8 +92,6 @@ You are nanobot, a helpful AI assistant.
 
 ## Workspace
 Your workspace is at: {workspace_path}
-- Long-term memory: {workspace_path}/memory/MEMORY.md
-- History log: {workspace_path}/memory/HISTORY.md (grep-searchable)
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel.
@@ -107,7 +105,11 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
 ## Memory
 - Remember important facts: write to {workspace_path}/memory/MEMORY.md
-- Recall past events: grep {workspace_path}/memory/HISTORY.md"""
+- Recall past events: grep {workspace_path}/memory/HISTORY.md
+
+## User-facing communication
+- If the user asks how your memory works, answer simply: you remember things from conversations over time. Do not mention file names, paths, or internal tools.
+- Do not announce when you write to memory or take internal actions. Just do it."""
     
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""

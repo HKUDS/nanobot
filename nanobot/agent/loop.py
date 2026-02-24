@@ -27,8 +27,9 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, HonchoConfig
     from nanobot.cron.service import CronService
+    from nanobot.honcho.session import HonchoSessionManager
 
 
 class AgentLoop:
@@ -58,10 +59,12 @@ class AgentLoop:
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
+        honcho_config: HonchoConfig | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
+        self.honcho_config = honcho_config
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -92,14 +95,110 @@ class AgentLoop:
         )
 
         self._running = False
+        self._honcho: HonchoSessionManager | None = None
+        self._honcho_migrated: set[str] = set()
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
-        self._consolidating: set[str] = set()  # Session keys with consolidation in progress
-        self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
+        self._consolidating: set[str] = set()
+        self._consolidation_tasks: set[asyncio.Task] = set()
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._register_default_tools()
+
+    # ── Honcho integration ──────────────────────────────────────────
+
+    @property
+    def honcho_active(self) -> bool:
+        """True when Honcho is initialized and ready."""
+        return self._honcho is not None
+
+    def _honcho_set_context(self, session_key: str) -> None:
+        """Set session context on Honcho tools and ensure the Honcho session exists."""
+        if not self.honcho_active:
+            return
+        for tool_name in ("query_user_context",):
+            tool = self.tools.get(tool_name)
+            if tool and hasattr(tool, "set_context"):
+                tool.set_context(session_key)
+        self._honcho.get_or_create(session_key)
+        if session_key not in self._honcho_migrated:
+            self._honcho_migrated.add(session_key)
+            self._maybe_migrate_local_session(session_key)
+
+    def _maybe_migrate_local_session(self, session_key: str) -> None:
+        """Auto-migrate local data to Honcho on first activation per session key."""
+        honcho_session = self._honcho.get_or_create(session_key)
+        if honcho_session.messages:
+            return
+
+        migrated_anything = False
+
+        # 1. Migrate JSONL session messages
+        local_session = self.sessions.get_or_create(session_key)
+        real_messages = [m for m in local_session.messages if m.get("role") in ("user", "assistant")]
+        if real_messages:
+            logger.info(f"Migrating {len(real_messages)} local messages to Honcho for {session_key}")
+            ok = self._honcho.migrate_local_history(session_key, real_messages)
+            if ok:
+                sessions_dir = Path.home() / ".nanobot" / "sessions"
+                from nanobot.utils.helpers import safe_filename
+                safe_key = safe_filename(session_key.replace(":", "_"))
+                src = sessions_dir / f"{safe_key}.jsonl"
+                if src.exists():
+                    archive_dir = sessions_dir / "migrated"
+                    archive_dir.mkdir(parents=True, exist_ok=True)
+                    src.rename(archive_dir / src.name)
+                    logger.info(f"Archived {src.name} to sessions/migrated/")
+                migrated_anything = True
+            else:
+                logger.warning(f"Session migration failed for {session_key}, will retry next time")
+
+        # 2. Migrate MEMORY.md + HISTORY.md (if they exist)
+        memory_dir = self.workspace / "memory"
+        if memory_dir.exists() and any(memory_dir.iterdir()):
+            if self._honcho.migrate_memory_files(session_key, self.workspace):
+                archive_dir = memory_dir / "migrated"
+                archive_dir.mkdir(parents=True, exist_ok=True)
+                for f in ("MEMORY.md", "HISTORY.md"):
+                    src = memory_dir / f
+                    if src.exists():
+                        src.rename(archive_dir / src.name)
+                        logger.info(f"Archived {f} to memory/migrated/")
+                migrated_anything = True
+
+        if migrated_anything:
+            logger.info(f"Local data migration to Honcho complete for {session_key}")
+
+    def _honcho_prefetch(self, session_key: str, user_message: str) -> str:
+        """Fetch user context from Honcho for system prompt injection."""
+        if not self.honcho_active or not self.honcho_config or not self.honcho_config.prefetch:
+            return ""
+        try:
+            ctx = self._honcho.get_prefetch_context(session_key, user_message=user_message)
+            parts = []
+            if ctx.get("representation"):
+                parts.append(f"User profile: {ctx['representation']}")
+            if ctx.get("card"):
+                parts.append(f"User context: {ctx['card']}")
+            return "\n\n# Honcho User Context\n\n" + "\n\n".join(parts) if parts else ""
+        except Exception as e:
+            logger.warning(f"Honcho prefetch failed: {e}")
+            return ""
+
+    def _honcho_sync(self, session_key: str, user_content: str, assistant_content: str) -> None:
+        """Sync a message pair to Honcho storage."""
+        if not self.honcho_active:
+            return
+        try:
+            honcho_session = self._honcho.get_or_create(session_key)
+            honcho_session.add_message("user", user_content)
+            honcho_session.add_message("assistant", assistant_content)
+            self._honcho.save(honcho_session)
+        except Exception as e:
+            logger.warning(f"Honcho sync failed: {e}")
+
+    # ── Tool & MCP ──────────────────────────────────────────────────
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -117,6 +216,31 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+        # Honcho tools (opt-in: requires honcho.enabled + HONCHO_API_KEY)
+        if self.honcho_config and self.honcho_config.enabled:
+            import os
+            if os.environ.get("HONCHO_API_KEY"):
+                try:
+                    from nanobot.honcho.client import get_honcho_client, HonchoClientConfig
+                    from nanobot.honcho.session import HonchoSessionManager
+                    from nanobot.agent.tools.honcho import HonchoTool
+
+                    client_config = HonchoClientConfig(
+                        workspace_id=self.honcho_config.workspace_id,
+                        api_key=os.environ["HONCHO_API_KEY"],
+                        environment=self.honcho_config.environment,
+                    )
+                    get_honcho_client(client_config)
+                    self._honcho = HonchoSessionManager(
+                        context_tokens=self.honcho_config.context_tokens,
+                    )
+                    self.tools.register(HonchoTool(session_manager=self._honcho))
+                    logger.info("Honcho tools registered (query_user_context)")
+                except ImportError:
+                    logger.warning("Honcho enabled but honcho-ai not installed. Run: nanobot honcho enable")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize Honcho: {e}")
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -154,9 +278,11 @@ class AgentLoop:
             if isinstance(cron_tool, CronTool):
                 cron_tool.set_context(channel, chat_id)
 
+    # ── Agent iteration loop ────────────────────────────────────────
+
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
-        """Remove <think>…</think> blocks that some models embed in content."""
+        """Remove <think>...</think> blocks that some models embed in content."""
         if not text:
             return None
         return re.sub(r"<think>[\s\S]*?</think>", "", text).strip() or None
@@ -168,7 +294,7 @@ class AgentLoop:
             val = next(iter(tc.arguments.values()), None) if tc.arguments else None
             if not isinstance(val, str):
                 return tc.name
-            return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
+            return f'{tc.name}("{val[:40]}...")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
     async def _run_agent_loop(
@@ -237,6 +363,8 @@ class AgentLoop:
 
         return final_content, tools_used, messages
 
+    # ── Main loop ───────────────────────────────────────────────────
+
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
         self._running = True
@@ -249,6 +377,7 @@ class AgentLoop:
                     self.bus.consume_inbound(),
                     timeout=1.0
                 )
+
                 try:
                     response = await self._process_message(msg)
                     if response is not None:
@@ -293,6 +422,8 @@ class AgentLoop:
         if not lock.locked():
             self._consolidation_locks.pop(session_key, None)
 
+    # ── Message processing ──────────────────────────────────────────
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -308,6 +439,7 @@ class AgentLoop:
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            self._honcho_set_context(key)
             history = session.get_history(max_messages=self.memory_window)
             messages = self.context.build_messages(
                 history=history,
@@ -315,6 +447,8 @@ class AgentLoop:
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
+            if self.honcho_active:
+                self._honcho_sync(key, msg.content, final_content or "")
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
@@ -358,31 +492,42 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+                                  content="nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
 
-        unconsolidated = len(session.messages) - session.last_consolidated
-        if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
-            self._consolidating.add(session.key)
-            lock = self._get_consolidation_lock(session.key)
+        # Memory consolidation
+        if self.honcho_active and len(session.messages) > self.memory_window:
+            # Honcho handles persistence; just trim locally
+            keep_count = min(10, max(2, self.memory_window // 2))
+            session.messages = session.messages[-keep_count:]
+            self.sessions.save(session)
+        else:
+            unconsolidated = len(session.messages) - session.last_consolidated
+            if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
+                self._consolidating.add(session.key)
+                lock = self._get_consolidation_lock(session.key)
 
-            async def _consolidate_and_unlock():
-                try:
-                    async with lock:
-                        await self._consolidate_memory(session)
-                finally:
-                    self._consolidating.discard(session.key)
-                    self._prune_consolidation_lock(session.key, lock)
-                    _task = asyncio.current_task()
-                    if _task is not None:
-                        self._consolidation_tasks.discard(_task)
+                async def _consolidate_and_unlock():
+                    try:
+                        async with lock:
+                            await self._consolidate_memory(session)
+                    finally:
+                        self._consolidating.discard(session.key)
+                        self._prune_consolidation_lock(session.key, lock)
+                        _task = asyncio.current_task()
+                        if _task is not None:
+                            self._consolidation_tasks.discard(_task)
 
-            _task = asyncio.create_task(_consolidate_and_unlock())
-            self._consolidation_tasks.add(_task)
+                _task = asyncio.create_task(_consolidate_and_unlock())
+                self._consolidation_tasks.add(_task)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
+
+        # Honcho: set tool contexts + prefetch user context
+        self._honcho_set_context(msg.session_key)
+        honcho_context = self._honcho_prefetch(msg.session_key, msg.content)
 
         history = session.get_history(max_messages=self.memory_window)
         initial_messages = self.context.build_messages(
@@ -391,6 +536,10 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
         )
+
+        # Inject Honcho context into system prompt
+        if honcho_context and initial_messages and initial_messages[0].get("role") == "system":
+            initial_messages[0]["content"] += honcho_context
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
@@ -411,6 +560,9 @@ class AgentLoop:
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         self._save_turn(session, all_msgs, 1 + len(history))
+
+        if self.honcho_active:
+            self._honcho_sync(msg.session_key, msg.content, final_content)
         self.sessions.save(session)
 
         if message_tool := self.tools.get("message"):

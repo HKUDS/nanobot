@@ -294,14 +294,20 @@ def gateway(
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     
     config = load_config()
+
+    # Warn if Honcho is enabled but API key is missing
+    if config.honcho.enabled and not os.environ.get("HONCHO_API_KEY"):
+        console.print("[yellow]Warning: Honcho is enabled but HONCHO_API_KEY is not set.[/yellow]")
+        console.print("[yellow]  Long-term memory will be inactive. Set the key or run: nanobot honcho disable[/yellow]")
+
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
-    
+
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
-    
+
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
@@ -317,10 +323,11 @@ def gateway(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
+        honcho_config=config.honcho,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
     )
-    
+
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
@@ -444,7 +451,12 @@ def agent(
     from loguru import logger
     
     config = load_config()
-    
+
+    # Warn if Honcho is enabled but API key is missing
+    if config.honcho.enabled and not os.environ.get("HONCHO_API_KEY"):
+        console.print("[yellow]Warning: Honcho is enabled but HONCHO_API_KEY is not set.[/yellow]")
+        console.print("[yellow]  Long-term memory will be inactive. Set the key or run: nanobot honcho disable[/yellow]")
+
     bus = MessageBus()
     provider = _make_provider(config)
 
@@ -470,10 +482,11 @@ def agent(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        honcho_config=config.honcho,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
     )
-    
+
     # Show spinner when logs are off (no output to miss); skip when logs are on
     def _thinking_ctx():
         if logs:
@@ -1032,6 +1045,43 @@ def status():
             else:
                 has_key = bool(p.api_key)
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+
+        # Check Honcho status
+        import os
+        has_honcho_key = bool(os.environ.get("HONCHO_API_KEY"))
+        honcho_enabled = config.honcho.enabled and has_honcho_key
+        if honcho_enabled:
+            console.print(f"Honcho: [green]enabled[/green] (workspace: {config.honcho.workspace_id})")
+        elif config.honcho.enabled:
+            console.print(f"Honcho: [yellow]config enabled but HONCHO_API_KEY not set[/yellow]")
+        else:
+            console.print(f"Honcho: [dim]disabled[/dim]")
+
+
+# ============================================================================
+# Honcho Commands
+# ============================================================================
+
+
+honcho_app = typer.Typer(help="Manage Honcho memory integration")
+app.add_typer(honcho_app, name="honcho")
+
+
+@honcho_app.command("enable")
+def honcho_enable(
+    api_key: str = typer.Option(None, "--api-key", "-k", help="Honcho API key"),
+    migrate: bool = typer.Option(False, "--migrate", help="Migrate existing local sessions to Honcho"),
+):
+    """Enable Honcho AI-native memory (replaces file-based sessions)."""
+    from nanobot.cli.honcho_setup import enable
+    enable(api_key=api_key, migrate=migrate)
+
+
+@honcho_app.command("disable")
+def honcho_disable():
+    """Disable Honcho and revert to local file-based sessions."""
+    from nanobot.cli.honcho_setup import disable
+    disable()
 
 
 # ============================================================================
