@@ -22,12 +22,30 @@ class ContextBuilder:
     
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     
-    def __init__(self, workspace: Path):
+    def __init__(
+        self,
+        workspace: Path,
+        *,
+        memory_mode: str = "legacy",
+        memory_retrieval_k: int = 6,
+        memory_token_budget: int = 900,
+        memory_recency_half_life_days: float = 30.0,
+        memory_embedding_provider: str = "",
+    ):
         self.workspace = workspace
-        self.memory = MemoryStore(workspace)
+        self.memory = MemoryStore(workspace, embedding_provider=memory_embedding_provider)
         self.skills = SkillsLoader(workspace)
+        self.memory_mode = memory_mode
+        self.memory_retrieval_k = memory_retrieval_k
+        self.memory_token_budget = memory_token_budget
+        self.memory_recency_half_life_days = memory_recency_half_life_days
+        self.memory_embedding_provider = memory_embedding_provider
     
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        current_message: str | None = None,
+    ) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
         
@@ -48,7 +66,14 @@ class ContextBuilder:
             parts.append(bootstrap)
         
         # Memory context
-        memory = self.memory.get_memory_context()
+        memory = self.memory.get_memory_context(
+            mode=self.memory_mode,
+            query=current_message,
+            retrieval_k=self.memory_retrieval_k,
+            token_budget=self.memory_token_budget,
+            recency_half_life_days=self.memory_recency_half_life_days,
+            embedding_provider=self.memory_embedding_provider,
+        )
         if memory:
             parts.append(f"# Memory\n\n{memory}")
         
@@ -159,7 +184,9 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         messages = []
 
         # System prompt
-        system_prompt = self.build_system_prompt(skill_names)
+        system_prompt = self.build_system_prompt(skill_names, current_message=current_message)
+        if channel and chat_id:
+            system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
         messages.append({"role": "system", "content": system_prompt})
 
         # History

@@ -10,6 +10,9 @@ always: true
 
 - `memory/MEMORY.md` — Long-term facts (preferences, project context, relationships). Always loaded into your context.
 - `memory/HISTORY.md` — Append-only event log. NOT loaded into context. Search it with grep.
+- `memory/events.jsonl` — Structured episodic events used for retrieval ranking.
+- `memory/profile.json` — Canonical profile facts (`preferences`, `stable_facts`, etc.).
+- `memory/metrics.json` — Memory observability counters.
 
 ## Search Past Events
 
@@ -29,3 +32,13 @@ Write important facts immediately using `edit_file` or `write_file`:
 ## Auto-consolidation
 
 Old conversations are automatically summarized and appended to HISTORY.md when the session grows large. Long-term facts are extracted to MEMORY.md. You don't need to manage this.
+
+## Memory Maintenance Commands
+
+Use CLI commands when troubleshooting or auditing memory quality:
+
+```bash
+nanobot memory inspect --query "keyword"
+nanobot memory rebuild
+nanobot memory verify
+```

@@ -226,6 +226,21 @@ def _create_workspace_templates(workspace: Path):
         history_file.write_text("", encoding="utf-8")
         console.print("  [dim]Created memory/HISTORY.md[/dim]")
 
+    events_file = memory_dir / "events.jsonl"
+    if not events_file.exists():
+        events_file.write_text("", encoding="utf-8")
+        console.print("  [dim]Created memory/events.jsonl[/dim]")
+
+    profile_file = memory_dir / "profile.json"
+    if not profile_file.exists():
+        profile_file.write_text("{}", encoding="utf-8")
+        console.print("  [dim]Created memory/profile.json[/dim]")
+
+    metrics_file = memory_dir / "metrics.json"
+    if not metrics_file.exists():
+        metrics_file.write_text("{}", encoding="utf-8")
+        console.print("  [dim]Created memory/metrics.json[/dim]")
+
     (workspace / "skills").mkdir(exist_ok=True)
 
 
@@ -312,6 +327,12 @@ def gateway(
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
+        memory_mode=config.agents.defaults.memory_mode,
+        memory_retrieval_k=config.agents.defaults.memory_retrieval_k,
+        memory_token_budget=config.agents.defaults.memory_token_budget,
+        memory_recency_half_life_days=config.agents.defaults.memory_recency_half_life_days,
+        memory_enable_contradiction_check=config.agents.defaults.memory_enable_contradiction_check,
+        memory_embedding_provider=config.agents.defaults.memory_embedding_provider,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
@@ -469,6 +490,12 @@ def agent(
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
+        memory_mode=config.agents.defaults.memory_mode,
+        memory_retrieval_k=config.agents.defaults.memory_retrieval_k,
+        memory_token_budget=config.agents.defaults.memory_token_budget,
+        memory_recency_half_life_days=config.agents.defaults.memory_recency_half_life_days,
+        memory_enable_contradiction_check=config.agents.defaults.memory_enable_contradiction_check,
+        memory_embedding_provider=config.agents.defaults.memory_embedding_provider,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
@@ -960,6 +987,12 @@ def cron_run(
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
+        memory_mode=config.agents.defaults.memory_mode,
+        memory_retrieval_k=config.agents.defaults.memory_retrieval_k,
+        memory_token_budget=config.agents.defaults.memory_token_budget,
+        memory_recency_half_life_days=config.agents.defaults.memory_recency_half_life_days,
+        memory_enable_contradiction_check=config.agents.defaults.memory_enable_contradiction_check,
+        memory_embedding_provider=config.agents.defaults.memory_embedding_provider,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -998,6 +1031,140 @@ def cron_run(
 # ============================================================================
 # Status Commands
 # ============================================================================
+
+
+memory_app = typer.Typer(help="Manage memory system")
+app.add_typer(memory_app, name="memory")
+
+
+@memory_app.command("inspect")
+def memory_inspect(
+    query: str = typer.Option("", "--query", "-q", help="Optional retrieval query"),
+    top_k: int = typer.Option(6, "--top-k", "-k", help="Top-k memories to display"),
+):
+    """Inspect memory profile, metrics, and retrieval results."""
+    from nanobot.config.loader import load_config
+    from nanobot.agent.memory import MemoryStore
+
+    config = load_config()
+    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+
+    observability = store.get_observability_report()
+    metrics = observability.get("metrics", {})
+    kpis = observability.get("kpis", {})
+    profile = store.read_profile()
+    report = store.verify_memory()
+    events = store.read_events()
+
+    console.print(f"{__logo__} Memory Inspect\n")
+    console.print(f"Mode: [cyan]{config.agents.defaults.memory_mode}[/cyan]")
+    console.print(f"Events: [green]{len(events)}[/green]")
+    console.print(f"Profile items: [green]{report['profile_items']}[/green]")
+    console.print(f"Open conflicts: [yellow]{report['open_conflicts']}[/yellow]")
+    console.print(f"Stale events: [yellow]{report['stale_events']}[/yellow]\n")
+
+    table = Table(title="Memory Metrics")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+    for key in (
+        "consolidations",
+        "messages_processed",
+        "user_messages_processed",
+        "user_corrections",
+        "events_extracted",
+        "profile_updates_applied",
+        "retrieval_queries",
+        "retrieval_hits",
+        "conflicts_detected",
+        "memory_context_calls",
+        "memory_context_tokens_total",
+        "memory_context_tokens_max",
+        "last_updated",
+    ):
+        table.add_row(key, str(metrics.get(key, 0)))
+    console.print(table)
+
+    kpi_table = Table(title="Memory KPIs")
+    kpi_table.add_column("KPI", style="cyan")
+    kpi_table.add_column("Value", style="green")
+    kpi_table.add_row("retrieval_hit_rate", str(kpis.get("retrieval_hit_rate", 0.0)))
+    kpi_table.add_row("contradiction_rate_per_100_messages", str(kpis.get("contradiction_rate_per_100_messages", 0.0)))
+    kpi_table.add_row("user_correction_rate_per_100_user_messages", str(kpis.get("user_correction_rate_per_100_user_messages", 0.0)))
+    kpi_table.add_row("avg_memory_context_tokens", str(kpis.get("avg_memory_context_tokens", 0.0)))
+    kpi_table.add_row("max_memory_context_tokens", str(kpis.get("max_memory_context_tokens", 0)))
+    console.print(kpi_table)
+
+    if query.strip():
+        retrieved = store.retrieve(
+            query,
+            top_k=top_k,
+            recency_half_life_days=config.agents.defaults.memory_recency_half_life_days,
+            embedding_provider=config.agents.defaults.memory_embedding_provider,
+        )
+        if not retrieved:
+            console.print("\n[dim]No memory retrieved for query.[/dim]")
+            return
+        out = Table(title=f"Top Memories for: {query}")
+        out.add_column("When", style="cyan")
+        out.add_column("Type", style="magenta")
+        out.add_column("Score", style="green")
+        out.add_column("Summary")
+        for item in retrieved:
+            out.add_row(
+                str(item.get("timestamp", ""))[:16],
+                str(item.get("type", "fact")),
+                f"{float(item.get('score', 0.0)):.3f}",
+                str(item.get("summary", "")),
+            )
+        console.print()
+        console.print(out)
+
+    pref_count = len(profile.get("preferences", [])) if isinstance(profile.get("preferences"), list) else 0
+    fact_count = len(profile.get("stable_facts", [])) if isinstance(profile.get("stable_facts"), list) else 0
+    console.print(f"\nProfile breakdown: preferences={pref_count}, stable_facts={fact_count}")
+
+
+@memory_app.command("rebuild")
+def memory_rebuild(
+    max_events: int = typer.Option(30, "--max-events", help="Max recent events for MEMORY.md snapshot"),
+):
+    """Rebuild memory/MEMORY.md from structured memory profile and events."""
+    from nanobot.config.loader import load_config
+    from nanobot.agent.memory import MemoryStore
+
+    config = load_config()
+    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    snapshot = store.rebuild_memory_snapshot(max_events=max_events, write=True)
+    line_count = len(snapshot.splitlines())
+    console.print(f"[green]✓[/green] Rebuilt MEMORY.md with {line_count} lines")
+
+
+@memory_app.command("verify")
+def memory_verify(
+    stale_days: int = typer.Option(90, "--stale-days", help="Age threshold for stale events without TTL"),
+):
+    """Verify memory consistency and freshness."""
+    from nanobot.config.loader import load_config
+    from nanobot.agent.memory import MemoryStore
+
+    config = load_config()
+    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    report = store.verify_memory(stale_days=stale_days, update_profile=True)
+
+    table = Table(title="Memory Verification")
+    table.add_column("Check", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("events", str(report["events"]))
+    table.add_row("profile_items", str(report["profile_items"]))
+    table.add_row("open_conflicts", str(report["open_conflicts"]))
+    table.add_row("stale_events", str(report["stale_events"]))
+    table.add_row("stale_profile_items", str(report["stale_profile_items"]))
+    table.add_row("ttl_tracked_events", str(report["ttl_tracked_events"]))
+    table.add_row("last_verified_at", str(report["last_verified_at"]))
+    console.print(table)
+
+    if report["open_conflicts"] > 0:
+        raise typer.Exit(2)
 
 
 @app.command()

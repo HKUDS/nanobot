@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 from contextlib import AsyncExitStack
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -53,6 +54,12 @@ class AgentLoop:
         temperature: float = 0.1,
         max_tokens: int = 4096,
         memory_window: int = 100,
+        memory_mode: str = "legacy",
+        memory_retrieval_k: int = 6,
+        memory_token_budget: int = 900,
+        memory_recency_half_life_days: float = 30.0,
+        memory_enable_contradiction_check: bool = True,
+        memory_embedding_provider: str = "",
         brave_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
@@ -71,12 +78,25 @@ class AgentLoop:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.memory_window = memory_window
+        self.memory_mode = memory_mode
+        self.memory_retrieval_k = memory_retrieval_k
+        self.memory_token_budget = memory_token_budget
+        self.memory_recency_half_life_days = memory_recency_half_life_days
+        self.memory_enable_contradiction_check = memory_enable_contradiction_check
+        self.memory_embedding_provider = memory_embedding_provider
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
-        self.context = ContextBuilder(workspace)
+        self.context = ContextBuilder(
+            workspace,
+            memory_mode=self.memory_mode,
+            memory_retrieval_k=self.memory_retrieval_k,
+            memory_token_budget=self.memory_token_budget,
+            memory_recency_half_life_days=self.memory_recency_half_life_days,
+            memory_embedding_provider=self.memory_embedding_provider,
+        )
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -336,7 +356,10 @@ class AgentLoop:
                     if snapshot:
                         temp = Session(key=session.key)
                         temp.messages = list(snapshot)
-                        if not await self._consolidate_memory(temp, archive_all=True):
+                        archived = await self._consolidate_memory(temp, archive_all=True)
+                        if not archived:
+                            archived = self._fallback_archive_snapshot(snapshot)
+                        if not archived:
                             return OutboundMessage(
                                 channel=msg.channel, chat_id=msg.chat_id,
                                 content="Memory archival failed, session not cleared. Please try again.",
@@ -439,10 +462,45 @@ class AgentLoop:
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
-        return await MemoryStore(self.workspace).consolidate(
+        return await MemoryStore(self.workspace, embedding_provider=self.memory_embedding_provider).consolidate(
             session, self.provider, self.model,
-            archive_all=archive_all, memory_window=self.memory_window,
+            archive_all=archive_all,
+            memory_window=self.memory_window,
+            memory_mode=self.memory_mode,
+            retrieval_k=self.memory_retrieval_k,
+            token_budget=self.memory_token_budget,
+            recency_half_life_days=self.memory_recency_half_life_days,
+            enable_contradiction_check=self.memory_enable_contradiction_check,
+            embedding_provider=self.memory_embedding_provider,
         )
+
+    def _fallback_archive_snapshot(self, snapshot: list[dict]) -> bool:
+        """Fallback archival used by /new when AI consolidation fails."""
+        try:
+            lines: list[str] = []
+            for m in snapshot:
+                content = m.get("content")
+                if not content:
+                    continue
+                tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
+                timestamp = str(m.get("timestamp", "?"))[:16]
+                role = str(m.get("role", "unknown")).upper()
+                lines.append(f"[{timestamp}] {role}{tools}: {content}")
+
+            if not lines:
+                return True
+
+            header = (
+                f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] "
+                f"Fallback archive from /new ({len(lines)} messages)"
+            )
+            entry = header + "\n" + "\n".join(lines)
+            MemoryStore(self.workspace).append_history(entry)
+            logger.warning("/new used fallback archival: {} messages", len(lines))
+            return True
+        except Exception:
+            logger.exception("Fallback archival failed")
+            return False
 
     async def process_direct(
         self,
