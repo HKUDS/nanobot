@@ -36,6 +36,7 @@ class AgentLoop:
     _CONSOLIDATION_HARD_LIMIT = 30
     _SILENT_TRAILING_RE = re.compile(r"\[SILENT\][\s\.,!?;:，。！？；：、…~]*$")
     _EMPTY_RESPONSE_SENTINELS = {"(empty)", "[empty message]"}
+    _EMPTY_RESPONSE_FALLBACK_PREFIX = "I could not produce a final response because the model returned empty/blank content "
 
     def __init__(
         self,
@@ -160,6 +161,27 @@ class AgentLoop:
                     response = await self._process_message(msg)
                     if response:
                         await self.bus.publish_outbound(response)
+                    elif msg.channel == "telegram":
+                        # Ensure Telegram typing indicator is stopped even when no visible text is emitted.
+                        await self.bus.publish_outbound(
+                            OutboundMessage(
+                                channel=msg.channel,
+                                chat_id=msg.chat_id,
+                                content="",
+                                silent=True,
+                                metadata=msg.metadata or {},
+                            )
+                        )
+                    elif msg.channel == "cli":
+                        # Keep interactive CLI turns from hanging when no final text is emitted.
+                        await self.bus.publish_outbound(
+                            OutboundMessage(
+                                channel=msg.channel,
+                                chat_id=msg.chat_id,
+                                content="",
+                                metadata=msg.metadata or {},
+                            )
+                        )
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
                     await self.bus.publish_outbound(
@@ -616,6 +638,18 @@ class AgentLoop:
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
+
+        if (
+            msg.channel != "cli"
+            and isinstance(final_content, str)
+            and final_content.startswith(self._EMPTY_RESPONSE_FALLBACK_PREFIX)
+        ):
+            logger.warning(
+                "Suppress diagnostic empty-response fallback on external channel {}:{}",
+                msg.channel,
+                msg.chat_id,
+            )
+            final_content = ""
 
         self._save_session_with_tools(
             session,
