@@ -31,6 +31,28 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
 
 
+# Models known to support native vision (image input).
+# When the active model matches any of these prefixes/patterns, images are
+# sent inline as base64 and the vision_model preprocessor is skipped.
+_VISION_CAPABLE_PATTERNS = (
+    "claude",       # all Anthropic models (claude-3, claude-opus-4, …)
+    "gpt-4",        # GPT-4V, GPT-4o, …
+    "gpt-4o",
+    "gemini",       # Google Gemini
+    "llava",        # open-source multimodal
+    "pixtral",      # Mistral vision
+    "qwen-vl",      # Qwen Vision Language
+    "vision",       # any model with "vision" in name
+    "minicpm-v",
+)
+
+
+def _model_supports_vision(model: str) -> bool:
+    """Return True if the model is known to accept inline image content."""
+    m = model.lower()
+    return any(p in m for p in _VISION_CAPABLE_PATTERNS)
+
+
 class AgentLoop:
     """
     The agent loop is the core processing engine.
@@ -396,14 +418,23 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.memory_window)
-        # ── Vision preprocessing ──────────────────────────────────────────────
-        # When vision_model is configured and the message contains fresh images:
-        #   1. Call vision_model with history context to get rich descriptions
-        #   2. Store descriptions in MediaCache (never re-process same image)
-        #   3. Delete the raw file from disk
-        #   4. Main agent loop runs on text descriptions only (cheaper + faster)
-        # Already-cached images are substituted as text directly (no LLM call).
-        if msg.media and self.vision_model:
+        # ── Vision handling ───────────────────────────────────────────────────
+        # Two paths depending on whether the main model supports native vision:
+        #
+        # A) Main model IS vision-capable (Claude, GPT-4V, Gemini, …):
+        #    → Images are passed inline as base64 directly to the main model.
+        #    → vision_model is NOT called (it's a fallback, not a preprocessor).
+        #    → Cache is still checked: a previously transcribed image is returned
+        #      as text so we never re-encode an image that was already described.
+        #
+        # B) Main model is NOT vision-capable (text-only LLM):
+        #    → vision_model (if set) is called as a dedicated preprocessor.
+        #    → Descriptions are stored in MediaCache (SHA-256 keyed JSON).
+        #    → Raw files are deleted; main model receives text descriptions only.
+        #
+        main_has_vision = _model_supports_vision(self.model)
+        if msg.media and not main_has_vision and self.vision_model:
+            # Path B: preprocess images with the dedicated vision model
             uncached = []
             for path in msg.media:
                 fhash = self.context.media_cache.hash_file(path)
@@ -411,7 +442,6 @@ class AgentLoop:
                     uncached.append(path)
 
             if uncached:
-                # Build focused message list for vision preprocessor
                 vision_msgs = self.context.build_vision_messages(
                     history=history,
                     current_message=msg.content,
@@ -427,14 +457,18 @@ class AgentLoop:
                         max_tokens=2048,
                     )
                     description = vision_resp.content or ""
-                    # Store one shared description for all images in this batch
                     for path in uncached:
                         fhash = self.context.media_cache.hash_file(path)
                         if fhash:
                             self.context.media_cache.put(fhash, description, path)
-                    logger.info("Vision preprocessor: transcribed {} image(s) with {}", len(uncached), self.vision_model)
+                    logger.info(
+                        "Vision fallback: transcribed {} image(s) via {} (main model '{}' has no vision)",
+                        len(uncached), self.vision_model, self.model,
+                    )
                 except Exception as e:
-                    logger.warning("Vision preprocessor failed ({}), falling back to inline base64", e)
+                    logger.warning("Vision fallback failed ({}), images will be dropped for text-only model", e)
+        elif msg.media and main_has_vision:
+            logger.debug("Main model '{}' supports vision — passing images inline", self.model)
 
         # Build messages BEFORE deleting files so _build_user_content can hash
         # them and find their cached descriptions.  Files are deleted afterwards.
