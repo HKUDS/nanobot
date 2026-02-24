@@ -355,6 +355,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # GigaChat
+    ProviderSpec(
+        name="gigachat",
+        keywords=("gigachat", "GigaChat-Pro"),
+        env_key="GIGACHAT_CREDENTIALS",
+        display_name="GigaChat",
+        litellm_prefix="gigachat",
+        skip_prefixes=("gigachat/"),
+        env_extras=(("SSL_VERIFY","False"),), #required accirding to litellm docs
+        is_gateway=False,
+        is_local=False,
+        is_oauth=True,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # === Local deployment (matched by config key, NOT by api_base) =========
 
     # vLLM / any OpenAI-compatible local server.
