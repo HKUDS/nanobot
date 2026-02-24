@@ -35,6 +35,7 @@ class AgentLoop:
     _CONSOLIDATION_COOLDOWN_S = 15 * 60
     _CONSOLIDATION_HARD_LIMIT = 30
     _SILENT_TRAILING_RE = re.compile(r"\[SILENT\][\s\.,!?;:，。！？；：、…~]*$")
+    _EMPTY_RESPONSE_SENTINELS = {"(empty)", "[empty message]"}
 
     def __init__(
         self,
@@ -311,6 +312,13 @@ class AgentLoop:
         cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
         return cleaned
 
+    @classmethod
+    def _is_empty_response_sentinel(cls, content: str | None) -> bool:
+        """Return True for provider/tool placeholder texts that should not reach users."""
+        if content is None:
+            return False
+        return content.strip().lower() in cls._EMPTY_RESPONSE_SENTINELS
+
     @staticmethod
     def _log_token_usage(usage: dict[str, int] | None) -> None:
         """Log token/caching usage consistently across loops."""
@@ -471,7 +479,12 @@ class AgentLoop:
                     )
                 continue
 
-            if response.content is None or response.content.strip() == "":
+            stripped_content = self._strip_think(response.content)
+            if (
+                response.content is None
+                or response.content.strip() == ""
+                or self._is_empty_response_sentinel(stripped_content)
+            ):
                 sent_message = any(name == "message" for name, _, _ in tool_use_log)
                 if sent_message:
                     logger.info(
@@ -502,7 +515,7 @@ class AgentLoop:
                         "Please retry."
                     )
             else:
-                final_content = self._strip_think(response.content)
+                final_content = stripped_content
                 break
 
         if final_content is None:
