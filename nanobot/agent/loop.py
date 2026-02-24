@@ -436,13 +436,8 @@ class AgentLoop:
                 except Exception as e:
                     logger.warning("Vision preprocessor failed ({}), falling back to inline base64", e)
 
-        # Delete raw media files — descriptions are now in MediaCache
-        for media_path in (msg.media or []):
-            try:
-                Path(media_path).unlink(missing_ok=True)
-            except OSError:
-                pass
-
+        # Build messages BEFORE deleting files so _build_user_content can hash
+        # them and find their cached descriptions.  Files are deleted afterwards.
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
@@ -450,6 +445,13 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id,
             system_prompt_prefix=system_prompt,
         )
+
+        # Delete raw media files — descriptions are now embedded in initial_messages
+        for media_path in (msg.media or []):
+            try:
+                Path(media_path).unlink(missing_ok=True)
+            except OSError:
+                pass
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
