@@ -150,6 +150,7 @@ class TestHybridMemoryStore:
         assert len(retrieved) >= 1
         assert retrieved[0]["summary"].lower().find("oauth2") >= 0
         assert retrieved[0]["retrieval_reason"]["provider"] == "hash"
+        assert retrieved[0]["provenance"]["canonical_id"] == retrieved[0]["id"]
 
         index_file = store.index_dir / "vectors_hash.json"
         assert index_file.exists()
@@ -518,3 +519,149 @@ class TestHybridMemoryStore:
         resolved = [c for c in all_conflicts if c.get("index") == idx]
         assert resolved
         assert resolved[0]["status"] == "resolved"
+
+    def test_semantic_dedup_merges_events_and_keeps_provenance(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path, embedding_provider="hash")
+
+        written_1 = store.append_events(
+            [
+                {
+                    "id": "dup-1",
+                    "timestamp": "2026-02-23T10:00:00+00:00",
+                    "channel": "cli",
+                    "chat_id": "direct",
+                    "type": "fact",
+                    "summary": "API uses OAuth2 authentication for requests.",
+                    "entities": ["api", "oauth2"],
+                    "salience": 0.75,
+                    "confidence": 0.8,
+                    "source_span": [0, 1],
+                    "ttl_days": 365,
+                }
+            ]
+        )
+        written_2 = store.append_events(
+            [
+                {
+                    "id": "dup-2",
+                    "timestamp": "2026-02-23T11:00:00+00:00",
+                    "channel": "cli",
+                    "chat_id": "direct",
+                    "type": "fact",
+                    "summary": "The API authenticates using OAuth2 tokens.",
+                    "entities": ["tokens", "oauth2"],
+                    "salience": 0.7,
+                    "confidence": 0.78,
+                    "source_span": [2, 4],
+                    "ttl_days": 365,
+                }
+            ]
+        )
+
+        assert written_1 == 1
+        assert written_2 == 0
+
+        events = store.read_events()
+        assert len(events) == 1
+        event = events[0]
+        assert event["canonical_id"] == "dup-1"
+        assert event["merged_event_count"] >= 2
+        assert len(event.get("aliases", [])) >= 2
+        assert len(event.get("evidence", [])) >= 2
+
+        retrieved = store.retrieve("oauth2 tokens", top_k=2, embedding_provider="hash")
+        assert retrieved
+        provenance = retrieved[0]["provenance"]
+        assert provenance["canonical_id"] == "dup-1"
+        assert provenance["evidence_count"] >= 2
+
+        metrics = store.get_metrics()
+        assert metrics["event_dedup_merges"] >= 1
+
+    def test_non_duplicate_events_remain_separate(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path, embedding_provider="hash")
+        written = store.append_events(
+            [
+                {
+                    "id": "nd-1",
+                    "timestamp": "2026-02-23T10:00:00+00:00",
+                    "channel": "cli",
+                    "chat_id": "direct",
+                    "type": "fact",
+                    "summary": "Primary database is PostgreSQL.",
+                    "entities": ["postgresql", "database"],
+                    "salience": 0.7,
+                    "confidence": 0.8,
+                    "source_span": [0, 1],
+                    "ttl_days": 365,
+                },
+                {
+                    "id": "nd-2",
+                    "timestamp": "2026-02-23T10:05:00+00:00",
+                    "channel": "cli",
+                    "chat_id": "direct",
+                    "type": "fact",
+                    "summary": "Deployment region is eu-west-1.",
+                    "entities": ["region", "eu-west-1"],
+                    "salience": 0.7,
+                    "confidence": 0.8,
+                    "source_span": [2, 3],
+                    "ttl_days": 365,
+                },
+            ]
+        )
+
+        assert written == 2
+        events = store.read_events()
+        assert len(events) == 2
+        ids = {str(e.get("id")) for e in events}
+        assert {"nd-1", "nd-2"}.issubset(ids)
+
+    def test_sqlite_vector_backend_persists_and_retrieves(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="sqlite")
+        store.append_events(
+            [
+                {
+                    "id": "sql-ev-1",
+                    "timestamp": "2026-02-23T00:00:00+00:00",
+                    "channel": "cli",
+                    "chat_id": "direct",
+                    "type": "fact",
+                    "summary": "Primary database is PostgreSQL.",
+                    "entities": ["database", "postgresql"],
+                    "salience": 0.8,
+                    "confidence": 0.8,
+                    "source_span": [0, 1],
+                    "ttl_days": 365,
+                }
+            ]
+        )
+
+        retrieved = store.retrieve("postgresql database", top_k=2, embedding_provider="hash")
+        assert retrieved
+        assert retrieved[0]["retrieval_reason"]["backend"] == "sqlite"
+        assert (store.index_dir / "vectors.sqlite3").exists()
+
+    def test_faiss_backend_falls_back_when_unavailable(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="faiss")
+        store.append_events(
+            [
+                {
+                    "id": "faiss-fallback-1",
+                    "timestamp": "2026-02-23T00:00:00+00:00",
+                    "channel": "cli",
+                    "chat_id": "direct",
+                    "type": "fact",
+                    "summary": "Service region is eu-west-1.",
+                    "entities": ["region", "eu-west-1"],
+                    "salience": 0.7,
+                    "confidence": 0.8,
+                    "source_span": [2, 3],
+                    "ttl_days": 365,
+                }
+            ]
+        )
+
+        retrieved = store.retrieve("region eu-west-1", top_k=2, embedding_provider="hash")
+        assert retrieved
+        assert retrieved[0]["retrieval_reason"]["backend"] in {"faiss", "json"}

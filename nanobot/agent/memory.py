@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.memory_embeddings import MemoryEmbedder, cosine_similarity
+from nanobot.agent.memory_embeddings import (
+    MemoryEmbedder,
+    create_vector_backend,
+    cosine_similarity,
+)
 from nanobot.utils.helpers import ensure_dir
 
 if TYPE_CHECKING:
@@ -155,6 +159,12 @@ class MemoryPersistence:
         return written
 
     @staticmethod
+    def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+        with open(path, "w", encoding="utf-8") as f:
+            for row in rows:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    @staticmethod
     def append_text(path: Path, text: str) -> None:
         with open(path, "a", encoding="utf-8") as f:
             f.write(text)
@@ -178,6 +188,7 @@ class MemoryRetriever:
         *,
         index_dir: Path,
         embedding_provider: str,
+        vector_backend: str,
         persistence: MemoryPersistence,
         read_events: Any,
         to_str_list: Any,
@@ -188,6 +199,7 @@ class MemoryRetriever:
     ):
         self.index_dir = index_dir
         self.embedding_provider = embedding_provider or "hash"
+        self.vector_backend = vector_backend or "json"
         self.persistence = persistence
         self.read_events = read_events
         self.to_str_list = to_str_list
@@ -196,6 +208,7 @@ class MemoryRetriever:
         self.utc_now_iso = utc_now_iso
         self.record_metric = record_metric
         self._embedder: MemoryEmbedder | None = None
+        self._index_backend = create_vector_backend(self.vector_backend, index_dir=self.index_dir)
 
     @staticmethod
     def provider_slug(provider: str) -> str:
@@ -209,7 +222,16 @@ class MemoryRetriever:
         return self._embedder
 
     def index_file(self, provider: str) -> Path:
-        return self.index_dir / f"vectors_{self.provider_slug(provider)}.json"
+        slug = self.provider_slug(provider)
+        if self._index_backend.name == "json":
+            return self.index_dir / f"vectors_{slug}.json"
+        if self._index_backend.name == "sqlite":
+            return self.index_dir / "vectors.sqlite3"
+        return self.index_dir / f"vectors_{slug}.faiss"
+
+    @property
+    def active_backend(self) -> str:
+        return self._index_backend.name
 
     def event_text(self, event: dict[str, Any]) -> str:
         summary = str(event.get("summary", ""))
@@ -218,23 +240,25 @@ class MemoryRetriever:
         return f"{event_type}. {summary}. {entities}".strip()
 
     def load_vector_index(self, provider: str) -> dict[str, Any]:
-        path = self.index_file(provider)
-        data = self.persistence.read_json(path)
-        if isinstance(data, dict) and isinstance(data.get("items"), dict):
-            return data
-        if path.exists():
-            logger.warning("Failed to parse vector index '{}', rebuilding", path)
+        items = self._index_backend.load_items(provider)
         return {
             "provider": provider,
+            "backend": self._index_backend.name,
             "updated_at": self.utc_now_iso(),
-            "items": {},
+            "items": items,
+            "dim": len(next(iter(items.values()))) if items else 0,
         }
 
     def save_vector_index(self, provider: str, index_data: dict[str, Any]) -> None:
-        path = self.index_file(provider)
-        index_data["provider"] = provider
-        index_data["updated_at"] = self.utc_now_iso()
-        self.persistence.write_text(path, json.dumps(index_data, ensure_ascii=False))
+        items: dict[str, list[float]] = {
+            key: [float(x) for x in value]
+            for key, value in index_data.get("items", {}).items()
+            if isinstance(key, str) and isinstance(value, list)
+        }
+        dim = int(index_data.get("dim", 0) or 0)
+        if dim <= 0 and items:
+            dim = len(next(iter(items.values())))
+        self._index_backend.save_items(provider, items, dim)
 
     def ensure_event_embeddings(
         self,
@@ -271,6 +295,36 @@ class MemoryRetriever:
             self.save_vector_index(provider, index_data)
             self.record_metric("index_updates", len(missing_ids))
 
+        return items, provider
+
+    def rebuild_event_embeddings(
+        self,
+        events: list[dict[str, Any]],
+        *,
+        embedding_provider: str | None = None,
+    ) -> tuple[dict[str, list[float]], str]:
+        embedder = self.get_embedder(embedding_provider)
+        provider = embedder.provider_name
+        valid_events = [event for event in events if isinstance(event.get("id"), str) and event.get("id")]
+        if not valid_events:
+            self.save_vector_index(provider, {"items": {}, "dim": 0})
+            return {}, provider
+
+        ids = [str(event["id"]) for event in valid_events]
+        texts = [self.event_text(event) for event in valid_events]
+        vectors = embedder.embed_texts(texts)
+        items = {
+            event_id: [float(x) for x in vector]
+            for event_id, vector in zip(ids, vectors, strict=False)
+        }
+        self.save_vector_index(
+            provider,
+            {
+                "items": items,
+                "dim": len(next(iter(items.values()))) if items else 0,
+            },
+        )
+        self.record_metric("index_updates", len(items))
         return items, provider
 
     @staticmethod
@@ -339,6 +393,15 @@ class MemoryRetriever:
                 "salience": round(sal, 4),
                 "confidence": round(conf, 4),
                 "provider": active_provider,
+                "backend": self.active_backend,
+            }
+            evidence = event.get("evidence") if isinstance(event.get("evidence"), list) else []
+            aliases = event.get("aliases") if isinstance(event.get("aliases"), list) else []
+            event_copy["provenance"] = {
+                "canonical_id": event.get("canonical_id") or event.get("id"),
+                "aliases_count": len(aliases),
+                "evidence_count": len(evidence),
+                "merged_event_count": int(event.get("merged_event_count", 1) or 1),
             }
             scored.append(event_copy)
 
@@ -541,7 +604,7 @@ class MemoryStore:
     PROFILE_STATUS_CONFLICTED = "conflicted"
     PROFILE_STATUS_STALE = "stale"
 
-    def __init__(self, workspace: Path, embedding_provider: str = ""):
+    def __init__(self, workspace: Path, embedding_provider: str = "", vector_backend: str = "json"):
         self.persistence = MemoryPersistence(workspace)
         self.memory_dir = self.persistence.memory_dir
         self.memory_file = self.persistence.memory_file
@@ -551,9 +614,11 @@ class MemoryStore:
         self.metrics_file = self.persistence.metrics_file
         self.index_dir = self.persistence.index_dir
         self.embedding_provider = embedding_provider or "hash"
+        self.vector_backend = vector_backend or "json"
         self.retriever = MemoryRetriever(
             index_dir=self.index_dir,
             embedding_provider=self.embedding_provider,
+            vector_backend=self.vector_backend,
             persistence=self.persistence,
             read_events=self.read_events,
             to_str_list=self._to_str_list,
@@ -615,6 +680,7 @@ class MemoryStore:
         return {
             "consolidations": 0,
             "events_extracted": 0,
+            "event_dedup_merges": 0,
             "retrieval_queries": 0,
             "retrieval_hits": 0,
             "index_updates": 0,
@@ -832,20 +898,180 @@ class MemoryStore:
             return out[-limit:]
         return out
 
+    @staticmethod
+    def _merge_source_span(base: list[int] | Any, incoming: list[int] | Any) -> list[int]:
+        base_span = base if isinstance(base, list) and len(base) == 2 and all(isinstance(x, int) for x in base) else [0, 0]
+        incoming_span = (
+            incoming if isinstance(incoming, list) and len(incoming) == 2 and all(isinstance(x, int) for x in incoming) else base_span
+        )
+        return [min(base_span[0], incoming_span[0]), max(base_span[1], incoming_span[1])]
+
+    def _ensure_event_provenance(self, event: dict[str, Any]) -> dict[str, Any]:
+        event_copy = dict(event)
+        event_id = str(event_copy.get("id", "")).strip()
+        if not event_id:
+            return event_copy
+
+        event_copy.setdefault("canonical_id", event_id)
+        aliases = event_copy.get("aliases")
+        if not isinstance(aliases, list):
+            aliases = []
+        summary = str(event_copy.get("summary", "")).strip()
+        if summary and summary not in aliases:
+            aliases.append(summary)
+        event_copy["aliases"] = aliases
+
+        evidence = event_copy.get("evidence")
+        if not isinstance(evidence, list):
+            evidence = []
+        if not evidence:
+            evidence.append(
+                {
+                    "event_id": event_id,
+                    "timestamp": str(event_copy.get("timestamp", "")),
+                    "summary": summary,
+                    "source_span": event_copy.get("source_span"),
+                    "confidence": self._safe_float(event_copy.get("confidence"), 0.7),
+                    "salience": self._safe_float(event_copy.get("salience"), 0.6),
+                }
+            )
+        event_copy["evidence"] = evidence
+        event_copy["merged_event_count"] = max(int(event_copy.get("merged_event_count", 1)), 1)
+        return event_copy
+
+    def _event_similarity(self, left: dict[str, Any], right: dict[str, Any]) -> tuple[float, float]:
+        left_text = self._event_text(left)
+        right_text = self._event_text(right)
+        lexical = self._lexical_similarity(left_text, right_text)
+
+        semantic = 0.0
+        try:
+            vectors = self._get_embedder(self.embedding_provider).embed_texts([left_text, right_text])
+            if len(vectors) == 2:
+                semantic = cosine_similarity(vectors[0], vectors[1])
+        except Exception:
+            semantic = 0.0
+        return lexical, semantic
+
+    def _find_semantic_duplicate(
+        self,
+        candidate: dict[str, Any],
+        existing_events: list[dict[str, Any]],
+    ) -> tuple[int | None, float]:
+        best_idx: int | None = None
+        best_score = 0.0
+        candidate_type = str(candidate.get("type", ""))
+
+        for idx, existing in enumerate(existing_events):
+            if str(existing.get("type", "")) != candidate_type:
+                continue
+            lexical, semantic = self._event_similarity(candidate, existing)
+            candidate_entities = {self._norm_text(x) for x in self._to_str_list(candidate.get("entities"))}
+            existing_entities = {self._norm_text(x) for x in self._to_str_list(existing.get("entities"))}
+            entity_overlap = 0.0
+            if candidate_entities and existing_entities:
+                entity_overlap = len(candidate_entities & existing_entities) / max(len(candidate_entities | existing_entities), 1)
+
+            score = 0.4 * semantic + 0.45 * lexical + 0.15 * entity_overlap
+            is_duplicate = (
+                lexical >= 0.84
+                or semantic >= 0.94
+                or (lexical >= 0.6 and semantic >= 0.86)
+                or (entity_overlap >= 0.33 and (lexical >= 0.42 or semantic >= 0.52))
+            )
+            if not is_duplicate:
+                continue
+            if score > best_score:
+                best_score = score
+                best_idx = idx
+
+        return best_idx, best_score
+
+    def _merge_events(
+        self,
+        base: dict[str, Any],
+        incoming: dict[str, Any],
+        *,
+        similarity: float,
+    ) -> dict[str, Any]:
+        canonical = self._ensure_event_provenance(base)
+        candidate = self._ensure_event_provenance(incoming)
+
+        entities = list(dict.fromkeys(self._to_str_list(canonical.get("entities")) + self._to_str_list(candidate.get("entities"))))
+        aliases = list(dict.fromkeys(self._to_str_list(canonical.get("aliases")) + self._to_str_list(candidate.get("aliases"))))
+        evidence = canonical.get("evidence") if isinstance(canonical.get("evidence"), list) else []
+        evidence.extend(candidate.get("evidence") if isinstance(candidate.get("evidence"), list) else [])
+        if len(evidence) > 20:
+            evidence = evidence[-20:]
+
+        merged_count = max(int(canonical.get("merged_event_count", 1)), 1) + 1
+        c_conf = self._safe_float(canonical.get("confidence"), 0.7)
+        i_conf = self._safe_float(candidate.get("confidence"), 0.7)
+        c_sal = self._safe_float(canonical.get("salience"), 0.6)
+        i_sal = self._safe_float(candidate.get("salience"), 0.6)
+
+        merged = dict(canonical)
+        merged["summary"] = str(canonical.get("summary") or candidate.get("summary") or "")
+        merged["entities"] = entities
+        merged["aliases"] = aliases
+        merged["evidence"] = evidence
+        merged["source_span"] = self._merge_source_span(canonical.get("source_span"), candidate.get("source_span"))
+        merged["confidence"] = min(max((c_conf + i_conf) / 2.0 + 0.03, 0.0), 1.0)
+        merged["salience"] = min(max(max(c_sal, i_sal), 0.0), 1.0)
+        merged["merged_event_count"] = merged_count
+        merged["last_merged_at"] = self._utc_now_iso()
+        merged["last_dedup_score"] = round(similarity, 4)
+        merged["canonical_id"] = str(canonical.get("canonical_id") or canonical.get("id", ""))
+
+        canonical_ts = self._to_datetime(str(canonical.get("timestamp", "")))
+        candidate_ts = self._to_datetime(str(candidate.get("timestamp", "")))
+        if canonical_ts and candidate_ts and candidate_ts > canonical_ts:
+            merged["timestamp"] = str(candidate.get("timestamp", merged.get("timestamp", "")))
+        return merged
+
     def append_events(self, events: list[dict[str, Any]]) -> int:
         if not events:
             return 0
-        existing_ids = {e.get("id") for e in self.read_events() if e.get("id")}
-        written_events: list[dict[str, Any]] = []
-        for event in events:
-            event_id = event.get("id")
-            if not event_id or event_id in existing_ids:
+        existing_events = [self._ensure_event_provenance(event) for event in self.read_events()]
+        existing_ids = {e.get("id") for e in existing_events if e.get("id")}
+        written = 0
+        merged = 0
+        appended_events: list[dict[str, Any]] = []
+
+        for raw in events:
+            event_id = raw.get("id")
+            if not event_id:
                 continue
+            candidate = self._ensure_event_provenance(raw)
+
+            if event_id in existing_ids:
+                for idx, existing in enumerate(existing_events):
+                    if existing.get("id") == event_id:
+                        existing_events[idx] = self._merge_events(existing, candidate, similarity=1.0)
+                        merged += 1
+                        break
+                continue
+
+            dup_idx, dup_score = self._find_semantic_duplicate(candidate, existing_events)
+            if dup_idx is not None:
+                existing_events[dup_idx] = self._merge_events(existing_events[dup_idx], candidate, similarity=dup_score)
+                merged += 1
+                continue
+
             existing_ids.add(event_id)
-            written_events.append(event)
-        written = self.persistence.append_jsonl(self.events_file, written_events)
-        if written_events:
-            self._ensure_event_embeddings(written_events, embedding_provider=self.embedding_provider)
+            existing_events.append(candidate)
+            appended_events.append(candidate)
+            written += 1
+
+        if written <= 0 and merged <= 0:
+            return 0
+
+        self.persistence.write_jsonl(self.events_file, existing_events)
+        if merged > 0:
+            self.retriever.rebuild_event_embeddings(existing_events, embedding_provider=self.embedding_provider)
+            self._record_metric("event_dedup_merges", merged)
+        elif written > 0:
+            self._ensure_event_embeddings(appended_events, embedding_provider=self.embedding_provider)
         return written
 
     def read_profile(self) -> dict[str, Any]:

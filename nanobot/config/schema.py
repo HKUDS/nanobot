@@ -196,6 +196,7 @@ class AgentDefaults(Base):
     memory_recency_half_life_days: float = 30.0
     memory_enable_contradiction_check: bool = True
     memory_embedding_provider: str = ""  # Reserved for pluggable embedding backends
+    memory_vector_backend: str = "json"  # json | sqlite | sqlite-vss | faiss | auto
 
 
 class AgentsConfig(Base):

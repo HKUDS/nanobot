@@ -60,6 +60,7 @@ class AgentLoop:
         memory_recency_half_life_days: float = 30.0,
         memory_enable_contradiction_check: bool = True,
         memory_embedding_provider: str = "",
+        memory_vector_backend: str = "json",
         brave_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
@@ -84,6 +85,7 @@ class AgentLoop:
         self.memory_recency_half_life_days = memory_recency_half_life_days
         self.memory_enable_contradiction_check = memory_enable_contradiction_check
         self.memory_embedding_provider = memory_embedding_provider
+        self.memory_vector_backend = memory_vector_backend
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -96,6 +98,7 @@ class AgentLoop:
             memory_token_budget=self.memory_token_budget,
             memory_recency_half_life_days=self.memory_recency_half_life_days,
             memory_embedding_provider=self.memory_embedding_provider,
+            memory_vector_backend=self.memory_vector_backend,
         )
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
@@ -462,7 +465,11 @@ class AgentLoop:
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
-        return await MemoryStore(self.workspace, embedding_provider=self.memory_embedding_provider).consolidate(
+        return await MemoryStore(
+            self.workspace,
+            embedding_provider=self.memory_embedding_provider,
+            vector_backend=self.memory_vector_backend,
+        ).consolidate(
             session, self.provider, self.model,
             archive_all=archive_all,
             memory_window=self.memory_window,

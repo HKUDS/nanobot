@@ -333,6 +333,7 @@ def gateway(
         memory_recency_half_life_days=config.agents.defaults.memory_recency_half_life_days,
         memory_enable_contradiction_check=config.agents.defaults.memory_enable_contradiction_check,
         memory_embedding_provider=config.agents.defaults.memory_embedding_provider,
+        memory_vector_backend=config.agents.defaults.memory_vector_backend,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
@@ -496,6 +497,7 @@ def agent(
         memory_recency_half_life_days=config.agents.defaults.memory_recency_half_life_days,
         memory_enable_contradiction_check=config.agents.defaults.memory_enable_contradiction_check,
         memory_embedding_provider=config.agents.defaults.memory_embedding_provider,
+        memory_vector_backend=config.agents.defaults.memory_vector_backend,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
@@ -1047,7 +1049,11 @@ def memory_inspect(
     from nanobot.agent.memory import MemoryStore
 
     config = load_config()
-    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    store = MemoryStore(
+        config.workspace_path,
+        embedding_provider=config.agents.defaults.memory_embedding_provider,
+        vector_backend=config.agents.defaults.memory_vector_backend,
+    )
 
     observability = store.get_observability_report()
     metrics = observability.get("metrics", {})
@@ -1058,6 +1064,7 @@ def memory_inspect(
 
     console.print(f"{__logo__} Memory Inspect\n")
     console.print(f"Mode: [cyan]{config.agents.defaults.memory_mode}[/cyan]")
+    console.print(f"Vector backend: [cyan]{store.retriever.active_backend}[/cyan]")
     console.print(f"Events: [green]{len(events)}[/green]")
     console.print(f"Profile items: [green]{report['profile_items']}[/green]")
     console.print(f"Open conflicts: [yellow]{report['open_conflicts']}[/yellow]")
@@ -1072,6 +1079,7 @@ def memory_inspect(
         "user_messages_processed",
         "user_corrections",
         "events_extracted",
+        "event_dedup_merges",
         "profile_updates_applied",
         "retrieval_queries",
         "retrieval_hits",
@@ -1133,7 +1141,11 @@ def memory_rebuild(
     from nanobot.agent.memory import MemoryStore
 
     config = load_config()
-    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    store = MemoryStore(
+        config.workspace_path,
+        embedding_provider=config.agents.defaults.memory_embedding_provider,
+        vector_backend=config.agents.defaults.memory_vector_backend,
+    )
     snapshot = store.rebuild_memory_snapshot(max_events=max_events, write=True)
     line_count = len(snapshot.splitlines())
     console.print(f"[green]✓[/green] Rebuilt MEMORY.md with {line_count} lines")
@@ -1148,7 +1160,11 @@ def memory_verify(
     from nanobot.agent.memory import MemoryStore
 
     config = load_config()
-    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    store = MemoryStore(
+        config.workspace_path,
+        embedding_provider=config.agents.defaults.memory_embedding_provider,
+        vector_backend=config.agents.defaults.memory_vector_backend,
+    )
     report = store.verify_memory(stale_days=stale_days, update_profile=True)
 
     table = Table(title="Memory Verification")
@@ -1181,7 +1197,11 @@ def memory_eval(
     from nanobot.agent.memory import MemoryStore
 
     config = load_config()
-    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    store = MemoryStore(
+        config.workspace_path,
+        embedding_provider=config.agents.defaults.memory_embedding_provider,
+        vector_backend=config.agents.defaults.memory_vector_backend,
+    )
 
     path = Path(cases_file) if cases_file else (config.workspace_path / "memory" / "eval_cases.json")
     if not path.exists():
@@ -1271,7 +1291,11 @@ def memory_conflicts(
     from nanobot.agent.memory import MemoryStore
 
     config = load_config()
-    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    store = MemoryStore(
+        config.workspace_path,
+        embedding_provider=config.agents.defaults.memory_embedding_provider,
+        vector_backend=config.agents.defaults.memory_vector_backend,
+    )
     rows = store.list_conflicts(include_closed=all)
     if not rows:
         console.print("No conflicts found.")
@@ -1304,7 +1328,11 @@ def memory_resolve(
     from nanobot.agent.memory import MemoryStore
 
     config = load_config()
-    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    store = MemoryStore(
+        config.workspace_path,
+        embedding_provider=config.agents.defaults.memory_embedding_provider,
+        vector_backend=config.agents.defaults.memory_vector_backend,
+    )
     ok = store.resolve_conflict(index=index, action=action)
     if not ok:
         console.print("[red]Failed to resolve conflict. Check index/action.[/red]")
@@ -1322,7 +1350,11 @@ def memory_pin(
     from nanobot.agent.memory import MemoryStore
 
     config = load_config()
-    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    store = MemoryStore(
+        config.workspace_path,
+        embedding_provider=config.agents.defaults.memory_embedding_provider,
+        vector_backend=config.agents.defaults.memory_vector_backend,
+    )
     try:
         ok = store.set_item_pin(field, text, pinned=True)
     except ValueError as exc:
@@ -1343,7 +1375,11 @@ def memory_unpin(
     from nanobot.agent.memory import MemoryStore
 
     config = load_config()
-    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    store = MemoryStore(
+        config.workspace_path,
+        embedding_provider=config.agents.defaults.memory_embedding_provider,
+        vector_backend=config.agents.defaults.memory_vector_backend,
+    )
     try:
         ok = store.set_item_pin(field, text, pinned=False)
     except ValueError as exc:
@@ -1364,7 +1400,11 @@ def memory_outdated(
     from nanobot.agent.memory import MemoryStore
 
     config = load_config()
-    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    store = MemoryStore(
+        config.workspace_path,
+        embedding_provider=config.agents.defaults.memory_embedding_provider,
+        vector_backend=config.agents.defaults.memory_vector_backend,
+    )
     try:
         ok = store.mark_item_outdated(field, text)
     except ValueError as exc:
