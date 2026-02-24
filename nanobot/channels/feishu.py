@@ -572,28 +572,21 @@ class FeishuChannel(BaseChannel):
 
             # Wait for response and close streaming session if active
             if use_streaming and streaming_session:
-                await self._wait_and_close_stream(streaming_session)
+                await self._wait_and_close_stream(streaming_session, stream_id)
 
         except Exception as e:
             logger.error(f"Error processing Feishu message: {e}")
 
-    async def _wait_and_close_stream(self, session: "FeishuStreamingSession") -> None:
-        """Wait for response completion and close streaming session."""
-        max_wait, check_interval, waited = 300, 0.2, 0.0
+    async def _wait_and_close_stream(
+        self, session: "FeishuStreamingSession", stream_id: str
+    ) -> None:
+        """Wait for agent loop to finish, then close streaming session."""
         loop = asyncio.get_running_loop()
 
-        while waited < max_wait and not session.closed:
-            await asyncio.sleep(check_interval)
-            waited += check_interval
-            # Close when idle > 1s (response complete)
-            if session.current_text and session.last_update_time > 0:
-                if (time.time() * 1000 - session.last_update_time) / 1000 > 1.0:
-                    await loop.run_in_executor(
-                        None, session.close_sync, session.pending_text or session.current_text
-                    )
-                    return
+        # Wait for agent loop to signal completion (via bus.mark_stream_done)
+        await self.bus.wait_stream_done(stream_id, timeout=300)
 
         if not session.closed:
             await loop.run_in_executor(
-                None, session.close_sync, session.current_text or "Response timeout."
+                None, session.close_sync, session.pending_text or session.current_text
             )

@@ -282,6 +282,10 @@ class AgentLoop:
         session.add_message("assistant", final_content)
         self.sessions.save(session)
 
+        # Mark stream as done so channel can close streaming session
+        if msg.stream_id:
+            self.bus.mark_stream_done(msg.stream_id)
+
         # If streaming was used, content was already delivered via callback
         # Return None to skip sending a duplicate OutboundMessage
         if stream_callback:
