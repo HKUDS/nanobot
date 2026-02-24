@@ -80,7 +80,7 @@ class WebSearchTool(Tool):
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
                     params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": api_key},
+                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
                     timeout=10.0
                 )
                 r.raise_for_status()
