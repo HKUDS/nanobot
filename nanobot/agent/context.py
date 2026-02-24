@@ -72,10 +72,6 @@ Skills with available="false" need dependencies installed first - you can try in
     
     def _get_identity(self) -> str:
         """Get the core identity section."""
-        from datetime import datetime
-        import time as _time
-        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
-        tz = _time.strftime("%Z") or "UTC"
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
@@ -83,9 +79,6 @@ Skills with available="false" need dependencies installed first - you can try in
         return f"""# nanobot 🐈
 
 You are nanobot, a helpful AI assistant. 
-
-## Current Time
-{now} ({tz})
 
 ## Runtime
 {runtime}
@@ -108,6 +101,34 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 ## Memory
 - Remember important facts: write to {workspace_path}/memory/MEMORY.md
 - Recall past events: grep {workspace_path}/memory/HISTORY.md"""
+
+    @staticmethod
+    def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:
+        """Build dynamic runtime context and attach it to the tail user message."""
+        from datetime import datetime
+        import time as _time
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        tz = _time.strftime("%Z") or "UTC"
+        lines = [f"Current Time: {now} ({tz})"]
+        if channel and chat_id:
+            lines.append(f"Channel: {channel}")
+            lines.append(f"Chat ID: {chat_id}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _append_runtime_context(
+        user_content: str | list[dict[str, Any]],
+        runtime_context: str,
+    ) -> str | list[dict[str, Any]]:
+        """Append runtime context at the tail of the user message."""
+        runtime_block = f"[Runtime Context]\n{runtime_context}"
+        if isinstance(user_content, str):
+            return f"{user_content}\n\n{runtime_block}"
+
+        content = list(user_content)
+        content.append({"type": "text", "text": runtime_block})
+        return content
     
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
@@ -148,8 +169,6 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
         # System prompt
         system_prompt = self.build_system_prompt(skill_names)
-        if channel and chat_id:
-            system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
         messages.append({"role": "system", "content": system_prompt})
 
         # History
@@ -157,6 +176,10 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
         # Current message (with optional image attachments)
         user_content = self._build_user_content(current_message, media)
+        user_content = self._append_runtime_context(
+            user_content=user_content,
+            runtime_context=self._build_runtime_context(channel, chat_id),
+        )
         messages.append({"role": "user", "content": user_content})
 
         return messages
