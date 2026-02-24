@@ -16,6 +16,9 @@ from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFile
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 
+# subagent support for file operations
+from nanobot.agent.context import ContextBuilder
+
 
 class SubagentManager:
     """
@@ -49,11 +52,14 @@ class SubagentManager:
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+
+        self.context = ContextBuilder(workspace)
     
     async def spawn(
         self,
         task: str,
         label: str | None = None,
+        media: list[str] | None = None,
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
     ) -> str:
@@ -79,7 +85,7 @@ class SubagentManager:
         
         # Create background task
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin)
+            self._run_subagent(task_id, task, display_label, media, origin)
         )
         self._running_tasks[task_id] = bg_task
         
@@ -94,6 +100,7 @@ class SubagentManager:
         task_id: str,
         task: str,
         label: str,
+        media: list[str] | None,
         origin: dict[str, str],
     ) -> None:
         """Execute the subagent task and announce the result."""
@@ -117,11 +124,12 @@ class SubagentManager:
             
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)
+            user_content = self.context.build_user_content(task, media=media)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": task},
+                {"role": "user", "content": user_content},
             ]
-            
+
             # Run agent loop (limited iterations)
             max_iterations = 15
             iteration = 0

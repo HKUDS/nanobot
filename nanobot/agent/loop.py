@@ -25,6 +25,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
+from nanobot.config.schema import SubAgentDefaults
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig
@@ -52,7 +53,8 @@ class AgentLoop:
         max_iterations: int = 40,
         temperature: float = 0.1,
         max_tokens: int = 4096,
-        memory_window: int = 100,
+        memory_window: int = 50,
+        sub_agents_config: list[SubAgentDefaults] | None = None,
         brave_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
@@ -71,6 +73,7 @@ class AgentLoop:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.memory_window = memory_window
+        self.sub_agents_config = sub_agents_config or []
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -79,7 +82,7 @@ class AgentLoop:
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
-        self.subagents = SubagentManager(
+        default_manager = SubagentManager(
             provider=provider,
             workspace=workspace,
             bus=bus,
@@ -90,7 +93,22 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
-
+        self.subagents = {"default": {"manager": default_manager, "role": "default"}}
+        for sub_agent_config in self.sub_agents_config:
+            if sub_agent_config.enabled:
+                sub_agent = SubagentManager(
+                    provider=provider,
+                    workspace=Path(sub_agent_config.workspace).expanduser(),
+                    bus=bus,
+                    model=sub_agent_config.model,
+                    temperature=sub_agent_config.temperature,
+                    max_tokens=sub_agent_config.max_tokens,
+                    brave_api_key=brave_api_key,
+                    exec_config=self.exec_config,
+                    restrict_to_workspace=restrict_to_workspace,
+                )
+                self.subagents[sub_agent_config.model] = {"manager": sub_agent, "role": sub_agent_config.role}
+        
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
@@ -114,7 +132,7 @@ class AgentLoop:
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
-        self.tools.register(SpawnTool(manager=self.subagents))
+        self.tools.register(SpawnTool(subagents=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 

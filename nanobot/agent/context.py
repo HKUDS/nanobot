@@ -156,12 +156,12 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         messages.extend(history)
 
         # Current message (with optional image attachments)
-        user_content = self._build_user_content(current_message, media)
+        user_content = self.build_user_content(current_message, media)
         messages.append({"role": "user", "content": user_content})
 
         return messages
 
-    def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
+    def build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""
         if not media:
             return text
