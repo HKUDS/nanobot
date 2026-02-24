@@ -49,6 +49,7 @@ class EmailChannel(BaseChannel):
         "Nov",
         "Dec",
     )
+    _IMAP_163_HOST_HINTS = ("163.com", ".163.com")
 
     def __init__(self, config: EmailConfig, bus: MessageBus):
         super().__init__(config, bus)
@@ -237,6 +238,8 @@ class EmailChannel(BaseChannel):
 
         try:
             client.login(self.config.imap_username, self.config.imap_password)
+            self._send_imap_id_if_needed(client)
+
             status, _ = client.select(mailbox)
             if status != "OK":
                 return messages
@@ -316,6 +319,73 @@ class EmailChannel(BaseChannel):
                 pass
 
         return messages
+
+    def _send_imap_id_if_needed(self, client: Any) -> None:
+        """
+        Send IMAP ID before SELECT for providers (notably 163.com) that require it.
+
+        163.com can reject SELECT with "Unsafe Login" unless the client sends ID first.
+        For non-standard test fakes or clients without extension support, skip unless the
+        configured host is a known provider that requires ID.
+        """
+        host = (self.config.imap_host or "").strip().lower()
+        requires_id = any(hint in host for hint in self._IMAP_163_HOST_HINTS)
+        payloads = [self._build_imap_id_payload()]
+        if requires_id:
+            # Some servers accept ID NIL but are picky about parameter formatting.
+            payloads.append("NIL")
+
+        sender = None
+        if hasattr(client, "xatom"):
+            sender = lambda p: client.xatom("ID", p)
+        elif hasattr(client, "_simple_command"):
+            # Fallback for clients exposing the private API only.
+            imaplib.Commands.setdefault("ID", ("AUTH", "NONAUTH", "SELECTED"))
+            sender = lambda p: client._simple_command("ID", p)
+
+        if sender is None:
+            if requires_id:
+                raise RuntimeError("IMAP server requires ID command, but client does not support IMAP ID")
+            return
+
+        errors: list[str] = []
+        for payload in payloads:
+            try:
+                status, data = sender(payload)
+            except Exception as e:
+                errors.append(f"{payload}: exception={e}")
+                continue
+
+            if status == "OK":
+                logger.debug("IMAP ID accepted by {} with payload {}", host or "<unknown>", payload)
+                return
+
+            errors.append(f"{payload}: status={status} data={data}")
+
+        if requires_id:
+            raise RuntimeError(
+                "IMAP ID command was rejected by server before SELECT. "
+                f"Host={host}. Attempts: {'; '.join(errors)}"
+            )
+        logger.debug("IMAP ID not accepted by {} (non-fatal): {}", host or "<unknown>", "; ".join(errors))
+
+    def _build_imap_id_payload(self) -> str:
+        """Build RFC 2971 ID command payload."""
+        username = (self.config.imap_username or "").strip()
+        contact = username or "unknown"
+        pairs = (
+            ("name", "nanobot"),
+            ("version", "1.0"),
+            ("vendor", "nanobot"),
+            ("contact", contact),
+        )
+        inner = " ".join(f'"{self._imap_id_escape(k)}" "{self._imap_id_escape(v)}"' for k, v in pairs)
+        return f"({inner})"
+
+    @staticmethod
+    def _imap_id_escape(value: str) -> str:
+        """Escape quoted-string content for IMAP ID payload."""
+        return (value or "").replace("\\", "\\\\").replace('"', '\\"')
 
     @classmethod
     def _format_imap_date(cls, value: date) -> str:

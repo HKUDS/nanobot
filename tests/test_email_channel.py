@@ -309,3 +309,50 @@ def test_fetch_messages_between_dates_uses_imap_since_before_without_mark_seen(m
     assert fake.search_args is not None
     assert fake.search_args[1:] == ("SINCE", "06-Feb-2026", "BEFORE", "07-Feb-2026")
     assert fake.store_calls == []
+
+
+def test_163_imap_sends_id_before_select(monkeypatch) -> None:
+    raw = _make_raw_email(subject="163", body="Needs ID")
+
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, object]] = []
+
+        def login(self, _user: str, _pw: str):
+            self.calls.append(("login", None))
+            return "OK", [b"logged in"]
+
+        def xatom(self, name: str, payload: str):
+            self.calls.append((name.upper(), payload))
+            return "OK", [b"ID completed"]
+
+        def select(self, mailbox: str):
+            self.calls.append(("select", mailbox))
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b"7"]
+
+        def fetch(self, _imap_id: bytes, _parts: str):
+            return "OK", [(b"7 (UID 700 BODY[] {200})", raw), b")"]
+
+        def store(self, _imap_id: bytes, _op: str, _flags: str):
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config()
+    cfg.imap_host = "imap.163.com"
+    channel = EmailChannel(cfg, MessageBus())
+
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert fake.calls[0][0] == "login"
+    assert fake.calls[1][0] == "ID"
+    assert fake.calls[2] == ("select", "INBOX")
+    assert '"name" "nanobot"' in str(fake.calls[1][1])
