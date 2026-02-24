@@ -49,6 +49,7 @@ class AgentLoop:
         provider: LLMProvider,
         workspace: Path,
         model: str | None = None,
+        vision_model: str | None = None,
         max_iterations: int = 40,
         temperature: float = 0.1,
         max_tokens: int = 4096,
@@ -67,6 +68,7 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self.vision_model = vision_model or ""
         self.max_iterations = max_iterations
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -175,12 +177,14 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        model: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        effective_model = model or self.model
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -188,7 +192,7 @@ class AgentLoop:
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
-                model=self.model,
+                model=effective_model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
@@ -408,8 +412,10 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
+        # Use vision_model when message contains media (images/files) and vision_model is configured
+        effective_model = self.vision_model if msg.media and self.vision_model else None
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages, on_progress=on_progress or _bus_progress, model=effective_model,
         )
 
         if final_content is None:

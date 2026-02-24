@@ -186,6 +186,7 @@ class AgentDefaults(Base):
 
     workspace: str = "~/.nanobot/workspace"
     model: str = "anthropic/claude-opus-4-5"
+    vision_model: str = ""  # Optional vision-capable model used when images are attached (e.g. "google/gemini-2.0-flash-001")
     max_tokens: int = 8192
     temperature: float = 0.1
     max_tool_iterations: int = 40

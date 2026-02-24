@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.skill_ranker import SkillRanker
 from nanobot.agent.skills import SkillsLoader
 
 
@@ -26,8 +27,9 @@ class ContextBuilder:
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
-    
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+        self.skill_ranker = SkillRanker(self.skills)
+
+    def build_system_prompt(self, skill_names: list[str] | None = None, user_query: str | None = None) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
         
@@ -52,16 +54,28 @@ class ContextBuilder:
         if memory:
             parts.append(f"# Memory\n\n{memory}")
         
-        # Skills - progressive loading
-        # 1. Always-loaded skills: include full content
+        # Skills - smart injection via TF-IDF relevance ranking
         always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
-        
-        # 2. Available skills: only show summary (agent uses read_file to load)
-        skills_summary = self.skills.build_skills_summary()
+
+        if user_query:
+            # Smart injection: always + top-K relevant skills get full content
+            inject_full, _ = self.skill_ranker.get_relevant_skills(
+                query=user_query,
+                always_skills=always_skills,
+                top_k=3,
+                threshold=0.05,
+            )
+        else:
+            # Fallback: only always-skills get full content
+            inject_full = always_skills
+
+        if inject_full:
+            full_content = self.skills.load_skills_for_context(inject_full)
+            if full_content:
+                parts.append(f"# Active Skills\n\n{full_content}")
+
+        # Remaining skills: summary only (agent reads full content on demand)
+        skills_summary = self.skills.build_skills_summary(exclude=set(inject_full) if inject_full else None)
         if skills_summary:
             parts.append(f"""# Skills
 
@@ -69,7 +83,7 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
-        
+
         return "\n\n---\n\n".join(parts)
     
     def _get_identity(self) -> str:
@@ -77,10 +91,10 @@ Skills with available="false" need dependencies installed first - you can try in
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
-        
+
         return f"""# nanobot 🐈
 
-You are nanobot, a helpful AI assistant. 
+You are nanobot, a helpful AI assistant.
 
 ## Runtime
 {runtime}
@@ -162,7 +176,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         messages = []
 
         # System prompt
-        system_prompt = self.build_system_prompt(skill_names)
+        system_prompt = self.build_system_prompt(skill_names, user_query=current_message)
         if system_prompt_prefix:
             system_prompt = system_prompt_prefix + "\n\n" + system_prompt
         messages.append({"role": "system", "content": system_prompt})

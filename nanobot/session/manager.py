@@ -41,17 +41,58 @@ class Session:
         }
         self.messages.append(msg)
         self.updated_at = datetime.now()
-    
+
+    @staticmethod
+    def _is_history_slice_coherent(messages: list[dict[str, Any]]) -> bool:
+        """Validate tool-call/tool-result adjacency so we never send orphaned tool results."""
+        declared_ids: set[str] = set()
+        pending_ids: set[str] | None = None
+
+        for m in messages:
+            role = m.get("role")
+            if role == "assistant" and m.get("tool_calls"):
+                if pending_ids:
+                    return False
+                ids = {
+                    str(tc.get("id"))
+                    for tc in (m.get("tool_calls") or [])
+                    if isinstance(tc, dict) and tc.get("id")
+                }
+                if not ids:
+                    return False
+                declared_ids.update(ids)
+                pending_ids = set(ids)
+                continue
+            if role == "tool":
+                tool_call_id = str(m.get("tool_call_id") or "")
+                if not tool_call_id or tool_call_id not in declared_ids:
+                    return False
+                if not pending_ids or tool_call_id not in pending_ids:
+                    return False
+                pending_ids.remove(tool_call_id)
+                if not pending_ids:
+                    pending_ids = None
+                continue
+            if pending_ids:
+                return False
+
+        return not pending_ids
+
+    @classmethod
+    def _trim_to_coherent_history(cls, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Drop the smallest broken prefix caused by tail truncation."""
+        if cls._is_history_slice_coherent(messages):
+            return messages
+        for start in range(1, len(messages)):
+            candidate = messages[start:]
+            if cls._is_history_slice_coherent(candidate):
+                return candidate
+        return []
+
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input, aligned to a user turn."""
         unconsolidated = self.messages[self.last_consolidated:]
-        sliced = unconsolidated[-max_messages:]
-
-        # Drop leading non-user messages to avoid orphaned tool_result blocks
-        for i, m in enumerate(sliced):
-            if m.get("role") == "user":
-                sliced = sliced[i:]
-                break
+        sliced = self._trim_to_coherent_history(unconsolidated[-max_messages:])
 
         out: list[dict[str, Any]] = []
         for m in sliced:
