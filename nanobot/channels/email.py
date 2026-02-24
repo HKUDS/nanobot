@@ -108,11 +108,6 @@ class EmailChannel(BaseChannel):
             logger.warning("Skip email send: consent_granted is false")
             return
 
-        force_send = bool((msg.metadata or {}).get("force_send"))
-        if not self.config.auto_reply_enabled and not force_send:
-            logger.info("Skip automatic email reply: auto_reply_enabled is false")
-            return
-
         if not self.config.smtp_host:
             logger.warning("Email channel SMTP host not configured")
             return
@@ -120,6 +115,15 @@ class EmailChannel(BaseChannel):
         to_addr = msg.chat_id.strip()
         if not to_addr:
             logger.warning("Email channel missing recipient address")
+            return
+
+        # Determine if this is a reply (recipient has sent us an email before)
+        is_reply = to_addr in self._last_subject_by_chat
+        force_send = bool((msg.metadata or {}).get("force_send"))
+
+        # autoReplyEnabled only controls automatic replies, not proactive sends
+        if is_reply and not self.config.auto_reply_enabled and not force_send:
+            logger.info("Skip automatic email reply to {}: auto_reply_enabled is false", to_addr)
             return
 
         base_subject = self._last_subject_by_chat.get(to_addr, "nanobot reply")
