@@ -19,7 +19,7 @@ class ExecTool(Tool):
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
-        path_append: str = "/usr/sbin:/usr/local/sbin",
+        path_append: str = "",
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -71,7 +71,7 @@ class ExecTool(Tool):
         
         env = os.environ.copy()
         if self.path_append:
-            env["PATH"] = env.get("PATH", "") + ":" + self.path_append
+            env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
 
         try:
             process = await asyncio.create_subprocess_shell(

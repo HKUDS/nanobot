@@ -252,7 +252,7 @@ class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
     timeout: int = 60
-    path_append: str = "/usr/sbin:/usr/local/sbin"
+    path_append: str = ""
 
 
 class MCPServerConfig(Base):
