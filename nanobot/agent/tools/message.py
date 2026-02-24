@@ -2,6 +2,12 @@
 
 from typing import Any, Awaitable, Callable
 
+from nanobot.agent.task_context import (
+    current_channel,
+    current_chat_id,
+    current_message_id,
+    message_sent_in_turn,
+)
 from nanobot.agent.tools.base import Tool
 from nanobot.bus.events import OutboundMessage
 
@@ -17,16 +23,16 @@ class MessageTool(Tool):
         default_message_id: str | None = None,
     ):
         self._send_callback = send_callback
+        # Legacy defaults used only when ContextVar is unset (e.g. tests)
         self._default_channel = default_channel
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
-        self._sent_in_turn: bool = False
 
     def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
-        """Set the current message context."""
-        self._default_channel = channel
-        self._default_chat_id = chat_id
-        self._default_message_id = message_id
+        """Set the current message context via ContextVar."""
+        current_channel.set(channel)
+        current_chat_id.set(chat_id)
+        current_message_id.set(message_id)
 
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""
@@ -34,7 +40,12 @@ class MessageTool(Tool):
 
     def start_turn(self) -> None:
         """Reset per-turn send tracking."""
-        self._sent_in_turn = False
+        message_sent_in_turn.set(False)
+
+    @property
+    def sent_in_turn(self) -> bool:
+        """Whether a message was sent in the current turn."""
+        return message_sent_in_turn.get()
 
     @property
     def name(self) -> str:
@@ -79,9 +90,9 @@ class MessageTool(Tool):
         media: list[str] | None = None,
         **kwargs: Any
     ) -> str:
-        channel = channel or self._default_channel
-        chat_id = chat_id or self._default_chat_id
-        message_id = message_id or self._default_message_id
+        channel = channel or current_channel.get() or self._default_channel
+        chat_id = chat_id or current_chat_id.get() or self._default_chat_id
+        message_id = message_id or current_message_id.get() or self._default_message_id
 
         if not channel or not chat_id:
             return "Error: No target channel/chat specified"
@@ -101,8 +112,7 @@ class MessageTool(Tool):
 
         try:
             await self._send_callback(msg)
-            if channel == self._default_channel and chat_id == self._default_chat_id:
-                self._sent_in_turn = True
+            message_sent_in_turn.set(True)
             media_info = f" with {len(media)} attachments" if media else ""
             return f"Message sent to {channel}:{chat_id}{media_info}"
         except Exception as e:
