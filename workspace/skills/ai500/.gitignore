@@ -1,0 +1,5 @@
+# Secrets
+secret.env
+
+# Runtime output
+memory/
