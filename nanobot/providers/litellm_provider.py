@@ -8,7 +8,7 @@ from typing import Any
 import litellm
 from litellm import acompletion
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest, GroundingMetadata
 from nanobot.providers.registry import find_by_model, find_gateway
 
 
@@ -170,17 +170,19 @@ class LiteLLMProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        google_search: bool = False,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
-        
+
         Args:
             messages: List of message dicts with 'role' and 'content'.
             tools: Optional list of tool definitions in OpenAI format.
             model: Model identifier (e.g., 'anthropic/claude-sonnet-4-5').
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
-        
+            google_search: Enable Google Search grounding (Gemini only).
+
         Returns:
             LLMResponse with content and/or tool calls.
         """
@@ -215,9 +217,17 @@ class LiteLLMProvider(LLMProvider):
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
-        
-        if tools:
-            kwargs["tools"] = tools
+
+        # Build tools list with Google Search if enabled
+        final_tools = list(tools) if tools else []
+        if google_search:
+            # Check if this is a Gemini model
+            spec = self._gateway or find_by_model(original_model)
+            if spec and spec.name == "gemini":
+                final_tools.append({"google_search": {}})
+
+        if final_tools:
+            kwargs["tools"] = final_tools
             kwargs["tool_choice"] = "auto"
         
         try:
