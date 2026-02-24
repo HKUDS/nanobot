@@ -58,12 +58,17 @@ class WebSearchTool(Tool):
     }
     
     def __init__(self, api_key: str | None = None, max_results: int = 5):
-        self.api_key = api_key or os.environ.get("BRAVE_API_KEY", "")
+        self.api_key = api_key
         self.max_results = max_results
-    
+
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        if not self.api_key:
-            return "Error: BRAVE_API_KEY not configured"
+        api_key = self.api_key or os.environ.get("BRAVE_API_KEY", "")
+        if not api_key:
+            return (
+                "Error: Brave Search API key not configured. "
+                "Set it in ~/.nanobot/config.json under tools.web.search.apiKey "
+                "(or export BRAVE_API_KEY), then restart the gateway."
+            )
         
         try:
             n = min(max(count or self.max_results, 1), 10)
@@ -71,7 +76,7 @@ class WebSearchTool(Tool):
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
                     params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
+                    headers={"Accept": "application/json", "X-Subscription-Token": api_key},
                     timeout=10.0
                 )
                 r.raise_for_status()
@@ -116,7 +121,7 @@ class WebFetchTool(Tool):
         # Validate URL before fetching
         is_valid, error_msg = _validate_url(url)
         if not is_valid:
-            return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url})
+            return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
 
         try:
             async with httpx.AsyncClient(
@@ -131,7 +136,7 @@ class WebFetchTool(Tool):
             
             # JSON
             if "application/json" in ctype:
-                text, extractor = json.dumps(r.json(), indent=2), "json"
+                text, extractor = json.dumps(r.json(), indent=2, ensure_ascii=False), "json"
             # HTML
             elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
                 doc = Document(r.text)
@@ -146,9 +151,9 @@ class WebFetchTool(Tool):
                 text = text[:max_chars]
             
             return json.dumps({"url": url, "finalUrl": str(r.url), "status": r.status_code,
-                              "extractor": extractor, "truncated": truncated, "length": len(text), "text": text})
+                              "extractor": extractor, "truncated": truncated, "length": len(text), "text": text}, ensure_ascii=False)
         except Exception as e:
-            return json.dumps({"error": str(e), "url": url})
+            return json.dumps({"error": str(e), "url": url}, ensure_ascii=False)
     
     def _to_markdown(self, html: str) -> str:
         """Convert HTML to markdown."""

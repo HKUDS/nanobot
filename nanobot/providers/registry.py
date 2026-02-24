@@ -51,6 +51,15 @@ class ProviderSpec:
     # per-model param overrides, e.g. (("kimi-k2.5", {"temperature": 1.0}),)
     model_overrides: tuple[tuple[str, dict[str, Any]], ...] = ()
 
+    # OAuth-based providers (e.g., OpenAI Codex) don't use API keys
+    is_oauth: bool = False                   # if True, uses OAuth flow instead of API key
+
+    # Direct providers bypass LiteLLM entirely (e.g., CustomProvider)
+    is_direct: bool = False
+
+    # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
+    supports_prompt_caching: bool = False
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -61,6 +70,16 @@ class ProviderSpec:
 # ---------------------------------------------------------------------------
 
 PROVIDERS: tuple[ProviderSpec, ...] = (
+
+    # === Custom (direct OpenAI-compatible endpoint, bypasses LiteLLM) ======
+    ProviderSpec(
+        name="custom",
+        keywords=(),
+        env_key="",
+        display_name="Custom",
+        litellm_prefix="",
+        is_direct=True,
+    ),
 
     # === Gateways (detected by api_key / api_base, not model name) =========
     # Gateways can route any model, so they win in fallback.
@@ -81,6 +100,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://openrouter.ai/api/v1",
         strip_model_prefix=False,
         model_overrides=(),
+        supports_prompt_caching=True,
     ),
 
     # AiHubMix: global gateway, OpenAI-compatible interface.
@@ -103,6 +123,42 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # SiliconFlow (硅基流动): OpenAI-compatible gateway, model names keep org prefix
+    ProviderSpec(
+        name="siliconflow",
+        keywords=("siliconflow",),
+        env_key="OPENAI_API_KEY",
+        display_name="SiliconFlow",
+        litellm_prefix="openai",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="siliconflow",
+        default_api_base="https://api.siliconflow.cn/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
+    # VolcEngine (火山引擎): OpenAI-compatible gateway
+    ProviderSpec(
+        name="volcengine",
+        keywords=("volcengine", "volces", "ark"),
+        env_key="OPENAI_API_KEY",
+        display_name="VolcEngine",
+        litellm_prefix="volcengine",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="volces",
+        default_api_base="https://ark.cn-beijing.volces.com/api/v3",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # === Standard providers (matched by model-name keywords) ===============
 
     # Anthropic: LiteLLM recognizes "claude-*" natively, no prefix needed.
@@ -121,6 +177,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="",
         strip_model_prefix=False,
         model_overrides=(),
+        supports_prompt_caching=True,
     ),
 
     # OpenAI: LiteLLM recognizes "gpt-*" natively, no prefix needed.
@@ -139,6 +196,44 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="",
         strip_model_prefix=False,
         model_overrides=(),
+    ),
+
+    # OpenAI Codex: uses OAuth, not API key.
+    ProviderSpec(
+        name="openai_codex",
+        keywords=("openai-codex", "codex"),
+        env_key="",                         # OAuth-based, no API key
+        display_name="OpenAI Codex",
+        litellm_prefix="",                  # Not routed through LiteLLM
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="codex",
+        default_api_base="https://chatgpt.com/backend-api",
+        strip_model_prefix=False,
+        model_overrides=(),
+        is_oauth=True,                      # OAuth-based authentication
+    ),
+
+    # Github Copilot: uses OAuth, not API key.
+    ProviderSpec(
+        name="github_copilot",
+        keywords=("github_copilot", "copilot"),
+        env_key="",                         # OAuth-based, no API key
+        display_name="Github Copilot",
+        litellm_prefix="github_copilot",   # github_copilot/model → github_copilot/model
+        skip_prefixes=("github_copilot/",),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+        is_oauth=True,                      # OAuth-based authentication
     ),
 
     # DeepSeek: needs "deepseek/" prefix for LiteLLM routing.
@@ -312,10 +407,18 @@ def find_by_model(model: str) -> ProviderSpec | None:
     """Match a standard provider by model-name keyword (case-insensitive).
     Skips gateways/local — those are matched by api_key/api_base instead."""
     model_lower = model.lower()
-    for spec in PROVIDERS:
-        if spec.is_gateway or spec.is_local:
-            continue
-        if any(kw in model_lower for kw in spec.keywords):
+    model_normalized = model_lower.replace("-", "_")
+    model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
+    normalized_prefix = model_prefix.replace("-", "_")
+    std_specs = [s for s in PROVIDERS if not s.is_gateway and not s.is_local]
+
+    # Prefer explicit provider prefix — prevents `github-copilot/...codex` matching openai_codex.
+    for spec in std_specs:
+        if model_prefix and normalized_prefix == spec.name:
+            return spec
+
+    for spec in std_specs:
+        if any(kw in model_lower or kw.replace("-", "_") in model_normalized for kw in spec.keywords):
             return spec
     return None
 
