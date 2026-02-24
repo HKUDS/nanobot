@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "query": "oauth2 authentication",
+      "expected_ids": ["ev-auth-oauth2"],
+      "expected_any": ["oauth2"],
+      "top_k": 4
+    },
+    {
+      "query": "postgresql primary database",
+      "expected_ids": ["ev-db-postgres"],
+      "expected_any": ["postgresql"],
+      "top_k": 4
+    },
+    {
+      "query": "deployment region",
+      "expected_ids": ["ev-region"],
+      "expected_any": ["eu-west-1"],
+      "top_k": 4
+    },
+    {
+      "query": "memory context token budget",
+      "expected_ids": ["ev-memory-budget"],
+      "expected_any": ["token budget"],
+      "top_k": 4
+    }
+  ]
+}

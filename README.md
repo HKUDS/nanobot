@@ -956,6 +956,35 @@ If you edit the `.service` file itself, run `systemctl --user daemon-reload` bef
 > loginctl enable-linger $USER
 > ```
 
+## 📈 Memory Eval CI Trend
+
+nanobot includes a deterministic CI benchmark for memory retrieval quality.
+
+- Workflow: `.github/workflows/memory-eval-trend.yml`
+- Benchmark cases: `case/memory_eval_cases.json`
+- Baseline thresholds: `case/memory_eval_baseline.json`
+- Runner script: `scripts/memory_eval_ci.py`
+
+The workflow runs on PRs and `main` pushes (memory-related paths), then:
+
+1. Seeds a temporary workspace with deterministic memory events.
+2. Runs retrieval evaluation (Recall@k, Precision@k, hit rate).
+3. Compares results against baseline thresholds.
+4. Publishes markdown summary + JSON artifacts.
+
+Run the same benchmark locally:
+
+```bash
+python scripts/memory_eval_ci.py \
+  --workspace ./.ci/memory-workspace \
+  --cases-file ./case/memory_eval_cases.json \
+  --baseline-file ./case/memory_eval_baseline.json \
+  --output-file ./artifacts/memory_eval_latest.json \
+  --history-file ./artifacts/memory_eval_history.json \
+  --summary-file ./artifacts/memory_eval_summary.md \
+  --strict
+```
+
 ## 📁 Project Structure
 
 ```

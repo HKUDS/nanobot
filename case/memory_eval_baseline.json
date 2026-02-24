@@ -1,0 +1,7 @@
+{
+  "min_recall_at_k": 0.85,
+  "min_precision_at_k": 0.2,
+  "min_retrieval_hit_rate": 0.6,
+  "max_contradiction_rate_per_100_messages": 5.0,
+  "notes": "CI baseline for deterministic synthetic memory fixture"
+}

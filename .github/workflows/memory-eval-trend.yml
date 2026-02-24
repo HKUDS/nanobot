@@ -1,0 +1,70 @@
+name: Memory Eval Trend
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'nanobot/agent/**'
+      - 'nanobot/cli/**'
+      - 'nanobot/config/**'
+      - 'tests/**'
+      - 'case/memory_eval_cases.json'
+      - 'case/memory_eval_baseline.json'
+      - 'scripts/memory_eval_ci.py'
+      - '.github/workflows/memory-eval-trend.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'nanobot/agent/**'
+      - 'nanobot/cli/**'
+      - 'nanobot/config/**'
+      - 'tests/**'
+      - 'case/memory_eval_cases.json'
+      - 'case/memory_eval_baseline.json'
+      - 'scripts/memory_eval_ci.py'
+      - '.github/workflows/memory-eval-trend.yml'
+
+jobs:
+  memory-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run deterministic memory benchmark
+        run: |
+          mkdir -p artifacts
+          python scripts/memory_eval_ci.py \
+            --workspace "$GITHUB_WORKSPACE/.ci/memory-workspace" \
+            --cases-file "$GITHUB_WORKSPACE/case/memory_eval_cases.json" \
+            --baseline-file "$GITHUB_WORKSPACE/case/memory_eval_baseline.json" \
+            --output-file "$GITHUB_WORKSPACE/artifacts/memory_eval_latest.json" \
+            --history-file "$GITHUB_WORKSPACE/artifacts/memory_eval_history.json" \
+            --summary-file "$GITHUB_WORKSPACE/artifacts/memory_eval_summary.md" \
+            --strict
+
+      - name: Publish summary
+        run: cat artifacts/memory_eval_summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-eval-report
+          path: |
+            artifacts/memory_eval_latest.json
+            artifacts/memory_eval_history.json
+            artifacts/memory_eval_summary.md
+          if-no-files-found: error
