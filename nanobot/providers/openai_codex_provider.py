@@ -9,8 +9,6 @@ from typing import Any, AsyncGenerator
 
 import httpx
 from loguru import logger
-
-from oauth_cli_kit import get_token as get_codex_token
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
@@ -35,7 +33,7 @@ class OpenAICodexProvider(LLMProvider):
         model = model or self.default_model
         system_prompt, input_items = _convert_messages(messages)
 
-        token = await asyncio.to_thread(get_codex_token)
+        token = await asyncio.to_thread(_get_codex_token)
         headers = _build_headers(token.account_id, token.access)
 
         body: dict[str, Any] = {
@@ -77,6 +75,17 @@ class OpenAICodexProvider(LLMProvider):
 
     def get_default_model(self) -> str:
         return self.default_model
+
+
+def _get_codex_token():
+    try:
+        from oauth_cli_kit import get_token as get_codex_token
+    except ImportError as e:
+        raise RuntimeError(
+            "OpenAI Codex OAuth dependency missing. Install with: pip install 'nanobot-ai[oauth]' "
+            "or pip install oauth-cli-kit"
+        ) from e
+    return get_codex_token()
 
 
 def _strip_model_prefix(model: str) -> str:
