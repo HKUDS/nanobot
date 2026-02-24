@@ -49,17 +49,22 @@ class ToolRegistry:
         Raises:
             KeyError: If tool not found.
         """
+        _HINT = "\n\n[Analyze the error above and try a different approach.]"
+
         tool = self._tools.get(name)
         if not tool:
-            return f"Error: Tool '{name}' not found"
+            return f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
 
         try:
             errors = tool.validate_params(params)
             if errors:
-                return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
-            return await tool.execute(**params)
+                return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _HINT
+            result = await tool.execute(**params)
+            if isinstance(result, str) and result.startswith("Error"):
+                return result + _HINT
+            return result
         except Exception as e:
-            return f"Error executing {name}: {str(e)}"
+            return f"Error executing {name}: {str(e)}" + _HINT
     
     @property
     def tool_names(self) -> list[str]:
