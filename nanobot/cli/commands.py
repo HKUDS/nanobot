@@ -1167,6 +1167,215 @@ def memory_verify(
         raise typer.Exit(2)
 
 
+@memory_app.command("eval")
+def memory_eval(
+    cases_file: str = typer.Option("", "--cases-file", help="Path to JSON benchmark cases file"),
+    top_k: int = typer.Option(6, "--top-k", "-k", help="Default top-k when case does not specify it"),
+    export: bool = typer.Option(False, "--export", help="Save evaluation report JSON under memory/reports/"),
+    output_file: str = typer.Option("", "--output-file", help="Optional JSON output path (implies --export)"),
+):
+    """Evaluate memory retrieval quality (Recall@k, Precision@k) plus runtime KPIs."""
+    import json
+
+    from nanobot.config.loader import load_config
+    from nanobot.agent.memory import MemoryStore
+
+    config = load_config()
+    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+
+    path = Path(cases_file) if cases_file else (config.workspace_path / "memory" / "eval_cases.json")
+    if not path.exists():
+        template = {
+            "cases": [
+                {
+                    "query": "oauth2 authentication",
+                    "expected_any": ["oauth2", "authentication"],
+                    "top_k": 6,
+                }
+            ]
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(template, ensure_ascii=False, indent=2), encoding="utf-8")
+        console.print(f"[yellow]Created template benchmark file:[/yellow] {path}")
+        console.print("[dim]Edit it and run `nanobot memory eval` again.[/dim]")
+        raise typer.Exit(1)
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        console.print(f"[red]Failed to parse benchmark file:[/red] {exc}")
+        raise typer.Exit(1)
+
+    raw_cases = payload.get("cases") if isinstance(payload, dict) else payload
+    if not isinstance(raw_cases, list):
+        console.print("[red]Benchmark file must contain a JSON array or {'cases': [...]}[/red]")
+        raise typer.Exit(1)
+
+    evaluation = store.evaluate_retrieval_cases(
+        raw_cases,
+        default_top_k=top_k,
+        recency_half_life_days=config.agents.defaults.memory_recency_half_life_days,
+        embedding_provider=config.agents.defaults.memory_embedding_provider,
+    )
+    obs = store.get_observability_report()
+    eval_summary = evaluation.get("summary", {})
+    kpis = obs.get("kpis", {})
+
+    table = Table(title="Memory Evaluation")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("cases", str(evaluation.get("cases", 0)))
+    table.add_row("recall_at_k", str(eval_summary.get("recall_at_k", 0.0)))
+    table.add_row("precision_at_k", str(eval_summary.get("precision_at_k", 0.0)))
+    table.add_row("retrieval_hit_rate", str(kpis.get("retrieval_hit_rate", 0.0)))
+    table.add_row("contradiction_rate_per_100_messages", str(kpis.get("contradiction_rate_per_100_messages", 0.0)))
+    table.add_row("user_correction_rate_per_100_user_messages", str(kpis.get("user_correction_rate_per_100_user_messages", 0.0)))
+    table.add_row("avg_memory_context_tokens", str(kpis.get("avg_memory_context_tokens", 0.0)))
+    console.print(table)
+
+    details = evaluation.get("evaluated", [])
+    if details:
+        detail_table = Table(title="Case Breakdown")
+        detail_table.add_column("Query", style="cyan")
+        detail_table.add_column("TopK")
+        detail_table.add_column("Expected")
+        detail_table.add_column("Hits", style="green")
+        detail_table.add_column("Recall@k", style="green")
+        detail_table.add_column("Precision@k", style="green")
+        for item in details[:20]:
+            detail_table.add_row(
+                str(item.get("query", ""))[:60],
+                str(item.get("top_k", "")),
+                str(item.get("expected", "")),
+                str(item.get("hits", "")),
+                str(item.get("case_recall_at_k", "")),
+                str(item.get("case_precision_at_k", "")),
+            )
+        console.print(detail_table)
+
+    if export or output_file:
+        saved = store.save_evaluation_report(
+            evaluation,
+            obs,
+            output_file=output_file or None,
+        )
+        console.print(f"[green]✓[/green] Saved report: {saved}")
+
+
+@memory_app.command("conflicts")
+def memory_conflicts(
+    all: bool = typer.Option(False, "--all", help="Include resolved conflicts"),
+):
+    """List memory conflicts for manual review."""
+    from nanobot.config.loader import load_config
+    from nanobot.agent.memory import MemoryStore
+
+    config = load_config()
+    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    rows = store.list_conflicts(include_closed=all)
+    if not rows:
+        console.print("No conflicts found.")
+        return
+
+    table = Table(title="Memory Conflicts")
+    table.add_column("Index", style="cyan")
+    table.add_column("Field")
+    table.add_column("Old")
+    table.add_column("New")
+    table.add_column("Status", style="yellow")
+    for item in rows:
+        table.add_row(
+            str(item.get("index", "")),
+            str(item.get("field", "")),
+            str(item.get("old", ""))[:70],
+            str(item.get("new", ""))[:70],
+            str(item.get("status", "")),
+        )
+    console.print(table)
+
+
+@memory_app.command("resolve")
+def memory_resolve(
+    index: int = typer.Option(..., "--index", help="Conflict index from `nanobot memory conflicts`"),
+    action: str = typer.Option(..., "--action", help="Resolution: keep_old | keep_new | dismiss"),
+):
+    """Resolve a single memory conflict."""
+    from nanobot.config.loader import load_config
+    from nanobot.agent.memory import MemoryStore
+
+    config = load_config()
+    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    ok = store.resolve_conflict(index=index, action=action)
+    if not ok:
+        console.print("[red]Failed to resolve conflict. Check index/action.[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]✓[/green] Conflict {index} resolved with action '{action}'")
+
+
+@memory_app.command("pin")
+def memory_pin(
+    field: str = typer.Option(..., "--field", help="Profile field (preferences|stable_facts|active_projects|relationships|constraints)"),
+    text: str = typer.Option(..., "--text", help="Memory text to pin"),
+):
+    """Pin a memory item so it is prioritized in snapshots and context."""
+    from nanobot.config.loader import load_config
+    from nanobot.agent.memory import MemoryStore
+
+    config = load_config()
+    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    try:
+        ok = store.set_item_pin(field, text, pinned=True)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    if not ok:
+        raise typer.Exit(1)
+    console.print(f"[green]✓[/green] Pinned memory item in '{field}'")
+
+
+@memory_app.command("unpin")
+def memory_unpin(
+    field: str = typer.Option(..., "--field", help="Profile field"),
+    text: str = typer.Option(..., "--text", help="Memory text to unpin"),
+):
+    """Unpin a memory item."""
+    from nanobot.config.loader import load_config
+    from nanobot.agent.memory import MemoryStore
+
+    config = load_config()
+    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    try:
+        ok = store.set_item_pin(field, text, pinned=False)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    if not ok:
+        raise typer.Exit(1)
+    console.print(f"[green]✓[/green] Unpinned memory item in '{field}'")
+
+
+@memory_app.command("outdated")
+def memory_outdated(
+    field: str = typer.Option(..., "--field", help="Profile field"),
+    text: str = typer.Option(..., "--text", help="Memory text to mark outdated"),
+):
+    """Mark a memory item as outdated (stale)."""
+    from nanobot.config.loader import load_config
+    from nanobot.agent.memory import MemoryStore
+
+    config = load_config()
+    store = MemoryStore(config.workspace_path, embedding_provider=config.agents.defaults.memory_embedding_provider)
+    try:
+        ok = store.mark_item_outdated(field, text)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    if not ok:
+        console.print("[red]Memory item not found.[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]✓[/green] Marked memory item as outdated in '{field}'")
+
+
 @app.command()
 def status():
     """Show nanobot status."""

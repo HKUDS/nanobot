@@ -374,3 +374,147 @@ class TestHybridMemoryStore:
         assert 0.0 <= kpis["retrieval_hit_rate"] <= 1.0
         assert kpis["user_correction_rate_per_100_user_messages"] > 0.0
         assert kpis["avg_memory_context_tokens"] > 0.0
+
+    def test_evaluate_retrieval_cases_metrics(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path, embedding_provider="hash")
+        store.append_events(
+            [
+                {
+                    "id": "ev-oauth",
+                    "timestamp": "2026-02-20T10:00:00+00:00",
+                    "channel": "cli",
+                    "chat_id": "direct",
+                    "type": "fact",
+                    "summary": "API uses OAuth2 authentication.",
+                    "entities": ["api", "oauth2", "auth"],
+                    "salience": 0.9,
+                    "confidence": 0.9,
+                    "source_span": [0, 1],
+                    "ttl_days": 365,
+                },
+                {
+                    "id": "ev-cache",
+                    "timestamp": "2026-02-20T10:01:00+00:00",
+                    "channel": "cli",
+                    "chat_id": "direct",
+                    "type": "fact",
+                    "summary": "Cache TTL is 60 seconds.",
+                    "entities": ["cache", "ttl"],
+                    "salience": 0.6,
+                    "confidence": 0.8,
+                    "source_span": [2, 3],
+                    "ttl_days": 30,
+                },
+            ]
+        )
+
+        report = store.evaluate_retrieval_cases(
+            [
+                {
+                    "query": "oauth2 auth",
+                    "expected_ids": ["ev-oauth"],
+                    "expected_any": ["oauth2"],
+                    "top_k": 3,
+                },
+                {
+                    "query": "cache ttl",
+                    "expected_any": ["cache ttl"],
+                    "top_k": 3,
+                },
+            ],
+            default_top_k=6,
+            recency_half_life_days=30.0,
+            embedding_provider="hash",
+        )
+
+        assert report["cases"] == 2
+        assert report["summary"]["recall_at_k"] > 0.0
+        assert report["summary"]["precision_at_k"] > 0.0
+        assert len(report["evaluated"]) == 2
+
+    def test_evaluate_retrieval_cases_empty_input(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path, embedding_provider="hash")
+        report = store.evaluate_retrieval_cases([], default_top_k=6, embedding_provider="hash")
+        assert report["cases"] == 0
+        assert report["summary"]["recall_at_k"] == 0.0
+        assert report["summary"]["precision_at_k"] == 0.0
+
+    def test_save_evaluation_report_writes_json(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path, embedding_provider="hash")
+        evaluation = {
+            "cases": 1,
+            "evaluated": [{"query": "oauth2", "hits": 1}],
+            "summary": {"recall_at_k": 1.0, "precision_at_k": 0.5},
+        }
+        observability = {
+            "metrics": {"retrieval_queries": 10, "retrieval_hits": 7},
+            "kpis": {"retrieval_hit_rate": 0.7},
+        }
+
+        out_path = store.save_evaluation_report(evaluation, observability)
+        assert out_path.exists()
+        assert out_path.name.startswith("memory_eval_")
+
+        payload = out_path.read_text(encoding="utf-8")
+        assert '"evaluation"' in payload
+        assert '"observability"' in payload
+
+    def test_pin_unpin_and_mark_outdated_controls(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path, embedding_provider="hash")
+        profile = store.read_profile()
+        profile["stable_facts"] = ["API uses OAuth2"]
+        store.write_profile(profile)
+
+        assert store.set_item_pin("stable_facts", "API uses OAuth2", pinned=True) is True
+        pinned_profile = store.read_profile()
+        meta = pinned_profile["meta"]["stable_facts"]["api uses oauth2"]
+        assert meta["pinned"] is True
+
+        snapshot = store.rebuild_memory_snapshot(write=False)
+        assert "API uses OAuth2" in snapshot
+        assert "📌" in snapshot
+
+        assert store.set_item_pin("stable_facts", "API uses OAuth2", pinned=False) is True
+        unpinned_profile = store.read_profile()
+        assert unpinned_profile["meta"]["stable_facts"]["api uses oauth2"]["pinned"] is False
+
+        assert store.mark_item_outdated("stable_facts", "API uses OAuth2") is True
+        stale_profile = store.read_profile()
+        assert stale_profile["meta"]["stable_facts"]["api uses oauth2"]["status"] == "stale"
+
+    def test_conflict_list_and_resolve(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path, embedding_provider="hash")
+        profile = store.read_profile()
+        profile["constraints"] = ["Use dark mode"]
+
+        added, conflicts, _ = store._apply_profile_updates(
+            profile,
+            updates={
+                "preferences": [],
+                "stable_facts": [],
+                "active_projects": [],
+                "relationships": [],
+                "constraints": ["Do not use dark mode"],
+            },
+            enable_contradiction_check=True,
+        )
+        assert added == 1
+        assert conflicts >= 1
+        store.write_profile(profile)
+
+        open_conflicts = store.list_conflicts()
+        assert len(open_conflicts) >= 1
+        idx = int(open_conflicts[0]["index"])
+
+        ok = store.resolve_conflict(idx, "keep_new")
+        assert ok is True
+
+        updated = store.read_profile()
+        constraints = updated.get("constraints", [])
+        assert "Do not use dark mode" in constraints
+        assert "Use dark mode" not in constraints
+
+        all_conflicts = store.list_conflicts(include_closed=True)
+        resolved = [c for c in all_conflicts if c.get("index") == idx]
+        assert resolved
+        assert resolved[0]["status"] == "resolved"
