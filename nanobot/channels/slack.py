@@ -230,7 +230,9 @@ class SlackChannel(BaseChannel):
 
     _TABLE_RE = re.compile(r"(?m)^\|.*\|$(?:\n\|[\s:|-]*\|$)(?:\n\|.*\|$)*")
     _CODE_FENCE_RE = re.compile(r"```[\s\S]*?```")
+    _INLINE_CODE_RE = re.compile(r"`[^`]+`")
     _LEFTOVER_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+    _LEFTOVER_HEADER_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
     _BARE_URL_RE = re.compile(r"(?<![|<])(https?://\S+)")
 
     @classmethod
@@ -247,8 +249,12 @@ class SlackChannel(BaseChannel):
     def _fixup_mrkdwn(cls, text: str) -> str:
         """Fix markdown artifacts that slackify_markdown misses.
 
-        Handles: leftover ``**bold**``, ``&amp;`` in bare URLs, and
-        collapsed paragraph spacing.
+        The slackify_markdown library uses markdown-it which requires certain
+        boundary conditions for emphasis.  Patterns like ``**key:**value``
+        (closing ``**`` immediately followed by non-space) are not recognised
+        as bold and pass through as literal asterisks.  This method catches
+        those leftovers, stray ``## headers``, and over-escaped ``&amp;`` in
+        bare URLs, while leaving code spans untouched.
         """
         # Protect code blocks from further processing
         code_blocks: list[str] = []
@@ -258,9 +264,10 @@ class SlackChannel(BaseChannel):
             return f"\x00CB{len(code_blocks) - 1}\x00"
 
         text = cls._CODE_FENCE_RE.sub(_save_code, text)
+        text = cls._INLINE_CODE_RE.sub(_save_code, text)
 
-        # Fix leftover **bold** the library didn't convert (e.g. **key:**val)
         text = cls._LEFTOVER_BOLD_RE.sub(r"*\1*", text)
+        text = cls._LEFTOVER_HEADER_RE.sub(r"*\1*", text)
 
         # Fix &amp; in bare URLs that the library over-escaped
         text = cls._BARE_URL_RE.sub(
