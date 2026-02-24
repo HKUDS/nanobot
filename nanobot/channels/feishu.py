@@ -278,6 +278,17 @@ class FeishuChannel(BaseChannel):
             logger.error("Feishu app_id and app_secret not configured")
             return
         
+        # Ensure SSL_CERT_FILE is set on POSIX systems if not explicitly provided.
+        # This helps the lark-oapi WebSocket client find certificates on macOS.
+        if os.name == "posix" and "SSL_CERT_FILE" not in os.environ:
+            try:
+                import certifi
+                os.environ["SSL_CERT_FILE"] = certifi.where()
+                logger.debug("Feishu: set SSL_CERT_FILE from certifi: {}", os.environ["SSL_CERT_FILE"])
+            except ImportError:
+                logger.debug("Feishu: certifi not installed, skipping SSL_CERT_FILE auto-config")
+
+        
         self._running = True
         self._loop = asyncio.get_running_loop()
         
