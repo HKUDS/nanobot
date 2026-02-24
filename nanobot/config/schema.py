@@ -228,10 +228,24 @@ class AgentDefaults(Base):
     memory_window: int = 100
 
 
+class SubagentProfile(Base):
+    """Configuration for a named subagent profile."""
+
+    description: str = ""  # Helps the LLM decide which profile to use
+    tools: list[str] = Field(default_factory=list)  # Tool allow list (empty = all tools)
+    disallowed_tools: list[str] = Field(default_factory=list)  # Tool deny list
+    skills: list[str] = Field(default_factory=list)  # Skills to inject into system prompt
+    model: str | None = None  # Model override (None = inherit from parent)
+    temperature: float | None = None  # Temperature override
+    max_tokens: int | None = None  # Max tokens override
+    max_iterations: int = 15  # Iteration limit for this profile
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    subagent_profiles: dict[str, SubagentProfile] = Field(default_factory=dict)
 
 
 class ProviderConfig(Base):

@@ -37,7 +37,7 @@ class SpawnTool(Tool):
     
     @property
     def parameters(self) -> dict[str, Any]:
-        return {
+        params: dict[str, Any] = {
             "type": "object",
             "properties": {
                 "task": {
@@ -51,12 +51,23 @@ class SpawnTool(Tool):
             },
             "required": ["task"],
         }
-    
-    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
+        # Expose available profiles in the schema so the LLM knows what's available
+        profile_names = self._manager.get_profile_names()
+        if profile_names:
+            profiles_desc = self._manager.get_profiles_description()
+            params["properties"]["profile"] = {
+                "type": "string",
+                "description": f"Optional subagent profile to use. Available profiles:\n{profiles_desc}",
+                "enum": profile_names,
+            }
+        return params
+
+    async def execute(self, task: str, label: str | None = None, profile: str | None = None, **kwargs: Any) -> str:
         """Spawn a subagent to execute the given task."""
         return await self._manager.spawn(
             task=task,
             label=label,
+            profile=profile,
             origin_channel=self._origin_channel,
             origin_chat_id=self._origin_chat_id,
             session_key=self._session_key,
