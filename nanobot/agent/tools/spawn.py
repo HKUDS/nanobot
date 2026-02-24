@@ -2,6 +2,7 @@
 
 from typing import Any, TYPE_CHECKING
 
+from nanobot.agent.task_context import current_channel, current_chat_id
 from nanobot.agent.tools.base import Tool
 
 if TYPE_CHECKING:
@@ -13,15 +14,11 @@ class SpawnTool(Tool):
     
     def __init__(self, manager: "SubagentManager"):
         self._manager = manager
-        self._origin_channel = "cli"
-        self._origin_chat_id = "direct"
-        self._session_key = "cli:direct"
     
     def set_context(self, channel: str, chat_id: str) -> None:
-        """Set the origin context for subagent announcements."""
-        self._origin_channel = channel
-        self._origin_chat_id = chat_id
-        self._session_key = f"{channel}:{chat_id}"
+        """Set the origin context via ContextVar."""
+        current_channel.set(channel)
+        current_chat_id.set(chat_id)
     
     @property
     def name(self) -> str:
@@ -57,7 +54,6 @@ class SpawnTool(Tool):
         return await self._manager.spawn(
             task=task,
             label=label,
-            origin_channel=self._origin_channel,
-            origin_chat_id=self._origin_chat_id,
-            session_key=self._session_key,
+            origin_channel=current_channel.get() or "cli",
+            origin_chat_id=current_chat_id.get() or "direct",
         )

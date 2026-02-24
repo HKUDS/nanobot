@@ -15,6 +15,7 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.task_context import current_channel, current_chat_id, current_message_id, message_sent_in_turn
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -147,11 +148,10 @@ class AgentLoop:
             self._mcp_connecting = False
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
-        """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
-            if tool := self.tools.get(name):
-                if hasattr(tool, "set_context"):
-                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+        """Update context for all tools that need routing info (via ContextVar)."""
+        current_channel.set(channel)
+        current_chat_id.set(chat_id)
+        current_message_id.set(message_id)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -433,8 +433,9 @@ class AgentLoop:
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
 
-        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
-            return None
+        if message_tool := self.tools.get("message"):
+            if isinstance(message_tool, MessageTool) and message_tool.sent_in_turn:
+                return None
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
