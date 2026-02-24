@@ -57,6 +57,8 @@ class SubagentManager:
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
         model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         """
         Spawn a subagent to execute a task in the background.
@@ -66,8 +68,9 @@ class SubagentManager:
             label: Optional human-readable label for the task.
             origin_channel: The channel to announce results to.
             origin_chat_id: The chat ID to announce results to.
-            model: Optional model override for this subagent. If not provided,
-                   uses the SubagentManager's default model.
+            model: Optional model override. Falls back to SubagentManager default.
+            temperature: Optional temperature override. Falls back to SubagentManager default.
+            max_tokens: Optional max_tokens override. Falls back to SubagentManager default.
 
         Returns:
             Status message indicating the subagent was started.
@@ -83,16 +86,19 @@ class SubagentManager:
 
         # Create background task
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, effective_model)
+            self._run_subagent(
+                task_id, task, display_label, origin, effective_model,
+                temperature=temperature, max_tokens=max_tokens,
+            )
         )
         self._running_tasks[task_id] = bg_task
-        
+
         # Cleanup when done
         bg_task.add_done_callback(lambda _: self._running_tasks.pop(task_id, None))
-        
+
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
-    
+
     async def _run_subagent(
         self,
         task_id: str,
@@ -100,9 +106,13 @@ class SubagentManager:
         label: str,
         origin: dict[str, str],
         model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         effective_model = model or self.model
+        effective_temperature = temperature if temperature is not None else self.temperature
+        effective_max_tokens = max_tokens if max_tokens is not None else self.max_tokens
         logger.info("Subagent [{}] starting task: {} (model: {})", task_id, label, effective_model)
         
         try:
@@ -140,8 +150,8 @@ class SubagentManager:
                     messages=messages,
                     tools=tools.get_definitions(),
                     model=effective_model,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
+                    temperature=effective_temperature,
+                    max_tokens=effective_max_tokens,
                 )
                 
                 if response.has_tool_calls:

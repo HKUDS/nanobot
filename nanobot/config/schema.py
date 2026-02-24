@@ -194,10 +194,11 @@ class AgentDefaults(Base):
 
 
 class AgentProfile(Base):
-    """Named agent profile with a custom system prompt and optional model override.
+    """Named agent profile that overrides agent defaults for cron jobs.
 
     Used with ``nanobot cron add --agent <name>`` to run a specific cron job
-    under a different identity or set of instructions than the global default.
+    under a different identity, model, or resource limits than the global default.
+    All fields are optional — only set what you want to override.
 
     Example ``~/.nanobot/config.json``::
 
@@ -206,15 +207,23 @@ class AgentProfile(Base):
             "profiles": {
               "gerchik-trader": {
                 "systemPrompt": "You are a Gerchik strategy trader...",
-                "model": "google/gemini-2.0-flash-001"
+                "model": "zai/glm-4-flash",
+                "maxToolIterations": 30,
+                "temperature": 0.3,
+                "maxTokens": 8192,
+                "memoryWindow": 15
               }
             }
           }
         }
     """
 
-    system_prompt: str
+    system_prompt: str = ""
     model: str | None = None
+    max_tokens: int | None = None
+    temperature: float | None = None
+    max_tool_iterations: int | None = None
+    memory_window: int | None = None
 
 
 class AgentsConfig(Base):

@@ -347,28 +347,32 @@ def gateway(
         # Resolve named agent profile → per-call overrides (never mutate agent state)
         system_prompt: str | None = None
         profile_model: str | None = None
+        profile_max_iter: int | None = None
+        profile_temperature: float | None = None
+        profile_max_tokens: int | None = None
+        profile_memory_window: int | None = None
+
         if job.payload.agent:
             profile = config.agents.profiles.get(job.payload.agent)
-            if profile:
-                system_prompt = profile.system_prompt
-                profile_model = profile.model or None
-            else:
-                # Named profile not found → try the special "default" profile as fallback
-                default_profile = config.agents.profiles.get("default")
-                if default_profile:
-                    system_prompt = default_profile.system_prompt
-                    profile_model = default_profile.model or None
+            if not profile:
+                profile = config.agents.profiles.get("default")
+                if profile:
                     logger.warning(
-                        "Cron job '{}': agent profile '{}' not found, falling back to 'default' profile.",
-                        job.name,
-                        job.payload.agent,
+                        "Cron job '{}': profile '{}' not found, falling back to 'default'.",
+                        job.name, job.payload.agent,
                     )
                 else:
                     logger.warning(
-                        "Cron job '{}': agent profile '{}' not found in config, using agent defaults.",
-                        job.name,
-                        job.payload.agent,
+                        "Cron job '{}': profile '{}' not found, using agent defaults.",
+                        job.name, job.payload.agent,
                     )
+            if profile:
+                system_prompt = profile.system_prompt or None
+                profile_model = profile.model or None
+                profile_max_iter = profile.max_tool_iterations
+                profile_temperature = profile.temperature
+                profile_max_tokens = profile.max_tokens
+                profile_memory_window = profile.memory_window
 
         # If the profile model belongs to a different provider, build a temp provider
         # for this call only — never mutate the shared agent state.
@@ -381,7 +385,7 @@ def gateway(
                     "Cron job '{}': cannot build provider for model '{}': {}. Using default.",
                     job.name, profile_model, e,
                 )
-                profile_model = None  # fall back to default model
+                profile_model = None
 
         response = await agent.process_direct(
             job.payload.message,
@@ -391,6 +395,10 @@ def gateway(
             system_prompt=system_prompt,
             model=profile_model,
             provider=profile_provider,
+            max_iterations=profile_max_iter,
+            temperature=profile_temperature,
+            max_tokens=profile_max_tokens,
+            memory_window=profile_memory_window,
         )
         if job.payload.deliver and job.payload.to:
             from nanobot.bus.events import OutboundMessage
@@ -1062,16 +1070,57 @@ def cron_run(
 
     async def on_job(job: CronJob) -> str | None:
         system_prompt: str | None = None
+        profile_model: str | None = None
+        profile_max_iter: int | None = None
+        profile_temperature: float | None = None
+        profile_max_tokens: int | None = None
+        profile_memory_window: int | None = None
+
         if job.payload.agent:
             profile = config.agents.profiles.get(job.payload.agent)
+            if not profile:
+                profile = config.agents.profiles.get("default")
+                if profile:
+                    _logger.warning(
+                        "cron run: profile '{}' not found, falling back to 'default'.",
+                        job.payload.agent,
+                    )
+                else:
+                    _logger.warning(
+                        "cron run: profile '{}' not found, using agent defaults.",
+                        job.payload.agent,
+                    )
             if profile:
-                system_prompt = profile.system_prompt
+                system_prompt = profile.system_prompt or None
+                profile_model = profile.model or None
+                profile_max_iter = profile.max_tool_iterations
+                profile_temperature = profile.temperature
+                profile_max_tokens = profile.max_tokens
+                profile_memory_window = profile.memory_window
+
+        profile_provider = None
+        if profile_model and profile_model != config.agents.defaults.model:
+            try:
+                profile_provider = _make_provider_for_model(config, profile_model)
+            except Exception as e:
+                _logger.warning(
+                    "cron run: cannot build provider for model '{}': {}. Using default.",
+                    profile_model, e,
+                )
+                profile_model = None
+
         response = await agent_loop.process_direct(
             job.payload.message,
             session_key=f"cron:{job.id}",
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
             system_prompt=system_prompt,
+            model=profile_model,
+            provider=profile_provider,
+            max_iterations=profile_max_iter,
+            temperature=profile_temperature,
+            max_tokens=profile_max_tokens,
+            memory_window=profile_memory_window,
         )
         result_holder.append(response)
         return response

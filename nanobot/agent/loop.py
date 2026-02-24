@@ -201,6 +201,9 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         model: str | None = None,
         provider: "LLMProvider | None" = None,
+        max_iterations: int | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
@@ -209,16 +212,19 @@ class AgentLoop:
         tools_used: list[str] = []
         effective_model = model or self.model
         effective_provider = provider or self.provider
+        effective_max_iter = max_iterations if max_iterations is not None else self.max_iterations
+        effective_temperature = temperature if temperature is not None else self.temperature
+        effective_max_tokens = max_tokens if max_tokens is not None else self.max_tokens
 
-        while iteration < self.max_iterations:
+        while iteration < effective_max_iter:
             iteration += 1
 
             response = await effective_provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=effective_model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
+                temperature=effective_temperature,
+                max_tokens=effective_max_tokens,
             )
 
             if response.has_tool_calls:
@@ -262,10 +268,10 @@ class AgentLoop:
                 final_content = self._strip_think(response.content)
                 break
 
-        if final_content is None and iteration >= self.max_iterations:
-            logger.warning("Max iterations ({}) reached", self.max_iterations)
+        if final_content is None and iteration >= effective_max_iter:
+            logger.warning("Max iterations ({}) reached", effective_max_iter)
             final_content = (
-                f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
+                f"I reached the maximum number of tool call iterations ({effective_max_iter}) "
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
@@ -335,6 +341,10 @@ class AgentLoop:
         system_prompt: str | None = None,
         model: str | None = None,
         provider: "LLMProvider | None" = None,
+        max_iterations: int | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        memory_window: int | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -417,11 +427,21 @@ class AgentLoop:
             self._consolidation_tasks.add(_task)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        # Propagate active profile overrides to SpawnTool so spawned subagents
+        # inherit the profile's model/temperature/max_tokens instead of global defaults.
+        if spawn_tool := self.tools.get("spawn"):
+            if isinstance(spawn_tool, SpawnTool):
+                spawn_tool.set_profile_context(
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=self.memory_window)
+        effective_memory_window = memory_window if memory_window is not None else self.memory_window
+        history = session.get_history(max_messages=effective_memory_window)
         # ── Vision handling ───────────────────────────────────────────────────
         # Two paths depending on whether the main model supports native vision:
         #
@@ -499,9 +519,15 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        # Main agent: use per-call model/provider override (e.g. from agent profile) or default
+        # Main agent: use per-call overrides (e.g. from agent profile) or defaults
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress, model=model, provider=provider,
+            initial_messages,
+            on_progress=on_progress or _bus_progress,
+            model=model,
+            provider=provider,
+            max_iterations=max_iterations,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
 
         if final_content is None:
@@ -554,22 +580,36 @@ class AgentLoop:
         system_prompt: str | None = None,
         model: str | None = None,
         provider: "LLMProvider | None" = None,
+        max_iterations: int | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        memory_window: int | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage).
 
+        All overrides apply to this call only — agent defaults are never mutated.
+
         Args:
-            system_prompt: Optional system prompt override.  When provided it is
-                prepended to the default system prompt.  Used by named agent
-                profiles (``cron add --agent <name>``).
-            model: Optional model override for this call only.  Does NOT mutate
-                the agent's default model — safe to use concurrently.
-            provider: Optional provider override for this call only.  Required when
-                the profile model belongs to a different provider than the default.
+            system_prompt: Prepended to the default system prompt (agent profile identity).
+            model: Model override. Requires matching provider to be configured.
+            provider: Provider override when profile model uses a different provider.
+            max_iterations: Tool call iteration limit (profile override).
+            temperature: Sampling temperature (profile override).
+            max_tokens: Max output tokens (profile override).
+            memory_window: How many history messages to include (profile override).
         """
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(
-            msg, session_key=session_key, on_progress=on_progress,
-            system_prompt=system_prompt, model=model, provider=provider,
+            msg,
+            session_key=session_key,
+            on_progress=on_progress,
+            system_prompt=system_prompt,
+            model=model,
+            provider=provider,
+            max_iterations=max_iterations,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            memory_window=memory_window,
         )
         return response.content if response else ""
