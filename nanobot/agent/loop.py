@@ -99,6 +99,7 @@ class AgentLoop:
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
+        self._session_tasks: dict[str, dict[str, Any]] = {}  # session_key -> {task, msg} for cancel
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -248,8 +249,47 @@ class AgentLoop:
 
         return final_content, tools_used, messages
 
+    def _on_session_task_done(
+        self, fut: asyncio.Future, session_key: str, msg: InboundMessage
+    ) -> None:
+        """Callback when a per-session process task finishes. Publishes result or 'Stopped.' if cancelled."""
+        self._session_tasks.pop(session_key, None)
+        if fut.cancelled():
+            asyncio.get_running_loop().create_task(
+                self.bus.publish_outbound(OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id, content="Stopped."
+                ))
+            )
+            return
+        try:
+            response = fut.result()
+            if response is not None:
+                asyncio.get_running_loop().create_task(
+                    self.bus.publish_outbound(response)
+                )
+            elif msg.channel == "cli":
+                asyncio.get_running_loop().create_task(
+                    self.bus.publish_outbound(OutboundMessage(
+                        channel=msg.channel, chat_id=msg.chat_id, content="",
+                        metadata=msg.metadata or {},
+                    ))
+                )
+        except Exception as e:
+            logger.error("Error processing message: {}", e)
+            asyncio.get_running_loop().create_task(
+                self.bus.publish_outbound(OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content=f"Sorry, I encountered an error: {str(e)}",
+                ))
+            )
+
     async def run(self) -> None:
-        """Run the agent loop, processing messages from the bus."""
+        """Run the agent loop, processing messages from the bus.
+
+        User messages are processed in per-session tasks so that /stop can cancel
+        the current turn for that session (e.g. from Telegram) without stopping
+        the whole loop.
+        """
         self._running = True
         await self._connect_mcp()
         logger.info("Agent loop started")
@@ -260,23 +300,57 @@ class AgentLoop:
                     self.bus.consume_inbound(),
                     timeout=1.0
                 )
+            except asyncio.TimeoutError:
+                continue
+
+            key = msg.session_key
+            cmd = (msg.content or "").strip().lower() if msg.channel != "system" else ""
+
+            # /stop: cancel current turn for this session (works from any channel: Telegram, CLI, etc.)
+            if cmd == "/stop":
+                entry = self._session_tasks.get(key)
+                if entry:
+                    task = entry["task"]
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                    await self.bus.publish_outbound(OutboundMessage(
+                        channel=msg.channel, chat_id=msg.chat_id, content="Stopped."
+                    ))
+                else:
+                    await self.bus.publish_outbound(OutboundMessage(
+                        channel=msg.channel, chat_id=msg.chat_id,
+                        content="Nothing to stop.",
+                    ))
+                continue
+
+            # Session already has a running turn: ask to wait (user messages only)
+            if key in self._session_tasks and msg.channel != "system":
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="Please wait, I'm still working on your previous message.",
+                ))
+                continue
+
+            # System messages: process synchronously (no per-session task)
+            if msg.channel == "system":
                 try:
                     response = await self._process_message(msg)
                     if response is not None:
                         await self.bus.publish_outbound(response)
-                    elif msg.channel == "cli":
-                        await self.bus.publish_outbound(OutboundMessage(
-                            channel=msg.channel, chat_id=msg.chat_id, content="", metadata=msg.metadata or {},
-                        ))
                 except Exception as e:
                     logger.error("Error processing message: {}", e)
                     await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content=f"Sorry, I encountered an error: {str(e)}"
+                        channel=msg.channel, chat_id=msg.chat_id,
+                        content=f"Sorry, I encountered an error: {str(e)}",
                     ))
-            except asyncio.TimeoutError:
                 continue
+
+            # Start a per-session task for this user message
+            task = asyncio.create_task(self._process_message(msg))
+            self._session_tasks[key] = {"task": task, "msg": msg}
+            task.add_done_callback(
+                lambda f, sk=key, m=msg: self._on_session_task_done(f, sk, m)
+            )
 
     async def close_mcp(self) -> None:
         """Close MCP connections."""
@@ -369,7 +443,7 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop current reply\n/help — Show available commands")
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):

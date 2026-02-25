@@ -506,7 +506,10 @@ def agent(
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
         _init_prompt_session()
-        console.print(f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n")
+        console.print(
+            f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit, "
+            "[bold]/stop[/bold] to cancel current reply)\n"
+        )
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)
@@ -578,7 +581,36 @@ def agent(
                         ))
 
                         with _thinking_ctx():
-                            await turn_done.wait()
+                            # Allow typing /stop while the agent is thinking (same as Telegram /stop)
+                            while not turn_done.is_set():
+                                task_turn = asyncio.create_task(turn_done.wait())
+                                task_input = asyncio.create_task(_read_interactive_input_async())
+                                done, pending = await asyncio.wait(
+                                    [task_turn, task_input],
+                                    return_when=asyncio.FIRST_COMPLETED,
+                                )
+                                for t in pending:
+                                    t.cancel()
+                                    try:
+                                        await t
+                                    except asyncio.CancelledError:
+                                        pass
+                                if turn_done.is_set():
+                                    break
+                                # Input completed: user typed something while thinking
+                                if task_input in done:
+                                    try:
+                                        interrupt_input = task_input.result().strip()
+                                    except Exception:
+                                        interrupt_input = ""
+                                    if interrupt_input.lower() == "/stop":
+                                        await bus.publish_inbound(InboundMessage(
+                                            channel=cli_channel,
+                                            sender_id="user",
+                                            chat_id=cli_chat_id,
+                                            content="/stop",
+                                        ))
+                                await turn_done.wait()
 
                         if turn_response:
                             _print_agent_response(turn_response[0], render_markdown=markdown)
