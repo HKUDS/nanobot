@@ -82,8 +82,11 @@ git push origin orghi-main
 
 When merging main into orghi-main, conflicts often occur in:
 - `README.md` (branding, emoji)
-- `nanobot/__init__.py` (version string)
+- `nanobot/__init__.py` (version string, logo)
 - `pyproject.toml` (version field)
 - `workspace/` (personal config)
 
-Prefer keeping orghi-main customizations in these files; accept upstream changes for all other files.
+**Rules:**
+- **Always accept upstream** for `nanobot/__init__.py` `__version__` only. Keep orghi-main `__logo__`. This keeps the fork aligned with upstream and makes it clear which upstream version you are on.
+- Prefer keeping orghi-main customizations in `README.md`, `pyproject.toml`, and `workspace/`.
+- Accept upstream changes for all other files.
