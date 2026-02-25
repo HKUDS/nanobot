@@ -205,6 +205,11 @@ Connect nanobot to your favorite chat platform.
 nanobot gateway
 ```
 
+**4. Commands** (also work in CLI and other channels)
+- `/new` — Start a new conversation
+- `/stop` — Cancel the current reply (e.g. if you mistyped or want to abort a long run)
+- `/help` — Show available commands
+
 </details>
 
 <details>

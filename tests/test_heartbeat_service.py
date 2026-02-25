@@ -1,35 +1,25 @@
 import asyncio
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.heartbeat.service import (
-    HEARTBEAT_OK_TOKEN,
-    HeartbeatService,
-)
-
-
-def test_heartbeat_ok_detection() -> None:
-    def is_ok(response: str) -> bool:
-        return HEARTBEAT_OK_TOKEN in response.upper()
-
-    assert is_ok("HEARTBEAT_OK")
-    assert is_ok("`HEARTBEAT_OK`")
-    assert is_ok("**HEARTBEAT_OK**")
-    assert is_ok("heartbeat_ok")
-    assert is_ok("HEARTBEAT_OK.")
-
-    assert not is_ok("HEARTBEAT_NOT_OK")
-    assert not is_ok("all good")
+from nanobot.heartbeat.service import HeartbeatService
 
 
 @pytest.mark.asyncio
-async def test_start_is_idempotent(tmp_path) -> None:
-    async def _on_heartbeat(_: str) -> str:
-        return "HEARTBEAT_OK"
+async def test_start_is_idempotent(tmp_path: Path) -> None:
+    """Starting the service twice does not create a second task."""
+    provider = MagicMock()
+    provider.chat = AsyncMock(return_value=MagicMock(has_tool_calls=False))
+    async def _on_execute(_: str) -> str:
+        return "ok"
 
     service = HeartbeatService(
         workspace=tmp_path,
-        on_heartbeat=_on_heartbeat,
+        provider=provider,
+        model="test-model",
+        on_execute=_on_execute,
         interval_s=9999,
         enabled=True,
     )
