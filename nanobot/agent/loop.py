@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 from contextlib import AsyncExitStack
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -42,6 +43,11 @@ class AgentLoop:
     4. Executes tool calls
     5. Sends responses back
     """
+    _PROMPT_SUMMARY_KEY = "prompt_rollover_summary"
+    _PROMPT_BASE_INDEX_KEY = "prompt_rollover_base_index"
+    _PROMPT_ROLLOVER_HARD_RATIO = 1.4
+    _PROMPT_ROLLOVER_MIN_HEADROOM = 10
+    _SUMMARY_SOURCE_MAX_CHARS = 400
 
     def __init__(
         self,
@@ -294,6 +300,140 @@ class AgentLoop:
         if not lock.locked():
             self._consolidation_locks.pop(session_key, None)
 
+    def _get_prompt_rollover_limits(self) -> tuple[int, int]:
+        """Return (soft_limit, hard_limit) without adding new config knobs."""
+        soft_limit = max(1, self.memory_window)
+        hard_limit = max(
+            soft_limit + self._PROMPT_ROLLOVER_MIN_HEADROOM,
+            int(soft_limit * self._PROMPT_ROLLOVER_HARD_RATIO),
+        )
+        return soft_limit, hard_limit
+
+    def _get_prompt_base_index(self, session: Session) -> int:
+        raw_base = session.metadata.get(self._PROMPT_BASE_INDEX_KEY, session.last_consolidated)
+        try:
+            base = int(raw_base)
+        except (TypeError, ValueError):
+            base = session.last_consolidated
+        base = max(0, session.last_consolidated, base)
+        return min(base, len(session.messages))
+
+    @staticmethod
+    def _serialize_message_for_summary(msg: dict[str, Any], max_chars: int) -> str:
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            text = content
+        else:
+            text = json.dumps(content, ensure_ascii=False)
+        text = text.strip().replace("\n", " ")
+        if len(text) > max_chars:
+            text = text[:max_chars] + "..."
+        role = str(msg.get("role", "unknown")).upper()
+        return f"{role}: {text}"
+
+    async def _update_prompt_rollover_summary(
+        self,
+        existing_summary: str | None,
+        chunk: list[dict[str, Any]],
+    ) -> str | None:
+        lines = [
+            self._serialize_message_for_summary(m, self._SUMMARY_SOURCE_MAX_CHARS)
+            for m in chunk
+            if m.get("content")
+        ]
+        if not lines:
+            return existing_summary.strip() if isinstance(existing_summary, str) else None
+
+        current_summary = (existing_summary or "").strip()
+        source_text = "\n".join(lines)
+        prompt = f"""Update the stable conversation summary.
+
+Existing summary:
+{current_summary or "(empty)"}
+
+New older messages to fold in:
+{source_text}
+
+Return plain text only. Keep it concise and factual. Preserve open tasks, decisions, and user preferences."""
+
+        response = await self.provider.chat(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You summarize chat history for context compression.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            model=self.model,
+            max_tokens=min(self.max_tokens, 1024),
+            temperature=0.1,
+        )
+
+        if response.finish_reason == "error":
+            return None
+
+        summary = (response.content or "").strip()
+        if not summary:
+            return None
+        return summary[:6000].strip()
+
+    async def _maybe_rollover_prompt_history(self, session: Session) -> None:
+        """Batch-roll old prompt history into a stable summary (avoid per-turn sliding)."""
+        soft_limit, hard_limit = self._get_prompt_rollover_limits()
+        base_index = self._get_prompt_base_index(session)
+        start_index = max(base_index, session.last_consolidated)
+
+        available = len(session.messages) - start_index
+        if available <= hard_limit:
+            return
+
+        new_base = max(start_index, len(session.messages) - soft_limit)
+        chunk = session.messages[start_index:new_base]
+        if not chunk:
+            return
+
+        existing_summary = session.metadata.get(self._PROMPT_SUMMARY_KEY)
+        updated_summary = await self._update_prompt_rollover_summary(existing_summary, chunk)
+        if not updated_summary:
+            return
+
+        session.metadata[self._PROMPT_SUMMARY_KEY] = updated_summary
+        session.metadata[self._PROMPT_BASE_INDEX_KEY] = new_base
+        session.updated_at = datetime.now()
+        logger.info(
+            "Prompt rollover: session={} start={} new_base={} kept={} summarized={}",
+            session.key,
+            start_index,
+            new_base,
+            len(session.messages) - new_base,
+            len(chunk),
+        )
+
+    def _build_prompt_history(self, session: Session) -> tuple[str | None, list[dict[str, Any]]]:
+        base_index = self._get_prompt_base_index(session)
+        start_index = max(base_index, session.last_consolidated)
+        sliced = session.messages[start_index:]
+
+        # Avoid starting from orphaned tool/result entries.
+        for i, m in enumerate(sliced):
+            if m.get("role") == "user":
+                sliced = sliced[i:]
+                break
+        else:
+            sliced = []
+
+        history: list[dict[str, Any]] = []
+        for m in sliced:
+            entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
+            for key in ("tool_calls", "tool_call_id", "name"):
+                if key in m:
+                    entry[key] = m[key]
+            history.append(entry)
+
+        summary = session.metadata.get(self._PROMPT_SUMMARY_KEY)
+        summary_text = summary.strip() if isinstance(summary, str) else None
+        return summary_text or None, history
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -308,10 +448,12 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
+            await self._maybe_rollover_prompt_history(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
-            history = session.get_history(max_messages=self.memory_window)
+            session_summary, history = self._build_prompt_history(session)
             messages = self.context.build_messages(
                 history=history,
+                session_summary=session_summary,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
@@ -353,6 +495,8 @@ class AgentLoop:
                 self._prune_consolidation_lock(session.key, lock)
 
             session.clear()
+            session.metadata.pop(self._PROMPT_SUMMARY_KEY, None)
+            session.metadata.pop(self._PROMPT_BASE_INDEX_KEY, None)
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
@@ -380,14 +524,16 @@ class AgentLoop:
             _task = asyncio.create_task(_consolidate_and_unlock())
             self._consolidation_tasks.add(_task)
 
+        await self._maybe_rollover_prompt_history(session)
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=self.memory_window)
+        session_summary, history = self._build_prompt_history(session)
         initial_messages = self.context.build_messages(
             history=history,
+            session_summary=session_summary,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
@@ -427,7 +573,6 @@ class AgentLoop:
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
-        from datetime import datetime
         for m in messages[skip:]:
             entry = {k: v for k, v in m.items() if k != "reasoning_content"}
             if entry.get("role") == "tool" and isinstance(entry.get("content"), str):

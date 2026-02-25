@@ -28,7 +28,11 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
     
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        session_summary: str | None = None,
+    ) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
         
@@ -70,6 +74,12 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
+
+        if session_summary and session_summary.strip():
+            parts.append(
+                "# Session Summary (Compressed Context)\n\n"
+                + session_summary.strip()
+            )
         
         return "\n\n---\n\n".join(parts)
     
@@ -132,6 +142,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         history: list[dict[str, Any]],
         current_message: str,
         skill_names: list[str] | None = None,
+        session_summary: str | None = None,
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
@@ -153,7 +164,10 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         messages = []
 
         # System prompt
-        system_prompt = self.build_system_prompt(skill_names)
+        system_prompt = self.build_system_prompt(
+            skill_names=skill_names,
+            session_summary=session_summary,
+        )
         messages.append({"role": "system", "content": system_prompt})
 
         # History
