@@ -324,8 +324,7 @@ def gateway(
     
     # Resolve per-channel agent profile overrides
     channel_overrides: dict[str, dict] = {}
-    for ch_name in ("telegram", "whatsapp", "feishu", "dingtalk", "discord",
-                    "email", "mochat", "slack", "qq"):
+    for ch_name in config.channels.model_fields:
         ch_cfg = getattr(config.channels, ch_name, None)
         if not (ch_cfg and getattr(ch_cfg, "agent", None)):
             continue
