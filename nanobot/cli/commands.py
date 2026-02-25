@@ -1079,12 +1079,15 @@ def memory_inspect(
     observability = store.get_observability_report()
     metrics = observability.get("metrics", {})
     kpis = observability.get("kpis", {})
+    backend = observability.get("backend", {}) if isinstance(observability, dict) else {}
     profile = store.read_profile()
     report = store.verify_memory()
     events = store.read_events()
 
     console.print(f"{__logo__} Memory Inspect\n")
     console.print(f"Mode: [cyan]{config.agents.defaults.memory_mode}[/cyan]")
+    console.print(f"mem0 enabled: [cyan]{backend.get('mem0_enabled', False)}[/cyan]")
+    console.print(f"mem0 mode: [cyan]{backend.get('mem0_mode', 'disabled')}[/cyan]")
     console.print(f"Vector backend (active): [cyan]{store.retriever.active_backend}[/cyan]")
     console.print("Vector backend (supported): [cyan]sqlite[/cyan]")
     console.print(f"Events: [green]{len(events)}[/green]")

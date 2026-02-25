@@ -54,7 +54,7 @@ class AgentLoop:
         temperature: float = 0.1,
         max_tokens: int = 4096,
         memory_window: int = 100,
-        memory_mode: str = "legacy",
+        memory_mode: str = "hybrid",
         memory_retrieval_k: int = 6,
         memory_token_budget: int = 900,
         memory_recency_half_life_days: float = 30.0,

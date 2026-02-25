@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,16 @@ from nanobot.utils.helpers import ensure_dir
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
+
+try:
+    from mem0 import Memory as Mem0Memory
+except Exception:  # pragma: no cover - optional dependency
+    Mem0Memory = None
+
+try:
+    from mem0 import MemoryClient as Mem0MemoryClient
+except Exception:  # pragma: no cover - optional dependency
+    Mem0MemoryClient = None
 
 
 _SAVE_MEMORY_TOOL = [
@@ -686,6 +697,144 @@ class MemoryExtractor:
         return self.heuristic_extract_events(old_messages, source_start=source_start)
 
 
+class _Mem0Adapter:
+    """Thin compatibility wrapper around mem0 OSS/hosted clients."""
+
+    def __init__(self, *, workspace: Path):
+        self.workspace = workspace
+        self.user_id = os.getenv("NANOBOT_MEM0_USER_ID", "nanobot")
+        self.enabled = False
+        self.client: Any | None = None
+        self.mode = "disabled"
+        self.error: str | None = None
+        self._init_client()
+
+    def _init_client(self) -> None:
+        config_path = self.workspace / "memory" / "mem0_config.json"
+        api_key = os.getenv("MEM0_API_KEY", "").strip()
+
+        if api_key and Mem0MemoryClient is not None:
+            try:
+                org_id = os.getenv("MEM0_ORG_ID", "").strip() or None
+                project_id = os.getenv("MEM0_PROJECT_ID", "").strip() or None
+                kwargs: dict[str, Any] = {"api_key": api_key}
+                if org_id:
+                    kwargs["org_id"] = org_id
+                if project_id:
+                    kwargs["project_id"] = project_id
+                self.client = Mem0MemoryClient(**kwargs)
+                self.enabled = True
+                self.mode = "hosted"
+                return
+            except Exception as exc:
+                self.error = str(exc)
+
+        if Mem0Memory is None:
+            self.error = self.error or "mem0 package not installed"
+            return
+
+        try:
+            if config_path.exists():
+                payload = json.loads(config_path.read_text(encoding="utf-8"))
+                self.client = Mem0Memory.from_config(payload)
+            else:
+                self.client = Mem0Memory()
+            self.enabled = True
+            self.mode = "oss"
+            return
+        except Exception as exc:
+            self.error = str(exc)
+            self.enabled = False
+            self.client = None
+            self.mode = "disabled"
+            logger.warning("mem0 disabled: {}", self.error)
+
+    @staticmethod
+    def _rows(payload: Any) -> list[dict[str, Any]]:
+        if isinstance(payload, list):
+            return [row for row in payload if isinstance(row, dict)]
+        if isinstance(payload, dict):
+            for key in ("results", "data", "memories"):
+                rows = payload.get(key)
+                if isinstance(rows, list):
+                    return [row for row in rows if isinstance(row, dict)]
+        return []
+
+    def add_text(self, text: str, *, metadata: dict[str, Any] | None = None) -> bool:
+        if not self.enabled or not self.client or not text.strip():
+            return False
+        messages = [{"role": "user", "content": text.strip()}]
+        kwargs: dict[str, Any] = {"user_id": self.user_id}
+        if metadata:
+            kwargs["metadata"] = metadata
+        try:
+            self.client.add(messages, infer=False, **kwargs)
+            return True
+        except TypeError:
+            try:
+                self.client.add(messages, **kwargs)
+                return True
+            except Exception:
+                return False
+        except Exception:
+            return False
+
+    def search(self, query: str, *, top_k: int = 6) -> list[dict[str, Any]]:
+        if not self.enabled or not self.client or not query.strip():
+            return []
+        kwargs: dict[str, Any] = {"user_id": self.user_id, "limit": max(1, top_k)}
+        try:
+            raw = self.client.search(query=query, **kwargs)
+        except TypeError:
+            try:
+                raw = self.client.search(query, **kwargs)
+            except Exception:
+                return []
+        except Exception:
+            return []
+
+        out: list[dict[str, Any]] = []
+        for item in self._rows(raw):
+            summary = str(item.get("memory") or item.get("text") or item.get("summary") or "").strip()
+            if not summary:
+                continue
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            timestamp = (
+                item.get("updated_at")
+                or item.get("created_at")
+                or metadata.get("timestamp")
+                or ""
+            )
+            event_type = str(metadata.get("event_type", "fact"))
+            try:
+                score = float(item.get("score", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                score = 0.0
+            canonical_id = str(item.get("id") or hashlib.sha1(summary.encode("utf-8")).hexdigest())
+            out.append(
+                {
+                    "id": canonical_id,
+                    "timestamp": str(timestamp),
+                    "type": event_type,
+                    "summary": summary,
+                    "entities": metadata.get("entities", []),
+                    "score": score,
+                    "retrieval_reason": {
+                        "provider": "mem0",
+                        "backend": "mem0",
+                        "semantic": round(score, 4),
+                        "recency": 0.0,
+                    },
+                    "provenance": {
+                        "canonical_id": canonical_id,
+                        "source_span": metadata.get("source_span"),
+                    },
+                }
+            )
+        out.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
+        return out[: max(1, top_k)]
+
+
 class MemoryStore:
     """Hybrid memory: markdown files + structured events/profile/metrics."""
 
@@ -696,6 +845,7 @@ class MemoryStore:
     PROFILE_STATUS_STALE = "stale"
 
     def __init__(self, workspace: Path, embedding_provider: str = "", vector_backend: str = "sqlite"):
+        self.workspace = workspace
         self.persistence = MemoryPersistence(workspace)
         self.memory_dir = self.persistence.memory_dir
         self.memory_file = self.persistence.memory_file
@@ -723,6 +873,7 @@ class MemoryStore:
             coerce_event=self._coerce_event,
             utc_now_iso=self._utc_now_iso,
         )
+        self.mem0 = _Mem0Adapter(workspace=workspace)
 
     @staticmethod
     def _utc_now_iso() -> str:
@@ -824,6 +975,10 @@ class MemoryStore:
                 "user_correction_rate_per_100_user_messages": round(user_correction_rate_per_100, 4),
                 "avg_memory_context_tokens": round(avg_memory_context_tokens, 2),
                 "max_memory_context_tokens": memory_context_tokens_max,
+            },
+            "backend": {
+                "mem0_enabled": self.mem0.enabled,
+                "mem0_mode": self.mem0.mode,
             },
         }
 
@@ -1136,6 +1291,21 @@ class MemoryStore:
             self._record_metric("event_dedup_merges", merged)
         elif written > 0:
             self.retriever.ensure_event_embeddings(appended_events, embedding_provider=self.embedding_provider)
+
+        if written > 0 and self.mem0.enabled:
+            for event in appended_events:
+                summary = str(event.get("summary", "")).strip()
+                if not summary:
+                    continue
+                metadata = {
+                    "event_type": str(event.get("type", "fact")),
+                    "timestamp": str(event.get("timestamp", "")),
+                    "entities": self._to_str_list(event.get("entities")),
+                    "source_span": event.get("source_span"),
+                    "channel": str(event.get("channel", "")),
+                    "chat_id": str(event.get("chat_id", "")),
+                }
+                self.mem0.add_text(summary, metadata=metadata)
         return written
 
     def read_profile(self) -> dict[str, Any]:
@@ -1398,14 +1568,26 @@ class MemoryStore:
         recency_half_life_days: float = 30.0,
         embedding_provider: str | None = None,
     ) -> list[dict[str, Any]]:
-        retrieved = self.retriever.retrieve(
-            query,
-            top_k=top_k,
-            recency_half_life_days=recency_half_life_days,
-            embedding_provider=embedding_provider,
-        )
+        retrieved: list[dict[str, Any]] = []
+        mem0_had_results = False
+
+        if self.mem0.enabled:
+            self._record_metric("retrieval_queries", 1)
+            retrieved = self.mem0.search(query, top_k=top_k)
+            mem0_had_results = bool(retrieved)
+
+        if not retrieved:
+            # Fallback to legacy retrieval so existing local memories still work.
+            retrieved = self.retriever.retrieve(
+                query,
+                top_k=top_k,
+                recency_half_life_days=recency_half_life_days,
+                embedding_provider=embedding_provider,
+            )
         if not retrieved:
             return retrieved
+        if mem0_had_results:
+            self._record_metric("retrieval_hits", 1)
 
         profile = self.read_profile()
         conflicts = profile.get("conflicts", []) if isinstance(profile.get("conflicts"), list) else []
@@ -1861,6 +2043,17 @@ class MemoryStore:
         if conflicts > 0:
             self._record_metric("conflicts_detected", conflicts)
 
+        if self.mem0.enabled:
+            self.mem0.add_text(
+                text,
+                metadata={
+                    "event_type": "user_correction",
+                    "timestamp": self._utc_now_iso(),
+                    "channel": channel,
+                    "chat_id": chat_id,
+                },
+            )
+
         self.rebuild_memory_snapshot(write=True)
         return {"applied": applied, "conflicts": conflicts, "events": events_written}
 
@@ -2110,6 +2303,22 @@ class MemoryStore:
                     self._record_metric("events_extracted", events_written)
 
                 self.rebuild_memory_snapshot(write=True)
+
+            if self.mem0.enabled:
+                for m in old_messages:
+                    role = str(m.get("role", "user")).strip().lower() or "user"
+                    content = str(m.get("content", "")).strip()
+                    if not content:
+                        continue
+                    self.mem0.add_text(
+                        content,
+                        metadata={
+                            "event_type": "conversation_turn",
+                            "role": role,
+                            "timestamp": str(m.get("timestamp", "")),
+                            "session": session.key,
+                        },
+                    )
 
             self._finalize_consolidation(
                 session,

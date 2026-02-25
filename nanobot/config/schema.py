@@ -190,7 +190,7 @@ class AgentDefaults(Base):
     temperature: float = 0.1
     max_tool_iterations: int = 40
     memory_window: int = 100
-    memory_mode: str = "legacy"  # legacy | hybrid
+    memory_mode: str = "hybrid"  # legacy | hybrid
     memory_retrieval_k: int = 6
     memory_token_budget: int = 900
     memory_recency_half_life_days: float = 30.0
