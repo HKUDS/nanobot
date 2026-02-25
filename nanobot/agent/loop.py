@@ -21,6 +21,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.observe.trace import TraceRecorder, extract_skill_from_path, new_trace_id
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -57,6 +58,7 @@ class AgentLoop:
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
+        observe_enabled: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
@@ -75,6 +77,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.observe_enabled = observe_enabled
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -89,6 +92,7 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            observe_enabled=observe_enabled,
         )
 
         self._running = False
@@ -140,7 +144,13 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def _set_tool_context(
+        self,
+        channel: str,
+        chat_id: str,
+        message_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> None:
         """Update context for all tools that need routing info."""
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
@@ -149,10 +159,73 @@ class AgentLoop:
         if spawn_tool := self.tools.get("spawn"):
             if isinstance(spawn_tool, SpawnTool):
                 spawn_tool.set_context(channel, chat_id)
+                spawn_tool.set_parent_trace_id(trace_id)
 
         if cron_tool := self.tools.get("cron"):
             if isinstance(cron_tool, CronTool):
                 cron_tool.set_context(channel, chat_id)
+
+    def _start_trace(
+        self,
+        *,
+        session_key: str,
+        channel: str,
+        chat_id: str,
+        message_id: str | None,
+        role: str,
+        content: Any,
+        media: list[str] | None = None,
+        parent_trace_id: str | None = None,
+        trace_type: str = "agent",
+    ) -> TraceRecorder | None:
+        if not self.observe_enabled:
+            return None
+        trace = TraceRecorder(
+            new_trace_id(session_key),
+            parent_trace_id=parent_trace_id,
+            session_key=session_key,
+            channel=channel,
+            chat_id=chat_id,
+            message_id=message_id,
+            workspace=self.workspace,
+            trace_type=trace_type,
+        )
+        trace.record_input(role, content, media or None)
+        return trace
+
+    @staticmethod
+    def _finalize_trace(trace: TraceRecorder | None, content: str) -> None:
+        if trace:
+            trace.record_final_response(content)
+            trace.finalize()
+
+    @staticmethod
+    def _record_skill_use(trace: TraceRecorder | None, args_payload: Any) -> None:
+        if not trace or not isinstance(args_payload, dict):
+            return
+        skill = extract_skill_from_path(str(args_payload.get("path", "")))
+        if skill:
+            trace.record_skill_use(
+                name=skill["name"],
+                path=skill["path"],
+                source=skill["source"],
+            )
+
+    def _record_spawn(self, trace: TraceRecorder | None) -> None:
+        if not trace:
+            return
+        spawn_tool = self.tools.get("spawn")
+        if not isinstance(spawn_tool, SpawnTool) or not spawn_tool.last_spawned:
+            return
+        info = spawn_tool.last_spawned
+        if not info.get("trace_id"):
+            return
+        trace.record_subagent_spawn(
+            task_id=info["task_id"],
+            trace_id=info["trace_id"],
+            label=info["label"],
+            task=info["task"],
+        )
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -175,7 +248,8 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
-    ) -> tuple[str | None, list[str], list[dict]]:
+        trace: TraceRecorder | None = None,
+    ) -> tuple[str | None, list[str], list[dict], Any | None]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
         iteration = 0
@@ -192,6 +266,15 @@ class AgentLoop:
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
+            if trace:
+                trace.record_model_call(
+                    iteration,
+                    messages,
+                    model=self.model,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    response=response,
+                )
 
             if response.has_tool_calls:
                 if on_progress:
@@ -218,9 +301,22 @@ class AgentLoop:
 
                 for tool_call in response.tool_calls:
                     tools_used.append(tool_call.name)
-                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                    raw_args = tool_call.arguments
+                    args_payload = raw_args
+                    if isinstance(raw_args, str):
+                        try:
+                            args_payload = json.loads(raw_args)
+                        except Exception:
+                            args_payload = {"_raw": raw_args}
+                    if tool_call.name == "read_file":
+                        self._record_skill_use(trace, args_payload)
+                    args_str = json.dumps(raw_args, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    if trace:
+                        trace.record_tool_call(tool_call.id, tool_call.name, args_payload, result)
+                        if tool_call.name == "spawn":
+                            self._record_spawn(trace)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -307,15 +403,29 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            trace = self._start_trace(
+                session_key=key,
+                channel=channel,
+                chat_id=chat_id,
+                message_id=msg.metadata.get("message_id") if msg.metadata else None,
+                role="system",
+                content=msg.content,
+            )
+            self._set_tool_context(
+                channel,
+                chat_id,
+                msg.metadata.get("message_id") if msg.metadata else None,
+                trace.trace_id if trace else None,
+            )
             history = session.get_history(max_messages=self.memory_window)
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(messages, trace=trace)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
+            self._finalize_trace(trace, final_content or "Background task completed.")
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -324,6 +434,15 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
+        trace = self._start_trace(
+            session_key=key,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            message_id=msg.metadata.get("message_id") if msg.metadata else None,
+            role="user",
+            content=msg.content,
+            media=msg.media if msg.media else None,
+        )
 
         # Slash commands
         cmd = msg.content.strip().lower()
@@ -337,16 +456,20 @@ class AgentLoop:
                         temp = Session(key=session.key)
                         temp.messages = list(snapshot)
                         if not await self._consolidate_memory(temp, archive_all=True):
-                            return OutboundMessage(
+                            resp = OutboundMessage(
                                 channel=msg.channel, chat_id=msg.chat_id,
                                 content="Memory archival failed, session not cleared. Please try again.",
                             )
+                            self._finalize_trace(trace, resp.content)
+                            return resp
             except Exception:
                 logger.exception("/new archival failed for {}", session.key)
-                return OutboundMessage(
+                resp = OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
                     content="Memory archival failed, session not cleared. Please try again.",
                 )
+                self._finalize_trace(trace, resp.content)
+                return resp
             finally:
                 self._consolidating.discard(session.key)
                 self._prune_consolidation_lock(session.key, lock)
@@ -354,11 +477,15 @@ class AgentLoop:
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+            resp = OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
+            self._finalize_trace(trace, resp.content)
+            return resp
         if cmd == "/help":
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+            resp = OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+            self._finalize_trace(trace, resp.content)
+            return resp
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
@@ -379,7 +506,12 @@ class AgentLoop:
             _task = asyncio.create_task(_consolidate_and_unlock())
             self._consolidation_tasks.add(_task)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        self._set_tool_context(
+            msg.channel,
+            msg.chat_id,
+            msg.metadata.get("message_id") if msg.metadata else None,
+            trace.trace_id if trace else None,
+        )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
@@ -401,7 +533,7 @@ class AgentLoop:
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages, on_progress=on_progress or _bus_progress, trace=trace
         )
 
         if final_content is None:
@@ -415,12 +547,15 @@ class AgentLoop:
 
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+                self._finalize_trace(trace, final_content)
                 return None
 
-        return OutboundMessage(
+        resp = OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},
         )
+        self._finalize_trace(trace, final_content)
+        return resp
 
     _TOOL_RESULT_MAX_CHARS = 500
 

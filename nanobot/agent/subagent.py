@@ -15,6 +15,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
+from nanobot.observe.trace import TraceRecorder, extract_skill_from_path, new_trace_id
 
 
 class SubagentManager:
@@ -37,6 +38,7 @@ class SubagentManager:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        observe_enabled: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.provider = provider
@@ -48,7 +50,52 @@ class SubagentManager:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.observe_enabled = observe_enabled
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        self._running_traces: dict[str, TraceRecorder] = {}
+
+    def _start_trace(
+        self,
+        *,
+        task_id: str,
+        origin_channel: str,
+        origin_chat_id: str,
+        parent_trace_id: str | None,
+        task: str,
+    ) -> TraceRecorder | None:
+        if not self.observe_enabled:
+            return None
+        trace_id = new_trace_id(f"subagent_{task_id}")
+        trace = TraceRecorder(
+            trace_id,
+            parent_trace_id=parent_trace_id,
+            session_key=f"subagent:{task_id}",
+            channel=origin_channel,
+            chat_id=origin_chat_id,
+            message_id=None,
+            workspace=self.workspace,
+            trace_type="subagent",
+        )
+        trace.record_input("user", task)
+        return trace
+
+    @staticmethod
+    def _finalize_trace(trace: TraceRecorder | None, content: str) -> None:
+        if trace:
+            trace.record_final_response(content)
+            trace.finalize()
+
+    @staticmethod
+    def _record_skill_use(trace: TraceRecorder | None, args_payload: Any) -> None:
+        if not trace or not isinstance(args_payload, dict):
+            return
+        skill = extract_skill_from_path(str(args_payload.get("path", "")))
+        if skill:
+            trace.record_skill_use(
+                name=skill["name"],
+                path=skill["path"],
+                source=skill["source"],
+            )
     
     async def spawn(
         self,
@@ -56,7 +103,8 @@ class SubagentManager:
         label: str | None = None,
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
-    ) -> str:
+        parent_trace_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         Spawn a subagent to execute a task in the background.
         
@@ -76,18 +124,36 @@ class SubagentManager:
             "channel": origin_channel,
             "chat_id": origin_chat_id,
         }
-        
+        trace = self._start_trace(
+            task_id=task_id,
+            origin_channel=origin_channel,
+            origin_chat_id=origin_chat_id,
+            parent_trace_id=parent_trace_id,
+            task=task,
+        )
+        if trace:
+            self._running_traces[task_id] = trace
+
         # Create background task
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin)
+            self._run_subagent(task_id, task, display_label, origin, trace)
         )
         self._running_tasks[task_id] = bg_task
         
         # Cleanup when done
-        bg_task.add_done_callback(lambda _: self._running_tasks.pop(task_id, None))
+        def _cleanup(_: asyncio.Task) -> None:
+            self._running_tasks.pop(task_id, None)
+            self._running_traces.pop(task_id, None)
+        bg_task.add_done_callback(_cleanup)
         
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
-        return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
+        return {
+            "message": f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes.",
+            "task_id": task_id,
+            "trace_id": trace.trace_id if trace else None,
+            "label": display_label,
+            "task": task,
+        }
     
     async def _run_subagent(
         self,
@@ -95,6 +161,7 @@ class SubagentManager:
         task: str,
         label: str,
         origin: dict[str, str],
+        trace: TraceRecorder | None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -126,6 +193,7 @@ class SubagentManager:
             max_iterations = 15
             iteration = 0
             final_result: str | None = None
+            last_response: Any | None = None
             
             while iteration < max_iterations:
                 iteration += 1
@@ -137,6 +205,15 @@ class SubagentManager:
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                 )
+                if trace:
+                    trace.record_model_call(
+                        iteration,
+                        messages,
+                        model=self.model,
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                        response=response,
+                    )
                 
                 if response.has_tool_calls:
                     # Add assistant message with tool calls
@@ -159,9 +236,20 @@ class SubagentManager:
                     
                     # Execute tools
                     for tool_call in response.tool_calls:
-                        args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                        raw_args = tool_call.arguments
+                        args_payload = raw_args
+                        if isinstance(raw_args, str):
+                            try:
+                                args_payload = json.loads(raw_args)
+                            except Exception:
+                                args_payload = {"_raw": raw_args}
+                        if tool_call.name == "read_file":
+                            self._record_skill_use(trace, args_payload)
+                        args_str = json.dumps(raw_args, ensure_ascii=False)
                         logger.debug("Subagent [{}] executing: {} with arguments: {}", task_id, tool_call.name, args_str)
                         result = await tools.execute(tool_call.name, tool_call.arguments)
+                        if trace:
+                            trace.record_tool_call(tool_call.id, tool_call.name, args_payload, result)
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
@@ -176,11 +264,13 @@ class SubagentManager:
                 final_result = "Task completed but no final response was generated."
             
             logger.info("Subagent [{}] completed successfully", task_id)
+            self._finalize_trace(trace, final_result)
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
             
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
+            self._finalize_trace(trace, error_msg)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
     
     async def _announce_result(
