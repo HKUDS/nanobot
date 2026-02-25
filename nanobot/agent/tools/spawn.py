@@ -30,7 +30,9 @@ class SpawnTool(Tool):
         return (
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
-            "The subagent will complete the task and report back when done."
+            "The subagent will complete the task and report back when done. "
+            "Optionally specify a 'model' to use a different LLM for this subagent "
+            "(e.g., use a more capable model for complex tasks)."
         )
     
     @property
@@ -46,15 +48,20 @@ class SpawnTool(Tool):
                     "type": "string",
                     "description": "Optional short label for the task (for display)",
                 },
+                "model": {
+                    "type": "string",
+                    "description": "Optional model override for this subagent (e.g., 'openrouter/anthropic/claude-3.5-sonnet' for complex tasks)",
+                },
             },
             "required": ["task"],
         }
     
-    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
+    async def execute(self, task: str, label: str | None = None, model: str | None = None, **kwargs: Any) -> str:
         """Spawn a subagent to execute the given task."""
         return await self._manager.spawn(
             task=task,
             label=label,
             origin_channel=self._origin_channel,
             origin_chat_id=self._origin_chat_id,
+            model=model,
         )
