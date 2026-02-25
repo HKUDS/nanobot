@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent.commands import get_help_text, is_immediate_command, parse_command
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
@@ -99,6 +100,8 @@ class AgentLoop:
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
+        self._active_tasks: dict[str, asyncio.Task] = {}  # session_key -> running task
+        self._processing_lock = asyncio.Lock()  # Serialize message processing
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -238,7 +241,12 @@ class AgentLoop:
         return final_content, tools_used, messages
 
     async def run(self) -> None:
-        """Run the agent loop, processing messages from the bus."""
+        """Run the agent loop, processing messages from the bus.
+
+        Regular messages are dispatched as asyncio tasks so the loop stays
+        responsive to immediate commands like /stop.  A global processing
+        lock serializes message handling to avoid shared-state races.
+        """
         self._running = True
         await self._connect_mcp()
         logger.info("Agent loop started")
@@ -249,23 +257,65 @@ class AgentLoop:
                     self.bus.consume_inbound(),
                     timeout=1.0
                 )
-                try:
-                    response = await self._process_message(msg)
-                    if response is not None:
-                        await self.bus.publish_outbound(response)
-                    elif msg.channel == "cli":
-                        await self.bus.publish_outbound(OutboundMessage(
-                            channel=msg.channel, chat_id=msg.chat_id, content="", metadata=msg.metadata or {},
-                        ))
-                except Exception as e:
-                    logger.error("Error processing message: {}", e)
-                    await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content=f"Sorry, I encountered an error: {str(e)}"
-                    ))
+
+                # Immediate commands (/stop) are handled inline
+                cmd = parse_command(msg.content)
+                if cmd and is_immediate_command(cmd):
+                    await self._handle_immediate_command(cmd, msg)
+                    continue
+
+                # Regular messages (including non-immediate commands) are
+                # dispatched as tasks so the loop keeps consuming.
+                asyncio.create_task(self._dispatch(msg))
+
             except asyncio.TimeoutError:
                 continue
+
+    async def _handle_immediate_command(self, cmd: str, msg: InboundMessage) -> None:
+        """Handle a command that must be processed while the agent may be busy."""
+        if cmd == "/stop":
+            task = self._active_tasks.get(msg.session_key)
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="⏹ Task stopped.",
+                ))
+            else:
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="No active task to stop.",
+                ))
+
+    async def _dispatch(self, msg: InboundMessage) -> None:
+        """Dispatch a message for processing under the global lock."""
+        async with self._processing_lock:
+            self._active_tasks[msg.session_key] = asyncio.current_task()  # type: ignore[arg-type]
+            try:
+                response = await self._process_message(msg)
+                if response is not None:
+                    await self.bus.publish_outbound(response)
+                elif msg.channel == "cli":
+                    await self.bus.publish_outbound(OutboundMessage(
+                        channel=msg.channel, chat_id=msg.chat_id,
+                        content="", metadata=msg.metadata or {},
+                    ))
+            except asyncio.CancelledError:
+                logger.info("Task cancelled for session {}", msg.session_key)
+                # Response already sent by _handle_immediate_command
+            except Exception as e:
+                logger.error("Error processing message: {}", e)
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=f"Sorry, I encountered an error: {str(e)}"
+                ))
+            finally:
+                self._active_tasks.pop(msg.session_key, None)
 
     async def close_mcp(self) -> None:
         """Close MCP connections."""
@@ -358,7 +408,7 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+                                  content=get_help_text())
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
