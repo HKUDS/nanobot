@@ -11,6 +11,7 @@ from loguru import logger
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
@@ -91,10 +92,11 @@ class SubagentManager:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
             allowed_dir = self.workspace if self.restrict_to_workspace else None
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            extra_read_dirs = [BUILTIN_SKILLS_DIR] if allowed_dir and BUILTIN_SKILLS_DIR.exists() else None
+            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_read_dirs=extra_read_dirs))
             tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_read_dirs=extra_read_dirs))
             tools.register(ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,

@@ -16,6 +16,7 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -109,7 +110,11 @@ class AgentLoop:
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         allowed_dir = self.workspace if self.restrict_to_workspace else None
-        for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
+        # Builtin skills live outside workspace; allow read-only access even when restricted
+        extra_read_dirs = [BUILTIN_SKILLS_DIR] if allowed_dir and BUILTIN_SKILLS_DIR.exists() else None
+        for cls in (ReadFileTool, ListDirTool):
+            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir, extra_read_dirs=extra_read_dirs))
+        for cls in (WriteFileTool, EditFileTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
