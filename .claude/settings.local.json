@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile nanobot/providers/multi_model_provider.py nanobot/cli/commands.py nanobot/config/schema.py nanobot/providers/__init__.py)",
+      "Bash(./bin/nanobot agent -m \"hello\")",
+      "Bash(./bin/nanobot status)",
+      "Bash(curl -X POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions -H \"Authorization: Bearer sk-41981ede2a8845b9b9a7a1a2ae4d789a\" -H \"Content-Type: application/json\" -d '{\n    \"\"model\"\": \"\"qwen-turbo\"\",\n    \"\"messages\"\": [{\"\"role\"\": \"\"user\"\", \"\"content\"\": \"\"hello\"\"}],\n    \"\"max_tokens\"\": 50\n  }')",
+      "Bash(curl -X POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions -H \"Authorization: Bearer sk-41981ede2a8845b9b9a7a1a2ae4d789a\" -H \"Content-Type: application/json\" -d '{\n    \"\"model\"\": \"\"qwen3-vl-plus-2025-12-19\"\",\n    \"\"messages\"\": [{\"\"role\"\": \"\"user\"\", \"\"content\"\": \"\"hello\"\"}],\n    \"\"max_tokens\"\": 50\n  }')",
+      "Bash(curl -X POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions -H \"Authorization: Bearer sk-41981ede2a8845b9b9a7a1a2ae4d789a\" -H \"Content-Type: application/json\" -d '{\n    \"\"model\"\": \"\"qwen-max\"\",\n    \"\"messages\"\": [{\"\"role\"\": \"\"user\"\", \"\"content\"\": \"\"hello\"\"}],\n    \"\"max_tokens\"\": 50\n  }')",
+      "Bash(curl -X POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions -H \"Authorization: Bearer sk-41981ede2a8845b9b9a7a1a2ae4d789a\" -H \"Content-Type: application/json\" -d '{\n    \"\"\"\"model\"\"\"\": \"\"\"\"qwen-turbo\"\"\"\",\n    \"\"\"\"messages\"\"\"\": [{\"\"\"\"role\"\"\"\": \"\"\"\"user\"\"\"\", \"\"\"\"content\"\"\"\": \"\"\"\"hello\"\"\"\"}],\n    \"\"\"\"max_tokens\"\"\"\": 50\n  }')",
+      "Bash(./bin/nanobot agent -m \"hello\" --logs)",
+      "Bash(git checkout model-failover)",
+      "Bash(git merge main)"
+    ]
+  }
+}

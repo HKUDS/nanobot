@@ -1,0 +1,140 @@
+Metadata-Version: 2.4
+Name: slackify_markdown
+Version: 0.2.0
+Summary: Convert markdown to Slack-compatible formatting
+Author-email: Manthan Surkar <manthan1674@gmail.com>
+License: MIT License
+        
+        Copyright (c) 2025 Manthan Surkar
+        
+        Permission is hereby granted, free of charge, to any person obtaining a copy
+        of this software and associated documentation files (the "Software"), to deal
+        in the Software without restriction, including without limitation the rights
+        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        copies of the Software, and to permit persons to whom the Software is
+        furnished to do so, subject to the following conditions:
+        
+        The above copyright notice and this permission notice shall be included in all
+        copies or substantial portions of the Software.
+        
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+        SOFTWARE.
+        
+Project-URL: Homepage, https://github.com/thesmallstar/slackify-markdown-python
+Project-URL: Bug Tracker, https://github.com/thesmallstar/slackify-markdown-python/issues
+Project-URL: Documentation, https://github.com/thesmallstar/slackify-markdown-python#readme
+Keywords: slack,markdown,mrkdwn,converter,formatting,text
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Intended Audience :: Developers
+Classifier: Topic :: Communications :: Chat
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: markdown-it-py>=3.0.0
+Dynamic: license-file
+
+# Slackify Markdown
+
+A Python library for converting Markdown to slack specific markdown. This is inspired from existing npm package [slackify-markdown](https://www.npmjs.com/package/slackify-markdown)
+
+## Overview
+
+This library converts regular Markdown to Slack-specific markdown, making it easy to use and display correctly in Slack messages.
+
+## Installation
+
+```bash
+pip install slackify-markdown
+```
+
+## Usage
+
+```python
+from slackify_markdown import slackify
+
+# Convert markdown to Slack mrkdwn
+from slackify_markdown import slackify_markdown
+
+markdown = """
+# Title
+
+This is **bold text** and this is *italic text*.
+
+## Subtitle
+1. **Item 1**
+2. *Item 2*
+
+## Another Subtitle
+* **Element 1** - *Description 1*
+* **Element 2** - *Description 2*
+
+[Link](https://example.com)
+
+"""
+
+slack_output = slackify_markdown(markdown)
+"""
+*Title*
+
+This is *bold text* and this is _italic text_.
+
+*Subtitle*
+1.  *Item 1*
+2.  _Item 2_
+
+*Another Subtitle*
+•   *Element 1* - _Description 1_
+•   *Element 2* - _Description 2_
+
+<https://example.com|Link>
+"""
+```
+
+## Features
+
+- Converts headers to Slack-compatible bold text
+- Preserves bold and italic formatting
+- Handles code blocks and inline code
+- Converts links to Slack's expected format
+- Processes lists (ordered and unordered)
+- Handles blockquotes
+
+## Example Conversions
+
+| Markdown | Slack mrkdwn |
+|----------|--------------|
+| `# Heading` | `*Heading*` |
+| `**Bold**` | `*Bold*` |
+| `*Italic*` | `_Italic_` |
+| `` `code` `` | `` `code` `` |
+| `[Link](https://example.com)` | `<https://example.com\|Link>` |
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgements
+
+Shoutout to [jsarafaj](https://github.com/jsarafajr), his JS library has inspired the code and tests for this package.

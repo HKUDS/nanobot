@@ -1,0 +1,5 @@
+Wheel-Version: 1.0
+Generator: maturin (1.10.2)
+Root-Is-Purelib: false
+Tag: cp313-cp313-manylinux_2_17_armv7l
+Tag: cp313-cp313-manylinux2014_armv7l

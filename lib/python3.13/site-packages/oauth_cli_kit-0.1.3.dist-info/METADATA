@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: oauth-cli-kit
+Version: 0.1.3
+Summary: Reusable OAuth 2.0 + PKCE helpers for CLI applications
+Author: nanobot contributors
+License: MIT
+License-File: LICENSE
+Keywords: auth,cli,oauth,pkce
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.11
+Requires-Dist: httpx>=0.25.0
+Requires-Dist: platformdirs>=4.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == 'dev'

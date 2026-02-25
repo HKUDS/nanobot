@@ -1,0 +1,2 @@
+[console_scripts]
+json_repair = json_repair.__main__:cli

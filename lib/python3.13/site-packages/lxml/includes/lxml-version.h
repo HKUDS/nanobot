@@ -1,0 +1,3 @@
+#ifndef LXML_VERSION_STRING
+#define LXML_VERSION_STRING "5.4.0"
+#endif

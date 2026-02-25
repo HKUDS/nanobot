@@ -1,0 +1,2 @@
+[console_scripts]
+nanobot = nanobot.cli.commands:app

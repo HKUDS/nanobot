@@ -1,0 +1,33 @@
+# File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
+
+from typing_extensions import Literal
+
+from ..._models import BaseModel
+
+__all__ = ["ResponseAudioDoneEvent"]
+
+
+class ResponseAudioDoneEvent(BaseModel):
+    """Returned when the model-generated audio is done.
+
+    Also emitted when a Response
+    is interrupted, incomplete, or cancelled.
+    """
+
+    content_index: int
+    """The index of the content part in the item's content array."""
+
+    event_id: str
+    """The unique ID of the server event."""
+
+    item_id: str
+    """The ID of the item."""
+
+    output_index: int
+    """The index of the output item in the response."""
+
+    response_id: str
+    """The ID of the response."""
+
+    type: Literal["response.output_audio.done"]
+    """The event type, must be `response.output_audio.done`."""

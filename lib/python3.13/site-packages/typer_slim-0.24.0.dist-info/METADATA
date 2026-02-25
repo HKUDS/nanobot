@@ -1,0 +1,93 @@
+Metadata-Version: 2.4
+Name: typer-slim
+Version: 0.24.0
+Summary: Typer, build great CLIs. Easy to code. Based on Python type hints.
+Author-Email: =?utf-8?q?Sebasti=C3=A1n_Ram=C3=ADrez?= <tiangolo@gmail.com>
+License-Expression: MIT
+License-File: LICENSE
+Classifier: Intended Audience :: Information Technology
+Classifier: Intended Audience :: System Administrators
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python
+Classifier: Topic :: Software Development :: Libraries :: Application Frameworks
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Topic :: Software Development :: Libraries
+Classifier: Topic :: Software Development
+Classifier: Typing :: Typed
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Project-URL: Homepage, https://github.com/fastapi/typer
+Project-URL: Documentation, https://typer.tiangolo.com
+Project-URL: Repository, https://github.com/fastapi/typer
+Project-URL: Issues, https://github.com/fastapi/typer/issues
+Project-URL: Changelog, https://typer.tiangolo.com/release-notes/
+Requires-Python: >=3.10
+Requires-Dist: typer>=0.24.0
+Description-Content-Type: text/markdown
+
+<p align="center">
+  <a href="https://typer.tiangolo.com"><img src="https://typer.tiangolo.com/img/logo-margin/logo-margin-vector.svg" alt="Typer"></a>
+</p>
+<p align="center">
+    <em>Typer, build great CLIs. Easy to code. Based on Python type hints.</em>
+</p>
+<p align="center">
+<a href="https://github.com/fastapi/typer/actions?query=workflow%3ATest+event%3Apush+branch%3Amaster" target="_blank">
+    <img src="https://github.com/fastapi/typer/actions/workflows/test.yml/badge.svg?event=push&branch=master" alt="Test">
+</a>
+<a href="https://github.com/fastapi/typer/actions?query=workflow%3APublish" target="_blank">
+    <img src="https://github.com/fastapi/typer/workflows/Publish/badge.svg" alt="Publish">
+</a>
+<a href="https://coverage-badge.samuelcolvin.workers.dev/redirect/fastapi/typer" target="_blank">
+    <img src="https://coverage-badge.samuelcolvin.workers.dev/fastapi/typer.svg" alt="Coverage">
+<a href="https://pypi.org/project/typer" target="_blank">
+    <img src="https://img.shields.io/pypi/v/typer?color=%2334D058&label=pypi%20package" alt="Package version">
+</a>
+</p>
+
+---
+
+**Documentation**: <a href="https://typer.tiangolo.com" target="_blank">https://typer.tiangolo.com/tutorial/typer-command/</a>
+
+**Source Code**: <a href="https://github.com/fastapi/typer" target="_blank">https://github.com/fastapi/typer</a>
+
+---
+
+Typer is a library for building <abbr title="command line interface, programs executed from a terminal">CLI</abbr> applications that users will **love using** and developers will **love creating**. Based on Python type hints.
+
+It's also a command line tool to run scripts, automatically converting them to CLI applications.
+
+## `typer-slim`
+
+⚠️ Do not install this package. ⚠️
+
+This package, `typer-slim`, does nothing other than depend on `typer`.
+
+There used to be a slimmed-down version of Typer called `typer-slim`, which didn't include the dependencies `rich` and `shellingham`, nor the `typer` command.
+
+However, since version 0.22.0, we have stopped supporting this, and `typer-slim` now simply installs (all of) Typer.
+
+If you want to disable Rich globally, you can set an environmental variable `TYPER_USE_RICH` to `False` or `0`.
+
+The only reason this package exists is as a migration path for old projects that used to depend on `typer-slim`, so that they can get the latest version of `typer`.
+
+You **should not** install this package.
+
+Install instead:
+
+```bash
+pip install typer
+```
+
+This package is deprecated and will stop receiving any updates and published versions.
+
+## License
+
+This project is licensed under the terms of the MIT license.
