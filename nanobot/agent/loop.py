@@ -278,15 +278,24 @@ class AgentLoop:
         """Handle a command that must be processed while the agent may be busy."""
         if cmd == "/stop":
             task = self._active_tasks.get(msg.session_key)
+            sub_cancelled = await self.subagents.cancel_by_session(msg.session_key)
             if task and not task.done():
                 task.cancel()
                 try:
                     await task
                 except (asyncio.CancelledError, Exception):
                     pass
+                parts = ["⏹ Task stopped."]
+                if sub_cancelled:
+                    parts.append(f"Also stopped {sub_cancelled} background task(s).")
                 await self.bus.publish_outbound(OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
-                    content="⏹ Task stopped.",
+                    content=" ".join(parts),
+                ))
+            elif sub_cancelled:
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content=f"⏹ Stopped {sub_cancelled} background task(s).",
                 ))
             else:
                 await self.bus.publish_outbound(OutboundMessage(

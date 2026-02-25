@@ -49,6 +49,7 @@ class SubagentManager:
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
     
     async def spawn(
         self,
@@ -56,6 +57,7 @@ class SubagentManager:
         label: str | None = None,
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
+        session_key: str | None = None,
     ) -> str:
         """
         Spawn a subagent to execute a task in the background.
@@ -82,9 +84,20 @@ class SubagentManager:
             self._run_subagent(task_id, task, display_label, origin)
         )
         self._running_tasks[task_id] = bg_task
-        
-        # Cleanup when done
-        bg_task.add_done_callback(lambda _: self._running_tasks.pop(task_id, None))
+
+        if session_key:
+            self._session_tasks.setdefault(session_key, set()).add(task_id)
+
+        def _cleanup(_: asyncio.Task) -> None:
+            self._running_tasks.pop(task_id, None)
+            if session_key:
+                ids = self._session_tasks.get(session_key)
+                if ids:
+                    ids.discard(task_id)
+                    if not ids:
+                        self._session_tasks.pop(session_key, None)
+
+        bg_task.add_done_callback(_cleanup)
         
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
@@ -252,6 +265,21 @@ Skills are available at: {self.workspace}/skills/ (read SKILL.md files as needed
 
 When you have completed the task, provide a clear summary of your findings or actions."""
     
+    async def cancel_by_session(self, session_key: str) -> int:
+        """Cancel all subagents spawned under the given session. Returns count cancelled."""
+        task_ids = list(self._session_tasks.get(session_key, []))
+        cancelled = 0
+        for tid in task_ids:
+            t = self._running_tasks.get(tid)
+            if t and not t.done():
+                t.cancel()
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+                cancelled += 1
+        return cancelled
+
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""
         return len(self._running_tasks)
