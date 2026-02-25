@@ -111,6 +111,7 @@ class TelegramChannel(BaseChannel):
     BOT_COMMANDS = [
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
+        BotCommand("model", "Show or switch model for this chat"),
         BotCommand("help", "Show available commands"),
     ]
     
@@ -146,6 +147,7 @@ class TelegramChannel(BaseChannel):
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
+        self._app.add_handler(CommandHandler("model", self._on_model))
         self._app.add_handler(CommandHandler("help", self._on_help))
         
         # Add message handler for text, photos, voice, documents
@@ -299,6 +301,7 @@ class TelegramChannel(BaseChannel):
         await update.message.reply_text(
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
+            "/model [name] — Show or switch model for this chat\n"
             "/help — Show available commands"
         )
 
@@ -316,6 +319,27 @@ class TelegramChannel(BaseChannel):
             sender_id=self._sender_id(update.effective_user),
             chat_id=str(update.message.chat_id),
             content=update.message.text,
+        )
+
+    async def _on_model(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /model command by sending a structured command to AgentLoop."""
+        if not update.message or not update.effective_user:
+            return
+
+        sender_id = self._sender_id(update.effective_user)
+        chat_id = str(update.message.chat_id)
+        raw_text = update.message.text or "/model"
+        requested_model = " ".join(context.args).strip() if context.args else None
+
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=chat_id,
+            content=raw_text,
+            metadata={
+                "message_id": update.message.message_id,
+                "system_command": "set_model",
+                "model": requested_model,
+            },
         )
     
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
