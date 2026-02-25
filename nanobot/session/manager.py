@@ -42,49 +42,42 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
-    def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """
-        Get message history for LLM context.
+    def get_history(self, max_messages: int = 500, max_age_hours: float = 24.0) -> list[dict[str, Any]]:
+        """Return unconsolidated messages for LLM input, aligned to a user turn."""
+        from datetime import timezone
+        unconsolidated = self.messages[self.last_consolidated:]
 
-        Args:
-            max_messages: Maximum messages to return.
+        # Filter by age
+        if max_age_hours > 0:
+            cutoff = datetime.now(timezone.utc) - __import__('datetime').timedelta(hours=max_age_hours)
+            cutoff_naive = cutoff.replace(tzinfo=None)
+            fresh = []
+            for m in unconsolidated:
+                ts_str = m.get("timestamp", "")
+                try:
+                    ts = datetime.fromisoformat(ts_str)
+                    if ts >= cutoff_naive:
+                        fresh.append(m)
+                except (ValueError, TypeError):
+                    fresh.append(m)
+            unconsolidated = fresh
 
-        Returns:
-            List of messages in LLM format, preserving tool metadata.
-        """
-        # Get recent messages
-        recent = self.messages[-max_messages:] if len(self.messages) > max_messages else self.messages
+        sliced = unconsolidated[-max_messages:]
 
-        # Convert to LLM format, merging tool call summaries into assistant messages
-        result = []
-        i = 0
-        while i < len(recent):
-            msg = recent[i]
-            role = msg["role"]
-            content = msg.get("content", "")
+        # Drop leading non-user messages
+        for i, m in enumerate(sliced):
+            if m.get("role") == "user":
+                sliced = sliced[i:]
+                break
 
-            # Check if next message is a system tool call summary
-            if role == "assistant" and i + 1 < len(recent):
-                next_msg = recent[i + 1]
-                if next_msg["role"] == "system" and next_msg.get("content", "").startswith("Tool calls:"):
-                    # Merge tool call summary into assistant message
-                    content = f"{content}\n\n{next_msg['content']}"
-                    i += 1  # Skip the system message
-
-            # Skip standalone system tool call messages (already merged or orphaned)
-            if role == "system" and content.startswith("Tool calls:"):
-                i += 1
-                continue
-
-            entry: dict[str, Any] = {"role": role, "content": content}
-            # Preserve tool metadata
+        out: list[dict[str, Any]] = []
+        for m in sliced:
+            entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
             for k in ("tool_calls", "tool_call_id", "name"):
-                if k in msg:
-                    entry[k] = msg[k]
-            result.append(entry)
-            i += 1
-
-        return result
+                if k in m:
+                    entry[k] = m[k]
+            out.append(entry)
+        return out
 
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""

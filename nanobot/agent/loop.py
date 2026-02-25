@@ -53,6 +53,7 @@ class AgentLoop:
         temperature: float = 0.1,
         max_tokens: int = 4096,
         memory_window: int = 100,
+        history_max_age_hours: float = 24.0,
         brave_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
@@ -73,6 +74,7 @@ class AgentLoop:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.memory_window = memory_window
+        self.history_max_age_hours = history_max_age_hours
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -270,6 +272,8 @@ class AgentLoop:
                         chat_id=msg.chat_id,
                         content=f"Sorry, I encountered an error: {str(e)}"
                     ))
+                finally:
+                    await self.bus.complete_inbound_turn(msg)
             except asyncio.TimeoutError:
                 continue
 
@@ -314,10 +318,7 @@ class AgentLoop:
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
-            history = session.get_history(max_messages=self.memory_window)
-            messages = self.context.build_messages(
-                history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+            history = session.get_history(max_messages=self.memory_window, max_age_hours=self.history_max_age_hours)
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
@@ -390,8 +391,7 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=self.memory_window)
-        initial_messages = self.context.build_messages(
+        history = session.get_history(max_messages=self.memory_window, max_age_hours=self.history_max_age_hours)
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
