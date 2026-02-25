@@ -588,7 +588,17 @@ class FeishuChannel(BaseChannel):
             file_path = media_dir / filename
             file_path.write_bytes(data)
             logger.debug("Downloaded {} to {}", msg_type, file_path)
-            return str(file_path), f"[{msg_type}: {filename}]"
+
+            # Extract text from PDF files
+            content_text = f"[{msg_type}: {filename}]"
+            if file_path.suffix.lower() == ".pdf":
+                from nanobot.utils.pdf import extract_pdf_text
+
+                pdf_text = extract_pdf_text(file_path)
+                if pdf_text:
+                    content_text += f"\n\n{pdf_text}"
+
+            return str(file_path), content_text
 
         return None, f"[{msg_type}: download failed]"
 
