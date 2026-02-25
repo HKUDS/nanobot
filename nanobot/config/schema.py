@@ -162,7 +162,15 @@ class QQConfig(Base):
     enabled: bool = False
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
+    allow_from: list[str] = Field(
+        default_factory=list
+    )  # Allowed user openids (empty = public access)
+
+
+class CustomConfig(Base):
+    """Generic custom channel configuration - modify channels/custom.py to implement."""
+
+    enabled: bool = False
 
 
 class ChannelsConfig(Base):
@@ -179,6 +187,7 @@ class ChannelsConfig(Base):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    custom: CustomConfig = Field(default_factory=CustomConfig)
 
 
 class AgentDefaults(Base):
