@@ -136,6 +136,18 @@ class ChannelManager:
                 logger.info("QQ channel enabled")
             except ImportError as e:
                 logger.warning("QQ channel not available: {}", e)
+
+        # Webhook channel
+        if self.config.channels.webhook.enabled:
+            try:
+                from nanobot.channels.webhook import WebhookChannel
+                self.channels["webhook"] = WebhookChannel(
+                    self.config.channels.webhook,
+                    self.bus,
+                )
+                logger.info("Webhook channel enabled")
+            except ImportError as e:
+                logger.warning("Webhook channel not available: {}", e)
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""

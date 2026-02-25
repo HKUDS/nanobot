@@ -172,6 +172,12 @@ Connect nanobot to your favorite chat platform.
 | **Slack** | Bot token + App-Level token |
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
+| **Webhook** | Local HTTP access + connector endpoint (`127.0.0.1:19400`) |
+
+> Webhook channel defaults:
+> - Inbound route: `POST /v1/inbound`
+> - Outbound route: `POST /v1/outbound`
+> - Connector forward target: `http://127.0.0.1:19400/v1/outbound`
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
