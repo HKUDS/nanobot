@@ -88,7 +88,7 @@ When merging main into orghi-main, conflicts often occur in:
 - `workspace/` (personal config)
 
 **File rules:**
-- **Always accept upstream** for `nanobot/__init__.py` `__version__` only. Keep orghi-main `__logo__`. This keeps the fork aligned with upstream and makes it clear which upstream version you are on.
+- **Always accept upstream** for `nanobot/__init__.py` `__version__` only. Keep orghi-main `__logo__`. This keeps the fork aligned with upstream and makes it clear which upstream version you are on. Keep the version in `pyproject.toml`, `README.md`, and `nanobot/__init__.py` aligned.
 - Prefer keeping orghi-main customizations in `README.md`, `pyproject.toml`, and `workspace/`.
 - Accept upstream changes for all other files.
 
