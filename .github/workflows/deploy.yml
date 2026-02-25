@@ -19,6 +19,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Get image tag
+        id: tag
+        run: |
+          VERSION=$(grep '^version = ' pyproject.toml | cut -d'"' -f2)
+          SHA=$(git rev-parse --short HEAD)
+          echo "tag=${VERSION}-${SHA}" >> $GITHUB_OUTPUT
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -34,7 +41,9 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.tag.outputs.tag }}
+            ghcr.io/${{ github.repository }}:latest
 
       - name: Deploy to Droplet
         uses: appleboy/ssh-action@v1.0.3
@@ -43,7 +52,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            export ORGHI_IMAGE=ghcr.io/${{ github.repository }}:latest
+            export ORGHI_IMAGE=ghcr.io/${{ github.repository }}:${{ steps.tag.outputs.tag }}
             cd ${{ secrets.DEPLOY_PATH || '/opt/orghi' }}
             git pull origin orghi-main
             docker compose -f docker-compose.prod.yml pull

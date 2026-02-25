@@ -1,5 +1,5 @@
 # Production: pulls image from GHCR. No local build.
-# Set ORGHI_IMAGE=ghcr.io/owner/orghi:latest (Actions sets this on deploy)
+# ORGHI_IMAGE=ghcr.io/owner/orghi:{version}-{shortSha} - Actions sets this on deploy
 
 x-common-config: &common-config
   image: ${ORGHI_IMAGE}
