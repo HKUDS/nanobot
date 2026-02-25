@@ -164,6 +164,17 @@ class QQConfig(Base):
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
+class SimpleWebChatConfig(Base):
+    """Simple web chat channel configuration (FastAPI + embedded HTML)."""
+
+    enabled: bool = False
+    host: str = "0.0.0.0"  # Bind host
+    port: int = 8088  # HTTP / WebSocket port
+    title: str = "Nanobot Chat"  # Page title shown in the browser
+    allow_from: list[str] = Field(default_factory=list)  # Allowed session IDs (empty = allow all)
+    max_upload_size_mb: int = 50  # Maximum upload size in megabytes
+
+
 
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
@@ -179,7 +190,7 @@ class ChannelsConfig(Base):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
-
+    simple_web_chat: SimpleWebChatConfig = Field(default_factory=SimpleWebChatConfig)
 
 class AgentDefaults(Base):
     """Default agent configuration."""
