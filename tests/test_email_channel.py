@@ -169,7 +169,8 @@ async def test_send_uses_smtp_and_reply_subject(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_skips_when_auto_reply_disabled(monkeypatch) -> None:
+async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
+    """When auto_reply_enabled=False, replies should be skipped but proactive sends allowed."""
     class FakeSMTP:
         def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
             self.sent_messages: list[EmailMessage] = []
@@ -201,6 +202,11 @@ async def test_send_skips_when_auto_reply_disabled(monkeypatch) -> None:
     cfg = _make_config()
     cfg.auto_reply_enabled = False
     channel = EmailChannel(cfg, MessageBus())
+
+    # Mark alice as someone who sent us an email (making this a "reply")
+    channel._last_subject_by_chat["alice@example.com"] = "Previous email"
+
+    # Reply should be skipped (auto_reply_enabled=False)
     await channel.send(
         OutboundMessage(
             channel="email",
@@ -210,6 +216,7 @@ async def test_send_skips_when_auto_reply_disabled(monkeypatch) -> None:
     )
     assert fake_instances == []
 
+    # Reply with force_send=True should be sent
     await channel.send(
         OutboundMessage(
             channel="email",
@@ -220,6 +227,56 @@ async def test_send_skips_when_auto_reply_disabled(monkeypatch) -> None:
     )
     assert len(fake_instances) == 1
     assert len(fake_instances[0].sent_messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_send_proactive_email_when_auto_reply_disabled(monkeypatch) -> None:
+    """Proactive emails (not replies) should be sent even when auto_reply_enabled=False."""
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.sent_messages: list[EmailMessage] = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, _user: str, _pw: str):
+            return None
+
+        def send_message(self, msg: EmailMessage):
+            self.sent_messages.append(msg)
+
+    fake_instances: list[FakeSMTP] = []
+
+    def _smtp_factory(host: str, port: int, timeout: int = 30):
+        instance = FakeSMTP(host, port, timeout=timeout)
+        fake_instances.append(instance)
+        return instance
+
+    monkeypatch.setattr("nanobot.channels.email.smtplib.SMTP", _smtp_factory)
+
+    cfg = _make_config()
+    cfg.auto_reply_enabled = False
+    channel = EmailChannel(cfg, MessageBus())
+
+    # bob@example.com has never sent us an email (proactive send)
+    # This should be sent even with auto_reply_enabled=False
+    await channel.send(
+        OutboundMessage(
+            channel="email",
+            chat_id="bob@example.com",
+            content="Hello, this is a proactive email.",
+        )
+    )
+    assert len(fake_instances) == 1
+    assert len(fake_instances[0].sent_messages) == 1
+    sent = fake_instances[0].sent_messages[0]
+    assert sent["To"] == "bob@example.com"
 
 
 @pytest.mark.asyncio

@@ -180,21 +180,25 @@ def _extract_element_content(element: dict) -> list[str]:
     return parts
 
 
-def _extract_post_text(content_json: dict) -> str:
-    """Extract plain text from Feishu post (rich text) message content.
+def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
+    """Extract text and image keys from Feishu post (rich text) message content.
     
     Supports two formats:
     1. Direct format: {"title": "...", "content": [...]}
     2. Localized format: {"zh_cn": {"title": "...", "content": [...]}}
+    
+    Returns:
+        (text, image_keys) - extracted text and list of image keys
     """
-    def extract_from_lang(lang_content: dict) -> str | None:
+    def extract_from_lang(lang_content: dict) -> tuple[str | None, list[str]]:
         if not isinstance(lang_content, dict):
-            return None
+            return None, []
         title = lang_content.get("title", "")
         content_blocks = lang_content.get("content", [])
         if not isinstance(content_blocks, list):
-            return None
+            return None, []
         text_parts = []
+        image_keys = []
         if title:
             text_parts.append(title)
         for block in content_blocks:
@@ -209,22 +213,36 @@ def _extract_post_text(content_json: dict) -> str:
                         text_parts.append(element.get("text", ""))
                     elif tag == "at":
                         text_parts.append(f"@{element.get('user_name', 'user')}")
-        return " ".join(text_parts).strip() if text_parts else None
+                    elif tag == "img":
+                        img_key = element.get("image_key")
+                        if img_key:
+                            image_keys.append(img_key)
+        text = " ".join(text_parts).strip() if text_parts else None
+        return text, image_keys
     
     # Try direct format first
     if "content" in content_json:
-        result = extract_from_lang(content_json)
-        if result:
-            return result
+        text, images = extract_from_lang(content_json)
+        if text or images:
+            return text or "", images
     
     # Try localized format
     for lang_key in ("zh_cn", "en_us", "ja_jp"):
         lang_content = content_json.get(lang_key)
-        result = extract_from_lang(lang_content)
-        if result:
-            return result
+        text, images = extract_from_lang(lang_content)
+        if text or images:
+            return text or "", images
     
-    return ""
+    return "", []
+
+
+def _extract_post_text(content_json: dict) -> str:
+    """Extract plain text from Feishu post (rich text) message content.
+    
+    Legacy wrapper for _extract_post_content, returns only text.
+    """
+    text, _ = _extract_post_content(content_json)
+    return text
 
 
 class FeishuChannel(BaseChannel):
@@ -503,18 +521,29 @@ class FeishuChannel(BaseChannel):
             logger.error("Error downloading image {}: {}", image_key, e)
             return None, None
 
-    def _download_file_sync(self, file_key: str) -> tuple[bytes | None, str | None]:
-        """Download a file from Feishu by file_key."""
+    def _download_file_sync(
+        self, message_id: str, file_key: str, resource_type: str = "file"
+    ) -> tuple[bytes | None, str | None]:
+        """Download a file/audio/media from a Feishu message by message_id and file_key."""
         try:
-            request = GetFileRequest.builder().file_key(file_key).build()
-            response = self._client.im.v1.file.get(request)
+            request = (
+                GetMessageResourceRequest.builder()
+                .message_id(message_id)
+                .file_key(file_key)
+                .type(resource_type)
+                .build()
+            )
+            response = self._client.im.v1.message_resource.get(request)
             if response.success():
-                return response.file, response.file_name
+                file_data = response.file
+                if hasattr(file_data, "read"):
+                    file_data = file_data.read()
+                return file_data, response.file_name
             else:
-                logger.error("Failed to download file: code={}, msg={}", response.code, response.msg)
+                logger.error("Failed to download {}: code={}, msg={}", resource_type, response.code, response.msg)
                 return None, None
-        except Exception as e:
-            logger.error("Error downloading file {}: {}", file_key, e)
+        except Exception:
+            logger.exception("Error downloading {} {}", resource_type, file_key)
             return None, None
 
     async def _download_and_save_media(
@@ -544,14 +573,14 @@ class FeishuChannel(BaseChannel):
                 if not filename:
                     filename = f"{image_key[:16]}.jpg"
 
-        elif msg_type in ("audio", "file"):
+        elif msg_type in ("audio", "file", "media"):
             file_key = content_json.get("file_key")
-            if file_key:
+            if file_key and message_id:
                 data, filename = await loop.run_in_executor(
-                    None, self._download_file_sync, file_key
+                    None, self._download_file_sync, message_id, file_key, msg_type
                 )
                 if not filename:
-                    ext = ".opus" if msg_type == "audio" else ""
+                    ext = {"audio": ".opus", "media": ".mp4"}.get(msg_type, "")
                     filename = f"{file_key[:16]}{ext}"
 
         if data and filename:
@@ -680,11 +709,19 @@ class FeishuChannel(BaseChannel):
                     content_parts.append(text)
 
             elif msg_type == "post":
-                text = _extract_post_text(content_json)
+                text, image_keys = _extract_post_content(content_json)
                 if text:
                     content_parts.append(text)
+                # Download images embedded in post
+                for img_key in image_keys:
+                    file_path, content_text = await self._download_and_save_media(
+                        "image", {"image_key": img_key}, message_id
+                    )
+                    if file_path:
+                        media_paths.append(file_path)
+                    content_parts.append(content_text)
 
-            elif msg_type in ("image", "audio", "file"):
+            elif msg_type in ("image", "audio", "file", "media"):
                 file_path, content_text = await self._download_and_save_media(msg_type, content_json, message_id)
                 if file_path:
                     media_paths.append(file_path)
