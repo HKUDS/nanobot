@@ -47,10 +47,7 @@ class LiteLLMProvider(LLMProvider):
         # Configure environment variables
         if api_key:
             self._setup_env(api_key, api_base, default_model)
-        
-        if api_base:
-            litellm.api_base = api_base
-        
+
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
         # Drop unsupported parameters for providers (e.g., gpt-5 rejects some params)
