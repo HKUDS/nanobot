@@ -42,6 +42,7 @@ class AgentLoop:
     4. Executes tool calls
     5. Sends responses back
     """
+    _SESSION_MODEL_KEY = "preferred_model"
 
     def __init__(
         self,
@@ -175,6 +176,7 @@ class AgentLoop:
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
+        model: str | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
@@ -182,6 +184,7 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        selected_model = model or self.model
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -189,7 +192,7 @@ class AgentLoop:
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
-                model=self.model,
+                model=selected_model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
@@ -237,6 +240,43 @@ class AgentLoop:
             )
 
         return final_content, tools_used, messages
+
+    def _session_model(self, session: Session) -> str:
+        """Return the model for this session, falling back to the default."""
+        model = session.metadata.get(self._SESSION_MODEL_KEY)
+        if isinstance(model, str) and model.strip():
+            return model.strip()
+        return self.model
+
+    def _handle_model_command(
+        self,
+        session: Session,
+        msg: InboundMessage,
+        requested_model: str | None,
+    ) -> OutboundMessage:
+        """Handle model selection/status commands."""
+        current_model = self._session_model(session)
+        requested = (requested_model or "").strip()
+
+        if not requested:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    f"Current model: `{current_model}`\n"
+                    "Use `/model <name>` to switch models for this chat."
+                ),
+                metadata=msg.metadata or {},
+            )
+
+        session.metadata[self._SESSION_MODEL_KEY] = requested
+        self.sessions.save(session)
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=f"Model switched to `{requested}` for this chat.",
+            metadata=msg.metadata or {},
+        )
 
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -314,7 +354,10 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(
+                messages,
+                model=self._session_model(session),
+            )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -326,8 +369,14 @@ class AgentLoop:
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
 
+        if msg.metadata.get("system_command") == "set_model":
+            raw_model = msg.metadata.get("model")
+            requested_model = raw_model if isinstance(raw_model, str) else None
+            return self._handle_model_command(session, msg, requested_model)
+
         # Slash commands
-        cmd = msg.content.strip().lower()
+        raw_cmd = msg.content.strip()
+        cmd = raw_cmd.lower()
         if cmd == "/new":
             lock = self._get_consolidation_lock(session.key)
             self._consolidating.add(session.key)
@@ -336,6 +385,7 @@ class AgentLoop:
                     snapshot = session.messages[session.last_consolidated:]
                     if snapshot:
                         temp = Session(key=session.key)
+                        temp.metadata = dict(session.metadata)
                         temp.messages = list(snapshot)
                         if not await self._consolidate_memory(temp, archive_all=True):
                             return OutboundMessage(
@@ -359,7 +409,10 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/model — Show or switch model for this chat\n/help — Show available commands")
+        model_match = re.match(r"^/model(?:@\w+)?(?:\s+(.+))?$", raw_cmd, re.IGNORECASE)
+        if model_match:
+            return self._handle_model_command(session, msg, model_match.group(1))
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
@@ -402,7 +455,9 @@ class AgentLoop:
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages,
+            model=self._session_model(session),
+            on_progress=on_progress or _bus_progress,
         )
 
         if final_content is None:
@@ -441,7 +496,7 @@ class AgentLoop:
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
         return await MemoryStore(self.workspace).consolidate(
-            session, self.provider, self.model,
+            session, self.provider, self._session_model(session),
             archive_all=archive_all, memory_window=self.memory_window,
         )
 
