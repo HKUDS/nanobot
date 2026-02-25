@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -131,6 +132,11 @@ class DingTalkChannel(BaseChannel):
     """
 
     name = "dingtalk"
+    _DINGTALK_NO_PROXY_HOSTS = (
+        "api.dingtalk.com",
+        "oapi.dingtalk.com",
+        "wss-open-connection-union.dingtalk.com",
+    )
 
     def __init__(self, config: DingTalkConfig, bus: MessageBus):
         super().__init__(config, bus)
@@ -159,7 +165,9 @@ class DingTalkChannel(BaseChannel):
                 return
 
             self._running = True
-            self._http = httpx.AsyncClient()
+            if not self.config.use_system_proxy:
+                self._ensure_no_proxy_for_dingtalk()
+            self._http = httpx.AsyncClient(trust_env=self.config.use_system_proxy)
 
             logger.info(
                 "Initializing DingTalk Stream Client with Client ID: {}...",
@@ -186,6 +194,18 @@ class DingTalkChannel(BaseChannel):
 
         except Exception as e:
             logger.exception("Failed to start DingTalk channel: {}", e)
+
+    def _ensure_no_proxy_for_dingtalk(self) -> None:
+        """Ensure DingTalk hosts bypass env proxy for SDK WebSocket and HTTP calls."""
+        raw_no_proxy = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or ""
+        entries = [item.strip() for item in raw_no_proxy.split(",") if item.strip()]
+        for host in self._DINGTALK_NO_PROXY_HOSTS:
+            if host not in entries:
+                entries.append(host)
+        merged = ",".join(entries)
+        os.environ["NO_PROXY"] = merged
+        os.environ["no_proxy"] = merged
+        logger.info("DingTalk proxy disabled via config (NO_PROXY hosts injected)")
 
     async def stop(self) -> None:
         """Stop the DingTalk bot."""

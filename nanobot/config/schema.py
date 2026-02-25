@@ -49,6 +49,7 @@ class DingTalkConfig(Base):
     client_id: str = ""  # AppKey
     client_secret: str = ""  # AppSecret
     allow_from: list[str] = Field(default_factory=list)  # Allowed staff_ids
+    use_system_proxy: bool = True  # Whether to read HTTP(S)_PROXY / NO_PROXY from environment
 
 
 class DiscordConfig(Base):
