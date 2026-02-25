@@ -18,7 +18,7 @@ from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.patch_stdout import patch_stdout
 
-from liberty-max import __version__, __logo__
+from liberty_max import __version__, __logo__
 from liberty_max.config.schema import Config
 
 app = typer.Typer(
