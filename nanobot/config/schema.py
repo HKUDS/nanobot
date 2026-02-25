@@ -165,6 +165,14 @@ class QQConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
 
+class MezonConfig(Base):
+    """Mezon channel configuration using mezon-sdk."""
+    enabled: bool = False
+    bot_id: str = ""  # Bot/app ID from Mezon developer portal
+    bot_token: str = ""  # API key from Mezon developer portal
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs (empty = allow all)
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -179,6 +187,7 @@ class ChannelsConfig(Base):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    mezon: MezonConfig = Field(default_factory=MezonConfig)
 
 
 class AgentDefaults(Base):
