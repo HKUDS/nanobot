@@ -429,10 +429,6 @@ class AgentLoop:
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
 
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-                return None
-
         # Handle [SILENT] marker: don't send message, only stop typing
         if final_content.strip() == "[SILENT]":
             return OutboundMessage(
@@ -440,6 +436,11 @@ class AgentLoop:
                 metadata=msg.metadata or {},
                 msg_type="silent",
             )
+
+        if message_tool := self.tools.get("message"):
+            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+                if not final_content.strip():
+                    return None
 
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
