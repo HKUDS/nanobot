@@ -304,30 +304,35 @@ class AgentLoop:
                 ))
 
     async def _dispatch(self, msg: InboundMessage) -> None:
-        """Dispatch a message for processing under the global lock."""
-        async with self._processing_lock:
-            self._active_tasks[msg.session_key] = asyncio.current_task()  # type: ignore[arg-type]
-            try:
-                response = await self._process_message(msg)
-                if response is not None:
-                    await self.bus.publish_outbound(response)
-                elif msg.channel == "cli":
+        """Dispatch a message for processing under the global lock.
+
+        The task is registered in _active_tasks *before* acquiring the lock
+        so that /stop can find (and cancel) tasks that are still queued.
+        """
+        self._active_tasks[msg.session_key] = asyncio.current_task()  # type: ignore[arg-type]
+        try:
+            async with self._processing_lock:
+                try:
+                    response = await self._process_message(msg)
+                    if response is not None:
+                        await self.bus.publish_outbound(response)
+                    elif msg.channel == "cli":
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel, chat_id=msg.chat_id,
+                            content="", metadata=msg.metadata or {},
+                        ))
+                except asyncio.CancelledError:
+                    logger.info("Task cancelled for session {}", msg.session_key)
+                    # Response already sent by _handle_immediate_command
+                except Exception as e:
+                    logger.error("Error processing message: {}", e)
                     await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel, chat_id=msg.chat_id,
-                        content="", metadata=msg.metadata or {},
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content=f"Sorry, I encountered an error: {str(e)}"
                     ))
-            except asyncio.CancelledError:
-                logger.info("Task cancelled for session {}", msg.session_key)
-                # Response already sent by _handle_immediate_command
-            except Exception as e:
-                logger.error("Error processing message: {}", e)
-                await self.bus.publish_outbound(OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=f"Sorry, I encountered an error: {str(e)}"
-                ))
-            finally:
-                self._active_tasks.pop(msg.session_key, None)
+        finally:
+            self._active_tasks.pop(msg.session_key, None)
 
     async def close_mcp(self) -> None:
         """Close MCP connections."""
