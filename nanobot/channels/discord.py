@@ -42,6 +42,26 @@ def _split_message(content: str, max_len: int = MAX_MESSAGE_LEN) -> list[str]:
     return chunks
 
 
+def _guess_mime(path: Path) -> str:
+    """Guess MIME type based on file extension."""
+    ext = path.suffix.lower()
+    mapping = {
+        ".ogg": "audio/ogg",
+        ".mp3": "audio/mpeg",
+        ".mp4": "video/mp4",
+        ".wav": "audio/wav",
+        ".m4a": "audio/mp4",
+        ".webm": "audio/webm",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".pdf": "application/pdf",
+    }
+    return mapping.get(ext, "application/octet-stream")
+
+
 class DiscordChannel(BaseChannel):
     """Discord channel using Gateway websocket."""
 
@@ -106,8 +126,11 @@ class DiscordChannel(BaseChannel):
 
         try:
             chunks = _split_message(msg.content or "")
-            if not chunks:
+            media = list(msg.media or [])
+            if not chunks and not media:
                 return
+            if not chunks and media:
+                chunks = [""]
 
             for i, chunk in enumerate(chunks):
                 payload: dict[str, Any] = {"content": chunk}
@@ -117,7 +140,11 @@ class DiscordChannel(BaseChannel):
                     payload["message_reference"] = {"message_id": msg.reply_to}
                     payload["allowed_mentions"] = {"replied_user": False}
 
-                if not await self._send_payload(url, headers, payload):
+                if i == 0 and media:
+                    sent = await self._send_payload_with_files(url, headers, payload, media)
+                else:
+                    sent = await self._send_payload(url, headers, payload)
+                if not sent:
                     break  # Abort remaining chunks on failure
         finally:
             await self._stop_typing(msg.chat_id)
@@ -142,6 +169,53 @@ class DiscordChannel(BaseChannel):
                     logger.error("Error sending Discord message: {}", e)
                 else:
                     await asyncio.sleep(1)
+        return False
+
+    async def _send_payload_with_files(
+        self,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        media: list[str],
+    ) -> bool:
+        """Send a Discord API payload with attachments using multipart form-data."""
+        for attempt in range(3):
+            file_handles: list[Any] = []
+            try:
+                files: list[tuple[str, tuple[Any, ...]]] = [
+                    ("payload_json", (None, json.dumps(payload)))
+                ]
+                for index, path_str in enumerate(media):
+                    path = Path(path_str)
+                    if not path.exists():
+                        logger.warning("Discord attachment does not exist: {}", path)
+                        continue
+                    handle = path.open("rb")
+                    file_handles.append(handle)
+                    files.append(
+                        (
+                            f"files[{index}]",
+                            (path.name, handle, _guess_mime(path)),
+                        )
+                    )
+
+                response = await self._http.post(url, headers=headers, files=files)
+                if response.status_code == 429:
+                    data = response.json()
+                    retry_after = float(data.get("retry_after", 1.0))
+                    logger.warning("Discord rate limited, retrying in {}s", retry_after)
+                    await asyncio.sleep(retry_after)
+                    continue
+                response.raise_for_status()
+                return True
+            except Exception as e:
+                if attempt == 2:
+                    logger.error("Error sending Discord message: {}", e)
+                else:
+                    await asyncio.sleep(1)
+            finally:
+                for handle in file_handles:
+                    handle.close()
         return False
 
     async def _gateway_loop(self) -> None:
