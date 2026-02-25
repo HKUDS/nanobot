@@ -222,6 +222,7 @@ class AgentDefaults(Base):
     workspace: str = "~/.nanobot/workspace"
     model: str = "anthropic/claude-opus-4-5"
     provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
+    fallbacks: list[str] = Field(default_factory=list)  # Fallback models tried on transient LLM failures
     max_tokens: int = 8192
     temperature: float = 0.1
     max_tool_iterations: int = 40

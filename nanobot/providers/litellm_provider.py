@@ -9,6 +9,7 @@ from typing import Any
 
 import litellm
 from litellm import acompletion
+from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
@@ -24,26 +25,37 @@ def _short_tool_id() -> str:
     return "".join(secrets.choice(_ALNUM) for _ in range(9))
 
 
+# Transient errors that should trigger fallback model retry.
+_TRANSIENT_ERRORS = (
+    litellm.Timeout,
+    litellm.ServiceUnavailableError,
+    litellm.InternalServerError,
+    litellm.RateLimitError,
+)
+
+
 class LiteLLMProvider(LLMProvider):
     """
     LLM provider using LiteLLM for multi-provider support.
-    
+
     Supports OpenRouter, Anthropic, OpenAI, Gemini, MiniMax, and many other providers through
     a unified interface.  Provider-specific logic is driven by the registry
     (see providers/registry.py) — no if-elif chains needed here.
     """
-    
+
     def __init__(
-        self, 
-        api_key: str | None = None, 
+        self,
+        api_key: str | None = None,
         api_base: str | None = None,
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
+        fallbacks: list[str] | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self._fallbacks = fallbacks or []
         
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -231,6 +243,13 @@ class LiteLLMProvider(LLMProvider):
         try:
             response = await acompletion(**kwargs)
             return self._parse_response(response)
+        except _TRANSIENT_ERRORS as e:
+            if not self._fallbacks:
+                return LLMResponse(
+                    content=f"Error calling LLM: {str(e)}",
+                    finish_reason="error",
+                )
+            return await self._try_fallbacks(e, messages, tools, max_tokens, temperature)
         except Exception as e:
             # Return error as content for graceful handling
             return LLMResponse(
@@ -238,6 +257,46 @@ class LiteLLMProvider(LLMProvider):
                 finish_reason="error",
             )
     
+    async def _try_fallbacks(
+        self,
+        original_error: Exception,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        max_tokens: int,
+        temperature: float,
+    ) -> LLMResponse:
+        """Try fallback models after a transient error on the primary model."""
+        sanitized = self._sanitize_messages(self._sanitize_empty_content(messages))
+
+        for fb_model in self._fallbacks:
+            resolved = self._resolve_model(fb_model)
+            logger.warning("Primary model failed ({}), trying fallback: {}", original_error, fb_model)
+
+            fb_kwargs: dict[str, Any] = {
+                "model": resolved,
+                "messages": sanitized,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            }
+            self._apply_model_overrides(resolved, fb_kwargs)
+
+            if tools:
+                fb_kwargs["tools"] = tools
+                fb_kwargs["tool_choice"] = "auto"
+
+            try:
+                response = await acompletion(**fb_kwargs)
+                logger.info("Fallback model {} succeeded", fb_model)
+                return self._parse_response(response)
+            except Exception as fb_err:
+                logger.warning("Fallback model {} also failed: {}", fb_model, fb_err)
+                continue
+
+        return LLMResponse(
+            content=f"All models failed. Primary error: {original_error}",
+            finish_reason="error",
+        )
+
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
         choice = response.choices[0]

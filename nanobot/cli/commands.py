@@ -199,6 +199,28 @@ def onboard():
 
 
 
+def _setup_all_provider_envs(config: Config) -> None:
+    """Set environment variables for every configured provider.
+
+    This is necessary so that fallback models from other providers can
+    authenticate via LiteLLM's env-var resolution.
+    """
+    import os
+    from nanobot.providers.registry import find_by_name
+
+    for spec_name in (
+        "anthropic", "openai", "openrouter", "deepseek", "groq", "zhipu",
+        "dashscope", "gemini", "moonshot", "minimax", "aihubmix",
+        "siliconflow", "volcengine", "vllm",
+    ):
+        p = getattr(config.providers, spec_name, None)
+        if not p or not p.api_key:
+            continue
+        spec = find_by_name(spec_name)
+        if spec and spec.env_key:
+            os.environ.setdefault(spec.env_key, p.api_key)
+
+
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.litellm_provider import LiteLLMProvider
@@ -228,12 +250,19 @@ def _make_provider(config: Config):
         console.print("Set one in ~/.nanobot/config.json under providers section")
         raise typer.Exit(1)
 
+    # Ensure all configured providers have their env vars set so that
+    # fallback models from different providers can authenticate.
+    fallbacks = config.agents.defaults.fallbacks
+    if fallbacks:
+        _setup_all_provider_envs(config)
+
     return LiteLLMProvider(
         api_key=p.api_key if p else None,
         api_base=config.get_api_base(model),
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=provider_name,
+        fallbacks=fallbacks,
     )
 
 
