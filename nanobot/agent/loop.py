@@ -60,6 +60,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        suppress_final_response_if_message_tool: bool = True,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -75,6 +76,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.suppress_final_response_if_message_tool = suppress_final_response_if_message_tool
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -407,15 +409,24 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
-
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
 
+        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-                return None
+                if self.suppress_final_response_if_message_tool:
+                    logger.info("Response suppressed due to message tool usage in this turn.")
+                    logger.debug(
+                        "Suppressed final response for {}:{}: {}",
+                        msg.channel, msg.sender_id, preview,
+                    )
+                    return None
+                logger.info(
+                    "Message tool was used in this turn, but final response delivery is enabled."
+                )
+
+        logger.info("Sending response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,

@@ -312,6 +312,9 @@ def gateway(
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
+        suppress_final_response_if_message_tool=(
+            config.agents.defaults.suppress_final_response_if_message_tool
+        ),
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
@@ -469,6 +472,9 @@ def agent(
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
+        suppress_final_response_if_message_tool=(
+            config.agents.defaults.suppress_final_response_if_message_tool
+        ),
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
@@ -960,6 +966,9 @@ def cron_run(
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
+        suppress_final_response_if_message_tool=(
+            config.agents.defaults.suppress_final_response_if_message_tool
+        ),
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
