@@ -272,24 +272,30 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
-    # Zhipu: LiteLLM uses "zai/" prefix.
-    # Also mirrors key to ZHIPUAI_API_KEY (some LiteLLM paths check that).
+    # Z.AI / Zhipu: LiteLLM uses "zai/" prefix.
+    # Default base points at the standard API endpoint.
+    # For coding-specific plans, users can override `providers.zai.api_base`:
+    #   CN     https://api.zhipuai.cn/api/coding/paas/v4/
+    #   Global https://api.z.ai/api/coding/paas/v4/
+    # Also mirrors key/base to ZHIPUAI_* for LiteLLM compatibility paths.
     # skip_prefixes: don't add "zai/" when already routed via gateway.
     ProviderSpec(
-        name="zhipu",
+        name="zai",
         keywords=("zhipu", "glm", "zai"),
         env_key="ZAI_API_KEY",
-        display_name="Zhipu AI",
+        display_name="Z.AI",
         litellm_prefix="zai",              # glm-4 → zai/glm-4
         skip_prefixes=("zhipu/", "zai/", "openrouter/", "hosted_vllm/"),
         env_extras=(
             ("ZHIPUAI_API_KEY", "{api_key}"),
+            ("ZAI_API_BASE", "{api_base}"),
+            ("ZHIPUAI_API_BASE", "{api_base}"),
         ),
         is_gateway=False,
         is_local=False,
         detect_by_key_prefix="",
         detect_by_base_keyword="",
-        default_api_base="",
+        default_api_base="https://open.bigmodel.cn/api/paas/v4",
         strip_model_prefix=False,
         model_overrides=(),
     ),
