@@ -337,7 +337,8 @@ class AgentLoop:
 
         # Slash commands
         cmd = msg.content.strip().lower()
-        if cmd == "/new":
+        cmd_base = cmd.split("@")[0]  # Handle /cmd@botname from Telegram groups
+        if cmd_base == "/new":
             lock = self._get_consolidation_lock(session.key)
             self._consolidating.add(session.key)
             try:
@@ -366,7 +367,7 @@ class AgentLoop:
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
-        if cmd == "/help":
+        if cmd_base == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
 
@@ -454,6 +455,10 @@ class AgentLoop:
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now()
+
+        # Advance last_consolidated to keep the unconsolidated window bounded
+        if len(session.messages) - session.last_consolidated > self.memory_window:
+            session.last_consolidated = len(session.messages) - self.memory_window
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
