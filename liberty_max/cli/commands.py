@@ -21,6 +21,12 @@ from prompt_toolkit.patch_stdout import patch_stdout
 from liberty_max import __version__, __logo__
 from liberty_max.config.schema import Config
 
+# Ensure stdout/stderr can render Unicode (e.g. emoji) on Windows without PYTHONUTF8=1
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 app = typer.Typer(
     name="liberty-max",
     help=f"{__logo__} liberty-max - Personal AI Assistant",
