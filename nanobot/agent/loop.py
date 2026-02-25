@@ -7,7 +7,7 @@ import json
 import re
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from loguru import logger
 
@@ -102,8 +102,12 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
-        self._consolidating: set[str] = set()  # Session keys with consolidation in progress
-        self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
+        self._consolidating: set[str] = (
+            set()
+        )  # Session keys with consolidation in progress
+        self._consolidation_tasks: set[asyncio.Task] = (
+            set()
+        )  # Strong refs to in-flight tasks
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._register_default_tools()
 
@@ -227,7 +231,9 @@ class AgentLoop:
                     clean = self._strip_think(response.content)
                     if clean:
                         await on_progress(clean)
-                    await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
+                    await on_progress(
+                        self._tool_hint(response.tool_calls), tool_hint=True
+                    )
 
                 tool_call_dicts = [
                     {
@@ -333,7 +339,9 @@ class AgentLoop:
             self._consolidation_locks[session_key] = lock
         return lock
 
-    def _prune_consolidation_lock(self, session_key: str, lock: asyncio.Lock) -> None:
+    def _prune_consolidation_lock(
+        self, session_key: str, lock: asyncio.Lock
+    ) -> None:
         """Drop lock entry if no longer in use."""
         if not lock.locked():
             self._consolidation_locks.pop(session_key, None)
@@ -355,11 +363,15 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            self._set_tool_context(
+                channel, chat_id, msg.metadata.get("message_id")
+            )
             history = session.get_history(max_messages=self.memory_window)
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=msg.content,
+                channel=channel,
+                chat_id=chat_id,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
@@ -390,19 +402,23 @@ class AgentLoop:
             self._consolidating.add(session.key)
             try:
                 async with lock:
-                    snapshot = session.messages[session.last_consolidated:]
+                    snapshot = session.messages[session.last_consolidated :]
                     if snapshot:
                         temp = Session(key=session.key)
                         temp.messages = list(snapshot)
-                        if not await self._consolidate_memory(temp, archive_all=True):
+                        if not await self._consolidate_memory(
+                            temp, archive_all=True
+                        ):
                             return OutboundMessage(
-                                channel=msg.channel, chat_id=msg.chat_id,
+                                channel=msg.channel,
+                                chat_id=msg.chat_id,
                                 content="Memory archival failed, session not cleared. Please try again.",
                             )
             except Exception:
                 logger.exception("/new archival failed for {}", session.key)
                 return OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
                     content="Memory archival failed, session not cleared. Please try again.",
                 )
             finally:
@@ -412,8 +428,11 @@ class AgentLoop:
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started.")
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="New session started.",
+            )
         if cmd == "/help":
             return OutboundMessage(
                 channel=msg.channel,
@@ -422,7 +441,10 @@ class AgentLoop:
             )
 
         unconsolidated = len(session.messages) - session.last_consolidated
-        if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
+        if (
+            unconsolidated >= self.memory_window
+            and session.key not in self._consolidating
+        ):
             self._consolidating.add(session.key)
             lock = self._get_consolidation_lock(session.key)
 
@@ -456,16 +478,24 @@ class AgentLoop:
             chat_id=msg.chat_id,
         )
 
-        async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
+        async def _bus_progress(
+            content: str, *, tool_hint: bool = False
+        ) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             meta["_tool_hint"] = tool_hint
-            await self.bus.publish_outbound(OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
-            ))
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=content,
+                    metadata=meta,
+                )
+            )
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages,
+            on_progress=on_progress or _bus_progress,
         )
 
         if final_content is None:
@@ -501,24 +531,37 @@ class AgentLoop:
 
     _TOOL_RESULT_MAX_CHARS = 500
 
-    def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
+    def _save_turn(
+        self, session: Session, messages: list[dict], skip: int
+    ) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
+
         for m in messages[skip:]:
             entry = {k: v for k, v in m.items() if k != "reasoning_content"}
-            if entry.get("role") == "tool" and isinstance(entry.get("content"), str):
+            if entry.get("role") == "tool" and isinstance(
+                entry.get("content"), str
+            ):
                 content = entry["content"]
                 if len(content) > self._TOOL_RESULT_MAX_CHARS:
-                    entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+                    entry["content"] = (
+                        content[: self._TOOL_RESULT_MAX_CHARS]
+                        + "\n... (truncated)"
+                    )
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now()
 
-    async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
+    async def _consolidate_memory(
+        self, session, archive_all: bool = False
+    ) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
         return await MemoryStore(self.workspace).consolidate(
-            session, self.provider, self.model,
-            archive_all=archive_all, memory_window=self.memory_window,
+            session,
+            self.provider,
+            self.model,
+            archive_all=archive_all,
+            memory_window=self.memory_window,
         )
 
     async def process_direct(

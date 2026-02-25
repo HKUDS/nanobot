@@ -233,7 +233,9 @@ def _create_workspace_templates(workspace: Path):
     memory_template = templates_dir / "memory" / "MEMORY.md"
     memory_file = memory_dir / "MEMORY.md"
     if not memory_file.exists():
-        memory_file.write_text(memory_template.read_text(encoding="utf-8"), encoding="utf-8")
+        memory_file.write_text(
+            memory_template.read_text(encoding="utf-8"), encoding="utf-8"
+        )
         console.print("  [dim]Created memory/MEMORY.md[/dim]")
 
     history_file = memory_dir / "HISTORY.md"
@@ -406,10 +408,13 @@ def gateway(
     async def on_heartbeat_notify(response: str) -> None:
         """Deliver a heartbeat response to the user's channel."""
         from nanobot.bus.events import OutboundMessage
+
         channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
             return  # No external channel available to deliver to
-        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+        await bus.publish_outbound(
+            OutboundMessage(channel=channel, chat_id=chat_id, content=response)
+        )
 
     hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(
@@ -431,7 +436,9 @@ def gateway(
 
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
-        console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
+        console.print(
+            f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs"
+        )
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
@@ -584,7 +591,9 @@ def agent(
                             ch = agent_loop.channels_config
                             if ch and is_tool_hint and not ch.send_tool_hints:
                                 pass
-                            elif ch and not is_tool_hint and not ch.send_progress:
+                            elif (
+                                ch and not is_tool_hint and not ch.send_progress
+                            ):
                                 pass
                             else:
                                 console.print(f"  [dim]↳ {msg.content}[/dim]")
@@ -718,30 +727,26 @@ def channels_status():
 
     # DingTalk
     dt = config.channels.dingtalk
-    dt_config = f"client_id: {dt.client_id[:10]}..." if dt.client_id else "[dim]not configured[/dim]"
-    table.add_row(
-        "DingTalk",
-        "✓" if dt.enabled else "✗",
-        dt_config
+    dt_config = (
+        f"client_id: {dt.client_id[:10]}..."
+        if dt.client_id
+        else "[dim]not configured[/dim]"
     )
+    table.add_row("DingTalk", "✓" if dt.enabled else "✗", dt_config)
 
     # QQ
     qq = config.channels.qq
-    qq_config = f"app_id: {qq.app_id[:10]}..." if qq.app_id else "[dim]not configured[/dim]"
-    table.add_row(
-        "QQ",
-        "✓" if qq.enabled else "✗",
-        qq_config
+    qq_config = (
+        f"app_id: {qq.app_id[:10]}..."
+        if qq.app_id
+        else "[dim]not configured[/dim]"
     )
+    table.add_row("QQ", "✓" if qq.enabled else "✗", qq_config)
 
     # Email
     em = config.channels.email
     em_config = em.imap_host if em.imap_host else "[dim]not configured[/dim]"
-    table.add_row(
-        "Email",
-        "✓" if em.enabled else "✗",
-        em_config
-    )
+    table.add_row("Email", "✓" if em.enabled else "✗", em_config)
 
     console.print(table)
 
@@ -1024,7 +1029,9 @@ def cron_enable(
 @cron_app.command("run")
 def cron_run(
     job_id: str = typer.Argument(..., help="Job ID to run"),
-    force: bool = typer.Option(False, "--force", "-f", help="Run even if disabled"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Run even if disabled"
+    ),
 ):
     """Manually run a job."""
     from loguru import logger

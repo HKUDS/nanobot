@@ -120,6 +120,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         if isinstance(user_content, str):
             return f"{user_content}\n\n{block}"
         return [*user_content, {"type": "text", "text": block}]
+
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
@@ -166,7 +167,9 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
 
         # Current message (with optional image attachments)
         user_content = self._build_user_content(current_message, media)
-        user_content = self._inject_runtime_context(user_content, channel, chat_id)
+        user_content = self._inject_runtime_context(
+            user_content, channel, chat_id
+        )
         messages.append({"role": "user", "content": user_content})
 
         return messages
