@@ -427,6 +427,14 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
                 return None
 
+        # Handle [SILENT] marker: don't send message, only stop typing
+        if final_content.strip() == "[SILENT]":
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id, content="",
+                metadata=msg.metadata or {},
+                msg_type="silent",
+            )
+
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},

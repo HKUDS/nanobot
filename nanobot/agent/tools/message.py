@@ -51,7 +51,7 @@ class MessageTool(Tool):
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "The message content to send"
+                    "description": "The message content to send. Must be empty string when sending only a sticker or reaction."
                 },
                 "channel": {
                     "type": "string",
@@ -64,7 +64,7 @@ class MessageTool(Tool):
                 "media": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional: list of file paths to attach (images, audio, documents)"
+                    "description": "Optional: list of file paths to attach (images, audio, documents). To send a Telegram sticker, use 'sticker:<file_id>' format, e.g. 'sticker:CAACAgU...'. Do NOT mix stickers with text content."
                 }
             },
             "required": ["content"]

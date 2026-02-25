@@ -265,12 +265,19 @@ class TelegramChannel(BaseChannel):
 
             # Check if we should send a sticker
             sticker_file_id = msg.metadata.get("sticker_file_id") if msg.metadata else None
+            if not sticker_file_id:
+                # Also check media list for sticker: prefix
+                for m in (msg.media or []):
+                    if m.startswith("sticker:"):
+                        sticker_file_id = m[len("sticker:"):]
+                        break
             if sticker_file_id:
                 await self._send_sticker(chat_id, sticker_file_id, reply_to_message_id)
-                return
+                if not msg.content:
+                    return
 
             # Check for media (images)
-            valid_media = [p for p in (msg.media or []) if Path(p).is_file()]
+            valid_media = [p for p in (msg.media or []) if not p.startswith("sticker:") and Path(p).is_file()]
 
             if valid_media:
                 await self._send_with_media(chat_id, msg.content, valid_media, reply_to_message_id)
