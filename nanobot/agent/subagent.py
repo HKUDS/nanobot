@@ -38,6 +38,7 @@ class SubagentManager:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        observe_enabled: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.provider = provider
@@ -49,8 +50,52 @@ class SubagentManager:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.observe_enabled = observe_enabled
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._running_traces: dict[str, TraceRecorder] = {}
+
+    def _start_trace(
+        self,
+        *,
+        task_id: str,
+        origin_channel: str,
+        origin_chat_id: str,
+        parent_trace_id: str | None,
+        task: str,
+    ) -> TraceRecorder | None:
+        if not self.observe_enabled:
+            return None
+        trace_id = new_trace_id(f"subagent_{task_id}")
+        trace = TraceRecorder(
+            trace_id,
+            parent_trace_id=parent_trace_id,
+            session_key=f"subagent:{task_id}",
+            channel=origin_channel,
+            chat_id=origin_chat_id,
+            message_id=None,
+            workspace=self.workspace,
+            trace_type="subagent",
+        )
+        trace.record_input("user", task)
+        return trace
+
+    @staticmethod
+    def _finalize_trace(trace: TraceRecorder | None, content: str) -> None:
+        if trace:
+            trace.record_final_response(content)
+            trace.finalize()
+
+    @staticmethod
+    def _record_skill_use(trace: TraceRecorder | None, args_payload: Any) -> None:
+        if not trace or not isinstance(args_payload, dict):
+            return
+        skill = extract_skill_from_path(str(args_payload.get("path", "")))
+        if skill:
+            trace.record_skill_use(
+                name=skill["name"],
+                path=skill["path"],
+                source=skill["source"],
+            )
     
     async def spawn(
         self,
@@ -79,20 +124,15 @@ class SubagentManager:
             "channel": origin_channel,
             "chat_id": origin_chat_id,
         }
-        
-        trace_id = new_trace_id(f"subagent_{task_id}")
-        trace = TraceRecorder(
-            trace_id,
+        trace = self._start_trace(
+            task_id=task_id,
+            origin_channel=origin_channel,
+            origin_chat_id=origin_chat_id,
             parent_trace_id=parent_trace_id,
-            session_key=f"subagent:{task_id}",
-            channel=origin_channel,
-            chat_id=origin_chat_id,
-            message_id=None,
-            workspace=self.workspace,
-            trace_type="subagent",
+            task=task,
         )
-        trace.record_input("user", task)
-        self._running_traces[task_id] = trace
+        if trace:
+            self._running_traces[task_id] = trace
 
         # Create background task
         bg_task = asyncio.create_task(
@@ -110,7 +150,7 @@ class SubagentManager:
         return {
             "message": f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes.",
             "task_id": task_id,
-            "trace_id": trace_id,
+            "trace_id": trace.trace_id if trace else None,
             "label": display_label,
             "task": task,
         }
@@ -203,14 +243,8 @@ class SubagentManager:
                                 args_payload = json.loads(raw_args)
                             except Exception:
                                 args_payload = {"_raw": raw_args}
-                        if trace and tool_call.name == "read_file" and isinstance(args_payload, dict):
-                            skill = extract_skill_from_path(str(args_payload.get("path", "")))
-                            if skill:
-                                trace.record_skill_use(
-                                    name=skill["name"],
-                                    path=skill["path"],
-                                    source=skill["source"],
-                                )
+                        if tool_call.name == "read_file":
+                            self._record_skill_use(trace, args_payload)
                         args_str = json.dumps(raw_args, ensure_ascii=False)
                         logger.debug("Subagent [{}] executing: {} with arguments: {}", task_id, tool_call.name, args_str)
                         result = await tools.execute(tool_call.name, tool_call.arguments)
@@ -230,17 +264,13 @@ class SubagentManager:
                 final_result = "Task completed but no final response was generated."
             
             logger.info("Subagent [{}] completed successfully", task_id)
-            if trace:
-                trace.record_final_response(final_result)
-                trace.finalize()
+            self._finalize_trace(trace, final_result)
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
             
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
-            if trace:
-                trace.record_final_response(error_msg)
-                trace.finalize()
+            self._finalize_trace(trace, error_msg)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
     
     async def _announce_result(

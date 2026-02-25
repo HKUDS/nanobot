@@ -4,15 +4,26 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v)
 }
 
+type StringFormat = "json" | "raw"
+
 function previewScalar(v: unknown): string {
   if (v === null) return "null"
   if (v === undefined) return "undefined"
   if (typeof v === "string") {
-    const s = v.length > 120 ? `${v.slice(0, 117)}…` : v
-    return JSON.stringify(s)
+    return JSON.stringify(v)
   }
   if (typeof v === "number" || typeof v === "boolean") return String(v)
   return String(v)
+}
+
+function renderScalar(
+  v: unknown,
+  stringFormat: StringFormat,
+): React.ReactNode {
+  if (typeof v === "string" && stringFormat === "raw") {
+    return <pre className="jsonScalar jsonScalarPre">{v}</pre>
+  }
+  return previewScalar(v)
 }
 
 function keyCount(v: unknown): number {
@@ -27,14 +38,15 @@ function Node(props: {
   path: string
   collapsed: Set<string>
   toggle: (p: string) => void
+  stringFormat: StringFormat
 }) {
-  const { value, label, path, collapsed, toggle } = props
+  const { value, label, path, collapsed, toggle, stringFormat } = props
   const isContainer = Array.isArray(value) || isPlainObject(value)
   const isCollapsed = collapsed.has(path)
   const showHeader = label !== undefined
   const scalarRow = (
     <div className="jsonRow">
-      <span className="jsonScalar">{previewScalar(value)}</span>
+      <span className="jsonScalar">{renderScalar(value, stringFormat)}</span>
     </div>
   )
 
@@ -54,7 +66,7 @@ function Node(props: {
           {Array.isArray(value) ? "Array" : "Object"}({keyCount(value)})
         </span>
       ) : (
-        <span className="jsonScalar">{previewScalar(value)}</span>
+        <span className="jsonScalar">{renderScalar(value, stringFormat)}</span>
       )}
     </div>
   ) : null
@@ -78,6 +90,7 @@ function Node(props: {
               path={`${path}.${idx}`}
               collapsed={collapsed}
               toggle={toggle}
+              stringFormat={stringFormat}
             />
           ))}
         </div>
@@ -107,6 +120,7 @@ function Node(props: {
             path={`${path}.${k}`}
             collapsed={collapsed}
             toggle={toggle}
+            stringFormat={stringFormat}
           />
         ))}
       </div>
@@ -114,7 +128,11 @@ function Node(props: {
   )
 }
 
-export default function JsonTree(props: { value: unknown; defaultCollapsedDepth?: number }) {
+export default function JsonTree(props: {
+  value: unknown
+  defaultCollapsedDepth?: number
+  stringFormat?: StringFormat
+}) {
   const initial = useMemo(() => {
     const set = new Set<string>()
     const depth = props.defaultCollapsedDepth ?? 2
@@ -147,7 +165,13 @@ export default function JsonTree(props: { value: unknown; defaultCollapsedDepth?
 
   return (
     <div className="jsonRoot">
-      <Node value={props.value} path="$" collapsed={collapsed} toggle={toggle} />
+      <Node
+        value={props.value}
+        path="$"
+        collapsed={collapsed}
+        toggle={toggle}
+        stringFormat={props.stringFormat ?? "json"}
+      />
     </div>
   )
 }

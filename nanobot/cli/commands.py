@@ -318,6 +318,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        observe_enabled=config.observe.enabled,
     )
 
     # Set cron callback (needs agent)
@@ -967,6 +968,7 @@ def cron_run(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        observe_enabled=config.observe.enabled,
     )
 
     store_path = get_data_dir() / "cron" / "jobs.json"

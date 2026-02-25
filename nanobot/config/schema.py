@@ -282,6 +282,12 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class ObserveConfig(Base):
+    """Observe configuration."""
+
+    enabled: bool = False
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -290,6 +296,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    observe: ObserveConfig = Field(default_factory=ObserveConfig)
 
     @property
     def workspace_path(self) -> Path:

@@ -117,7 +117,8 @@ function EventWrapper(props: { event: TraceEvent; children: React.ReactNode }) {
   )
 }
 
-function MetaGrid(props: { meta: Record<string, unknown> }) {
+function MetaGrid(props: { meta: Record<string, unknown>; stringFormat?: "json" | "raw" }) {
+  const format = props.stringFormat ?? "json"
   return (
     <div className="metaGrid">
       {Object.entries(props.meta).map(([k, v]) => (
@@ -125,7 +126,7 @@ function MetaGrid(props: { meta: Record<string, unknown> }) {
           <div className="metaKey">{k}</div>
           <div className="metaValue">
             {typeof v === "object" && v !== null ? (
-              <JsonTree value={v} defaultCollapsedDepth={1} />
+              <JsonTree value={v} defaultCollapsedDepth={1} stringFormat={format} />
             ) : (
               String(v ?? "")
             )}
@@ -159,7 +160,7 @@ function ModelCallEvent(props: { event: TraceEvent }) {
   return (
     <EventWrapper event={props.event}>
       <Collapsible className="section" summary="元信息" defaultOpen>
-        <MetaGrid meta={meta} />
+        <MetaGrid meta={meta} stringFormat="json" />
       </Collapsible>
       <Collapsible className="section" summary="输入" defaultOpen>
         <div className="sectionBody">
@@ -171,7 +172,7 @@ function ModelCallEvent(props: { event: TraceEvent }) {
             )}
           </Collapsible>
           <Collapsible className="subSection" summary="Messages" defaultOpen>
-            <JsonTree value={input.messages ?? []} defaultCollapsedDepth={2} />
+            <JsonTree value={input.messages ?? []} defaultCollapsedDepth={2} stringFormat="raw" />
           </Collapsible>
         </div>
       </Collapsible>
@@ -193,7 +194,11 @@ function ModelCallEvent(props: { event: TraceEvent }) {
           </Collapsible>
           {Array.isArray(outputBlock.tool_calls) && outputBlock.tool_calls.length > 0 ? (
             <Collapsible className="subSection" summary="ToolCalls" defaultOpen>
-              <JsonTree value={outputBlock.tool_calls ?? []} defaultCollapsedDepth={2} />
+              <JsonTree
+                value={outputBlock.tool_calls ?? []}
+                defaultCollapsedDepth={2}
+                stringFormat="raw"
+              />
             </Collapsible>
           ) : null}
         </div>
@@ -210,7 +215,7 @@ function DefaultEvent(props: { event: TraceEvent }) {
     return (
       <EventWrapper event={props.event}>
         {isNonEmptyString(content) ? <MarkdownBlock text={content} /> : null}
-        {value ? <JsonTree value={value} defaultCollapsedDepth={2} /> : null}
+        {value ? <JsonTree value={value} defaultCollapsedDepth={2} stringFormat="raw" /> : null}
       </EventWrapper>
     )
   }
@@ -225,7 +230,7 @@ function DefaultEvent(props: { event: TraceEvent }) {
   return (
     <EventWrapper event={props.event}>
       {isNonEmptyString(content) ? <MarkdownBlock text={content} /> : null}
-      <JsonTree value={value} defaultCollapsedDepth={2} />
+      <JsonTree value={value} defaultCollapsedDepth={2} stringFormat="raw" />
     </EventWrapper>
   )
 }
