@@ -520,6 +520,129 @@ class TestHybridMemoryStore:
         assert resolved
         assert resolved[0]["status"] == "resolved"
 
+    def test_live_user_correction_creates_profile_conflict_and_event(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path, embedding_provider="hash")
+        profile = store.read_profile()
+        profile["preferences"] = ["dark mode"]
+        store.write_profile(profile)
+
+        out = store.apply_live_user_correction(
+            "Correction: I now prefer light mode, not dark mode.",
+            channel="cli",
+            chat_id="direct",
+            enable_contradiction_check=True,
+        )
+
+        assert out["applied"] >= 1
+        assert out["conflicts"] >= 1
+        assert out["events"] >= 1
+
+        updated = store.read_profile()
+        prefs = updated.get("preferences", [])
+        assert "dark mode" in prefs
+        assert "light mode" in prefs
+
+        conflicts = updated.get("conflicts", [])
+        assert conflicts
+        open_conflicts = [c for c in conflicts if c.get("status") == "open"]
+        assert open_conflicts
+        assert open_conflicts[0]["old"] == "dark mode"
+        assert open_conflicts[0]["new"] == "light mode"
+
+        events = store.read_events()
+        assert events
+        assert any("corrected preference" in str(e.get("summary", "")).lower() for e in events)
+
+    def test_live_fact_correction_creates_stable_fact_conflict_and_event(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path, embedding_provider="hash")
+        profile = store.read_profile()
+        profile["stable_facts"] = ["deployment region is eu-west-1"]
+        store.write_profile(profile)
+
+        out = store.apply_live_user_correction(
+            "Correction: deployment region is us-east-1, not eu-west-1.",
+            channel="cli",
+            chat_id="direct",
+            enable_contradiction_check=True,
+        )
+
+        assert out["applied"] >= 1
+        assert out["conflicts"] >= 1
+        assert out["events"] >= 1
+
+        updated = store.read_profile()
+        facts = [str(v).lower() for v in updated.get("stable_facts", [])]
+        assert "deployment region is eu-west-1" in facts
+        assert "deployment region is us-east-1" in facts
+
+        conflicts = updated.get("conflicts", [])
+        open_conflicts = [c for c in conflicts if c.get("status") == "open" and c.get("field") == "stable_facts"]
+        assert open_conflicts
+        assert str(open_conflicts[0]["old"]).lower() == "deployment region is eu-west-1"
+        assert str(open_conflicts[0]["new"]).lower() == "deployment region is us-east-1"
+
+        events = store.read_events()
+        assert any("corrected fact" in str(e.get("summary", "")).lower() for e in events)
+
+    def test_retrieval_prefers_keep_new_resolved_fact(self, tmp_path: Path) -> None:
+        store = MemoryStore(tmp_path, embedding_provider="hash")
+        events = [
+            {
+                "id": "region-old",
+                "timestamp": "2026-02-24T17:04:00+00:00",
+                "channel": "cli",
+                "chat_id": "direct",
+                "type": "fact",
+                "summary": "Deployment region is eu-west-1.",
+                "entities": ["deployment region", "eu-west-1"],
+                "salience": 0.7,
+                "confidence": 0.9,
+                "source_span": [0, 1],
+                "ttl_days": 365,
+            },
+            {
+                "id": "region-new",
+                "timestamp": "2026-02-25T02:00:00+00:00",
+                "channel": "cli",
+                "chat_id": "direct",
+                "type": "fact",
+                "summary": "Corrected deployment region: us-east-1 supersedes eu-west-1.",
+                "entities": ["deployment region", "us-east-1", "eu-west-1"],
+                "salience": 0.85,
+                "confidence": 0.9,
+                "source_span": [2, 3],
+                "ttl_days": 365,
+            },
+        ]
+        store.persistence.write_jsonl(store.events_file, events)
+        store.retriever.rebuild_event_embeddings(events, embedding_provider="hash")
+
+        profile = store.read_profile()
+        profile["stable_facts"] = ["Deployment region is eu-west-1"]
+        store.write_profile(profile)
+
+        out = store.apply_live_user_correction(
+            "Correction: deployment region is us-east-1, not eu-west-1.",
+            channel="cli",
+            chat_id="direct",
+            enable_contradiction_check=True,
+        )
+        assert out["conflicts"] >= 1
+
+        open_conflicts = store.list_conflicts()
+        assert open_conflicts
+        idx = int(open_conflicts[0]["index"])
+        assert store.resolve_conflict(idx, "keep_new") is True
+
+        retrieved = store.retrieve(
+            "deployment region us-east-1 eu-west-1",
+            top_k=2,
+            recency_half_life_days=30.0,
+            embedding_provider="hash",
+        )
+        assert retrieved
+        assert "us-east-1" in str(retrieved[0].get("summary", "")).lower()
+
     def test_semantic_dedup_merges_events_and_keeps_provenance(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
 

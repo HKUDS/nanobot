@@ -295,9 +295,13 @@ class AgentLoop:
         if self._mcp_stack:
             try:
                 await self._mcp_stack.aclose()
-            except (RuntimeError, BaseExceptionGroup):
+            except RuntimeError:
                 pass  # MCP SDK cancel scope cleanup is noisy but harmless
             self._mcp_stack = None
+        try:
+            await self.provider.aclose()
+        except Exception as e:
+            logger.debug("Provider cleanup failed: {}", e)
 
     def stop(self) -> None:
         """Stop the agent loop."""
@@ -385,6 +389,21 @@ class AgentLoop:
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+
+        if self.memory_mode == "hybrid":
+            try:
+                MemoryStore(
+                    self.workspace,
+                    embedding_provider=self.memory_embedding_provider,
+                    vector_backend=self.memory_vector_backend,
+                ).apply_live_user_correction(
+                    msg.content,
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    enable_contradiction_check=self.memory_enable_contradiction_check,
+                )
+            except Exception:
+                logger.exception("Live correction capture failed")
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):

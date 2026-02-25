@@ -473,6 +473,96 @@ class MemoryExtractor:
                 count += 1
         return count
 
+    @staticmethod
+    def _clean_phrase(value: str) -> str:
+        cleaned = re.sub(r"\s+", " ", value.strip().strip(".,;:!?\"'()[]{}"))
+        cleaned = re.sub(r"^(?:the|a|an)\s+", "", cleaned, flags=re.IGNORECASE)
+        return cleaned.strip()
+
+    def extract_explicit_preference_corrections(self, content: str) -> list[tuple[str, str]]:
+        text = str(content or "").strip()
+        if not text:
+            return []
+
+        matches: list[tuple[str, str]] = []
+        patterns = (
+            (
+                r"(?:correction\s*[:,-]?\s*)?(?:i\s+(?:now\s+)?)?(?:prefer|want|use)\s+(.+?)\s*(?:,|;|\s+but)?\s*not\s+(.+?)(?:[.!?]|$)",
+                "new_old",
+            ),
+            (
+                r"(?:correction\s*[:,-]?\s*)?(?:not\s+)(.+?)\s*(?:,|;|\s+but)\s*(?:i\s+(?:now\s+)?)?(?:prefer|want|use)\s+(.+?)(?:[.!?]|$)",
+                "old_new",
+            ),
+        )
+
+        for pattern, order in patterns:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                if order == "new_old":
+                    new_value = self._clean_phrase(match.group(1))
+                    old_value = self._clean_phrase(match.group(2))
+                else:
+                    old_value = self._clean_phrase(match.group(1))
+                    new_value = self._clean_phrase(match.group(2))
+                if not new_value or not old_value:
+                    continue
+                if self._clean_phrase(new_value).lower() == self._clean_phrase(old_value).lower():
+                    continue
+                matches.append((new_value, old_value))
+
+        dedup: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for new_value, old_value in matches:
+            key = (new_value.lower(), old_value.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            dedup.append((new_value, old_value))
+        return dedup
+
+    def extract_explicit_fact_corrections(self, content: str) -> list[tuple[str, str]]:
+        text = str(content or "").strip()
+        if not text:
+            return []
+
+        matches: list[tuple[str, str]] = []
+        patterns = (
+            r"(?:correction\s*[:,-]?\s*)?(?:actually\s+)?([a-zA-Z0-9_\- ]{2,80}?)\s+is\s+(.+?)\s*(?:,|;|\s+but)?\s*not\s+(.+?)(?:[.!?]|$)",
+            r"(?:correction\s*[:,-]?\s*)?(?:actually\s+)?([a-zA-Z0-9_\- ]{2,80}?)\s+is\s+not\s+(.+?)\s*(?:,|;|\s+but)\s*(?:it(?:'s| is)|is)\s+(.+?)(?:[.!?]|$)",
+        )
+
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                subject = self._clean_phrase(match.group(1))
+                if "prefer" in subject.lower() or "want" in subject.lower() or "use" in subject.lower():
+                    continue
+
+                if "is not" in pattern:
+                    old_value = self._clean_phrase(match.group(2))
+                    new_value = self._clean_phrase(match.group(3))
+                else:
+                    new_value = self._clean_phrase(match.group(2))
+                    old_value = self._clean_phrase(match.group(3))
+
+                if not subject or not new_value or not old_value:
+                    continue
+
+                new_fact = f"{subject} is {new_value}"
+                old_fact = f"{subject} is {old_value}"
+                if self._clean_phrase(new_fact).lower() == self._clean_phrase(old_fact).lower():
+                    continue
+                matches.append((new_fact, old_fact))
+
+        dedup: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for new_value, old_value in matches:
+            key = (new_value.lower(), old_value.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            dedup.append((new_value, old_value))
+        return dedup
+
     def heuristic_extract_events(
         self,
         old_messages: list[dict[str, Any]],
@@ -1308,12 +1398,107 @@ class MemoryStore:
         recency_half_life_days: float = 30.0,
         embedding_provider: str | None = None,
     ) -> list[dict[str, Any]]:
-        return self.retriever.retrieve(
+        retrieved = self.retriever.retrieve(
             query,
             top_k=top_k,
             recency_half_life_days=recency_half_life_days,
             embedding_provider=embedding_provider,
         )
+        if not retrieved:
+            return retrieved
+
+        profile = self.read_profile()
+        conflicts = profile.get("conflicts", []) if isinstance(profile.get("conflicts"), list) else []
+
+        field_by_event_type = {
+            "preference": "preferences",
+            "fact": "stable_facts",
+            "relationship": "relationships",
+            "constraint": "constraints",
+            "task": "active_projects",
+            "decision": "active_projects",
+        }
+
+        resolved_keep_new_old: dict[str, set[str]] = {key: set() for key in self.PROFILE_KEYS}
+        resolved_keep_new_new: dict[str, set[str]] = {key: set() for key in self.PROFILE_KEYS}
+        for conflict in conflicts:
+            if not isinstance(conflict, dict):
+                continue
+            if str(conflict.get("status", "")).lower() != "resolved":
+                continue
+            if str(conflict.get("resolution", "")).lower() != "keep_new":
+                continue
+            field = str(conflict.get("field", ""))
+            if field not in resolved_keep_new_old:
+                continue
+            old_value = str(conflict.get("old", "")).strip()
+            new_value = str(conflict.get("new", "")).strip()
+            if old_value:
+                resolved_keep_new_old[field].add(self._norm_text(old_value))
+            if new_value:
+                resolved_keep_new_new[field].add(self._norm_text(new_value))
+
+        def _contains_norm_phrase(text: str, phrase_norm: str) -> bool:
+            if not phrase_norm:
+                return False
+            text_norm = self._norm_text(text)
+            if not text_norm:
+                return False
+            return phrase_norm in text_norm
+
+        adjusted: list[dict[str, Any]] = []
+        for item in retrieved:
+            event_type = str(item.get("type", "fact"))
+            field = field_by_event_type.get(event_type)
+            summary = str(item.get("summary", ""))
+            score = float(item.get("score", 0.0))
+            adjustment = 0.0
+            adjustment_reasons: list[str] = []
+
+            if field:
+                for old_norm in resolved_keep_new_old.get(field, set()):
+                    if _contains_norm_phrase(summary, old_norm):
+                        adjustment -= 0.18
+                        adjustment_reasons.append("resolved_keep_new_old_penalty")
+                        break
+
+                for new_norm in resolved_keep_new_new.get(field, set()):
+                    if _contains_norm_phrase(summary, new_norm):
+                        adjustment += 0.12
+                        adjustment_reasons.append("resolved_keep_new_new_boost")
+                        break
+
+                section_meta = self._meta_section(profile, field)
+                if isinstance(section_meta, dict):
+                    for norm_key, meta in section_meta.items():
+                        if not isinstance(meta, dict):
+                            continue
+                        if not _contains_norm_phrase(summary, str(norm_key)):
+                            continue
+                        status = str(meta.get("status", "")).lower()
+                        pinned = bool(meta.get("pinned"))
+                        if status == self.PROFILE_STATUS_STALE and not pinned:
+                            adjustment -= 0.08
+                            adjustment_reasons.append("stale_profile_penalty")
+                            break
+                        if status == self.PROFILE_STATUS_CONFLICTED:
+                            adjustment -= 0.05
+                            adjustment_reasons.append("conflicted_profile_penalty")
+                            break
+
+            if adjustment_reasons:
+                reason = item.get("retrieval_reason")
+                if not isinstance(reason, dict):
+                    reason = {}
+                    item["retrieval_reason"] = reason
+                reason["profile_adjustment"] = round(adjustment, 4)
+                reason["profile_adjustment_reasons"] = adjustment_reasons
+
+            item["score"] = score + adjustment
+            adjusted.append(item)
+
+        adjusted.sort(key=lambda item: item.get("score", 0.0), reverse=True)
+        return adjusted[: max(1, top_k)]
 
     def _profile_section_lines(self, profile: dict[str, Any], max_items_per_section: int = 6) -> list[str]:
         lines: list[str] = []
@@ -1524,6 +1709,160 @@ class MemoryStore:
         if added > 0:
             self._record_metric("profile_updates_applied", added)
         return added, conflicts, touched
+
+    def _has_open_conflict(self, profile: dict[str, Any], *, field: str, old_value: str, new_value: str) -> bool:
+        old_norm = self._norm_text(old_value)
+        new_norm = self._norm_text(new_value)
+        for item in profile.get("conflicts", []):
+            if not isinstance(item, dict):
+                continue
+            if item.get("status") != "open":
+                continue
+            if item.get("field") != field:
+                continue
+            if self._norm_text(str(item.get("old", ""))) != old_norm:
+                continue
+            if self._norm_text(str(item.get("new", ""))) != new_norm:
+                continue
+            return True
+        return False
+
+    def apply_live_user_correction(
+        self,
+        content: str,
+        *,
+        channel: str = "",
+        chat_id: str = "",
+        enable_contradiction_check: bool = True,
+    ) -> dict[str, int]:
+        text = str(content or "").strip()
+        if not text:
+            return {"applied": 0, "conflicts": 0, "events": 0}
+
+        preference_corrections = self.extractor.extract_explicit_preference_corrections(text)
+        fact_corrections = self.extractor.extract_explicit_fact_corrections(text)
+        if not preference_corrections and not fact_corrections:
+            return {"applied": 0, "conflicts": 0, "events": 0}
+
+        self._record_metric("user_corrections", len(preference_corrections) + len(fact_corrections))
+
+        profile = self.read_profile()
+        profile.setdefault("conflicts", [])
+        applied = 0
+        conflicts = 0
+        events: list[dict[str, Any]] = []
+
+        def _apply_field_corrections(
+            *,
+            field: str,
+            event_type: str,
+            correction_label: str,
+            correction_pairs: list[tuple[str, str]],
+        ) -> tuple[int, int]:
+            local_applied = 0
+            local_conflicts = 0
+            values = self._to_str_list(profile.get(field))
+            by_norm = {self._norm_text(v): v for v in values}
+
+            for new_value, old_value in correction_pairs:
+                old_norm = self._norm_text(old_value)
+                new_norm = self._norm_text(new_value)
+                if not new_norm:
+                    continue
+
+                if new_norm not in by_norm:
+                    values.append(new_value)
+                    by_norm[new_norm] = new_value
+                    local_applied += 1
+
+                new_entry = self._meta_entry(profile, field, by_norm[new_norm])
+                self._touch_meta_entry(new_entry, confidence_delta=0.08, status=self.PROFILE_STATUS_ACTIVE)
+
+                if enable_contradiction_check and old_norm in by_norm and not self._has_open_conflict(
+                    profile,
+                    field=field,
+                    old_value=by_norm[old_norm],
+                    new_value=by_norm[new_norm],
+                ):
+                    old_entry = self._meta_entry(profile, field, by_norm[old_norm])
+                    self._touch_meta_entry(
+                        old_entry,
+                        confidence_delta=-0.2,
+                        min_confidence=0.35,
+                        status=self.PROFILE_STATUS_CONFLICTED,
+                    )
+                    self._touch_meta_entry(
+                        new_entry,
+                        confidence_delta=-0.08,
+                        min_confidence=0.35,
+                        status=self.PROFILE_STATUS_CONFLICTED,
+                    )
+                    profile["conflicts"].append(
+                        {
+                            "timestamp": self._utc_now_iso(),
+                            "field": field,
+                            "old": by_norm[old_norm],
+                            "new": by_norm[new_norm],
+                            "status": "open",
+                            "old_confidence": old_entry.get("confidence"),
+                            "new_confidence": new_entry.get("confidence"),
+                            "source": "live_correction",
+                        }
+                    )
+                    local_conflicts += 1
+
+                event = self._coerce_event(
+                    {
+                        "timestamp": self._utc_now_iso(),
+                        "type": event_type,
+                        "summary": f"User corrected {correction_label}: {new_value} (not {old_value}).",
+                        "entities": [new_value, old_value],
+                        "salience": 0.85,
+                        "confidence": 0.9,
+                        "ttl_days": 365,
+                    },
+                    source_span=[0, 0],
+                    channel=channel,
+                    chat_id=chat_id,
+                )
+                if event:
+                    events.append(event)
+
+            profile[field] = values
+            return local_applied, local_conflicts
+
+        pref_applied, pref_conflicts = _apply_field_corrections(
+            field="preferences",
+            event_type="preference",
+            correction_label="preference",
+            correction_pairs=preference_corrections,
+        )
+        fact_applied, fact_conflicts = _apply_field_corrections(
+            field="stable_facts",
+            event_type="fact",
+            correction_label="fact",
+            correction_pairs=fact_corrections,
+        )
+        applied += pref_applied + fact_applied
+        conflicts += pref_conflicts + fact_conflicts
+
+        if not applied and not conflicts:
+            return {"applied": 0, "conflicts": 0, "events": 0}
+
+        profile["last_verified_at"] = self._utc_now_iso()
+        self.write_profile(profile)
+
+        events_written = self.append_events(events)
+        if events_written > 0:
+            self._record_metric("events_extracted", events_written)
+
+        if applied > 0:
+            self._record_metric("profile_updates_applied", applied)
+        if conflicts > 0:
+            self._record_metric("conflicts_detected", conflicts)
+
+        self.rebuild_memory_snapshot(write=True)
+        return {"applied": applied, "conflicts": conflicts, "events": events_written}
 
     def read_long_term(self) -> str:
         return self.persistence.read_text(self.memory_file)

@@ -112,6 +112,22 @@ def _is_exit_command(command: str) -> bool:
     return command.lower() in EXIT_COMMANDS
 
 
+async def _drain_pending_tasks(timeout: float = 0.25) -> None:
+    """Give pending background tasks a brief chance to finish before loop shutdown."""
+    current = asyncio.current_task()
+    pending = [
+        task
+        for task in asyncio.all_tasks()
+        if task is not current and not task.done()
+    ]
+    if not pending:
+        return
+    try:
+        await asyncio.wait(pending, timeout=timeout)
+    except Exception:
+        return
+
+
 async def _read_interactive_input_async() -> str:
     """Read user input using prompt_toolkit (handles paste, history, display).
 
@@ -529,6 +545,7 @@ def agent(
                 response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
             _print_agent_response(response, render_markdown=markdown)
             await agent_loop.close_mcp()
+            await _drain_pending_tasks()
 
         asyncio.run(run_once())
     else:
@@ -624,6 +641,7 @@ def agent(
                 outbound_task.cancel()
                 await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
                 await agent_loop.close_mcp()
+                await _drain_pending_tasks()
 
         asyncio.run(run_interactive())
 

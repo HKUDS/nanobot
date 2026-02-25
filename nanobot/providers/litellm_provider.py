@@ -270,3 +270,13 @@ class LiteLLMProvider(LLMProvider):
     def get_default_model(self) -> str:
         """Get the default model."""
         return self.default_model
+
+    async def aclose(self) -> None:
+        """Close cached async clients used by LiteLLM."""
+        close_async_clients = getattr(litellm, "close_litellm_async_clients", None)
+        if not callable(close_async_clients):
+            return
+        try:
+            await close_async_clients()
+        except Exception:
+            return

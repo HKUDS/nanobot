@@ -108,3 +108,7 @@ class LLMProvider(ABC):
     def get_default_model(self) -> str:
         """Get the default model for this provider."""
         pass
+
+    async def aclose(self) -> None:
+        """Optional async cleanup hook for provider resources."""
+        return
