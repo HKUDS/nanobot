@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from datetime import datetime
+from typing import Any
 
 
 def ensure_dir(path: Path) -> Path:
@@ -78,3 +79,28 @@ def parse_session_key(key: str) -> tuple[str, str]:
     if len(parts) != 2:
         raise ValueError(f"Invalid session key: {key}")
     return parts[0], parts[1]
+
+def strip_base64_images(content: str | list[dict[str, Any]]) -> str | list[dict[str, Any]]:
+    """Strip base64 image data from message content, replacing with text placeholder."""
+    if not isinstance(content, list):
+        return content
+
+    new_content = []
+    for item in content:
+        if not isinstance(item, dict):
+            new_content.append(item)
+            continue
+
+        if item.get("type") == "image_url":
+            url = item.get("image_url", {}).get("url", "")
+            if url.startswith("data:image/") and ";base64," in url:
+                new_content.append({"type": "text", "text": "[image]"})
+                continue
+        new_content.append(item)
+
+    text_parts = [c["text"] for c in new_content if isinstance(c, dict) and c.get("type") == "text"]
+    if len(new_content) == 1 and not text_parts:
+        return new_content[0] if new_content else ""
+    if text_parts and len(new_content) == len(text_parts):
+        return "\n".join(text_parts)
+    return new_content
