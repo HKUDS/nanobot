@@ -172,6 +172,8 @@ Connect nanobot to your favorite chat platform.
 | **Slack** | Bot token + App-Level token |
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
+| **Matrix** | Homeserver URL + Access token + Room ID |
+| **Matrix** | Homeserver URL + Access token + Room ID |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -430,6 +432,80 @@ nanobot gateway
 ```
 
 Now send a message to the bot from QQ — it should respond!
+
+</details>
+
+<details>
+<summary><b>Matrix</b></summary>
+
+Matrix is a decentralized, open-source communication protocol. nanobot supports Matrix through the Matrix-SDK.
+
+**1. Set up Matrix account**
+- Create a dedicated Matrix account for your bot (e.g., on matrix.org)
+- Or use an existing Matrix account
+
+**2. Configure**
+
+Add the following to your `~/.nanobot/config.json`:
+
+```json
+{
+  "channels": {
+    "matrix": {
+      "enabled": true,
+      "homeserver": "https://matrix.org",
+      "user_id": "@your-bot:matrix.org",
+      "password": "your-password",
+      "access_token": "your-access-token",
+      "device_id": "YOUR_DEVICE_ID",
+      "room_aliases": ["#your-room:matrix.org"],
+      "allowFrom": ["@your-user:matrix.org"]
+    }
+  }
+}
+```
+
+> **Important**: You need to provide either `password` OR `access_token` + `device_id`.
+> - `password`: Simple password-based login (recommended for initial setup)
+> - `access_token` + `device_id`: For persistent sessions (get from Element app DevTools)
+> - `room_aliases`: List of room aliases to join (optional, bot can be invited directly)
+> - `allowFrom`: Whitelist of user IDs that can interact with the bot
+
+**3. Get credentials**
+
+**Option A: Password login**
+- Use your Matrix account password
+- Device ID will be generated automatically
+
+**Option B: Access token (recommended for production)**
+1. Log into your Matrix account via Element web app
+2. Open Developer Tools (F12) → Console
+3. Run: `localStorage.getItem('mx_access_token')` - copy the token
+4. Run: `localStorage.getItem('mx_device_id')` - copy the device ID
+5. Use these values in config (omit password)
+
+**4. Run**
+
+```bash
+nanobot gateway
+```
+
+The bot will:
+1. Log into the specified homeserver
+2. Join rooms from `room_aliases` (if specified)
+3. Listen for messages in joined rooms
+4. Respond to messages from allowed users
+
+**5. Invite the bot**
+- In your Matrix client, invite `@your-bot:matrix.org` to any room
+- The bot will accept invitations automatically
+- Or the bot will join rooms specified in `room_aliases`
+
+> [!TIP]
+> - For self-hosted Matrix servers: update `homeserver` URL accordingly
+> - The bot supports both direct messages and group chats
+> - Matrix rooms can be encrypted - bot handles encrypted messages automatically
+> - For better security, use access tokens instead of passwords
 
 </details>
 
