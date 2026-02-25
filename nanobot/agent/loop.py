@@ -234,6 +234,10 @@ class AgentLoop:
                     )
             else:
                 final_content = self._strip_think(response.content)
+                messages = self.context.add_assistant_message(
+                    messages, response.content,
+                    reasoning_content=response.reasoning_content,
+                )
                 break
 
         if final_content is None and iteration >= self.max_iterations:
@@ -409,6 +413,7 @@ class AgentLoop:
             meta["_tool_hint"] = tool_hint
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
+                msg_type="progress",
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
