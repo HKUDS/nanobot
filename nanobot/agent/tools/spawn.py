@@ -9,12 +9,7 @@ if TYPE_CHECKING:
 
 
 class SpawnTool(Tool):
-    """
-    Tool to spawn a subagent for background task execution.
-    
-    The subagent runs asynchronously and announces its result back
-    to the main agent when complete.
-    """
+    """Tool to spawn a subagent for background task execution."""
     
     def __init__(self, manager: "SubagentManager"):
         self._manager = manager

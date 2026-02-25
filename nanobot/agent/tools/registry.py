@@ -36,19 +36,7 @@ class ToolRegistry:
         return [tool.to_schema() for tool in self._tools.values()]
     
     async def execute(self, name: str, params: dict[str, Any]) -> str:
-        """
-        Execute a tool by name with given parameters.
-        
-        Args:
-            name: Tool name.
-            params: Tool parameters.
-        
-        Returns:
-            Tool execution result as string.
-        
-        Raises:
-            KeyError: If tool not found.
-        """
+        """Execute a tool by name with given parameters."""
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
 
         tool = self._tools.get(name)
