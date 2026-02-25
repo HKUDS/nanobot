@@ -259,6 +259,7 @@ class WebToolsConfig(Base):
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
+    enabled: bool = True
     timeout: int = 60
 
 
