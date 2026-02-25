@@ -45,6 +45,7 @@ dependencies = [
     "ddgs>=9.0.0",
     "matrix-nio>=0.24.0",
     "camoufox>=0.4.11",
+    "scrapling[fetchers]>=0.1.0",
 ]
 
 [project.optional-dependencies]

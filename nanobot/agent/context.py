@@ -20,9 +20,15 @@ class ContextBuilder:
     """
     
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
-    
-    def __init__(self, workspace: Path):
-        self.workspace = Path(workspace) if not isinstance(workspace, Path) else workspace
+    SOUL_FILE = "SOUL.md"
+
+    def __init__(self, workspace: Path, bot_name: str = "nanobot"):
+        # Ensure workspace is expanded from ~ to absolute path
+        if isinstance(workspace, Path):
+            self.workspace = workspace
+        else:
+            self.workspace = Path(workspace).expanduser()
+        self.bot_name = bot_name
         self.memory = MemoryStore(self.workspace)
         self.skills = SkillsLoader(self.workspace)
     
@@ -49,11 +55,17 @@ class ContextBuilder:
         """
         parts = []
 
-        # Core identity (with language support)
-        parts.append(self._get_identity(profile=profile, language=language))
+        # Core identity - SOUL.md takes priority
+        soul_content = self._load_soul_file()
+        if soul_content:
+            # Use SOUL.md as the primary identity
+            parts.append(soul_content)
+        else:
+            # Fall back to default hardcoded identity
+            parts.append(self._get_identity(profile=profile, language=language))
 
-        # Bootstrap files
-        bootstrap = self._load_bootstrap_files()
+        # Other bootstrap files (excluding SOUL.md since it's already processed)
+        bootstrap = self._load_bootstrap_files(exclude_soul=True)
         if bootstrap:
             parts.append(bootstrap)
 
@@ -106,67 +118,67 @@ Skills with available="false" need dependencies installed first - you can try in
         memory_path = f"{workspace_path}/memory/profiles/{profile}/MEMORY.md" if profile else f"{workspace_path}/memory/MEMORY.md"
         history_path = f"{workspace_path}/memory/profiles/{profile}/HISTORY.md" if profile else f"{workspace_path}/memory/HISTORY.md"
 
-        # Localized identity messages
+        # Localized identity messages - bot_name will be substituted dynamically
         identity_messages = {
-            'vi': """# nanobot 🐈
+            'vi': f"""# {{bot_name}} 🐈
 
-Bạn là nanobot, một trợ lý AI hữu ích. Bạn có quyền truy cập vào các công cụ cho phép bạn:
+Bạn là {{bot_name}}, một trợ lý AI hữu ích. Bạn có quyền truy cập vào các công cụ cho phép bạn:
 - Đọc, ghi và chỉnh sửa tệp
 - Thực thi lệnh shell
 - Tìm kiếm web và tải trang web
 - Gửi tin nhắn cho người dùng trên các kênh chat
 - Tạo tác nhân con cho các tác vụ phức tạp trong nền""",
-            'zh': """# nanobot 🐈
+            'zh': f"""# {{bot_name}} 🐈
 
-你是 nanobot，一个有用的 AI 助手。你可以访问以下工具：
+你是 {{bot_name}}，一个有用的 AI 助手。你可以访问以下工具：
 - 读取、写入和编辑文件
 - 执行 shell 命令
 - 搜索网页和获取网页内容
 - 在聊天频道上向用户发送消息
 - 为复杂的后台任务生成子代理""",
-            'ja': """# nanobot 🐈
+            'ja': f"""# {{bot_name}} 🐈
 
-あなたは nanobot という、役立つ AI アシスタントです。以下のツールにアクセスできます：
+あなたは {{bot_name}} という、役立つ AI アシスタントです。以下のツールにアクセスできます：
 - ファイルの読み取り、書き込み、編集
 - シェルコマンドの実行
 - Web 検索と Web ページの取得
 - チャットチャネルでユーザーにメッセージを送信
 - 複雑なバックグラウンドタスクのサブエージェントの生成""",
-            'ko': """# nanobot 🐈
+            'ko': f"""# {{bot_name}} 🐈
 
-당신은 nanobot라는 유용한 AI 어시스턴트입니다. 다음 도구에 액세스할 수 있습니다:
+당신은 {{bot_name}}라는 유용한 AI 어시스턴트입니다. 다음 도구에 액세스할 수 있습니다:
 - 파일 읽기, 쓰기 및 편집
 - 셸 명령 실행
 - 웹 검색 및 웹 페이지 가져오기
 - 채팅 채널에서 사용자에게 메시지 보내기
 - 복잡한 백그라운드 작업을 위한 하위 에이전트 생성""",
-            'es': """# nanobot 🐈
+            'es': f"""# {{bot_name}} 🐈
 
-Eres nanobot, un asistente de IA útil. Tienes acceso a herramientas que te permiten:
+Eres {{bot_name}}, un asistente de IA útil. Tienes acceso a herramientas que te permiten:
 - Leer, escribir y editar archivos
 - Ejecutar comandos de shell
 - Buscar en la web y obtener páginas web
 - Enviar mensajes a usuarios en canales de chat
 - Generar subagentes para tareas complejas en segundo plano""",
-            'fr': """# nanobot 🐈
+            'fr': f"""# {{bot_name}} 🐈
 
-Vous êtes nanobot, un assistant IA utile. Vous avez accès à des outils qui vous permettent de :
+Vous êtes {{bot_name}}, un assistant IA utile. Vous avez accès à des outils qui vous permettent de :
 - Lire, écrire et modifier des fichiers
 - Exécuter des commandes shell
 - Rechercher sur le web et récupérer des pages web
 - Envoyer des messages aux utilisateurs sur les canaux de chat
 - Générer des sous-agents pour des tâches complexes en arrière-plan""",
-            'de': """# nanobot 🐈
+            'de': f"""# {{bot_name}} 🐈
 
-Sie sind nanobot, ein nützlicher KI-Assistent. Sie haben Zugriff auf Tools, mit denen Sie:
+Sie sind {{bot_name}}, ein nützlicher KI-Assistent. Sie haben Zugriff auf Tools, mit denen Sie:
 - Dateien lesen, schreiben und bearbeiten können
 - Shell-Befehle ausführen können
 - Im Web suchen und Webseiten abrufen können
 - Benutzern in Chat-Kanälen Nachrichten senden können
 - Subagenten für komplexe Hintergrundaufgaben generieren können""",
-            'en': """# nanobot 🐈
+            'en': f"""# {{bot_name}} 🐈
 
-You are nanobot, a helpful AI assistant. You have access to tools that allow you to:
+You are {{bot_name}}, a helpful AI assistant. You have access to tools that allow you to:
 - Read, write, and edit files
 - Execute shell commands
 - Search the web and fetch web pages
@@ -242,7 +254,7 @@ When remembering something important, write to {workspace_path}/memory/MEMORY.md
 To recall past events, grep {workspace_path}/memory/HISTORY.md""",
         }
 
-        identity = identity_messages.get(language, identity_messages['en'])
+        identity = identity_messages.get(language, identity_messages['en']).format(bot_name=self.bot_name)
         instructions = tool_instructions.get(language, tool_instructions['en'])
 
         return f"""{identity}
@@ -260,17 +272,41 @@ Your workspace is at: {workspace_path}
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 {instructions}"""
     
-    def _load_bootstrap_files(self) -> str:
-        """Load all bootstrap files from workspace."""
+    def _load_bootstrap_files(self, exclude_soul: bool = False) -> str:
+        """Load all bootstrap files from workspace.
+
+        Args:
+            exclude_soul: If True, exclude SOUL.md from loading (it's already processed as identity).
+
+        Returns:
+            Combined content of all bootstrap files.
+        """
         parts = []
-        
-        for filename in self.BOOTSTRAP_FILES:
+
+        files_to_load = self.BOOTSTRAP_FILES
+        if exclude_soul:
+            files_to_load = [f for f in self.BOOTSTRAP_FILES if f != self.SOUL_FILE]
+
+        for filename in files_to_load:
             file_path = self.workspace / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
                 parts.append(f"## {filename}\n\n{content}")
-        
+
         return "\n\n".join(parts) if parts else ""
+
+    def _load_soul_file(self) -> str | None:
+        """Load SOUL.md if it exists and use it as the primary identity.
+
+        Returns:
+            SOUL.md content if file exists, None otherwise.
+        """
+        soul_path = self.workspace / self.SOUL_FILE
+        if soul_path.exists():
+            content = soul_path.read_text(encoding="utf-8")
+            # Return as-is without wrapping in headers since it IS the identity
+            return content.strip()
+        return None
     
     def build_messages(
         self,
@@ -332,6 +368,15 @@ Your workspace is at: {workspace_path}
 
         if channel and chat_id:
             final_system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
+
+        # Add relevant memory context from history (filtered by current message)
+        memory_store = MemoryStore(self.workspace, profile=profile)
+        relevant_memory = memory_store.get_relevant_context(
+            task=current_message,
+            max_chars=1500,
+        )
+        if relevant_memory:
+            final_system_prompt += f"\n\n## Relevant Context\n\nThe following information from previous conversations may be relevant to your current task:\n\n{relevant_memory}\n\nUse this context only if it is directly relevant to the user's question. Ignore it if the user is asking about something completely different."
 
         messages.append({"role": "system", "content": final_system_prompt})
 

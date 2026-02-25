@@ -119,6 +119,9 @@ class MemoryStore:
         Get relevant memory context for a specific task.
         Searches global and profile-specific history for relevant entries.
 
+        Uses improved relevance scoring based on multi-word phrase matching
+        to avoid returning unrelated content.
+
         Args:
             task: The task description to match against.
             max_chars: Maximum characters to return.
@@ -127,36 +130,94 @@ class MemoryStore:
             Relevant memory entries concatenated together.
         """
         import re
+        from math import log
 
-        # Extract key terms from task (simple approach: words 4+ chars)
-        words = re.findall(r"\b\w{4,}\b", task.lower())
-        if not words:
+        # Extract key phrases (2-3 word sequences) and single words
+        # This helps match "weather thanh hoa" as a phrase rather than just "thanh"
+        task_lower = task.lower()
+
+        # Extract meaningful phrases (2-3 word sequences)
+        words = re.findall(r"\b\w{3,}\b", task_lower)
+        if len(words) < 2:
             return ""
 
-        # Build regex pattern for any matching term
-        pattern = "|".join(re.escape(w) for w in set(words[:5]))  # Use top 5 terms
-        if not pattern:
-            return ""
+        # Build phrase pairs (bigrams) and triplets (trigrams)
+        phrases = set()
+        for i in range(len(words) - 1):
+            phrases.add(words[i] + " " + words[i + 1])  # bigrams
+        for i in range(len(words) - 2):
+            phrases.add(words[i] + " " + words[i + 1] + " " + words[i + 2])  # trigrams
 
-        results = []
+        # Also include individual words for fallback
+        individual_words = set(w for w in words if len(w) >= 3)
 
-        # Search profile history if applicable
+        # Score each entry by phrase and word matches
+        def score_entry(entry: str) -> float:
+            entry_lower = entry.lower()
+            score = 0.0
+
+            # Phrase matches get higher scores (prefer multi-word matches)
+            for phrase in phrases:
+                if phrase in entry_lower:
+                    score += 10.0 * len(phrase.split())  # Longer phrases score higher
+
+            # Word matches (lower score, used for tie-breaking)
+            for word in individual_words:
+                if word in entry_lower:
+                    score += 1.0
+
+            return score
+
+        def extract_entries(content: str) -> list[str]:
+            """Extract individual entries from history file."""
+            # History entries are separated by double newlines
+            entries = re.split(r'\n\n+', content.strip())
+            return [e.strip() for e in entries if e.strip() and len(e.strip()) > 20]
+
+        # Search and score profile history if applicable
+        profile_results = []
         if self.profile and self.history_file.exists():
             content = self.history_file.read_text(encoding="utf-8")
-            matches = re.findall(r".{0,200}" + pattern + ".{0,200}", content, re.IGNORECASE)
-            if matches:
-                results.append(f"## Profile History ({self.profile})\n" + "\n".join(matches[:3]))
+            entries = extract_entries(content)
+            for entry in entries:
+                score = score_entry(entry)
+                if score >= 3.0:  # Minimum threshold: at least one phrase or 3 words
+                    profile_results.append((score, entry))
 
-        # Search global history
+        # Search and score global history
+        global_results = []
         global_history = self._get_global_history_file()
         if global_history.exists():
             content = global_history.read_text(encoding="utf-8")
-            matches = re.findall(r".{0,200}" + pattern + ".{0,200}", content, re.IGNORECASE)
-            if matches:
-                results.append(f"## Global History\n" + "\n".join(matches[:3]))
+            entries = extract_entries(content)
+            for entry in entries:
+                score = score_entry(entry)
+                if score >= 3.0:
+                    global_results.append((score, entry))
+
+        # Sort by score (highest first) and take top results
+        profile_results.sort(key=lambda x: x[0], reverse=True)
+        global_results.sort(key=lambda x: x[0], reverse=True)
+
+        # Build output from top matches
+        results = []
+        combined_length = 0
+
+        # Add top profile results (up to 3)
+        for score, entry in profile_results[:3]:
+            if combined_length + len(entry) > max_chars:
+                break
+            results.append(entry)
+            combined_length += len(entry)
+
+        # Add top global results (up to 3)
+        for score, entry in global_results[:3]:
+            if combined_length + len(entry) > max_chars:
+                break
+            results.append(entry)
+            combined_length += len(entry)
 
         if not results:
             return ""
 
-        combined = "\n\n".join(results)
-        return combined[:max_chars] if len(combined) > max_chars else combined
+        return "\n\n".join(results)

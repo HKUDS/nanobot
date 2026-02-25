@@ -180,6 +180,18 @@ class AgentLoop:
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
 
+        # Scrapling web scraping tools
+        from nanobot.agent.tools.scrapling import (
+            ScrapePageTool,
+            ScrapeStealthyTool,
+            ScrapeDynamicTool,
+            ScrapeSpiderTool
+        )
+        self.tools.register(ScrapePageTool())
+        self.tools.register(ScrapeStealthyTool())
+        self.tools.register(ScrapeDynamicTool())
+        self.tools.register(ScrapeSpiderTool())
+
         # Research tool (Perplexica-style deep research)
         self.tools.register(ResearchTool(
             api_key=self.brave_api_key,

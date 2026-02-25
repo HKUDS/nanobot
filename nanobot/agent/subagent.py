@@ -46,6 +46,27 @@ class SubagentManager:
     isolated context and a focused system prompt.
     """
 
+    # Helper methods for formatting tool calls (same as AgentLoop)
+    @staticmethod
+    def _strip_think(text: str | None) -> str | None:
+        """Remove thinking blocks that some models embed in content."""
+        if not text:
+            return None
+        import re
+        return re.sub(r"<thinking>[\s\S]*?</thinking>", "", text).strip() or None
+
+    @staticmethod
+    def _tool_hint(tool_calls: list | None) -> str:
+        """Format tool calls as concise hint, e.g. 'web_search("query")'."""
+        if not tool_calls:
+            return ""
+        def _fmt(tc):
+            val = next(iter(tc.arguments.values()), None) if tc.arguments else None
+            if not isinstance(val, str):
+                return tc.name
+            return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
+        return ", ".join(_fmt(tc) for tc in tool_calls)
+
     def __init__(
         self,
         provider: LLMProvider,
@@ -61,7 +82,11 @@ class SubagentManager:
     ):
         from nanobot.config.schema import ExecToolConfig, Config
         self.provider = provider
-        self.workspace = workspace
+        # Ensure workspace is expanded from ~ to absolute path
+        if isinstance(workspace, Path):
+            self.workspace = workspace
+        else:
+            self.workspace = Path(workspace).expanduser()
         self.bus = bus
         self.model = model or provider.get_default_model()
         self.temperature = temperature
@@ -138,7 +163,15 @@ class SubagentManager:
         bg_task.add_done_callback(cleanup)
 
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
-        return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
+
+        # Build detailed status message
+        profile_suffix = f" (profile: {profile_name})" if profile_name else ""
+        status_msg = (
+            f"🤖 Subagent [{display_label}] started (id: {task_id}){profile_suffix}\n"
+            f"Task: {task}\n"
+            f"I'll notify you when it completes."
+        )
+        return status_msg
 
     def get_running_tasks(self) -> list[SubagentTask]:
         """Get all tracked tasks (running and recently completed)."""
@@ -167,6 +200,44 @@ class SubagentManager:
         logger.info("Subagent [{}] cancelled", task_id)
         return True
     
+    async def _send_progress(
+        self,
+        origin: dict[str, str],
+        content: str,
+        message_type: str = "thinking",
+    ) -> None:
+        """Send a progress message to the original channel."""
+        from nanobot.bus.events import OutboundMessage
+
+        msg = OutboundMessage(
+            channel=origin["channel"],
+            chat_id=origin["chat_id"],
+            content=content,
+            metadata={"message_type": message_type},
+        )
+        await self.bus.publish_outbound(msg)
+
+    def _log_monitor(self, msg_type: str, content: str, task_id: str, label: str) -> None:
+        """Log a subagent message to the monitor file."""
+        try:
+            from nanobot.config.loader import get_data_dir
+            from datetime import datetime
+
+            monitor_dir = get_data_dir() / "monitor"
+            monitor_dir.mkdir(parents=True, exist_ok=True)
+            monitor_file = monitor_dir / "messages.log"
+
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Safe content handling for None
+            safe_content = (content or "")[:200]
+            log_entry = f"[{timestamp}] [subagent:{task_id}|{label}] {msg_type}: {safe_content}\n"
+
+            with open(monitor_file, "a", encoding="utf-8") as f:
+                f.write(log_entry)
+        except Exception:
+            # Don't let monitor logging break the subagent
+            pass
+
     async def _run_subagent(
         self,
         task_id: str,
@@ -177,6 +248,9 @@ class SubagentManager:
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
+        # Safe task preview
+        task_preview = (task or "")[:100]
+        self._log_monitor("start", f"Task: {task_preview}", task_id, label)
 
         task_state = self._task_states.get(task_id)
         if not task_state:
@@ -209,6 +283,18 @@ class SubagentManager:
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
 
+            # Scrapling web scraping tools
+            from nanobot.agent.tools.scrapling import (
+                ScrapePageTool,
+                ScrapeStealthyTool,
+                ScrapeDynamicTool,
+                ScrapeSpiderTool
+            )
+            tools.register(ScrapePageTool())
+            tools.register(ScrapeStealthyTool())
+            tools.register(ScrapeDynamicTool())
+            tools.register(ScrapeSpiderTool())
+
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task, profile)
             messages: list[dict[str, Any]] = [
@@ -220,6 +306,7 @@ class SubagentManager:
             max_iterations = 15
             iteration = 0
             final_result: str | None = None
+            last_progress_update = datetime.now()
 
             while iteration < max_iterations:
                 iteration += 1
@@ -238,6 +325,15 @@ class SubagentManager:
                 )
 
                 if response.has_tool_calls:
+                    # Send progress updates for tool calls
+                    clean = self._strip_think(response.content)
+                    if clean:
+                        await self._send_progress(origin, f"[{label}] {clean}", message_type="thinking")
+                        self._log_monitor("thinking", clean[:100], task_id, label)
+                    tool_hint = self._tool_hint(response.tool_calls)
+                    await self._send_progress(origin, f"[{label}] {tool_hint}", message_type="action")
+                    self._log_monitor("action", tool_hint, task_id, label)
+
                     # Add assistant message with tool calls
                     tool_call_dicts = [
                         {
@@ -267,6 +363,16 @@ class SubagentManager:
                             "name": tool_call.name,
                             "content": result,
                         })
+
+                    # Send periodic "working on" update every 30 seconds
+                    now = datetime.now()
+                    if (now - last_progress_update).total_seconds() >= 30:
+                        await self._send_progress(
+                            origin,
+                            f"[{label}] Working on task... (iteration {iteration}/{max_iterations})",
+                            message_type="thinking"
+                        )
+                        last_progress_update = now
                 else:
                     final_result = response.content
                     break
@@ -275,6 +381,7 @@ class SubagentManager:
                 final_result = "Task completed but no final response was generated."
 
             logger.info("Subagent [{}] completed successfully", task_id)
+            self._log_monitor("complete", f"Result: {final_result[:100]}", task_id, label)
 
             # Update task state
             if task_id in self._task_states:
@@ -286,6 +393,7 @@ class SubagentManager:
 
         except asyncio.CancelledError:
             logger.info("Subagent [{}] was cancelled", task_id)
+            self._log_monitor("cancelled", "Task was cancelled", task_id, label)
             if task_id in self._task_states:
                 self._task_states[task_id].status = "cancelled"
                 self._task_states[task_id].completed_at = datetime.now()
@@ -294,6 +402,7 @@ class SubagentManager:
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
+            self._log_monitor("error", error_msg, task_id, label)
             if task_id in self._task_states:
                 self._task_states[task_id].status = "failed"
                 self._task_states[task_id].completed_at = datetime.now()
@@ -376,7 +485,9 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
             monitor_file = monitor_dir / "messages.log"
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             session = f"{origin['channel']}:{origin['chat_id']}"
-            log_entry = f"[{timestamp}] [subagent session:{session}] {label}: {result[:200]}\n"
+            # Safe result handling for None
+            safe_result = (result or "")[:200]
+            log_entry = f"[{timestamp}] [subagent session:{session}] {label}: {safe_result}\n"
             with open(monitor_file, "a", encoding="utf-8") as f:
                 f.write(log_entry)
         except Exception:
