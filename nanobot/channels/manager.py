@@ -136,7 +136,20 @@ class ChannelManager:
                 logger.info("QQ channel enabled")
             except ImportError as e:
                 logger.warning("QQ channel not available: {}", e)
-    
+
+        # Custom channel
+        if self.config.channels.custom.enabled:
+            try:
+                from nanobot.channels.custom import CustomChannel
+
+                self.channels["custom"] = CustomChannel(
+                    self.config.channels.custom,
+                    self.bus,
+                )
+                logger.info("Custom channel enabled")
+            except ImportError as e:
+                logger.warning("Custom channel not available: {}", e)
+
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
         try:
