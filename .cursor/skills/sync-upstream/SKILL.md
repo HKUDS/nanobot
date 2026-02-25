@@ -43,7 +43,7 @@ Run from repo root:
 ```
 
 **Flags:**
-- `--orghi` - Run CI (pytest) on main, then merge into orghi-main and push. Aborts if tests fail.
+- `--orghi` - Run CI (pytest) on main, merge into orghi-main, run orghi tests, then push. Aborts if main or orghi tests fail.
 - `--dry-run` - Print planned steps without executing.
 
 **Behavior:**
@@ -74,7 +74,8 @@ git push origin --tags
 uv run pytest  # CI gate - abort if fail
 git checkout orghi-main
 git merge main
-# Resolve conflicts (typically in customized files)
+# If conflicts: resolve, run orghi tests, commit, push (see Conflict Resolution below)
+uv run pytest tests/orghi -v  # Orghi tests - must pass before push
 git push origin orghi-main
 ```
 
@@ -86,7 +87,23 @@ When merging main into orghi-main, conflicts often occur in:
 - `pyproject.toml` (version field)
 - `workspace/` (personal config)
 
-**Rules:**
+**File rules:**
 - **Always accept upstream** for `nanobot/__init__.py` `__version__` only. Keep orghi-main `__logo__`. This keeps the fork aligned with upstream and makes it clear which upstream version you are on.
 - Prefer keeping orghi-main customizations in `README.md`, `pyproject.toml`, and `workspace/`.
 - Accept upstream changes for all other files.
+
+**Orghi tests:** Custom orghi features are tested in `tests/orghi/` (separate from upstream `tests/`). Run: `uv run pytest tests/orghi -v`. Must pass before push. They validate these custom features: (last updated: 2026-02-24)
+- Telegram send_only mode.
+
+**Agent workflow** when merge produces conflicts or orghi tests fail:
+
+1. **Resolve conflicts** in the conflicted files using the file rules above.
+2. **Run orghi tests**: `uv run pytest tests/orghi -v`
+3. **If tests fail** (retry up to 3 times):
+   - **Never** change or relax tests to make them pass. Tests encode intended orghi behavior.
+   - **Understand** the failing test and the orghi feature intent (e.g. send_only for cron jobs).
+   - **Fix** the feature code (e.g. `nanobot/channels/manager.py`, `nanobot/channels/telegram.py`) so it correctly integrates with upstream. Resolutions must be robust.
+   - Re-run orghi tests. If pass, commit and push.
+4. **After 3 failed attempts**: Stop. Report to user: which tests fail, what was tried, that manual review is needed. Do not modify tests.
+
+**Intent preservation**: The agent must never weaken tests to pass. The goal is to ensure the orghi custom feature is correctly merged with upstream changes. If upstream refactored or removed code that orghi depends on, the agent must adapt the orghi feature to the new upstream structure while preserving intent.

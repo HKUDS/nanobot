@@ -88,6 +88,15 @@ if [[ "$MERGE_ORGHI" == true ]]; then
   echo "Merging main into orghi-main..."
   run git checkout orghi-main
   run git merge main
+  echo "Running orghi tests..."
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "[dry-run] uv run pytest tests/orghi -v"
+  else
+    if ! uv run pytest tests/orghi -v; then
+      echo "Error: Orghi tests failed. Fix the merge resolution (feature code, not tests) and retry."
+      exit 1
+    fi
+  fi
   run git push origin orghi-main
   echo "Done. main and orghi-main are synced.${TAG:+ Tag: $TAG}"
 else
