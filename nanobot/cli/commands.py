@@ -158,7 +158,7 @@ def onboard():
     """Initialize nanobot configuration and workspace."""
     from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
-    from nanobot.utils.helpers import get_workspace_path
+    from nanobot.utils.helpers import ensure_dir
     
     config_path = get_config_path()
     
@@ -175,15 +175,14 @@ def onboard():
             save_config(config)
             console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
     else:
-        save_config(Config())
+        config = Config()
+        save_config(config)
         console.print(f"[green]✓[/green] Created config at {config_path}")
     
-    # Create workspace
-    workspace = get_workspace_path()
+    # Create workspace - use config's workspace_path to respect user settings
+    workspace = ensure_dir(config.workspace_path)
     
-    if not workspace.exists():
-        workspace.mkdir(parents=True, exist_ok=True)
-        console.print(f"[green]✓[/green] Created workspace at {workspace}")
+    console.print(f"[green]✓[/green] Workspace ready at {workspace}")
     
     # Create default bootstrap files
     _create_workspace_templates(workspace)
@@ -308,6 +307,7 @@ def gateway(
         provider=provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
+        fallbacks=config.agents.defaults.fallbacks,
         temperature=config.agents.defaults.temperature,
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
@@ -465,6 +465,7 @@ def agent(
         provider=provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
+        fallbacks=config.agents.defaults.fallbacks,
         temperature=config.agents.defaults.temperature,
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
@@ -956,6 +957,7 @@ def cron_run(
         provider=provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
+        fallbacks=config.agents.defaults.fallbacks,
         temperature=config.agents.defaults.temperature,
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,

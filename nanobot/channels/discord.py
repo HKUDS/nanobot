@@ -55,6 +55,7 @@ class DiscordChannel(BaseChannel):
         self._heartbeat_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
+        self._dm_channels: dict[str, str] = {}  # user_id -> channel_id cache
 
     async def start(self) -> None:
         """Start the Discord gateway connection."""
@@ -101,7 +102,13 @@ class DiscordChannel(BaseChannel):
             logger.warning("Discord HTTP client not initialized")
             return
 
-        url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
+        # Resolve the target channel ID - may need to create DM channel
+        channel_id = await self._resolve_channel_id(msg.chat_id)
+        if not channel_id:
+            logger.error("Failed to resolve Discord channel for chat_id: {}", msg.chat_id)
+            return
+
+        url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
         headers = {"Authorization": f"Bot {self.config.token}"}
 
         try:
@@ -120,7 +127,45 @@ class DiscordChannel(BaseChannel):
                 if not await self._send_payload(url, headers, payload):
                     break  # Abort remaining chunks on failure
         finally:
-            await self._stop_typing(msg.chat_id)
+            await self._stop_typing(channel_id)
+
+    async def _resolve_channel_id(self, chat_id: str) -> str | None:
+        """Resolve a chat_id to a Discord channel ID.
+        
+        If chat_id is already a channel ID, returns it directly.
+        If chat_id is a user ID, creates/gets DM channel and returns its ID.
+        """
+        # Check cache first
+        if chat_id in self._dm_channels:
+            return self._dm_channels[chat_id]
+        
+        # Try sending directly first (assume it's a channel ID)
+        # If it fails with 404, it might be a user ID - try creating DM
+        if not self._http:
+            return None
+            
+        # Try to create a DM channel (works if chat_id is a user ID)
+        dm_url = f"{DISCORD_API_BASE}/users/@me/channels"
+        headers = {"Authorization": f"Bot {self.config.token}"}
+        
+        try:
+            response = await self._http.post(
+                dm_url, 
+                headers=headers, 
+                json={"recipient_id": chat_id}
+            )
+            if response.status_code == 200:
+                data = response.json()
+                channel_id = data.get("id")
+                if channel_id:
+                    self._dm_channels[chat_id] = channel_id
+                    logger.debug("Created DM channel {} for user {}", channel_id, chat_id)
+                    return channel_id
+        except Exception as e:
+            logger.debug("Could not create DM channel for {}: {}", chat_id, e)
+        
+        # Fall back to using chat_id directly (might be a channel ID)
+        return chat_id
 
     async def _send_payload(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]

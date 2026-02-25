@@ -49,6 +49,7 @@ class AgentLoop:
         provider: LLMProvider,
         workspace: Path,
         model: str | None = None,
+        fallbacks: list[str] | None = None,
         max_iterations: int = 40,
         temperature: float = 0.1,
         max_tokens: int = 4096,
@@ -67,6 +68,7 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self.fallbacks = fallbacks or []
         self.max_iterations = max_iterations
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -188,13 +190,47 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
+            # Try primary model, then fallbacks on error/timeout
+            models_to_try = [self.model] + self.fallbacks
+            response = None
+            last_error = None
+            
+            for attempt_model in models_to_try:
+                try:
+                    response = await self.provider.chat(
+                        messages=messages,
+                        tools=self.tools.get_definitions(),
+                        model=attempt_model,
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                    )
+                    # Check if response is an error
+                    if response.finish_reason == "error":
+                        last_error = response.content
+                        logger.warning(
+                            "Model {} returned error: {}. Trying next fallback.",
+                            attempt_model,
+                            last_error[:200] if last_error else "unknown",
+                        )
+                        response = None
+                        continue
+                    # Success - use this model for subsequent calls
+                    if attempt_model != self.model:
+                        logger.info("Successfully used fallback model: {}", attempt_model)
+                    break
+                except Exception as e:
+                    last_error = str(e)
+                    logger.warning(
+                        "Model {} failed with exception: {}. Trying next fallback.",
+                        attempt_model,
+                        last_error[:200],
+                    )
+                    continue
+            
+            if response is None:
+                # All models failed
+                final_content = last_error or "All models failed"
+                break
 
             if response.has_tool_calls:
                 if on_progress:
