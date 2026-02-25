@@ -84,6 +84,7 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         system_prompt_prefix: str | None = None,
+        channel_overrides: "dict[str, dict] | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -101,6 +102,7 @@ class AgentLoop:
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self.system_prompt_prefix = system_prompt_prefix
+        self._channel_overrides: dict[str, dict] = channel_overrides or {}
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -292,8 +294,16 @@ class AgentLoop:
                     timeout=1.0
                 )
                 try:
+                    ch = self._channel_overrides.get(msg.channel, {})
                     response = await self._process_message(
-                        msg, system_prompt=self.system_prompt_prefix
+                        msg,
+                        system_prompt=ch.get("system_prompt") or self.system_prompt_prefix,
+                        model=ch.get("model"),
+                        provider=ch.get("provider"),
+                        temperature=ch.get("temperature"),
+                        max_tokens=ch.get("max_tokens"),
+                        max_iterations=ch.get("max_iterations"),
+                        memory_window=ch.get("memory_window"),
                     )
                     if response is not None:
                         await self.bus.publish_outbound(response)

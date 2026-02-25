@@ -305,6 +305,7 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
+    from loguru import logger
     
     if verbose:
         import logging
@@ -321,6 +322,36 @@ def gateway(
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
     
+    # Resolve per-channel agent profile overrides
+    channel_overrides: dict[str, dict] = {}
+    for ch_name in ("telegram", "whatsapp", "feishu", "dingtalk", "discord",
+                    "email", "mochat", "slack", "qq"):
+        ch_cfg = getattr(config.channels, ch_name, None)
+        if not (ch_cfg and getattr(ch_cfg, "agent", None)):
+            continue
+        profile = config.agents.profiles.get(ch_cfg.agent)
+        if not profile:
+            logger.warning("Channel '{}': agent profile '{}' not found, using defaults.", ch_name, ch_cfg.agent)
+            continue
+        ch_model = profile.model or None
+        ch_provider = None
+        if ch_model and ch_model != config.agents.defaults.model:
+            try:
+                ch_provider = _make_provider_for_model(config, ch_model)
+            except Exception as e:
+                logger.warning("Channel '{}': cannot build provider for '{}': {}. Using default.", ch_name, ch_model, e)
+                ch_model = None
+        channel_overrides[ch_name] = {
+            "model": ch_model,
+            "provider": ch_provider,
+            "system_prompt": profile.system_prompt or None,
+            "temperature": profile.temperature,
+            "max_tokens": profile.max_tokens,
+            "max_iterations": profile.max_tool_iterations,
+            "memory_window": profile.memory_window,
+        }
+        logger.info("Channel '{}' → profile '{}' (model: {})", ch_name, ch_cfg.agent, ch_model or config.agents.defaults.model)
+
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
@@ -339,6 +370,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        channel_overrides=channel_overrides,
     )
     
     # Set cron callback (needs agent)
