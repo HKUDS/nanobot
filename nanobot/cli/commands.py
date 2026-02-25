@@ -21,6 +21,21 @@ from prompt_toolkit.patch_stdout import patch_stdout
 from nanobot import __version__, __logo__
 from nanobot.config.schema import Config
 
+
+def _configure_linux_event_loop_policy() -> None:
+    """Apply Linux-specific asyncio policy workaround at CLI startup."""
+    if not sys.platform.startswith("linux"):
+        return
+
+    # Issue #550:
+    # Work around a Python 3.11 Linux subprocess cleanup bug where
+    # BaseSubprocessTransport.__del__ can run after loop shutdown and raise
+    # "RuntimeError: Event loop is closed" during interpreter teardown.
+    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+
+
+_configure_linux_event_loop_policy()
+
 app = typer.Typer(
     name="nanobot",
     help=f"{__logo__} nanobot - Personal AI Assistant",
@@ -131,7 +146,6 @@ async def _read_interactive_input_async() -> str:
         raise KeyboardInterrupt from exc
 
 
-
 def version_callback(value: bool):
     if value:
         console.print(f"{__logo__} nanobot v{__version__}")
@@ -194,8 +208,6 @@ def onboard():
     console.print("     Get one at: https://openrouter.ai/keys")
     console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
-
-
 
 
 def _create_workspace_templates(workspace: Path):
@@ -423,8 +435,6 @@ def gateway(
             await channels.stop_all()
     
     asyncio.run(run())
-
-
 
 
 # ============================================================================
