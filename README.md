@@ -807,7 +807,7 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | Option | Default | Description |
 |--------|---------|-------------|
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
-| `tools.exec.pathAppend` | `""` | Additional paths to append to `PATH` when executing shell commands. Useful for commands in non-standard locations (e.g., `/usr/sbin` for `ufw`). Use the platform-specific separator (`:` on Linux/macOS, `;` on Windows). |
+| `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
 
 
