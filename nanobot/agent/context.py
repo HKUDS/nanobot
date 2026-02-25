@@ -21,6 +21,7 @@ class ContextBuilder:
     """
     
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
+    _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     
     def __init__(self, workspace: Path):
         self.workspace = workspace
@@ -105,21 +106,14 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 - Recall past events: grep {workspace_path}/memory/HISTORY.md"""
 
     @staticmethod
-    def _inject_runtime_context(
-        user_content: str | list[dict[str, Any]],
-        channel: str | None,
-        chat_id: str | None,
-    ) -> str | list[dict[str, Any]]:
-        """Append dynamic runtime context to the tail of the user message."""
+    def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:
+        """Build untrusted runtime metadata block for injection before the user message."""
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         tz = time.strftime("%Z") or "UTC"
         lines = [f"Current Time: {now} ({tz})"]
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
-        block = "[Runtime Context]\n" + "\n".join(lines)
-        if isinstance(user_content, str):
-            return f"{user_content}\n\n{block}"
-        return [*user_content, {"type": "text", "text": block}]
+        return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
     
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
@@ -165,9 +159,11 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         # History
         messages.extend(history)
 
-        # Current message (with optional image attachments)
+        # Inject runtime metadata as a separate user message before the actual user message.
+        messages.append({"role": "user", "content": self._build_runtime_context(channel, chat_id)})
+
+        # Current user message
         user_content = self._build_user_content(current_message, media)
-        user_content = self._inject_runtime_context(user_content, channel, chat_id)
         messages.append({"role": "user", "content": user_content})
 
         return messages
