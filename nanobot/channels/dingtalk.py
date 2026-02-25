@@ -344,6 +344,35 @@ class DingTalkChannel(BaseChannel):
             logger.error(f"Failed to upload media to DingTalk: {e}")
             return None
 
+    @staticmethod
+    def _build_preview_title(
+        content: str,
+        fallback: str = "Nanobot Reply",
+        max_chars: int = 42,
+    ) -> str:
+        """Build a short preview title for DingTalk markdown messages."""
+        if not content:
+            return fallback
+
+        preview = ""
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            # Remove common markdown prefix markers from the first content line.
+            line = line.lstrip("#>*-` ")
+            line = line.replace("**", "").replace("__", "").replace("`", "")
+            line = " ".join(line.split())
+            if line:
+                preview = line
+                break
+
+        if not preview:
+            return fallback
+        if len(preview) <= max_chars:
+            return preview
+        return f"{preview[:max_chars - 3]}..."
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through DingTalk (private or group)."""
         if self._is_progress_notice(msg):
@@ -360,6 +389,8 @@ class DingTalkChannel(BaseChannel):
         if not is_group and msg.chat_id and msg.chat_id.startswith("cid"):
             is_group = True
 
+        preview_title = self._build_preview_title(msg.content)
+
         if is_group:
             # groupMessages/send: sends to a group conversation
             # https://open.dingtalk.com/document/orgapp/robot-send-group-chat-message
@@ -370,7 +401,7 @@ class DingTalkChannel(BaseChannel):
                 "msgKey": "sampleMarkdown",
                 "msgParam": json.dumps({
                     "text": msg.content,
-                    "title": "Nanobot Reply",
+                    "title": preview_title,
                 }, ensure_ascii=False),
             }
         else:
@@ -383,7 +414,7 @@ class DingTalkChannel(BaseChannel):
                 "msgKey": "sampleMarkdown",
                 "msgParam": json.dumps({
                     "text": msg.content,
-                    "title": "Nanobot Reply",
+                    "title": preview_title,
                 }, ensure_ascii=False),
             }
 
