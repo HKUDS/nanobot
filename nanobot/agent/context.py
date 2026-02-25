@@ -53,12 +53,15 @@ class ContextBuilder:
             parts.append(f"# Memory\n\n{memory}")
         
         # Skills - progressive loading
-        # 1. Always-loaded skills: include full content
+        # 1. Always-loaded skills + requested skills: include full content
         always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
+        requested_skills = skill_names or []
+        loaded_skills = list(set(always_skills + requested_skills))  # Deduplicate
+        
+        if loaded_skills:
+            skills_content = self.skills.load_skills_for_context(loaded_skills)
+            if skills_content:
+                parts.append(f"# Active Skills\n\n{skills_content}")
         
         # 2. Available skills: only show summary (agent uses read_file to load)
         skills_summary = self.skills.build_skills_summary()
