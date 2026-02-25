@@ -238,6 +238,13 @@ class AgentLoop:
                     self.bus.consume_inbound(),
                     timeout=1.0
                 )
+                if msg.observe_only:
+                    key = msg.session_key
+                    session = self.sessions.get_or_create(key)
+                    session.add_message("user", msg.content)
+                    self.sessions.save(session)
+                    logger.info("Observed message from {}:{}", msg.channel, msg.sender_id)
+                    continue
                 try:
                     response = await self._process_message(msg)
                     if response is not None:

@@ -12,6 +12,13 @@ class Base(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
+class WhatsAppMentionConfig(Base):
+    """WhatsApp mention behavior configuration."""
+
+    require_in_groups: bool = False  # If True, only reply in groups when bot is mentioned
+    mention_ids: list[str] = Field(default_factory=list)  # IDs that trigger a reply (e.g. LID)
+
+
 class WhatsAppConfig(Base):
     """WhatsApp channel configuration."""
 
@@ -19,6 +26,7 @@ class WhatsAppConfig(Base):
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""  # Shared token for bridge auth (optional, recommended)
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
+    mention: WhatsAppMentionConfig = Field(default_factory=WhatsAppMentionConfig)
 
 
 class TelegramConfig(Base):

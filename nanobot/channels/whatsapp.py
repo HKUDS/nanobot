@@ -119,6 +119,14 @@ class WhatsAppChannel(BaseChannel):
                 logger.info("Voice message received from {}, but direct download from bridge is not yet supported.", sender_id)
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
             
+            is_group = data.get("isGroup", False)
+            observe_only = is_group and self._should_observe_only(content)
+
+            if is_group and not observe_only:
+                content = self._strip_mention_ids(content)
+                if not content:
+                    observe_only = True
+
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=sender,  # Use full LID for replies
@@ -126,8 +134,9 @@ class WhatsAppChannel(BaseChannel):
                 metadata={
                     "message_id": data.get("id"),
                     "timestamp": data.get("timestamp"),
-                    "is_group": data.get("isGroup", False)
-                }
+                    "is_group": is_group,
+                },
+                observe_only=observe_only,
             )
         
         elif msg_type == "status":
@@ -146,3 +155,23 @@ class WhatsAppChannel(BaseChannel):
         
         elif msg_type == "error":
             logger.error("WhatsApp bridge error: {}", data.get('error'))
+
+    def _strip_mention_ids(self, content: str) -> str:
+        """Remove mention IDs (with optional @ prefix) from content and return the remainder."""
+        for mid in self.config.mention.mention_ids:
+            content = content.replace(f"@{mid}", "")
+            content = content.replace(mid, "")
+        return content.strip()
+
+    def _should_observe_only(self, content: str) -> bool:
+        """Check if a group message should be observed without triggering a reply.
+
+        Returns True when mention filtering is enabled and none of the
+        configured mention_ids appear in the message content.
+        """
+        mention = self.config.mention
+        if not mention.require_in_groups:
+            return False
+        if not mention.mention_ids:
+            return False
+        return not any(mid in content for mid in mention.mention_ids)

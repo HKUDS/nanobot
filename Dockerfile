@@ -33,8 +33,10 @@ WORKDIR /app
 # Create config directory
 RUN mkdir -p /root/.nanobot
 
-# Gateway default port
+# Entrypoint handles starting bridge + nanobot command
+COPY entrypoint.sh /app/entrypoint.sh
+
 EXPOSE 18790
 
-ENTRYPOINT ["nanobot"]
-CMD ["status"]
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["gateway"]

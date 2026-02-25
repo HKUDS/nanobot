@@ -89,7 +89,8 @@ class BaseChannel(ABC):
         chat_id: str,
         content: str,
         media: list[str] | None = None,
-        metadata: dict[str, Any] | None = None
+        metadata: dict[str, Any] | None = None,
+        observe_only: bool = False,
     ) -> None:
         """
         Handle an incoming message from the chat platform.
@@ -102,6 +103,7 @@ class BaseChannel(ABC):
             content: Message text content.
             media: Optional list of media URLs.
             metadata: Optional channel-specific metadata.
+            observe_only: If True, record in session but skip LLM processing.
         """
         if not self.is_allowed(sender_id):
             logger.warning(
@@ -117,7 +119,8 @@ class BaseChannel(ABC):
             chat_id=str(chat_id),
             content=content,
             media=media or [],
-            metadata=metadata or {}
+            metadata=metadata or {},
+            observe_only=observe_only,
         )
         
         await self.bus.publish_inbound(msg)
