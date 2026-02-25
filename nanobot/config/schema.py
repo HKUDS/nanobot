@@ -185,7 +185,7 @@ class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.nanobot/workspace"
-    model: str = "anthropic/claude-opus-4-5"
+    model: str = "anthropic/claude-opus-4-6"
     max_tokens: int = 8192
     temperature: float = 0.1
     max_tool_iterations: int = 40
@@ -206,9 +206,20 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
+class ClaudeCodeConfig(Base):
+    """Claude Code CLI OAuth authentication.
+
+    When enabled, nanobot auto-detects the Claude Code CLI login
+    and uses its OAuth token — no separate API key needed.
+    """
+    enabled: bool = True  # Auto-detect Claude Code CLI login
+    model: str = ""  # Override model when using Claude Code auth. Empty = use agents.defaults.model
+
+
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
+    claude_code: ClaudeCodeConfig = Field(default_factory=ClaudeCodeConfig)
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -228,6 +239,14 @@ class ProvidersConfig(Base):
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
 
 
+class ProxyConfig(Base):
+    """Anthropic API proxy configuration."""
+    enabled: bool = True
+    api_key: str = ""  # If set, require this key in Authorization header. Empty = accept any.
+    model_map: dict[str, str] = Field(default_factory=dict)  # Map incoming model names to backend names
+    default_model: str = ""  # Override default model for proxy requests. Empty = use agents.defaults.model
+
+
 class HeartbeatConfig(Base):
     """Heartbeat service configuration."""
 
@@ -240,6 +259,7 @@ class GatewayConfig(Base):
 
     host: str = "0.0.0.0"
     port: int = 18790
+    proxy: ProxyConfig = Field(default_factory=ProxyConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
