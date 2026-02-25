@@ -2,7 +2,7 @@
 
 > 用于追踪本地 origin/main 相对于上游 hk (HKUDS/nanobot) 的独有功能，方便后续合并冲突时判断取舍。
 >
-> 最后更新：2026-02-24，基于 merge commit `5b37335`
+> 最后更新：2026-02-25，基于 merge commit `2bed323`
 
 ---
 
@@ -91,15 +91,36 @@
 ### 7. Session 历史重写
 **文件：** `nanobot/session/manager.py`
 
-- `get_history()` 重写：取最近 `max_messages` 条，将相邻的 `"Tool calls:"` 开头 system 消息内联合并到前一条 assistant 消息中，孤立的工具摘要消息丢弃
+- `get_history()` 重写：从 `last_consolidated` 游标切片，过滤 24h 以前的消息（`max_age_hours=24.0`），取最近 `max_messages` 条，丢弃开头非 user 消息
 - 保留 `tool_calls`、`tool_call_id`、`name` 等元数据
-- hk 版本使用 `last_consolidated` 游标切片逻辑，行为不同
+- hk 版本的 `get_history()` 不含时效过滤，且使用不同的历史压缩逻辑
 
-**冲突时：** 根据需要选择——本地版本更激进地压缩历史；hk 版本保留完整游标追踪。
+**冲突时：** 保留本地版本（含 `last_consolidated` 切片 + `max_age_hours` 过滤）。
 
 ---
 
-### 8. CLI 日志文件输出
+### 9. AgentLoop 关键修复
+**文件：** `nanobot/agent/loop.py`
+
+- `run()` 的 `finally` 块必须调用 `await self.bus.complete_inbound_turn(msg)`，否则 buffer 永远不清空，所有后续消息被积压
+- `__init__` 新增 `history_max_age_hours: float = 24.0` 参数，两处 `get_history()` 调用均需透传 `max_age_hours=self.history_max_age_hours`
+- `/new` 和 `/help` 命令匹配需用 `cmd.split("@")[0]`，兼容 Telegram 群组的 `/cmd@botname` 格式
+- `[SILENT]` 输出需转换为 `msg_type="silent"` 的 OutboundMessage，不能直接发送文本
+- `_save_turn()` 末尾需推进 `last_consolidated`：`if len(session.messages) - session.last_consolidated > self.memory_window: session.last_consolidated = len(session.messages) - self.memory_window`
+- `_run_agent_loop()` 中 LLM 无 tool call 时，final response 必须用 `add_assistant_message()` 写入 messages，否则不会存入 session
+
+**冲突时：** 以上所有逻辑均为本地独有修复，hk 版本不含，合并后必须手动补回。
+
+---
+
+### 10. Heartbeat 间隔
+**文件：** `nanobot/config/schema.py`
+
+- `HeartbeatConfig.interval_s` 默认值改为 `24 * 60 * 60`（24小时），hk 默认为 `30 * 60`（30分钟）
+
+**冲突时：** 保留本地 24h 值。
+
+---
 **文件：** `nanobot/cli/commands.py`
 
 - `agent` 命令启动时自动写日志到 `{workspace}/logs/nanobot.log`（10MB rotation，保留 7 天）
@@ -112,5 +133,6 @@
 
 1. **以上所有文件，本地版本优先**（`git merge -X ours` 或手动选择）
 2. **hk 带来的新功能**（新渠道如 Slack 线程隔离、Heartbeat 幂等改进、Discord 断连修复等）直接接受，不与本地独有功能重叠
-3. **`session/manager.py`** 冲突需人工判断：本地历史压缩 vs hk 游标追踪，按需选择
+3. **`session/manager.py`** 冲突时保留本地版本（`last_consolidated` 切片 + `max_age_hours` 过滤）
 4. **`bus/events.py`** 合并时确保本地新增字段（`reaction`, `msg_type`, `session_key_override`）不被 hk 版本覆盖丢失
+5. **`agent/loop.py`** 合并后必须检查第 9 条所有修复点是否完整，尤其是 `complete_inbound_turn` 和 `history_max_age_hours`
