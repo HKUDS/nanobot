@@ -87,6 +87,8 @@ When merging main into orghi-main, conflicts often occur in:
 - `pyproject.toml` (version field)
 - `workspace/` (personal config)
 
+**Orghi Change Tracking:** For conflict guidance, see documents in `.orghi/orghi-change-tracking/feat/` and `.orghi/orghi-change-tracking/fix/`. Each file documents files touched, purpose, and conflict resolution. Worst case: accept upstream, rebuild using the doc.
+
 **File rules:**
 - **Always accept upstream** for `nanobot/__init__.py` `__version__` only. Keep orghi-main `__logo__`. This keeps the fork aligned with upstream and makes it clear which upstream version you are on. Keep the version in `pyproject.toml`, `README.md`, and `nanobot/__init__.py` aligned.
 - Prefer keeping orghi-main customizations in `README.md`, `pyproject.toml`, and `workspace/`.
@@ -101,8 +103,8 @@ When merging main into orghi-main, conflicts often occur in:
 2. **Run orghi tests**: `uv run pytest tests/orghi -v`
 3. **If tests fail** (retry up to 3 times):
    - **Never** change or relax tests to make them pass. Tests encode intended orghi behavior.
-   - **Understand** the failing test and the orghi feature intent (e.g. send_only for cron jobs).
-   - **Fix** the feature code (e.g. `nanobot/channels/manager.py`, `nanobot/channels/telegram.py`) so it correctly integrates with upstream. Resolutions must be robust.
+   - **Understand** the failing test and the orghi feature intent (use `.orghi/orghi-change-tracking/feat/` and `.orghi/orghi-change-tracking/fix/` to understand the change intent).
+   - **Fix** the feature code so it correctly integrates with upstream. Resolutions must be robust.
    - Re-run orghi tests. If pass, commit and push.
 4. **After 3 failed attempts**: Stop. Report to user: which tests fail, what was tried, that manual review is needed. Do not modify tests.
 
