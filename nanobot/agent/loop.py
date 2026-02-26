@@ -60,6 +60,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        session_adapters: dict[str, Any] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -78,6 +79,7 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
+        self.session_adapters = session_adapters or {}
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
             provider=provider,
@@ -355,22 +357,9 @@ class AgentLoop:
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
 
-        # Lazy thread session initialization: populate from main on first thread reply
-        slack_meta = (msg.metadata or {}).get("slack", {})
-        is_top_level = slack_meta.get("is_top_level", False)
-        thread_ts = slack_meta.get("thread_ts")
-
-        if not is_top_level and thread_ts and len(session.messages) == 0:
-            # First message in this thread - initialize from main session
-            main_key = f"{msg.channel}:{msg.chat_id}:main"
-            main_session = self.sessions.get_or_create(main_key)
-
-            # Copy messages tagged with this thread_ts
-            thread_messages = [m for m in main_session.messages if m.get("_thread_ts") == thread_ts]
-            if thread_messages:
-                session.messages.extend(thread_messages)
-                session.updated_at = datetime.now()
-                logger.info("Initialized thread session {} with {} messages from main", key, len(thread_messages))
+        # Hook: allow channel to initialize session
+        if adapter := self.session_adapters.get(msg.channel):
+            await adapter.on_session_load(self.sessions, msg, session)
 
         # Slash commands
         cmd = msg.content.strip().lower()
@@ -459,22 +448,14 @@ class AgentLoop:
 
         self._save_turn(session, all_msgs, 1 + len(history))
 
-        # For top-level messages: tag with thread_ts for lazy thread initialization
-        slack_meta = (msg.metadata or {}).get("slack", {})
-        is_top_level = slack_meta.get("is_top_level", False)
-        message_ts = slack_meta.get("message_ts")
-
-        if is_top_level and message_ts:
-            # Tag newly added messages with thread_ts
+        # Hook: allow channel to finalize turn
+        response_metadata = msg.metadata or {}
+        if adapter := self.session_adapters.get(msg.channel):
             num_new_messages = len(all_msgs) - len(history)
-            for i in range(-num_new_messages, 0):
-                session.messages[i]["_thread_ts"] = message_ts
-
-            # Update response metadata to reply in thread (creates Slack UI thread)
-            response_metadata = msg.metadata.copy() if msg.metadata else {}
-            response_metadata.setdefault("slack", {})["thread_ts"] = message_ts
-        else:
-            response_metadata = msg.metadata or {}
+            new_messages = session.messages[-num_new_messages:] if num_new_messages > 0 else []
+            response_metadata = await adapter.on_turn_complete(
+                self.sessions, msg, session, new_messages, response_metadata
+            )
 
         self.sessions.save(session)
 

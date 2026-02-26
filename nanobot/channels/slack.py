@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+from datetime import datetime
 from typing import Any
 
 from loguru import logger
@@ -12,10 +13,12 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from slackify_markdown import slackify_markdown
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.agent.session_adapter import SessionAdapter
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import SlackConfig
+from nanobot.session.manager import Session, SessionManager
 
 
 class SlackChannel(BaseChannel):
@@ -29,6 +32,7 @@ class SlackChannel(BaseChannel):
         self._web_client: AsyncWebClient | None = None
         self._socket_client: SocketModeClient | None = None
         self._bot_user_id: str | None = None
+        self.session_adapter = SlackSessionAdapter()
 
     async def start(self) -> None:
         """Start the Slack Socket Mode client."""
@@ -238,6 +242,59 @@ class SlackChannel(BaseChannel):
         if not text or not self._bot_user_id:
             return text
         return re.sub(rf"<@{re.escape(self._bot_user_id)}>\s*", "", text).strip()
+
+
+class SlackSessionAdapter(SessionAdapter):
+    """Handles Slack-specific session logic for thread isolation."""
+
+    async def on_session_load(
+        self,
+        session_manager: SessionManager,
+        inbound_msg: InboundMessage,
+        session: Session,
+    ) -> None:
+        """Initialize thread session from main session on first access."""
+        slack_meta = (inbound_msg.metadata or {}).get("slack", {})
+        is_top_level = slack_meta.get("is_top_level", False)
+        thread_ts = slack_meta.get("thread_ts")
+
+        # Lazy thread initialization: populate from main on first thread reply
+        if not is_top_level and thread_ts and len(session.messages) == 0:
+            main_key = f"{inbound_msg.channel}:{inbound_msg.chat_id}:main"
+            main_session = session_manager.get_or_create(main_key)
+
+            # Copy messages tagged with this thread_ts
+            thread_messages = [m for m in main_session.messages if m.get("_thread_ts") == thread_ts]
+            if thread_messages:
+                session.messages.extend(thread_messages)
+                session.updated_at = datetime.now()
+                logger.info("Initialized thread session {} with {} messages from main", session.key, len(thread_messages))
+
+    async def on_turn_complete(
+        self,
+        session_manager: SessionManager,
+        inbound_msg: InboundMessage,
+        session: Session,
+        new_messages: list[dict],
+        response_metadata: dict,
+    ) -> dict:
+        """Tag messages for thread routing and set response thread_ts."""
+        slack_meta = (inbound_msg.metadata or {}).get("slack", {})
+        is_top_level = slack_meta.get("is_top_level", False)
+        message_ts = slack_meta.get("message_ts")
+
+        # For top-level messages: tag with thread_ts for lazy thread initialization
+        if is_top_level and message_ts:
+            # Tag newly added messages
+            for msg in new_messages:
+                msg["_thread_ts"] = message_ts
+
+            # Update response metadata to reply in thread (creates Slack UI thread)
+            response_metadata = response_metadata.copy() if response_metadata else {}
+            response_metadata.setdefault("slack", {})["thread_ts"] = message_ts
+
+        return response_metadata
+
 
     _TABLE_RE = re.compile(r"(?m)^\|.*\|$(?:\n\|[\s:|-]*\|$)(?:\n\|.*\|$)*")
     _CODE_FENCE_RE = re.compile(r"```[\s\S]*?```")
