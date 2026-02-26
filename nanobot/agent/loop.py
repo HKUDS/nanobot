@@ -42,6 +42,9 @@ class AgentLoop:
     4. Executes tool calls
     5. Sends responses back
     """
+    _PROMPT_BASE_INDEX_KEY = "prompt_rollover_base_index"
+    _PROMPT_ROLLOVER_HARD_RATIO = 1.4
+    _PROMPT_ROLLOVER_MIN_HEADROOM = 10
 
     def __init__(
         self,
@@ -327,6 +330,71 @@ class AgentLoop:
         if not lock.locked():
             self._consolidation_locks.pop(session_key, None)
 
+    def _get_prompt_rollover_limits(self) -> tuple[int, int]:
+        """Return (soft_limit, hard_limit) for prompt history without new config knobs."""
+        soft_limit = max(1, self.memory_window)
+        hard_limit = max(
+            soft_limit + self._PROMPT_ROLLOVER_MIN_HEADROOM,
+            int(soft_limit * self._PROMPT_ROLLOVER_HARD_RATIO),
+        )
+        return soft_limit, hard_limit
+
+    def _get_prompt_base_index(self, session: Session) -> int:
+        raw_base = session.metadata.get(self._PROMPT_BASE_INDEX_KEY, session.last_consolidated)
+        try:
+            base = int(raw_base)
+        except (TypeError, ValueError):
+            base = session.last_consolidated
+        base = max(0, session.last_consolidated, base)
+        return min(base, len(session.messages))
+
+    def _maybe_rollover_prompt_history(self, session: Session) -> None:
+        """
+        Batch-roll prompt history by index only (no summary injection).
+
+        This keeps a stable prefix between rollovers and avoids per-turn
+        sliding-window churn once history grows beyond the hard limit.
+        """
+        soft_limit, hard_limit = self._get_prompt_rollover_limits()
+        start_index = self._get_prompt_base_index(session)
+        available = len(session.messages) - start_index
+        if available <= hard_limit:
+            return
+
+        new_base = max(start_index, len(session.messages) - soft_limit)
+        if new_base == start_index:
+            return
+
+        session.metadata[self._PROMPT_BASE_INDEX_KEY] = new_base
+        logger.info(
+            "Prompt rollover: session={} start={} new_base={} kept={}",
+            session.key,
+            start_index,
+            new_base,
+            len(session.messages) - new_base,
+        )
+
+    def _build_prompt_history(self, session: Session) -> list[dict[str, Any]]:
+        start_index = self._get_prompt_base_index(session)
+        sliced = session.messages[start_index:]
+
+        # Avoid starting from orphaned tool/result entries.
+        for i, msg in enumerate(sliced):
+            if msg.get("role") == "user":
+                sliced = sliced[i:]
+                break
+        else:
+            sliced = []
+
+        history: list[dict[str, Any]] = []
+        for msg in sliced:
+            entry: dict[str, Any] = {"role": msg["role"], "content": msg.get("content", "")}
+            for key in ("tool_calls", "tool_call_id", "name"):
+                if key in msg:
+                    entry[key] = msg[key]
+            history.append(entry)
+        return history
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -341,8 +409,9 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
+            self._maybe_rollover_prompt_history(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
-            history = session.get_history(max_messages=self.memory_window)
+            history = self._build_prompt_history(session)
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
@@ -386,6 +455,7 @@ class AgentLoop:
                 self._prune_consolidation_lock(session.key, lock)
 
             session.clear()
+            session.metadata.pop(self._PROMPT_BASE_INDEX_KEY, None)
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
@@ -413,12 +483,13 @@ class AgentLoop:
             _task = asyncio.create_task(_consolidate_and_unlock())
             self._consolidation_tasks.add(_task)
 
+        self._maybe_rollover_prompt_history(session)
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=self.memory_window)
+        history = self._build_prompt_history(session)
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
