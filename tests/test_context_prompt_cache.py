@@ -143,3 +143,25 @@ def test_rollover_keeps_user_turn_when_tail_has_no_user(tmp_path: Path) -> None:
     history = loop._build_prompt_history(session)
     assert history
     assert history[0]["role"] == "user"
+    assert len(history) <= loop.memory_window
+
+
+def test_rollover_keeps_hard_limit_when_no_user_exists_in_hard_window(tmp_path: Path) -> None:
+    """When no user exists in the hard window, keep bounded assistant/tool tail."""
+    loop = _make_loop(tmp_path, memory_window=100)
+    session = Session(key="cli:direct")
+
+    for i in range(60):
+        role = "user" if i % 2 == 0 else "assistant"
+        session.add_message(role, f"{role}-{i}")
+
+    for i in range(60, 200):
+        role = "assistant" if i % 2 == 0 else "tool"
+        session.add_message(role, f"{role}-{i}")
+
+    loop._maybe_rollover_prompt_history(session)
+
+    history = loop._build_prompt_history(session)
+    assert history
+    assert history[0]["role"] == "assistant"
+    assert len(history) <= loop.memory_window

@@ -348,26 +348,29 @@ class AgentLoop:
         session: Session,
         start_index: int,
         candidate_base: int,
+        hard_limit: int,
     ) -> int:
         """
         Align a rollover base index to a user-turn boundary.
 
         Prefer a user message at/after candidate_base to keep the recent range.
-        If none exists, fall back to the closest user message before candidate_base.
+        If none exists, fall back to the closest prior user inside the hard window.
+        If still none exists, keep candidate_base to preserve strict window bounds.
         """
         messages = session.messages
         end = len(messages)
         base = max(start_index, min(candidate_base, end))
+        hard_window_start = max(start_index, end - hard_limit)
 
         for idx in range(base, end):
             if messages[idx].get("role") == "user":
                 return idx
 
-        for idx in range(base - 1, start_index - 1, -1):
+        for idx in range(base - 1, hard_window_start - 1, -1):
             if messages[idx].get("role") == "user":
                 return idx
 
-        return start_index
+        return base
 
     def _maybe_rollover_prompt_history(self, session: Session) -> None:
         """
@@ -387,6 +390,7 @@ class AgentLoop:
             session=session,
             start_index=start_index,
             candidate_base=candidate_base,
+            hard_limit=hard_limit,
         )
         if new_base == start_index:
             return
@@ -404,13 +408,18 @@ class AgentLoop:
         start_index = self._get_prompt_base_index(session)
         sliced = session.messages[start_index:]
 
-        # Avoid starting from orphaned tool/result entries.
+        # Prefer starting at a user turn; if unavailable, fall back to assistant.
         for i, msg in enumerate(sliced):
             if msg.get("role") == "user":
                 sliced = sliced[i:]
                 break
         else:
-            sliced = []
+            for i, msg in enumerate(sliced):
+                if msg.get("role") == "assistant":
+                    sliced = sliced[i:]
+                    break
+            else:
+                sliced = []
 
         history: list[dict[str, Any]] = []
         for msg in sliced:
