@@ -20,3 +20,10 @@ poetry.lock
 .pytest_cache/
 botpy.log
 tests/
+
+# Utility / scratch scripts
+set_api_key.py
+test_firecrawl_standalone.py
+fix_web.py
+patch_web.py
+core_agent_lines.sh
