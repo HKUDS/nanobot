@@ -138,12 +138,13 @@ Add or merge these **two parts** into your config (other options have defaults).
 }
 ```
 
-*Set your model*:
+*Set your model* (optionally pin a provider — defaults to auto-detection):
 ```json
 {
   "agents": {
     "defaults": {
-      "model": "anthropic/claude-opus-4-5"
+      "model": "anthropic/claude-opus-4-5",
+      "provider": "openrouter"
     }
   }
 }
