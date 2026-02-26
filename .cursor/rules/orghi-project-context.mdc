@@ -1,0 +1,42 @@
+---
+description: Orghi project context - fork origin, branch strategy, and deployment
+alwaysApply: true
+---
+
+# Orghi Project Context
+
+## Project Overview
+
+- **Original project**: HKUDS/nanobot
+- **Fork**: jjfantini/orghi
+- **Goal**: Small personal assistant for personal workflows; base for submitting PRs to the open-source project. The agent is called "orghi" (internally still nanobot).
+
+## Branch Strategy
+
+Three main branch heads:
+
+| Branch | Purpose |
+|--------|---------|
+| `upstream/main` | Upstream repo; target for PRs |
+| `origin/main` | Kept in sync with upstream/main for development; allows the ability for the user to cleanlybranch off here to add features from the core codebase if they dont want to devleop on top of their custom orghi-main changes|
+| `origin/orghi-main` | Custom code for personal needs when PRs are not merged. |
+
+## Flow
+
+```
+upstream/main --> origin/main --> origin/orghi-main
+```
+
+Always flow upstream/main into origin/main, then into origin/orghi-main to keep the latest open-source contributions. We have a sync-upstream skill that does this for us.
+
+## Why origin/main Exists
+
+- Avoid merge conflicts
+- Test that features do not break anything before merging into orghi-main
+- Easier merge conflict resolution
+
+## Deployment
+
+- `orghi-main` has a deployment action that deploys orghi (nanobot) to a VPS on Digital Ocean via SSH
+- Every push to `orghi-main` deploys to the droplet
+- Development often happens in Cursor IDE on the remote droplet via SSH
