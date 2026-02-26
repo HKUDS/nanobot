@@ -239,7 +239,11 @@ class MCPManager:
 
             @asynccontextmanager
             async def _with_headers():
-                async with httpx.AsyncClient(headers=headers, follow_redirects=True) as client:
+                async with httpx.AsyncClient(
+                    headers=headers,
+                    follow_redirects=True,
+                    timeout=None,
+                ) as client:
                     async with _streamable_client(url, http_client=client) as result:
                         yield result
 

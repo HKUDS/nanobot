@@ -116,6 +116,7 @@ class TelegramChannel(BaseChannel):
     BOT_COMMANDS = [
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
+        BotCommand("stop", "Stop the current task"),
         BotCommand("help", "Show available commands"),
     ]
     
@@ -482,6 +483,7 @@ class TelegramChannel(BaseChannel):
         await update.message.reply_text(
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
+            "/stop — Stop the current task\n"
             "/help — Show available commands"
         )
 
@@ -922,24 +924,15 @@ class TelegramChannel(BaseChannel):
         """
         Build sender prefix for inbound messages.
         
-        Includes message_id (for reactions) and message_time in group chats.
+        Includes stable sender/group hints and message_id (for reactions).
         """
-        from datetime import timezone, timedelta
         msg_id = getattr(message, "message_id", None)
-        # Format message time in CST (UTC+8)
-        msg_date = getattr(message, "date", None)
-        time_str = ""
-        if msg_date:
-            cst = timezone(timedelta(hours=8))
-            time_str = msg_date.astimezone(cst).strftime("%Y-%m-%d %H:%M")
 
         if message.chat.type == "private":
-            # Still include message_id and time for private chats
+            # Keep private-chat prefix minimal: message_id is enough for reaction targeting.
             parts = []
             if msg_id is not None:
                 parts.append(f"message_id: {msg_id}")
-            if time_str:
-                parts.append(f"current_time {time_str}")
             return f"[{', '.join(parts)}]" if parts else ""
 
         sender = cls._resolve_sender_display(user)
@@ -947,8 +940,6 @@ class TelegramChannel(BaseChannel):
         extra_parts = []
         if msg_id is not None:
             extra_parts.append(f"message_id: {msg_id}")
-        if time_str:
-            extra_parts.append(f"current_time {time_str}")
         extra = f", {', '.join(extra_parts)}" if extra_parts else ""
         if chat_title:
             return f"[from: {sender}, group: {chat_title}{extra}]"

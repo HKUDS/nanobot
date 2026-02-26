@@ -9,22 +9,19 @@ if TYPE_CHECKING:
 
 
 class SpawnTool(Tool):
-    """
-    Tool to spawn a subagent for background task execution.
-    
-    The subagent runs asynchronously and announces its result back
-    to the main agent when complete.
-    """
+    """Tool to spawn a subagent for background task execution."""
     
     def __init__(self, manager: "SubagentManager"):
         self._manager = manager
         self._origin_channel = "cli"
         self._origin_chat_id = "direct"
+        self._session_key = "cli:direct"
     
     def set_context(self, channel: str, chat_id: str) -> None:
         """Set the origin context for subagent announcements."""
         self._origin_channel = channel
         self._origin_chat_id = chat_id
+        self._session_key = f"{channel}:{chat_id}"
     
     @property
     def name(self) -> str:
@@ -62,4 +59,5 @@ class SpawnTool(Tool):
             label=label,
             origin_channel=self._origin_channel,
             origin_chat_id=self._origin_chat_id,
+            session_key=self._session_key,
         )

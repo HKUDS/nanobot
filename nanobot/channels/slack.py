@@ -229,6 +229,11 @@ class SlackChannel(BaseChannel):
         return re.sub(rf"<@{re.escape(self._bot_user_id)}>\s*", "", text).strip()
 
     _TABLE_RE = re.compile(r"(?m)^\|.*\|$(?:\n\|[\s:|-]*\|$)(?:\n\|.*\|$)*")
+    _CODE_FENCE_RE = re.compile(r"```[\s\S]*?```")
+    _INLINE_CODE_RE = re.compile(r"`[^`]+`")
+    _LEFTOVER_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+    _LEFTOVER_HEADER_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
+    _BARE_URL_RE = re.compile(r"(?<![|<])(https?://\S+)")
 
     @classmethod
     def _to_mrkdwn(cls, text: str) -> str:
@@ -236,7 +241,26 @@ class SlackChannel(BaseChannel):
         if not text:
             return ""
         text = cls._TABLE_RE.sub(cls._convert_table, text)
-        return slackify_markdown(text)
+        return cls._fixup_mrkdwn(slackify_markdown(text))
+
+    @classmethod
+    def _fixup_mrkdwn(cls, text: str) -> str:
+        """Fix markdown artifacts that slackify_markdown misses."""
+        code_blocks: list[str] = []
+
+        def _save_code(m: re.Match) -> str:
+            code_blocks.append(m.group(0))
+            return f"\x00CB{len(code_blocks) - 1}\x00"
+
+        text = cls._CODE_FENCE_RE.sub(_save_code, text)
+        text = cls._INLINE_CODE_RE.sub(_save_code, text)
+        text = cls._LEFTOVER_BOLD_RE.sub(r"*\1*", text)
+        text = cls._LEFTOVER_HEADER_RE.sub(r"*\1*", text)
+        text = cls._BARE_URL_RE.sub(lambda m: m.group(0).replace("&amp;", "&"), text)
+
+        for i, block in enumerate(code_blocks):
+            text = text.replace(f"\x00CB{i}\x00", block)
+        return text
 
     @staticmethod
     def _convert_table(match: re.Match) -> str:

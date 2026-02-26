@@ -31,6 +31,7 @@ class AgentLoop:
     """The core processing engine that handles message->tool->response flow."""
 
     _LOG_PREVIEW_LIMIT = 320
+    _TOOL_RESULT_MAX_CHARS = 500
     _OUTBOUND_ACK_TIMEOUT_S = 15.0
     _CONSOLIDATION_COOLDOWN_S = 15 * 60
     _CONSOLIDATION_HARD_LIMIT = 30
@@ -98,6 +99,8 @@ class AgentLoop:
         )
 
         self._running = False
+        self._active_tasks: dict[str, list[asyncio.Task]] = {}
+        self._processing_lock = asyncio.Lock()
         self._consolidation_running_keys: set[str] = set()
         self._consolidation_pending_keys: set[str] = set()
         self._mcp_manager = None
@@ -121,6 +124,7 @@ class AgentLoop:
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
+                path_append=self.exec_config.path_append,
             )
         )
 
@@ -150,55 +154,108 @@ class AgentLoop:
             raise RuntimeError(error or "Message delivery failed")
 
     async def run(self) -> None:
-        """Run the agent loop, processing messages from the bus."""
+        """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         logger.info("Agent loop started")
 
         while self._running:
             try:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+
+            if msg.content.strip().lower() == "/stop":
                 try:
-                    response = await self._process_message(msg)
-                    if response:
-                        await self.bus.publish_outbound(response)
-                    elif msg.channel == "telegram":
-                        # Ensure Telegram typing indicator is stopped even when no visible text is emitted.
-                        await self.bus.publish_outbound(
-                            OutboundMessage(
-                                channel=msg.channel,
-                                chat_id=msg.chat_id,
-                                content="",
-                                silent=True,
-                                metadata=msg.metadata or {},
-                            )
-                        )
-                    elif msg.channel == "cli":
-                        # Keep interactive CLI turns from hanging when no final text is emitted.
-                        await self.bus.publish_outbound(
-                            OutboundMessage(
-                                channel=msg.channel,
-                                chat_id=msg.chat_id,
-                                content="",
-                                metadata=msg.metadata or {},
-                            )
-                        )
-                except Exception as e:
-                    logger.error(f"Error processing message: {e}")
-                    await self.bus.publish_outbound(
-                        OutboundMessage(
-                            channel=msg.channel,
-                            chat_id=msg.chat_id,
-                            content=f"Sorry, I encountered an error: {str(e)}",
-                            metadata=msg.metadata,
-                        )
-                    )
+                    await self._handle_stop(msg)
                 finally:
                     try:
                         await self.bus.complete_inbound_turn(msg)
                     except Exception as e:
                         logger.error(f"Error completing inbound turn: {e}")
-            except asyncio.TimeoutError:
                 continue
+
+            task = asyncio.create_task(self._dispatch(msg))
+            key = msg.session_key
+            self._active_tasks.setdefault(key, []).append(task)
+
+            def _cleanup(done: asyncio.Task, session_key: str = key) -> None:
+                tasks = self._active_tasks.get(session_key)
+                if not tasks:
+                    return
+                if done in tasks:
+                    tasks.remove(done)
+                if not tasks:
+                    self._active_tasks.pop(session_key, None)
+
+            task.add_done_callback(_cleanup)
+
+    async def _handle_stop(self, msg: InboundMessage) -> None:
+        """Cancel all active tasks and subagents for the session."""
+        tasks = self._active_tasks.pop(msg.session_key, [])
+        cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
+        for t in tasks:
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        sub_cancelled = await self.subagents.cancel_by_session(msg.session_key)
+        total = cancelled + sub_cancelled
+        content = f"⏹ Stopped {total} task(s)." if total else "No active task to stop."
+        await self.bus.publish_outbound(
+            OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=content,
+            )
+        )
+
+    async def _dispatch(self, msg: InboundMessage) -> None:
+        """Process a message under the global lock."""
+        async with self._processing_lock:
+            try:
+                response = await self._process_message(msg)
+                if response:
+                    await self.bus.publish_outbound(response)
+                elif msg.channel == "telegram":
+                    # Ensure Telegram typing indicator is stopped even when no visible text is emitted.
+                    await self.bus.publish_outbound(
+                        OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content="",
+                            silent=True,
+                            metadata=msg.metadata or {},
+                        )
+                    )
+                elif msg.channel == "cli":
+                    # Keep interactive CLI turns from hanging when no final text is emitted.
+                    await self.bus.publish_outbound(
+                        OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content="",
+                            metadata=msg.metadata or {},
+                        )
+                    )
+            except asyncio.CancelledError:
+                logger.info("Task cancelled for session {}", msg.session_key)
+                raise
+            except Exception as e:
+                logger.error(f"Error processing message: {e}")
+                await self.bus.publish_outbound(
+                    OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content=f"Sorry, I encountered an error: {str(e)}",
+                        metadata=msg.metadata,
+                    )
+                )
+            finally:
+                try:
+                    await self.bus.complete_inbound_turn(msg)
+                except Exception as e:
+                    logger.error(f"Error completing inbound turn: {e}")
 
     def stop(self) -> None:
         """Stop the agent loop."""
@@ -278,6 +335,13 @@ class AgentLoop:
             return timestamp.isoformat()
         return str(timestamp)
 
+    @classmethod
+    def _truncate_tool_result(cls, content: str) -> str:
+        """Trim oversized tool outputs before persisting into session history."""
+        if len(content) <= cls._TOOL_RESULT_MAX_CHARS:
+            return content
+        return content[: cls._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+
     @staticmethod
     def _save_session_with_tools(
         session,
@@ -292,13 +356,19 @@ class AgentLoop:
         session.add_message("user", user_content, **user_kwargs)
 
         if tool_use_log:
-            lines = []
             tools_used = []
-            for i, (name, args, result) in enumerate(tool_use_log, 1):
-                lines.append(f"{i}. {name}({args}) -> {result}")
+            summary_items = []
+            for name, args, result in tool_use_log:
                 tools_used.append(name)
-            summary_text = "\n".join(lines)
-            logger.info(f"Tool use summary:\n{summary_text}")
+                summary_items.append(
+                    {
+                        "name": name,
+                        "arguments": args,
+                        "result": AgentLoop._truncate_tool_result(result),
+                    }
+                )
+            summary_text = json.dumps(summary_items, ensure_ascii=False, separators=(",", ":"))
+            logger.info("Tool use summary:\n{}", summary_text)
             call_id = f"toolsum_{uuid.uuid4().hex[:12]}"
             session.add_message(
                 "assistant",
@@ -598,7 +668,7 @@ class AgentLoop:
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands",
+                content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands",
             )
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata)
