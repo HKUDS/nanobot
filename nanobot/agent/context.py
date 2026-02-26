@@ -74,10 +74,6 @@ Skills with available="false" need dependencies installed first - you can try in
     
     def _get_identity(self) -> str:
         """Get the core identity section."""
-        from datetime import datetime
-        import time as _time
-        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
-        tz = _time.strftime("%Z") or "UTC"
         workspace_path = str(self.workspace.expanduser().resolve())
         data_dir = str(Path.home() / ".nanobot")
         system = platform.system()
@@ -112,10 +108,17 @@ Your workspace is at: {workspace_path}
   - 如果 message tool 已经发了完整最终答案，最终文本必须是 [SILENT]，避免重复。
 - Sticker rules:
   - 入站贴纸会出现在用户消息里，如 [sticker: 😀 (set_name)] 或 [sticker: 😀]；把它当作用户语义的一部分来理解。
-  - 发送 Telegram 贴纸时，使用 message tool 的 `sticker_id` 参数（Telegram file_id）。
+  - 发送 Telegram 贴纸时，使用 message tool 的 `sticker_id` 参数（Telegram file_id）。"""
 
-## Current Time
-{now} ({tz})"""
+    @staticmethod
+    def _get_current_time_section() -> str:
+        """Get current local time section for system prompt tail."""
+        import time as _time
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        tz = _time.strftime("%Z") or "UTC"
+        return f"## Current Time\n{now} ({tz})"
+
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
@@ -161,6 +164,7 @@ Your workspace is at: {workspace_path}
         system_prompt = self.build_system_prompt(skill_names)
         if channel and chat_id:
             system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
+        system_prompt += f"\n\n{self._get_current_time_section()}"
         messages.append({"role": "system", "content": system_prompt})
 
         # History
