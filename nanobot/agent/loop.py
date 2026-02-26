@@ -355,6 +355,23 @@ class AgentLoop:
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
 
+        # Lazy thread session initialization: populate from main on first thread reply
+        slack_meta = (msg.metadata or {}).get("slack", {})
+        is_top_level = slack_meta.get("is_top_level", False)
+        thread_ts = slack_meta.get("thread_ts")
+
+        if not is_top_level and thread_ts and len(session.messages) == 0:
+            # First message in this thread - initialize from main session
+            main_key = f"{msg.channel}:{msg.chat_id}:main"
+            main_session = self.sessions.get_or_create(main_key)
+
+            # Copy messages tagged with this thread_ts
+            thread_messages = [m for m in main_session.messages if m.get("_thread_ts") == thread_ts]
+            if thread_messages:
+                session.messages.extend(thread_messages)
+                session.updated_at = datetime.now()
+                logger.info("Initialized thread session {} with {} messages from main", key, len(thread_messages))
+
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
@@ -441,6 +458,24 @@ class AgentLoop:
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         self._save_turn(session, all_msgs, 1 + len(history))
+
+        # For top-level messages: tag with thread_ts for lazy thread initialization
+        slack_meta = (msg.metadata or {}).get("slack", {})
+        is_top_level = slack_meta.get("is_top_level", False)
+        message_ts = slack_meta.get("message_ts")
+
+        if is_top_level and message_ts:
+            # Tag newly added messages with thread_ts
+            num_new_messages = len(all_msgs) - len(history)
+            for i in range(-num_new_messages, 0):
+                session.messages[i]["_thread_ts"] = message_ts
+
+            # Update response metadata to reply in thread (creates Slack UI thread)
+            response_metadata = msg.metadata.copy() if msg.metadata else {}
+            response_metadata.setdefault("slack", {})["thread_ts"] = message_ts
+        else:
+            response_metadata = msg.metadata or {}
+
         self.sessions.save(session)
 
         if message_tool := self.tools.get("message"):
@@ -449,7 +484,7 @@ class AgentLoop:
 
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
-            metadata=msg.metadata or {},
+            metadata=response_metadata,
         )
 
     _TOOL_RESULT_MAX_CHARS = 500

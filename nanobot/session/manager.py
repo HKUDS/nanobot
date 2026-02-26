@@ -95,23 +95,23 @@ class SessionManager:
     def get_or_create(self, key: str) -> Session:
         """
         Get an existing session or create a new one.
-        
+
         Args:
             key: Session key (usually channel:chat_id).
-        
+
         Returns:
             The session.
         """
         if key in self._cache:
             return self._cache[key]
-        
+
         session = self._load(key)
         if session is None:
             session = Session(key=key)
-        
+
         self._cache[key] = session
         return session
-    
+
     def _load(self, key: str) -> Session | None:
         """Load a session from disk."""
         path = self._get_session_path(key)

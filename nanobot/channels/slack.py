@@ -82,8 +82,8 @@ class SlackChannel(BaseChannel):
             slack_meta = msg.metadata.get("slack", {}) if msg.metadata else {}
             thread_ts = slack_meta.get("thread_ts")
             channel_type = slack_meta.get("channel_type")
-            # Only reply in thread for channel/group messages; DMs don't use threads
-            use_thread = thread_ts and channel_type != "im"
+            # Reply in thread for all messages with thread_ts (including DMs now)
+            use_thread = thread_ts is not None
             thread_ts_param = thread_ts if use_thread else None
 
             if msg.content:
@@ -165,22 +165,32 @@ class SlackChannel(BaseChannel):
 
         text = self._strip_bot_mention(text)
 
-        thread_ts = event.get("thread_ts")
-        if self.config.reply_in_thread and not thread_ts:
-            thread_ts = event.get("ts")
+        thread_ts = event.get("thread_ts")  # Set by Slack if replying in existing thread
+        message_ts = event.get("ts")  # This message's timestamp
+
+        # Determine if this is a top-level message or thread reply
+        is_top_level = thread_ts is None
+
+        # Unified session key logic for both DMs and channels
+        if is_top_level:
+            # Top-level message → main session
+            session_key = f"slack:{chat_id}:main"
+            metadata_extra = {"is_top_level": True, "message_ts": message_ts}
+        else:
+            # Reply in thread → thread-specific session
+            session_key = f"slack:{chat_id}:{thread_ts}"
+            metadata_extra = {"is_top_level": False, "thread_ts": thread_ts}
+
         # Add :eyes: reaction to the triggering message (best-effort)
         try:
-            if self._web_client and event.get("ts"):
+            if self._web_client and message_ts:
                 await self._web_client.reactions_add(
                     channel=chat_id,
                     name=self.config.react_emoji,
-                    timestamp=event.get("ts"),
+                    timestamp=message_ts,
                 )
         except Exception as e:
             logger.debug("Slack reactions_add failed: {}", e)
-
-        # Thread-scoped session key for channel/group messages
-        session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts and channel_type != "im" else None
 
         try:
             await self._handle_message(
@@ -192,6 +202,7 @@ class SlackChannel(BaseChannel):
                         "event": event,
                         "thread_ts": thread_ts,
                         "channel_type": channel_type,
+                        **metadata_extra,  # Add is_top_level and message_ts/thread_ts
                     },
                 },
                 session_key=session_key,
