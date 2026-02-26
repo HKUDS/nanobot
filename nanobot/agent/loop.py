@@ -228,7 +228,13 @@ class AgentLoop:
                         messages, tool_call.id, tool_call.name, result
                     )
             else:
-                final_content = self._strip_think(response.content)
+                clean = self._strip_think(response.content)
+                if on_progress and clean:
+                    await on_progress(clean)
+                messages = self.context.add_assistant_message(
+                    messages, clean, reasoning_content=response.reasoning_content,
+                )
+                final_content = clean
                 break
 
         if final_content is None and iteration >= self.max_iterations:
