@@ -118,6 +118,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
         BotCommand("reset", "Reset conversation history"),
+        BotCommand("stop", "Stop the current task"),
         BotCommand("help", "Show available commands"),
     ]
     

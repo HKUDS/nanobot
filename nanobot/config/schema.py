@@ -1,6 +1,8 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
+from typing import Literal
+
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
@@ -59,6 +61,23 @@ class DiscordConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
+
+
+class MatrixConfig(Base):
+    """Matrix (Element) channel configuration."""
+
+    enabled: bool = False
+    homeserver: str = "https://matrix.org"
+    access_token: str = ""
+    user_id: str = ""  # @bot:matrix.org
+    device_id: str = ""
+    e2ee_enabled: bool = True # Enable Matrix E2EE support (encryption + encrypted room handling).
+    sync_stop_grace_seconds: int = 2 # Max seconds to wait for sync_forever to stop gracefully before cancellation fallback.
+    max_media_bytes: int = 20 * 1024 * 1024 # Max attachment size accepted for Matrix media handling (inbound + outbound).
+    allow_from: list[str] = Field(default_factory=list)
+    group_policy: Literal["open", "mention", "allowlist"] = "open"
+    group_allow_from: list[str] = Field(default_factory=list)
+    allow_room_mentions: bool = False
 
 
 class EmailConfig(Base):
@@ -179,6 +198,7 @@ class ChannelsConfig(Base):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
 class ThinkingConfig(BaseModel):
@@ -192,6 +212,7 @@ class AgentDefaults(Base):
 
     workspace: str = "~/.nanobot/workspace"
     model: str = "anthropic/claude-opus-4-5"
+    provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     max_tokens: int = 8192
     temperature: float = 0.7
     max_tool_iterations: int = 20
@@ -269,6 +290,7 @@ class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
     timeout: int = 60
+    path_append: str = ""
 
 
 class MCPServerConfig(Base):
@@ -308,6 +330,11 @@ class Config(BaseSettings):
     def _match_provider(self, model: str | None = None) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import PROVIDERS
+
+        forced = self.agents.defaults.provider
+        if forced != "auto":
+            p = getattr(self.providers, forced, None)
+            return (p, forced) if p else (None, None)
 
         model_lower = (model or self.agents.defaults.model).lower()
         model_normalized = model_lower.replace("-", "_")
