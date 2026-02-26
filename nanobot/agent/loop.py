@@ -60,6 +60,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        enable_event_handling: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -75,6 +76,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.enable_event_handling = enable_event_handling
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -99,7 +101,8 @@ class AgentLoop:
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
-        self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
+        self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks (all scheduled tasks)
+        self._processing_tasks: set[str] = set()  # Session keys currently being processed
         self._processing_lock = asyncio.Lock()
         self._register_default_tools()
 
@@ -178,6 +181,7 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        session_key: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
@@ -185,8 +189,24 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
 
+        async def inject_event() -> bool:
+            """Check for and inject pending events. Returns True if event was found."""
+            if not session_key:
+                return False
+            event = await self.bus.check_events(session_key)
+            if event:
+                messages.append({
+                    "role": "system",
+                    "content": f"<SYS_EVENT type=\"user_interrupt\">{event}</SYS_EVENT>"
+                })
+                return True
+            return False
+
         while iteration < self.max_iterations:
             iteration += 1
+
+            # Check for user events before LLM call
+            await inject_event()
 
             response = await self.provider.chat(
                 messages=messages,
@@ -219,7 +239,20 @@ class AgentLoop:
                     reasoning_content=response.reasoning_content,
                 )
 
-                for tool_call in response.tool_calls:
+                # Execute each tool, checking for events before each one
+                for i, tool_call in enumerate(response.tool_calls):
+                    if await inject_event():
+                        # Event received: cancel this and all remaining tools
+                        logger.info("Event received during tool execution, cancelling remaining tools")
+                        for tc in response.tool_calls[i:]:
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "name": tc.name,
+                                "content": "CANCELLED: User interrupted"
+                            })
+                        break
+
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
@@ -255,9 +288,15 @@ class AgentLoop:
             if msg.content.strip().lower() == "/stop":
                 await self._handle_stop(msg)
             else:
+                # If a task is already processing this session, publish as interrupt event
+                if self.enable_event_handling and msg.session_key in self._processing_tasks:
+                    await self.bus.publish_event(msg.session_key, msg.content)
+                    logger.info("Published interrupt event for session {}", msg.session_key)
+                    return  # In-flight task will handle the event
+
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
-                task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
+                task.add_done_callback(lambda t, k=msg.session_key: self._cleanup_task(k, t))
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
@@ -277,25 +316,31 @@ class AgentLoop:
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message under the global lock."""
-        async with self._processing_lock:
-            try:
-                response = await self._process_message(msg)
-                if response is not None:
-                    await self.bus.publish_outbound(response)
-                elif msg.channel == "cli":
+        # Mark this session as being processed
+        self._processing_tasks.add(msg.session_key)
+        try:
+            async with self._processing_lock:
+                try:
+                    response = await self._process_message(msg)
+                    if response is not None:
+                        await self.bus.publish_outbound(response)
+                    elif msg.channel == "cli":
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel, chat_id=msg.chat_id,
+                            content="", metadata=msg.metadata or {},
+                        ))
+                except asyncio.CancelledError:
+                    logger.info("Task cancelled for session {}", msg.session_key)
+                    raise
+                except Exception:
+                    logger.exception("Error processing message for session {}", msg.session_key)
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,
-                        content="", metadata=msg.metadata or {},
+                        content="Sorry, I encountered an error.",
                     ))
-            except asyncio.CancelledError:
-                logger.info("Task cancelled for session {}", msg.session_key)
-                raise
-            except Exception:
-                logger.exception("Error processing message for session {}", msg.session_key)
-                await self.bus.publish_outbound(OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content="Sorry, I encountered an error.",
-                ))
+        finally:
+            # Always remove from processing set when done
+            self._processing_tasks.discard(msg.session_key)
 
     async def close_mcp(self) -> None:
         """Close MCP connections."""
@@ -323,6 +368,14 @@ class AgentLoop:
         if not lock.locked():
             self._consolidation_locks.pop(session_key, None)
 
+    def _cleanup_task(self, session_key: str, task: asyncio.Task) -> None:
+        """Remove a completed task from the active tasks tracking."""
+        tasks = self._active_tasks.get(session_key)
+        if tasks and task in tasks:
+            tasks.remove(task)
+            if not tasks:
+                del self._active_tasks[session_key]
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -342,8 +395,9 @@ class AgentLoop:
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
+                enable_event_handling=self.enable_event_handling,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(messages, session_key=key)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -420,6 +474,7 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            enable_event_handling=self.enable_event_handling,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -431,7 +486,7 @@ class AgentLoop:
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages, on_progress=on_progress or _bus_progress, session_key=key,
         )
 
         if final_content is None:
