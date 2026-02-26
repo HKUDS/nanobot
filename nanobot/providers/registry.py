@@ -236,6 +236,26 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_oauth=True,                      # OAuth-based authentication
     ),
 
+    # Antigravity (Google Cloud Code): uses OAuth, not API key.
+    ProviderSpec(
+        name="antigravity",
+        keywords=("antigravity", "ag"),
+        env_key="",
+        display_name="Antigravity",
+        litellm_prefix="",                  # Bypass LiteLLM
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="antigravity",
+        default_api_base="https://generativelanguage.googleapis.com/v1beta",
+        strip_model_prefix=False,
+        model_overrides=(),
+        is_oauth=True,
+        is_direct=True,                     # Direct custom implementation
+    ),
+
     # DeepSeek: needs "deepseek/" prefix for LiteLLM routing.
     ProviderSpec(
         name="deepseek",

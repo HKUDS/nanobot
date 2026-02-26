@@ -233,6 +233,7 @@ def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+    from nanobot.providers.antigravity_provider import AntigravityProvider
     from nanobot.providers.custom_provider import CustomProvider
 
     model = config.agents.defaults.model
@@ -242,6 +243,10 @@ def _make_provider(config: Config):
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         return OpenAICodexProvider(default_model=model)
+
+    # Antigravity (OAuth)
+    if provider_name == "antigravity" or model.startswith("antigravity/"):
+        return AntigravityProvider(default_model=model)
 
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     if provider_name == "custom":
