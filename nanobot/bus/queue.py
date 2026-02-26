@@ -42,8 +42,32 @@ class MessageBus:
         await self.inbound.put(msg)
 
     async def consume_inbound(self) -> InboundMessage:
-        """Consume the next inbound message (blocks until available)."""
+        """Consume the next inbound message (blocks until available).
+
+        Also drains any same-session messages already sitting in the queue
+        (accumulated between turns) and merges them into one.
+        """
         msg = await self.inbound.get()
+
+        # Drain queue: collect same-session messages, put back others
+        same_session = [msg]
+        others: list[InboundMessage] = []
+        while True:
+            try:
+                queued = self.inbound.get_nowait()
+                if queued.session_key == msg.session_key:
+                    same_session.append(queued)
+                else:
+                    others.append(queued)
+            except asyncio.QueueEmpty:
+                break
+        for m in others:
+            await self.inbound.put(m)
+
+        if len(same_session) > 1:
+            logger.info("Merging {} queued messages for session {}", len(same_session), msg.session_key)
+            msg = self._merge_buffered_messages(same_session)
+
         async with self._inbound_collect_lock:
             self._active_inbound_session = msg.session_key
         return msg
