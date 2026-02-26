@@ -16,16 +16,19 @@ class SpawnTool(Tool):
         self._manager = manager
         self._origin_channel = "cli"
         self._origin_chat_id = "direct"
+        self._session_key = "cli:direct"
         # Profile-inherited defaults (set per-message from active agent profile)
         self._profile_model: str | None = None
         self._profile_temperature: float | None = None
         self._profile_max_tokens: int | None = None
         self._profile_provider: "LLMProvider | None" = None
 
+
     def set_context(self, channel: str, chat_id: str) -> None:
         """Set the origin context for subagent announcements."""
         self._origin_channel = channel
         self._origin_chat_id = chat_id
+        self._session_key = f"{channel}:{chat_id}"
 
     def set_profile_context(
         self,
@@ -97,4 +100,5 @@ class SpawnTool(Tool):
             temperature=self._profile_temperature,
             max_tokens=self._profile_max_tokens,
             provider=self._profile_provider,
+            session_key=self._session_key,
         )
