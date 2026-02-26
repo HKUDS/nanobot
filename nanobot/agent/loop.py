@@ -1,10 +1,4 @@
-"""Agent loop: the core processing engine.
-
-Supports an optional dual-layer architecture (Steering Loop + AgentMessage)
-for dynamic task interruption and structured context hooks.
-Both layers are opt-in via ``enable_steering``; when disabled the behaviour
-is identical to the original single-layer loop.
-"""
+"""Agent loop: the core processing engine."""
 
 from __future__ import annotations
 

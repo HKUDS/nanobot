@@ -1,12 +1,4 @@
-"""Structured message model for the dual-layer architecture.
-
-Application layer (AgentMessage): supports rich metadata like artifacts,
-user attachments, and semantic tags for intelligent context pruning.
-
-LLM layer (dict): the standard role/content/tool_calls format that LLMs understand.
-
-When no hooks are configured, AgentMessage is a thin wrapper with zero overhead.
-"""
+"""Structured message model for the dual-layer architecture."""
 
 from __future__ import annotations
 
@@ -96,8 +88,6 @@ class AgentMessage:
             reasoning_content=d.get("reasoning_content"),
         )
 
-    # ---- Batch conversion ----
-
     @staticmethod
     def to_llm_list(messages: list[AgentMessage]) -> list[dict[str, Any]]:
         return [m.llm_dict for m in messages]
@@ -105,8 +95,6 @@ class AgentMessage:
     @staticmethod
     def from_dict_list(messages: list[dict[str, Any]]) -> list[AgentMessage]:
         return [AgentMessage.from_dict(m) for m in messages]
-
-    # ---- Semantic query helpers ----
 
     @staticmethod
     def filter_by_type(
