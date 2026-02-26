@@ -61,6 +61,49 @@ class Session:
                     entry[k] = m[k]
             out.append(entry)
         return out
+
+    def recent_image_paths(self, limit: int = 3) -> list[str]:
+        """
+        Return the most recent image file paths referenced in this session.
+
+        This is used to support "previous image" follow-up questions when the
+        current user message contains no media.
+        """
+        try:
+            n = int(limit)
+        except Exception:
+            n = 0
+        if n <= 0:
+            return []
+
+        exts = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tiff", ".tif", ".ico"}
+        seen: set[str] = set()
+        out: list[str] = []
+
+        # Walk backwards through persisted session messages.
+        for m in reversed(self.messages):
+            media = m.get("media")
+            if not isinstance(media, list) or not media:
+                continue
+            for p in reversed(media):
+                if not isinstance(p, str) or not p.strip():
+                    continue
+                if p in seen:
+                    continue
+                try:
+                    path = Path(p).expanduser()
+                    if path.suffix.lower() not in exts:
+                        continue
+                    if not path.exists():
+                        continue
+                except Exception:
+                    continue
+                seen.add(p)
+                out.append(str(path))
+                if len(out) >= n:
+                    return out
+
+        return out
     
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""

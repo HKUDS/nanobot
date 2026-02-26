@@ -53,6 +53,7 @@ class AgentLoop:
         temperature: float = 0.1,
         max_tokens: int = 4096,
         memory_window: int = 100,
+        recent_image_limit: int = 3,
         brave_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
@@ -71,6 +72,10 @@ class AgentLoop:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.memory_window = memory_window
+        try:
+            self.recent_image_limit = max(0, int(recent_image_limit))
+        except Exception:
+            self.recent_image_limit = 3
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -120,6 +125,34 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+    @staticmethod
+    def _looks_like_referring_previous_image(text: str) -> bool:
+        """
+        Heuristic: detect if a follow-up message likely refers to a previous image.
+
+        Keep this conservative to avoid attaching unrelated old images.
+        """
+        t = (text or "").strip().lower()
+        if not t:
+            return False
+
+        keywords = (
+            # Chinese common phrasings
+            "看图", "这张图", "这张图片", "图里", "图片里", "截图", "如图", "上面那张", "上一张",
+            "这个图", "图中", "图上的", "帮我看一下图", "识别一下图",
+            # English common phrasings
+            "in the image", "in this image", "in the picture", "in this picture", "screenshot", "as shown",
+            "shown in the image", "from the image", "from this image",
+        )
+        if any(k in t for k in keywords):
+            return True
+
+        # Very short questions often refer to the immediate previous context/image.
+        if len(t) <= 10 and any(x in t for x in ("这", "图", "吗", "呢", "?", "？")):
+            return True
+
+        return False
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -419,10 +452,24 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.memory_window)
+        media_for_turn = list(msg.media or [])
+
+        # If the current user message has no media but seems to refer to a previous image,
+        # attach a few recent images from session history.
+        if (not media_for_turn) and self.recent_image_limit > 0:
+            try:
+                if self._looks_like_referring_previous_image(msg.content):
+                    recent = session.recent_image_paths(limit=self.recent_image_limit)
+                    if recent:
+                        media_for_turn = list(recent)
+                        logger.debug("Auto-attached {} recent images for {}", len(recent), session.key)
+            except Exception:
+                pass
+
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
-            media=msg.media if msg.media else None,
+            media=media_for_turn if media_for_turn else None,
             channel=msg.channel, chat_id=msg.chat_id,
         )
 
@@ -444,7 +491,7 @@ class AgentLoop:
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        self._save_turn(session, all_msgs, 1 + len(history), inbound_media=list(msg.media or []))
         self.sessions.save(session)
 
         if message_tool := self.tools.get("message"):
@@ -458,11 +505,37 @@ class AgentLoop:
 
     _TOOL_RESULT_MAX_CHARS = 500
 
-    def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
+    def _save_turn(
+        self,
+        session: Session,
+        messages: list[dict],
+        skip: int,
+        inbound_media: list[str] | None = None,
+    ) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
+        inbound_media = inbound_media or []
+        inbound_media_written = False
+
         for m in messages[skip:]:
             entry = {k: v for k, v in m.items() if k != "reasoning_content"}
+
+            # Avoid persisting base64 multimodal payloads into session history.
+            # Keep the user text, and store inbound media paths for later recall.
+            if entry.get("role") == "user":
+                if isinstance(entry.get("content"), list):
+                    try:
+                        txt = ""
+                        for block in entry.get("content") or []:
+                            if isinstance(block, dict) and block.get("type") == "text":
+                                txt = str(block.get("text") or "")
+                        entry["content"] = txt
+                    except Exception:
+                        entry["content"] = ""
+                if inbound_media and not inbound_media_written:
+                    entry["media"] = list(inbound_media)
+                    inbound_media_written = True
+
             if entry.get("role") == "tool" and isinstance(entry.get("content"), str):
                 content = entry["content"]
                 if len(content) > self._TOOL_RESULT_MAX_CHARS:

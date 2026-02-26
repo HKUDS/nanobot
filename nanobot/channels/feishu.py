@@ -591,19 +591,55 @@ class FeishuChannel(BaseChannel):
 
         return None, f"[{msg_type}: download failed]"
 
-    def _send_message_sync(self, receive_id_type: str, receive_id: str, msg_type: str, content: str) -> bool:
+    def _send_message_sync(
+        self,
+        receive_id_type: str,
+        receive_id: str,
+        msg_type: str,
+        content: str,
+        *,
+        reply_to_message_id: str | None = None,
+    ) -> bool:
         """Send a single message (text/image/file/interactive) synchronously."""
         try:
-            request = CreateMessageRequest.builder() \
-                .receive_id_type(receive_id_type) \
-                .request_body(
-                    CreateMessageRequestBody.builder()
-                    .receive_id(receive_id)
-                    .msg_type(msg_type)
-                    .content(content)
+            if reply_to_message_id:
+                # Reply API (preferred when caller provides original message_id)
+                try:
+                    from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody  # type: ignore
+
+                    request = (
+                        ReplyMessageRequest.builder()
+                        .message_id(reply_to_message_id)
+                        .request_body(
+                            ReplyMessageRequestBody.builder()
+                            .msg_type(msg_type)
+                            .content(content)
+                            .build()
+                        )
+                        .build()
+                    )
+                    response = self._client.im.v1.message.reply(request)
+                except Exception:
+                    reply_to_message_id = None
+                    response = None
+            else:
+                response = None
+
+            if reply_to_message_id is None:
+                request = (
+                    CreateMessageRequest.builder()
+                    .receive_id_type(receive_id_type)
+                    .request_body(
+                        CreateMessageRequestBody.builder()
+                        .receive_id(receive_id)
+                        .msg_type(msg_type)
+                        .content(content)
+                        .build()
+                    )
                     .build()
-                ).build()
-            response = self._client.im.v1.message.create(request)
+                )
+                response = self._client.im.v1.message.create(request)
+
             if not response.success():
                 logger.error(
                     "Failed to send Feishu {} message: code={}, msg={}, log_id={}",
@@ -625,34 +661,100 @@ class FeishuChannel(BaseChannel):
         try:
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
             loop = asyncio.get_running_loop()
+            reply_to = None
+            try:
+                if isinstance(msg.metadata, dict):
+                    reply_to = str(msg.metadata.get("message_id") or "") or None
+            except Exception:
+                reply_to = None
 
-            for file_path in msg.media:
+            media_paths = list(msg.media or [])
+            image_paths = []
+            other_paths = []
+            for file_path in media_paths:
+                if not isinstance(file_path, str) or not file_path:
+                    continue
                 if not os.path.isfile(file_path):
                     logger.warning("Media file not found: {}", file_path)
                     continue
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext in self._IMAGE_EXTS:
-                    key = await loop.run_in_executor(None, self._upload_image_sync, file_path)
-                    if key:
-                        await loop.run_in_executor(
-                            None, self._send_message_sync,
-                            receive_id_type, msg.chat_id, "image", json.dumps({"image_key": key}, ensure_ascii=False),
-                        )
+                    image_paths.append(file_path)
                 else:
-                    key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
-                    if key:
-                        media_type = "audio" if ext in self._AUDIO_EXTS else "file"
-                        await loop.run_in_executor(
-                            None, self._send_message_sync,
-                            receive_id_type, msg.chat_id, media_type, json.dumps({"file_key": key}, ensure_ascii=False),
-                        )
+                    other_paths.append(file_path)
 
-            if msg.content and msg.content.strip():
-                card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
+            # If we have both image + text, prefer a single interactive card with embedded image.
+            if (msg.content and msg.content.strip()) and image_paths:
+                first = image_paths[0]
+                key = await loop.run_in_executor(None, self._upload_image_sync, first)
+                elements = []
+                if key:
+                    elements.append({"tag": "img", "img_key": key, "alt": {"tag": "plain_text", "content": "[image]"}})
+                elements.extend(self._build_card_elements(msg.content))
+                card = {"config": {"wide_screen_mode": True}, "elements": elements}
                 await loop.run_in_executor(
-                    None, self._send_message_sync,
-                    receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
+                    None,
+                    self._send_message_sync,
+                    receive_id_type,
+                    msg.chat_id,
+                    "interactive",
+                    json.dumps(card, ensure_ascii=False),
+                    reply_to_message_id=reply_to,
                 )
+                # Send remaining images (if any) as separate messages.
+                for fp in image_paths[1:]:
+                    k = await loop.run_in_executor(None, self._upload_image_sync, fp)
+                    if k:
+                        await loop.run_in_executor(
+                            None,
+                            self._send_message_sync,
+                            receive_id_type,
+                            msg.chat_id,
+                            "image",
+                            json.dumps({"image_key": k}, ensure_ascii=False),
+                            reply_to_message_id=reply_to,
+                        )
+            else:
+                # No text+image combo — send images first, then text card if present.
+                for fp in image_paths:
+                    k = await loop.run_in_executor(None, self._upload_image_sync, fp)
+                    if k:
+                        await loop.run_in_executor(
+                            None,
+                            self._send_message_sync,
+                            receive_id_type,
+                            msg.chat_id,
+                            "image",
+                            json.dumps({"image_key": k}, ensure_ascii=False),
+                            reply_to_message_id=reply_to,
+                        )
+                if msg.content and msg.content.strip():
+                    card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
+                    await loop.run_in_executor(
+                        None,
+                        self._send_message_sync,
+                        receive_id_type,
+                        msg.chat_id,
+                        "interactive",
+                        json.dumps(card, ensure_ascii=False),
+                        reply_to_message_id=reply_to,
+                    )
+
+            # Upload and send other files/audio
+            for file_path in other_paths:
+                ext = os.path.splitext(file_path)[1].lower()
+                key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
+                if key:
+                    media_type = "audio" if ext in self._AUDIO_EXTS else "file"
+                    await loop.run_in_executor(
+                        None,
+                        self._send_message_sync,
+                        receive_id_type,
+                        msg.chat_id,
+                        media_type,
+                        json.dumps({"file_key": key}, ensure_ascii=False),
+                        reply_to_message_id=reply_to,
+                    )
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)

@@ -182,6 +182,8 @@ class QQConfig(Base):
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
+    media_upload_command: str = ""  # Optional command to upload local files and output a public URL
+    media_upload_timeout_s: int = 30  # Timeout seconds for media upload command
 
 
 class ChannelsConfig(Base):
@@ -211,6 +213,7 @@ class AgentDefaults(Base):
     temperature: float = 0.1
     max_tool_iterations: int = 40
     memory_window: int = 100
+    recent_image_limit: int = 3  # Auto-attach recent images for follow-up questions (0 = disabled)
 
 
 class AgentsConfig(Base):
