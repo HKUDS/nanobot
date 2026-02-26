@@ -972,7 +972,7 @@ Once configured, MCP tools are automatically discovered and registered as `mcp__
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>
 
-The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). If the file has tasks, the agent executes them and delivers results to your most recently active chat channel.
+The gateway wakes up periodically (default: every 30 minutes) and checks `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). If the file has tasks, the agent executes them and delivers results to your most recently active chat channel.
 
 **Setup:** edit `~/.nanobot/workspace/HEARTBEAT.md` (created automatically by `nanobot onboard`):
 
@@ -984,6 +984,22 @@ The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspac
 ```
 
 The agent can also manage this file itself — ask it to "add a periodic task" and it will update `HEARTBEAT.md` for you.
+
+You can configure heartbeat interval and a dedicated model in `~/.nanobot/config.json`:
+
+```json
+{
+  "gateway": {
+    "heartbeat": {
+      "enabled": true,
+      "intervalS": 900,
+      "model": "openai/gpt-4o-mini"
+    }
+  }
+}
+```
+
+`gateway.heartbeat.model` (when set) is used for both heartbeat decision and heartbeat task execution.
 
 > **Note:** The gateway must be running (`nanobot gateway`) and you must have chatted with the bot at least once so it knows which channel to deliver to.
 

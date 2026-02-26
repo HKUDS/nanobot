@@ -502,8 +502,10 @@ class AgentLoop:
         asyncio.create_task(_run_for_session())
 
     async def _run_agent_loop(
-        self, initial_messages: list[dict],
+        self,
+        initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        model_override: str | None = None,
     ) -> tuple[str, str, list[tuple[str, str, str]]]:
         """Run the agent iteration loop and return final content + metadata."""
         messages = initial_messages
@@ -512,13 +514,14 @@ class AgentLoop:
         last_finish_reason = "unknown"
         tool_use_log: list[tuple[str, str, str]] = []
         stashed_content: str | None = None
+        model_to_use = model_override or self.model
 
         while iteration < self.max_iterations:
             iteration += 1
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
-                model=self.model,
+                model=model_to_use,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 thinking=self.thinking,
@@ -627,8 +630,11 @@ class AgentLoop:
         return final_content, last_finish_reason, tool_use_log
 
     async def _process_message(
-        self, msg: InboundMessage, session_key: str | None = None,
+        self,
+        msg: InboundMessage,
+        session_key: str | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        model_override: str | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message."""
         if msg.channel == "system":
@@ -701,7 +707,9 @@ class AgentLoop:
             )
 
         final_content, _, tool_use_log = await self._run_agent_loop(
-            messages, on_progress=on_progress or _bus_progress,
+            messages,
+            on_progress=on_progress or _bus_progress,
+            model_override=model_override,
         )
 
         silent_requested = self._contains_silent_marker(final_content)
@@ -983,9 +991,15 @@ Respond with ONLY valid JSON, no markdown fences."""
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        model_override: str | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self.start_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        response = await self._process_message(
+            msg,
+            session_key=session_key,
+            on_progress=on_progress,
+            model_override=model_override,
+        )
         return response.content if response else ""

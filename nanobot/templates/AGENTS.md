@@ -14,10 +14,12 @@ Get USER_ID and CHANNEL from the current session (e.g., `8281248569` and `telegr
 
 ## Heartbeat Tasks
 
-`HEARTBEAT.md` is checked every 30 minutes. Use file tools to manage periodic tasks:
+`HEARTBEAT.md` is checked periodically (default every 30 minutes; configurable via `gateway.heartbeat.intervalS`). Use file tools to manage periodic tasks:
 
 - **Add**: `edit_file` to append new tasks
 - **Remove**: `edit_file` to delete completed tasks
 - **Rewrite**: `write_file` to replace all tasks
 
 When the user asks for a recurring/periodic task, update `HEARTBEAT.md` instead of creating a one-time cron reminder.
+
+If `gateway.heartbeat.model` is configured, heartbeat decision and execution use that model.

@@ -271,7 +271,8 @@ class HeartbeatConfig(Base):
     """Heartbeat service configuration."""
 
     enabled: bool = True
-    interval_s: int = 30 * 60  # 30 minutes
+    interval_s: int = Field(default=30 * 60, ge=1)  # 30 minutes
+    model: str = ""  # Optional dedicated model for heartbeat decision + execution
 
 
 class GatewayConfig(Base):

@@ -391,6 +391,7 @@ def gateway(
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
+            model_override=hb_model,
         )
 
     async def on_heartbeat_notify(response: str) -> None:
@@ -402,10 +403,11 @@ def gateway(
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
 
     hb_cfg = config.gateway.heartbeat
+    hb_model = hb_cfg.model.strip() or agent.model
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
         provider=provider,
-        model=agent.model,
+        model=hb_model,
         on_execute=on_heartbeat_execute,
         on_notify=on_heartbeat_notify,
         interval_s=hb_cfg.interval_s,
@@ -421,7 +423,8 @@ def gateway(
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
     
-    console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+    model_suffix = f", model {hb_model}" if hb_cfg.model.strip() else ""
+    console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s{model_suffix}")
 
     # Show MCP status
     if config.mcp.servers:
