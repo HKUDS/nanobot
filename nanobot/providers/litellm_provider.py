@@ -1,19 +1,18 @@
 """LiteLLM provider implementation for multi-provider support."""
 
 import json
-import json_repair
 import os
 import re
 from typing import Any
 from uuid import uuid4
 
+import json_repair
 import litellm
 from litellm import acompletion
 from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
-
 
 # Standard OpenAI chat-completion message keys plus reasoning_content for
 # thinking-enabled models (Kimi k2.5, DeepSeek-R1, etc.).
@@ -162,6 +161,67 @@ class LiteLLMProvider(LLMProvider):
         if len(compact) > limit:
             return f"{compact[:limit]}...(truncated)"
         return compact
+
+    @staticmethod
+    def _coerce_int(value: Any) -> int:
+        """Best-effort conversion for token counters."""
+        if value is None:
+            return 0
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _usage_get(source: Any, key: str) -> Any:
+        """Read a usage field from either dict-like or object-like payloads."""
+        if source is None:
+            return None
+        if isinstance(source, dict):
+            return source.get(key)
+        return getattr(source, key, None)
+
+    @classmethod
+    def _extract_usage(cls, usage_obj: Any) -> dict[str, int]:
+        """Normalize usage payload across providers (OpenAI/Anthropic/etc.)."""
+        if not usage_obj:
+            return {}
+
+        prompt = cls._coerce_int(
+            cls._usage_get(usage_obj, "prompt_tokens") or cls._usage_get(usage_obj, "input_tokens")
+        )
+        completion = cls._coerce_int(
+            cls._usage_get(usage_obj, "completion_tokens") or cls._usage_get(usage_obj, "output_tokens")
+        )
+        total_raw = cls._usage_get(usage_obj, "total_tokens")
+        total = cls._coerce_int(total_raw) if total_raw is not None else prompt + completion
+
+        raw_cache_create = cls._usage_get(usage_obj, "cache_creation_input_tokens")
+        cache_create = cls._coerce_int(raw_cache_create)
+        cache_read = cls._coerce_int(cls._usage_get(usage_obj, "cache_read_input_tokens"))
+        read_from_openai_prompt_details = False
+
+        # OpenAI-style cache metric lives under prompt_tokens_details.cached_tokens.
+        if cache_read == 0:
+            prompt_details = cls._usage_get(usage_obj, "prompt_tokens_details")
+            cache_read = cls._coerce_int(cls._usage_get(prompt_details, "cached_tokens"))
+            read_from_openai_prompt_details = cache_read > 0
+
+        # OpenAI doesn't expose cache_creation_input_tokens directly in chat completions.
+        # Derive uncached prompt tokens so log hit_rate is meaningful.
+        if read_from_openai_prompt_details and raw_cache_create is None:
+            cache_create = max(prompt - cache_read, 0)
+
+        usage: dict[str, int] = {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": total,
+        }
+        if cache_create > 0:
+            usage["cache_creation_input_tokens"] = cache_create
+        if cache_read > 0:
+            usage["cache_read_input_tokens"] = cache_read
+        return usage
 
     @staticmethod
     def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -370,11 +430,7 @@ class LiteLLMProvider(LLMProvider):
 
             # 获取 usage（通常在最后一个 chunk）
             if hasattr(chunk, "usage") and chunk.usage:
-                usage = {
-                    "prompt_tokens": chunk.usage.prompt_tokens,
-                    "completion_tokens": chunk.usage.completion_tokens,
-                    "total_tokens": chunk.usage.total_tokens,
-                }
+                usage = self._extract_usage(chunk.usage)
 
         # 构建 tool_calls 列表
         tool_calls = []
@@ -524,13 +580,7 @@ class LiteLLMProvider(LLMProvider):
                     arguments=args,
                 ))
 
-        usage = {}
-        if hasattr(response, "usage") and response.usage:
-            usage = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens,
-            }
+        usage = self._extract_usage(response.usage if hasattr(response, "usage") else None)
         reasoning_content = getattr(message, "reasoning_content", None) or None
         return LLMResponse(
             content=message.content,

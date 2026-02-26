@@ -102,3 +102,39 @@ def test_format_exception_without_message() -> None:
         pass
 
     assert provider._format_exception(NoMessageError()) == "NoMessageError"
+
+
+def test_extract_usage_supports_openai_prompt_cache_details() -> None:
+    provider = LiteLLMProvider(default_model="test-model")
+    usage = SimpleNamespace(
+        prompt_tokens=120,
+        completion_tokens=12,
+        total_tokens=132,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=90),
+    )
+
+    assert provider._extract_usage(usage) == {
+        "prompt_tokens": 120,
+        "completion_tokens": 12,
+        "total_tokens": 132,
+        "cache_creation_input_tokens": 30,
+        "cache_read_input_tokens": 90,
+    }
+
+
+def test_extract_usage_supports_anthropic_cache_fields() -> None:
+    provider = LiteLLMProvider(default_model="test-model")
+    usage = SimpleNamespace(
+        input_tokens=200,
+        output_tokens=15,
+        cache_creation_input_tokens=50,
+        cache_read_input_tokens=120,
+    )
+
+    assert provider._extract_usage(usage) == {
+        "prompt_tokens": 200,
+        "completion_tokens": 15,
+        "total_tokens": 215,
+        "cache_creation_input_tokens": 50,
+        "cache_read_input_tokens": 120,
+    }
