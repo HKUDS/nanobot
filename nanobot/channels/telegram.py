@@ -262,6 +262,8 @@ class TelegramChannel(BaseChannel):
                         return
                 else:
                     logger.warning("reaction specified but no reaction_to_message_id in metadata")
+                    if not msg.content:
+                        return
 
             # Check if we should send a sticker
             sticker_file_id = msg.metadata.get("sticker_file_id") if msg.metadata else None
