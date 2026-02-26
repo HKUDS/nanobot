@@ -1,5 +1,6 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import asyncio
 import json
 import json_repair
 import os
@@ -219,29 +220,36 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
         
-        try:
-            response = await acompletion(**kwargs)
-            return self._parse_response(response)
-        except litellm.InternalServerError as e:
-            # Some providers (e.g. ZhipuAI/GLM) return finish_reason='abort'
-            # when the safety filter rejects a response.  LiteLLM does not
-            # recognise 'abort' and raises InternalServerError wrapping a
-            # pydantic ValidationError.  Treat it as an empty safe-stop so the
-            # agent loop can handle it gracefully instead of showing a traceback.
-            err_str = str(e)
-            if "abort" in err_str:
-                logger.warning("Provider returned finish_reason='abort' (safety filter); treating as empty stop.")
-                return LLMResponse(content="", finish_reason="stop")
-            return LLMResponse(
-                content=f"Error calling LLM: {err_str}",
-                finish_reason="error",
-            )
-        except Exception as e:
-            # Return error as content for graceful handling
-            return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
-                finish_reason="error",
-            )
+        MAX_RETRIES = 3
+        RETRY_BASE_DELAY = 1.0  # seconds
+
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                response = await acompletion(**kwargs)
+                return self._parse_response(response)
+            except litellm.InternalServerError as e:
+                err_str = str(e)
+                if "abort" in err_str:
+                    # GLM safety filter — not retryable
+                    logger.warning("Provider returned finish_reason='abort' (safety filter); treating as empty stop.")
+                    return LLMResponse(content="", finish_reason="stop")
+                # Connection errors etc. — retryable
+                if attempt < MAX_RETRIES:
+                    delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                    logger.warning("LLM call failed (attempt {}/{}): {}. Retrying in {}s...", attempt, MAX_RETRIES, err_str, delay)
+                    await asyncio.sleep(delay)
+                    continue
+                return LLMResponse(content=f"Error calling LLM: {err_str}", finish_reason="error")
+            except (litellm.ServiceUnavailableError, litellm.APIConnectionError, litellm.Timeout, litellm.RateLimitError) as e:
+                if attempt < MAX_RETRIES:
+                    delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                    logger.warning("LLM call failed (attempt {}/{}): {}. Retrying in {}s...", attempt, MAX_RETRIES, str(e), delay)
+                    await asyncio.sleep(delay)
+                    continue
+                return LLMResponse(content=f"Error calling LLM: {str(e)}", finish_reason="error")
+            except Exception as e:
+                # Non-retryable (auth errors, bad requests, etc.)
+                return LLMResponse(content=f"Error calling LLM: {str(e)}", finish_reason="error")
     
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
