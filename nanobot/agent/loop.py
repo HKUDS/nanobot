@@ -43,8 +43,6 @@ class AgentLoop:
     5. Sends responses back
     """
     _PROMPT_BASE_INDEX_KEY = "prompt_rollover_base_index"
-    _PROMPT_ROLLOVER_HARD_RATIO = 1.4
-    _PROMPT_ROLLOVER_MIN_HEADROOM = 10
 
     def __init__(
         self,
@@ -331,12 +329,9 @@ class AgentLoop:
             self._consolidation_locks.pop(session_key, None)
 
     def _get_prompt_rollover_limits(self) -> tuple[int, int]:
-        """Return (soft_limit, hard_limit) for prompt history without new config knobs."""
-        soft_limit = max(1, self.memory_window)
-        hard_limit = max(
-            soft_limit + self._PROMPT_ROLLOVER_MIN_HEADROOM,
-            int(soft_limit * self._PROMPT_ROLLOVER_HARD_RATIO),
-        )
+        """Return strict half-window rollover limits for prompt history."""
+        hard_limit = max(1, self.memory_window)
+        soft_limit = max(1, hard_limit // 2)
         return soft_limit, hard_limit
 
     def _get_prompt_base_index(self, session: Session) -> int:

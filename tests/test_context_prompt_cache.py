@@ -99,11 +99,11 @@ def test_rollover_batches_old_prefix_without_summary(tmp_path: Path) -> None:
 
     loop._maybe_rollover_prompt_history(session)
 
-    assert session.metadata["prompt_rollover_base_index"] == 50
+    assert session.metadata["prompt_rollover_base_index"] == 100
 
     history = loop._build_prompt_history(session)
-    assert len(history) == 100
-    assert history[0]["content"] == "user-50"
+    assert len(history) == 50
+    assert history[0]["content"] == "user-100"
 
 
 def test_rollover_does_not_slide_every_turn_before_hard_limit(tmp_path: Path) -> None:
@@ -118,8 +118,8 @@ def test_rollover_does_not_slide_every_turn_before_hard_limit(tmp_path: Path) ->
 
     loop._maybe_rollover_prompt_history(session)
 
-    assert session.metadata["prompt_rollover_base_index"] == 50
+    assert session.metadata["prompt_rollover_base_index"] == 100
 
     history = loop._build_prompt_history(session)
-    assert history[0]["content"] == "user-50"
-    assert len(history) == 110
+    assert history[0]["content"] == "user-100"
+    assert len(history) == 60
