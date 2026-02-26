@@ -300,8 +300,9 @@ def gateway(
         logging.basicConfig(level=logging.DEBUG)
 
     # Always write logs to file for troubleshooting
-    from nanobot.utils.helpers import setup_file_logging
+    from nanobot.utils.helpers import setup_file_logging, setup_heartbeat_logging
     setup_file_logging()
+    setup_heartbeat_logging()
 
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     

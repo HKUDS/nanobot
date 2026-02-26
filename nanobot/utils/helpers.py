@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from datetime import datetime
+from typing import Any
 
 
 def ensure_dir(path: Path) -> Path:
@@ -82,6 +83,31 @@ def setup_file_logging() -> Path:
         encoding="utf-8",
         enqueue=True,
         level="DEBUG",
+    )
+    return log_dir
+
+
+def _heartbeat_log_filter(record: dict[str, Any]) -> bool:
+    """Return True for heartbeat-related log records."""
+    name = str(record.get("name") or "")
+    message = str(record.get("message") or "")
+    return name.startswith("nanobot.heartbeat") or message.startswith("Heartbeat:")
+
+
+def setup_heartbeat_logging() -> Path:
+    """Add a dedicated heartbeat log sink and return the log directory path."""
+    from loguru import logger
+
+    log_dir = get_logs_path()
+    logger.add(
+        log_dir / "heartbeat_{time:YYYY-MM-DD}.log",
+        rotation="00:00",
+        retention="7 days",
+        compression="gz",
+        encoding="utf-8",
+        enqueue=True,
+        level="DEBUG",
+        filter=_heartbeat_log_filter,
     )
     return log_dir
 

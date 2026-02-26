@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -132,6 +133,10 @@ class TelegramChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
         self._recent_messages: dict[str, OrderedDict[int, dict[str, Any]]] = {}
         self._recent_message_limit = 500
+        self._poll_error_last_key: str | None = None
+        self._poll_error_last_ts: float = 0.0
+        self._poll_error_suppressed: int = 0
+        self._poll_error_window_s: float = 30.0
     
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -197,7 +202,8 @@ class TelegramChannel(BaseChannel):
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
             allowed_updates=["message"],
-            drop_pending_updates=True  # Ignore old messages on startup
+            drop_pending_updates=True,  # Ignore old messages on startup
+            error_callback=self._on_polling_error,
         )
         
         # Keep running until stopped
@@ -690,6 +696,35 @@ class TelegramChannel(BaseChannel):
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
         logger.error("Telegram error: {}", context.error)
+
+    def _on_polling_error(self, exc: Exception) -> None:
+        """Log concise polling errors and suppress repeated noise."""
+        key = f"{type(exc).__name__}: {exc}"
+        now = time.monotonic()
+        within_window = (now - self._poll_error_last_ts) < self._poll_error_window_s
+
+        if key == self._poll_error_last_key and within_window:
+            self._poll_error_suppressed += 1
+            # Emit periodic summary for persistent failures.
+            if self._poll_error_suppressed % 20 == 0:
+                logger.warning(
+                    "Telegram polling still failing ({} repeats): {}",
+                    self._poll_error_suppressed,
+                    key,
+                )
+            return
+
+        if self._poll_error_suppressed:
+            logger.warning(
+                "Telegram polling error repeated {} additional times: {}",
+                self._poll_error_suppressed,
+                self._poll_error_last_key,
+            )
+            self._poll_error_suppressed = 0
+
+        self._poll_error_last_key = key
+        self._poll_error_last_ts = now
+        logger.warning("Telegram polling transient error: {}", key)
 
     def _get_extension(self, media_type: str, mime_type: str | None) -> str:
         """Get file extension based on media type."""

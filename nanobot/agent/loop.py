@@ -536,6 +536,7 @@ class AgentLoop:
                         f"(finish_reason={last_finish_reason}, iteration={iteration}/{self.max_iterations}). "
                         "Please retry."
                     )
+                break
             else:
                 final_content = stripped_content
                 break
