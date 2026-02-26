@@ -47,12 +47,15 @@ class WebSearchTool(Tool):
     """Search the web using Brave Search API."""
     
     name = "web_search"
-    description = "Search the web. Returns titles, URLs, and snippets."
+    description = (
+        "Search the web for current information. Returns titles, URLs, and snippets. "
+        "Use when you need up-to-date facts, documentation, or links (e.g. lookups, troubleshooting)."
+    )
     parameters = {
         "type": "object",
         "properties": {
-            "query": {"type": "string", "description": "Search query"},
-            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10}
+            "query": {"type": "string", "description": "Search query (e.g. 'python asyncio tutorial', 'current weather API')"},
+            "count": {"type": "integer", "description": "Number of results to return (1-10)", "minimum": 1, "maximum": 10}
         },
         "required": ["query"]
     }
@@ -80,7 +83,7 @@ class WebSearchTool(Tool):
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
                     params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": api_key},
+                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
                     timeout=10.0
                 )
                 r.raise_for_status()
@@ -103,11 +106,14 @@ class WebFetchTool(Tool):
     """Fetch and extract content from a URL using Readability."""
     
     name = "web_fetch"
-    description = "Fetch URL and extract readable content (HTML → markdown/text)."
+    description = (
+        "Fetch a URL and extract readable content as markdown or plain text. "
+        "Use to read a specific webpage, documentation, or article when the user gives a link or you have a URL from web_search."
+    )
     parameters = {
         "type": "object",
         "properties": {
-            "url": {"type": "string", "description": "URL to fetch"},
+            "url": {"type": "string", "description": "Full URL to fetch (http or https)"},
             "extractMode": {"type": "string", "enum": ["markdown", "text"], "default": "markdown"},
             "maxChars": {"type": "integer", "minimum": 100}
         },

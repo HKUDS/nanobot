@@ -15,6 +15,7 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.end_turn import EndTurnTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -118,6 +119,7 @@ class AgentLoop:
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
+        self.tools.register(EndTurnTool())
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
@@ -187,6 +189,14 @@ class AgentLoop:
 
         while iteration < self.max_iterations:
             iteration += 1
+            messages.append({
+                "role": "user",
+                "content": (
+                    f"[System: Iteration {iteration} of {self.max_iterations}. "
+                    "To end your turn and let the user reply you MUST call the end_turn tool—text alone is not enough. "
+                    "Call end_turn when your response is complete; end before the limit.]"
+                ),
+            })
 
             response = await self.provider.chat(
                 messages=messages,
@@ -219,21 +229,37 @@ class AgentLoop:
                     reasoning_content=response.reasoning_content,
                 )
 
+                end_turn_called = False
+                end_turn_content = ""
                 for tool_call in response.tool_calls:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    if tool_call.name == "end_turn":
+                        end_turn_called = True
+                        end_turn_content = (tool_call.arguments.get("content") or "").strip()
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+
+                if end_turn_called:
+                    final_content = end_turn_content or self._strip_think(response.content) or ""
+                    break
             else:
                 clean = self._strip_think(response.content)
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
                 )
-                final_content = clean
-                break
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "[System: You replied with text but did not call end_turn. The user cannot reply until you call end_turn. "
+                        "You MUST call the end_turn tool now with your final message (use the content you just wrote, or a summary). "
+                        "If you have more to add, call more tools or send more text first, then call end_turn when done.]"
+                    ),
+                })
+                # Do not set final_content; do not break — loop again
 
         if final_content is None and iteration >= self.max_iterations:
             logger.warning("Max iterations ({}) reached", self.max_iterations)
@@ -458,11 +484,19 @@ class AgentLoop:
 
     _TOOL_RESULT_MAX_CHARS = 500
 
+    _END_TURN_REMINDER_PREFIX = "[System: You replied with text but did not call end_turn"
+    _ITERATION_PREFIX = "[System: Tool call iteration "
+
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
         for m in messages[skip:]:
             entry = {k: v for k, v in m.items() if k != "reasoning_content"}
+            if entry.get("role") == "user" and isinstance(entry.get("content"), str):
+                if entry["content"].startswith(self._END_TURN_REMINDER_PREFIX):
+                    continue
+                if entry["content"].startswith(self._ITERATION_PREFIX):
+                    continue
             if entry.get("role") == "tool" and isinstance(entry.get("content"), str):
                 content = entry["content"]
                 if len(content) > self._TOOL_RESULT_MAX_CHARS:

@@ -26,8 +26,11 @@ class CronTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Schedule reminders and recurring tasks. Actions: add, list, remove."
-    
+        return (
+            "Add, list, or remove scheduled reminders and recurring tasks. Use when the user asks for a reminder "
+            "at a specific time, a daily/weekly task, or to see or manage existing scheduled jobs."
+        )
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -36,31 +39,31 @@ class CronTool(Tool):
                 "action": {
                     "type": "string",
                     "enum": ["add", "list", "remove"],
-                    "description": "Action to perform"
+                    "description": "add = schedule a reminder/task; list = show jobs; remove = delete by job_id"
                 },
                 "message": {
                     "type": "string",
-                    "description": "Reminder message (for add)"
+                    "description": "Reminder or task message (required for add)"
                 },
                 "every_seconds": {
                     "type": "integer",
-                    "description": "Interval in seconds (for recurring tasks)"
+                    "description": "Repeat interval in seconds (e.g. 3600 for hourly)"
                 },
                 "cron_expr": {
                     "type": "string",
-                    "description": "Cron expression like '0 9 * * *' (for scheduled tasks)"
+                    "description": "Cron expression (e.g. '0 9 * * *' for daily at 09:00)"
                 },
                 "tz": {
                     "type": "string",
-                    "description": "IANA timezone for cron expressions (e.g. 'America/Vancouver')"
+                    "description": "IANA timezone for cron (e.g. 'America/Vancouver')"
                 },
                 "at": {
                     "type": "string",
-                    "description": "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00')"
+                    "description": "One-time run at ISO datetime (e.g. '2026-02-12T10:30:00')"
                 },
                 "job_id": {
                     "type": "string",
-                    "description": "Job ID (for remove)"
+                    "description": "Job ID to remove (from cron list)"
                 }
             },
             "required": ["action"]

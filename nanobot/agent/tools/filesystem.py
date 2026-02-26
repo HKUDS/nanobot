@@ -34,8 +34,11 @@ class ReadFileTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Read the contents of a file at the given path."
-    
+        return (
+            "Read the full contents of a file. Use to inspect code, configs, a skill's SKILL.md, "
+            "MEMORY.md, or any file in the workspace. Paths are relative to workspace unless absolute."
+        )
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -43,7 +46,7 @@ class ReadFileTool(Tool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "The file path to read"
+                    "description": "File path (relative to workspace or absolute)"
                 }
             },
             "required": ["path"]
@@ -78,8 +81,11 @@ class WriteFileTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Write content to a file at the given path. Creates parent directories if needed."
-    
+        return (
+            "Write or overwrite a file with the given content. Creates parent directories if needed. "
+            "Use to create new files or replace entire file contents."
+        )
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -87,11 +93,11 @@ class WriteFileTool(Tool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "The file path to write to"
+                    "description": "File path to write to (relative to workspace or absolute)"
                 },
                 "content": {
                     "type": "string",
-                    "description": "The content to write"
+                    "description": "Exact content to write"
                 }
             },
             "required": ["path", "content"]
@@ -122,8 +128,11 @@ class EditFileTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Edit a file by replacing old_text with new_text. The old_text must exist exactly in the file."
-    
+        return (
+            "Edit a file by replacing one exact occurrence of old_text with new_text. "
+            "Use for small, targeted changes; old_text must match exactly. For large changes, use read_file then write_file."
+        )
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -131,15 +140,15 @@ class EditFileTool(Tool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "The file path to edit"
+                    "description": "File path to edit"
                 },
                 "old_text": {
                     "type": "string",
-                    "description": "The exact text to find and replace"
+                    "description": "Exact substring to find (must appear once)"
                 },
                 "new_text": {
                     "type": "string",
-                    "description": "The text to replace with"
+                    "description": "Text to replace it with"
                 }
             },
             "required": ["path", "old_text", "new_text"]
@@ -206,8 +215,11 @@ class ListDirTool(Tool):
     
     @property
     def description(self) -> str:
-        return "List the contents of a directory."
-    
+        return (
+            "List files and subdirectories in a directory. Use to explore the workspace, "
+            "find skills under skills/, or discover project structure. Paths are relative to workspace unless absolute."
+        )
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -215,7 +227,7 @@ class ListDirTool(Tool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "The directory path to list"
+                    "description": "Directory path to list (e.g. '.' or 'skills')"
                 }
             },
             "required": ["path"]
