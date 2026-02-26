@@ -266,7 +266,8 @@ class GatewayConfig(Base):
 
 class WebSearchConfig(Base):
     """Web search tool configuration."""
-
+    provider: str = "brave"  # Default provider for web search (e.g. "brave", "baidu")
+    url_base: str = None  # Optional custom API base URL (overrides provider default)
     api_key: str = ""  # Brave Search API key
     max_results: int = 5
 
