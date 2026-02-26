@@ -82,9 +82,9 @@ Skills with available="false" need dependencies installed first - you can try in
         daily_path = f"{workspace_path}/memory/{self.memory_daily_subdir}" if self.memory_daily_subdir else f"{workspace_path}/memory"
 
         return f"""# Kaguya 🐈
-Powered by nanobot. 身份见 SOUL.md，用户信息见 USER.md，行为规则见 AGENTS.md。
+Powered by nanobot.
 
-你可以: read and edit file, exec command, search web, send message and spawn.
+You can read and edit file, exec command, search web, send message and spawn subagents.
 
 ## Runtime
 {runtime}
