@@ -1,5 +1,6 @@
 .assets
 .env
+.nanobot/
 *.pyc
 dist/
 build/

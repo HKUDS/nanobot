@@ -301,8 +301,17 @@ def gateway(
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
-    
-    # Create agent with cron service
+
+    # Create channel manager first
+    channels = ChannelManager(config, bus)
+
+    # Build session adapters from enabled channels
+    session_adapters = {}
+    for channel_name, channel in channels.channels.items():
+        if hasattr(channel, 'session_adapter'):
+            session_adapters[channel_name] = channel.session_adapter
+
+    # Create agent with cron service and session adapters
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -319,8 +328,9 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        session_adapters=session_adapters,
     )
-    
+
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
@@ -339,9 +349,6 @@ def gateway(
             ))
         return response
     cron.on_job = on_cron_job
-    
-    # Create channel manager
-    channels = ChannelManager(config, bus)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""

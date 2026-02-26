@@ -60,6 +60,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        session_adapters: dict[str, Any] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -78,6 +79,7 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
+        self.session_adapters = session_adapters or {}
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
             provider=provider,
@@ -359,6 +361,10 @@ class AgentLoop:
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
 
+        # Hook: allow channel to initialize session
+        if adapter := self.session_adapters.get(msg.channel):
+            await adapter.on_session_load(self.sessions, msg, session)
+
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
@@ -445,6 +451,16 @@ class AgentLoop:
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         self._save_turn(session, all_msgs, 1 + len(history))
+
+        # Hook: allow channel to finalize turn
+        response_metadata = msg.metadata or {}
+        if adapter := self.session_adapters.get(msg.channel):
+            num_new_messages = len(all_msgs) - len(history)
+            new_messages = session.messages[-num_new_messages:] if num_new_messages > 0 else []
+            response_metadata = await adapter.on_turn_complete(
+                self.sessions, msg, session, new_messages, response_metadata
+            )
+
         self.sessions.save(session)
 
         if message_tool := self.tools.get("message"):
@@ -453,7 +469,7 @@ class AgentLoop:
 
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
-            metadata=msg.metadata or {},
+            metadata=response_metadata,
         )
 
     _TOOL_RESULT_MAX_CHARS = 500
