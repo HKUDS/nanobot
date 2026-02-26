@@ -5,8 +5,11 @@ from __future__ import annotations
 from datetime import datetime as real_datetime
 from pathlib import Path
 import datetime as datetime_module
+from unittest.mock import MagicMock
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.loop import AgentLoop
+from nanobot.session.manager import Session
 
 
 class _FakeDatetime(real_datetime):
@@ -64,3 +67,101 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
 
     assert messages[-1]["role"] == "user"
     assert messages[-1]["content"] == "Return exactly: OK"
+
+
+class _DummyBus:
+    async def publish_outbound(self, _message):
+        return None
+
+
+def _make_loop(tmp_path: Path, memory_window: int = 100) -> AgentLoop:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "anthropic/claude-sonnet-4-5"
+    return AgentLoop(
+        bus=_DummyBus(),
+        provider=provider,
+        workspace=_make_workspace(tmp_path),
+        memory_window=memory_window,
+    )
+
+
+def _make_session(message_count: int) -> Session:
+    session = Session(key="cli:direct")
+    for i in range(message_count):
+        role = "user" if i % 2 == 0 else "assistant"
+        session.add_message(role, f"{role}-{i}")
+    return session
+
+
+def test_rollover_batches_old_prefix_without_summary(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path, memory_window=100)
+    session = _make_session(150)
+
+    loop._maybe_rollover_prompt_history(session)
+
+    assert session.metadata["prompt_rollover_base_index"] == 100
+
+    history = loop._build_prompt_history(session)
+    assert len(history) == 50
+    assert history[0]["content"] == "user-100"
+
+
+def test_rollover_does_not_slide_every_turn_before_hard_limit(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path, memory_window=100)
+    session = _make_session(150)
+
+    loop._maybe_rollover_prompt_history(session)
+
+    for i in range(150, 160):
+        role = "user" if i % 2 == 0 else "assistant"
+        session.add_message(role, f"{role}-{i}")
+
+    loop._maybe_rollover_prompt_history(session)
+
+    assert session.metadata["prompt_rollover_base_index"] == 100
+
+    history = loop._build_prompt_history(session)
+    assert history[0]["content"] == "user-100"
+    assert len(history) == 60
+
+
+def test_rollover_keeps_user_turn_when_tail_has_no_user(tmp_path: Path) -> None:
+    """Tool-heavy tails should not cause rollover history to become empty."""
+    loop = _make_loop(tmp_path, memory_window=100)
+    session = Session(key="cli:direct")
+
+    for i in range(40):
+        role = "user" if i % 2 == 0 else "assistant"
+        session.add_message(role, f"{role}-{i}")
+
+    for i in range(40, 130):
+        role = "assistant" if i % 2 == 0 else "tool"
+        session.add_message(role, f"{role}-{i}")
+
+    loop._maybe_rollover_prompt_history(session)
+
+    history = loop._build_prompt_history(session)
+    assert history
+    assert history[0]["role"] == "user"
+    assert len(history) <= loop.memory_window
+
+
+def test_rollover_keeps_hard_limit_when_no_user_exists_in_hard_window(tmp_path: Path) -> None:
+    """When no user exists in the hard window, keep bounded assistant/tool tail."""
+    loop = _make_loop(tmp_path, memory_window=100)
+    session = Session(key="cli:direct")
+
+    for i in range(60):
+        role = "user" if i % 2 == 0 else "assistant"
+        session.add_message(role, f"{role}-{i}")
+
+    for i in range(60, 200):
+        role = "assistant" if i % 2 == 0 else "tool"
+        session.add_message(role, f"{role}-{i}")
+
+    loop._maybe_rollover_prompt_history(session)
+
+    history = loop._build_prompt_history(session)
+    assert history
+    assert history[0]["role"] == "assistant"
+    assert len(history) <= loop.memory_window
