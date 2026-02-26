@@ -13,11 +13,6 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.memory_embeddings import (
-    MemoryEmbedder,
-    create_vector_backend,
-    cosine_similarity,
-)
 from nanobot.utils.helpers import ensure_dir
 
 if TYPE_CHECKING:
@@ -122,7 +117,6 @@ class MemoryPersistence:
         self.events_file = self.memory_dir / "events.jsonl"
         self.profile_file = self.memory_dir / "profile.json"
         self.metrics_file = self.memory_dir / "metrics.json"
-        self.index_dir = ensure_dir(self.memory_dir / "index")
 
     @staticmethod
     def read_json(path: Path) -> dict[str, Any] | list[Any] | None:
@@ -159,17 +153,6 @@ class MemoryPersistence:
         return out
 
     @staticmethod
-    def append_jsonl(path: Path, rows: list[dict[str, Any]]) -> int:
-        if not rows:
-            return 0
-        written = 0
-        with open(path, "a", encoding="utf-8") as f:
-            for row in rows:
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
-                written += 1
-        return written
-
-    @staticmethod
     def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
         with open(path, "w", encoding="utf-8") as f:
             for row in rows:
@@ -189,240 +172,6 @@ class MemoryPersistence:
     @staticmethod
     def write_text(path: Path, text: str) -> None:
         path.write_text(text, encoding="utf-8")
-
-
-class MemoryRetriever:
-    """Embedding/index/retrieval component extracted from MemoryStore."""
-
-    def __init__(
-        self,
-        *,
-        index_dir: Path,
-        embedding_provider: str,
-        vector_backend: str,
-        persistence: MemoryPersistence,
-        read_events: Any,
-        to_str_list: Any,
-        safe_float: Any,
-        to_datetime: Any,
-        utc_now_iso: Any,
-        record_metric: Any,
-    ):
-        self.index_dir = index_dir
-        self.embedding_provider = embedding_provider or "hash"
-        self.vector_backend = vector_backend or "json"
-        self.persistence = persistence
-        self.read_events = read_events
-        self.to_str_list = to_str_list
-        self.safe_float = safe_float
-        self.to_datetime = to_datetime
-        self.utc_now_iso = utc_now_iso
-        self.record_metric = record_metric
-        self._embedder: MemoryEmbedder | None = None
-        self._index_backend = create_vector_backend(self.vector_backend, index_dir=self.index_dir)
-
-    @staticmethod
-    def provider_slug(provider: str) -> str:
-        slug = re.sub(r"[^a-zA-Z0-9_\-]+", "_", provider.strip().lower())
-        return slug or "hash"
-
-    def get_embedder(self, embedding_provider: str | None = None) -> MemoryEmbedder:
-        requested = (embedding_provider or self.embedding_provider or "hash").strip()
-        if self._embedder is None or self._embedder.requested_provider != requested:
-            self._embedder = MemoryEmbedder(requested)
-        return self._embedder
-
-    def index_file(self, provider: str) -> Path:
-        slug = self.provider_slug(provider)
-        if self._index_backend.name == "sqlite":
-            return self.index_dir / "vectors.sqlite3"
-        return self.index_dir / f"vectors_{slug}.json"
-
-    @property
-    def active_backend(self) -> str:
-        return self._index_backend.name
-
-    def event_text(self, event: dict[str, Any]) -> str:
-        summary = str(event.get("summary", ""))
-        entities = " ".join(self.to_str_list(event.get("entities")))
-        event_type = str(event.get("type", "fact"))
-        return f"{event_type}. {summary}. {entities}".strip()
-
-    def load_vector_index(self, provider: str) -> dict[str, Any]:
-        items = self._index_backend.load_items(provider)
-        return {
-            "provider": provider,
-            "backend": self._index_backend.name,
-            "updated_at": self.utc_now_iso(),
-            "items": items,
-            "dim": len(next(iter(items.values()))) if items else 0,
-        }
-
-    def save_vector_index(self, provider: str, index_data: dict[str, Any]) -> None:
-        items: dict[str, list[float]] = {
-            key: [float(x) for x in value]
-            for key, value in index_data.get("items", {}).items()
-            if isinstance(key, str) and isinstance(value, list)
-        }
-        dim = int(index_data.get("dim", 0) or 0)
-        if dim <= 0 and items:
-            dim = len(next(iter(items.values())))
-        self._index_backend.save_items(provider, items, dim)
-
-    def ensure_event_embeddings(
-        self,
-        events: list[dict[str, Any]],
-        *,
-        embedding_provider: str | None = None,
-    ) -> tuple[dict[str, list[float]], str]:
-        embedder = self.get_embedder(embedding_provider)
-        provider = embedder.provider_name
-        index_data = self.load_vector_index(provider)
-        items: dict[str, list[float]] = {
-            key: value
-            for key, value in index_data.get("items", {}).items()
-            if isinstance(key, str) and isinstance(value, list)
-        }
-
-        missing_ids: list[str] = []
-        missing_texts: list[str] = []
-        for event in events:
-            event_id = event.get("id")
-            if not isinstance(event_id, str) or not event_id:
-                continue
-            if event_id in items:
-                continue
-            missing_ids.append(event_id)
-            missing_texts.append(self.event_text(event))
-
-        if missing_ids:
-            vectors = embedder.embed_texts(missing_texts)
-            for event_id, vector in zip(missing_ids, vectors, strict=False):
-                items[event_id] = [float(x) for x in vector]
-            index_data["items"] = items
-            index_data["dim"] = len(next(iter(items.values()))) if items else 0
-            self.save_vector_index(provider, index_data)
-            self.record_metric("index_updates", len(missing_ids))
-
-        return items, provider
-
-    def rebuild_event_embeddings(
-        self,
-        events: list[dict[str, Any]],
-        *,
-        embedding_provider: str | None = None,
-    ) -> tuple[dict[str, list[float]], str]:
-        embedder = self.get_embedder(embedding_provider)
-        provider = embedder.provider_name
-        valid_events = [event for event in events if isinstance(event.get("id"), str) and event.get("id")]
-        if not valid_events:
-            self.save_vector_index(provider, {"items": {}, "dim": 0})
-            return {}, provider
-
-        ids = [str(event["id"]) for event in valid_events]
-        texts = [self.event_text(event) for event in valid_events]
-        vectors = embedder.embed_texts(texts)
-        items = {
-            event_id: [float(x) for x in vector]
-            for event_id, vector in zip(ids, vectors, strict=False)
-        }
-        self.save_vector_index(
-            provider,
-            {
-                "items": items,
-                "dim": len(next(iter(items.values()))) if items else 0,
-            },
-        )
-        self.record_metric("index_updates", len(items))
-        return items, provider
-
-    @staticmethod
-    def _tokenize(value: str) -> set[str]:
-        return {t for t in re.findall(r"[a-zA-Z0-9_\-]+", value.lower()) if len(t) > 1}
-
-    @classmethod
-    def lexical_similarity(cls, query: str, text: str) -> float:
-        q = cls._tokenize(query)
-        t = cls._tokenize(text)
-        if not q or not t:
-            return 0.0
-        common = len(q & t)
-        denom = len(q | t)
-        return common / denom if denom else 0.0
-
-    def recency_score(self, timestamp: str, half_life_days: float) -> float:
-        dt = self.to_datetime(timestamp)
-        if not dt:
-            return 0.0
-        now = datetime.now(timezone.utc)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        age_days = max((now - dt).total_seconds() / 86400.0, 0.0)
-        half_life = max(half_life_days, 1.0)
-        return math.exp(-age_days / half_life)
-
-    def retrieve(
-        self,
-        query: str,
-        *,
-        top_k: int = 6,
-        recency_half_life_days: float = 30.0,
-        embedding_provider: str | None = None,
-    ) -> list[dict[str, Any]]:
-        events = self.read_events()
-        if not events:
-            self.record_metric("retrieval_queries", 1)
-            return []
-
-        vectors_by_id, active_provider = self.ensure_event_embeddings(
-            events,
-            embedding_provider=embedding_provider,
-        )
-        query_vec: list[float] | None = None
-        if query.strip():
-            query_vec = self.get_embedder(active_provider).embed_texts([query])[0]
-
-        scored: list[dict[str, Any]] = []
-        for event in events:
-            summary = str(event.get("summary", ""))
-            entities = " ".join(self.to_str_list(event.get("entities")))
-            text = f"{summary} {entities}".strip()
-            lex = self.lexical_similarity(query, text) if query.strip() else 0.0
-            event_vec = vectors_by_id.get(str(event.get("id", "")))
-            sem = cosine_similarity(query_vec, event_vec) if (query_vec and event_vec) else 0.0
-            rec = self.recency_score(str(event.get("timestamp", "")), recency_half_life_days)
-            sal = min(max(self.safe_float(event.get("salience"), 0.6), 0.0), 1.0)
-            conf = min(max(self.safe_float(event.get("confidence"), 0.7), 0.0), 1.0)
-            score = 0.5 * sem + 0.15 * lex + 0.15 * rec + 0.1 * sal + 0.1 * conf
-            if query.strip() and sem <= 0 and lex <= 0 and score < 0.2:
-                continue
-            event_copy = dict(event)
-            event_copy["score"] = score
-            event_copy["retrieval_reason"] = {
-                "semantic": round(sem, 4),
-                "lexical": round(lex, 4),
-                "recency": round(rec, 4),
-                "salience": round(sal, 4),
-                "confidence": round(conf, 4),
-                "provider": active_provider,
-                "backend": self.active_backend,
-            }
-            evidence = event.get("evidence") if isinstance(event.get("evidence"), list) else []
-            aliases = event.get("aliases") if isinstance(event.get("aliases"), list) else []
-            event_copy["provenance"] = {
-                "canonical_id": event.get("canonical_id") or event.get("id"),
-                "aliases_count": len(aliases),
-                "evidence_count": len(evidence),
-                "merged_event_count": int(event.get("merged_event_count", 1) or 1),
-            }
-            scored.append(event_copy)
-
-        scored.sort(key=lambda item: item.get("score", 0.0), reverse=True)
-        result = scored[: max(1, top_k)]
-        self.record_metric("retrieval_queries", 1)
-        if result:
-            self.record_metric("retrieval_hits", 1)
-        return result
 
 
 class MemoryExtractor:
@@ -707,10 +456,99 @@ class _Mem0Adapter:
         self.client: Any | None = None
         self.mode = "disabled"
         self.error: str | None = None
+        self._local_fallback_attempted = False
+        self._local_mem0_dir: Path | None = None
+        self._fallback_enabled = True
+        self._fallback_candidates: list[tuple[str, dict[str, Any], int]] = [
+            ("fastembed", {"model": "BAAI/bge-small-en-v1.5"}, 384),
+            ("huggingface", {"model": "sentence-transformers/all-MiniLM-L6-v2"}, 384),
+        ]
         self._init_client()
 
+    def _load_fallback_config(self, payload: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {}
+        fallback = payload.get("fallback")
+        if not isinstance(fallback, dict):
+            return {}
+        enabled = fallback.get("enabled")
+        if isinstance(enabled, bool):
+            self._fallback_enabled = enabled
+
+        providers = fallback.get("providers")
+        parsed: list[tuple[str, dict[str, Any], int]] = []
+        if isinstance(providers, list):
+            for item in providers:
+                if not isinstance(item, dict):
+                    continue
+                provider = str(item.get("provider", "")).strip().lower()
+                if not provider:
+                    continue
+                config = item.get("config") if isinstance(item.get("config"), dict) else {}
+                dims_raw = item.get("embedding_model_dims", 384)
+                try:
+                    dims = int(dims_raw)
+                except (TypeError, ValueError):
+                    dims = 384
+                parsed.append((provider, config, max(1, dims)))
+        if parsed:
+            self._fallback_candidates = parsed
+        return fallback
+
+    @staticmethod
+    def _parse_dotenv_line(line: str) -> tuple[str, str] | None:
+        text = line.strip()
+        if not text or text.startswith("#") or "=" not in text:
+            return None
+        key, value = text.split("=", 1)
+        key = key.strip()
+        if not key or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
+            return None
+        value = value.strip()
+        if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+            value = value[1:-1]
+        return key, value
+
+    def _load_env_candidates(self) -> None:
+        candidates = [
+            self.workspace / ".env",
+        ]
+        seen: set[Path] = set()
+        for path in candidates:
+            try:
+                p = path.expanduser().resolve()
+            except Exception:
+                p = path
+            if p in seen or not p.exists() or not p.is_file():
+                continue
+            seen.add(p)
+            try:
+                for raw in p.read_text(encoding="utf-8").splitlines():
+                    parsed = self._parse_dotenv_line(raw)
+                    if not parsed:
+                        continue
+                    key, value = parsed
+                    os.environ.setdefault(key, value)
+            except Exception:
+                continue
+
     def _init_client(self) -> None:
+        self._load_env_candidates()
         config_path = self.workspace / "memory" / "mem0_config.json"
+        local_mem0_dir = self.workspace / "memory" / "mem0"
+        local_mem0_dir.mkdir(parents=True, exist_ok=True)
+        self._local_mem0_dir = local_mem0_dir
+        os.environ.setdefault("MEM0_DIR", str(local_mem0_dir))
+        try:
+            import mem0.configs.base as mem0_base
+            import mem0.memory.main as mem0_main
+            import mem0.memory.setup as mem0_setup
+
+            mem0_base.mem0_dir = str(local_mem0_dir)
+            mem0_setup.mem0_dir = str(local_mem0_dir)
+            mem0_main.mem0_dir = str(local_mem0_dir)
+        except Exception:
+            pass
         api_key = os.getenv("MEM0_API_KEY", "").strip()
 
         if api_key and Mem0MemoryClient is not None:
@@ -733,21 +571,84 @@ class _Mem0Adapter:
             self.error = self.error or "mem0 package not installed"
             return
 
+        payload: dict[str, Any] | None = None
+        if config_path.exists():
+            try:
+                loaded = json.loads(config_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    payload = loaded
+            except Exception:
+                payload = None
+        self._load_fallback_config(payload)
+
         try:
-            if config_path.exists():
-                payload = json.loads(config_path.read_text(encoding="utf-8"))
-                self.client = Mem0Memory.from_config(payload)
+            if payload is not None:
+                mem0_payload = dict(payload)
+                mem0_payload.pop("fallback", None)
+                self.client = Mem0Memory.from_config(mem0_payload)
             else:
-                self.client = Mem0Memory()
+                # Force local writable persistence instead of ~/.mem0/*
+                self.client = Mem0Memory.from_config(
+                    {
+                        "history_db_path": str(local_mem0_dir / "history.db"),
+                        "vector_store": {
+                            "provider": "qdrant",
+                            "config": {
+                                "collection_name": "nanobot_mem0",
+                                "path": str(local_mem0_dir / "qdrant"),
+                            },
+                        },
+                    }
+                )
             self.enabled = True
             self.mode = "oss"
             return
         except Exception as exc:
+            if self._activate_local_fallback(reason=f"initialization failed: {exc}"):
+                return
             self.error = str(exc)
             self.enabled = False
             self.client = None
             self.mode = "disabled"
             logger.warning("mem0 disabled: {}", self.error)
+
+    def _activate_local_fallback(self, *, reason: str) -> bool:
+        if self._local_fallback_attempted or Mem0Memory is None:
+            return False
+        if not self._fallback_enabled:
+            return False
+        if self.mode == "hosted":
+            return False
+        self._local_fallback_attempted = True
+        local_mem0_dir = self._local_mem0_dir or (self.workspace / "memory" / "mem0")
+        local_mem0_dir.mkdir(parents=True, exist_ok=True)
+
+        for provider, embedder_cfg, dims in self._fallback_candidates:
+            try:
+                self.client = Mem0Memory.from_config(
+                    {
+                        "embedder": {"provider": provider, "config": embedder_cfg},
+                        "vector_store": {
+                            "provider": "qdrant",
+                            "config": {
+                                "collection_name": f"nanobot_mem0_local_{provider}",
+                                "path": str(local_mem0_dir / "qdrant"),
+                                "embedding_model_dims": dims,
+                            },
+                        },
+                        "history_db_path": str(local_mem0_dir / "history.db"),
+                    }
+                )
+                self.enabled = True
+                self.mode = f"oss-local-fallback-{provider}"
+                self.error = None
+                logger.warning("mem0 switched to local fallback embedder ({}): {}", provider, reason)
+                return True
+            except Exception as exc:
+                self.error = str(exc)
+                logger.warning("mem0 local fallback ({}) failed: {}", provider, self.error)
+                continue
+        return False
 
     @staticmethod
     def _rows(payload: Any) -> list[dict[str, Any]]:
@@ -776,7 +677,19 @@ class _Mem0Adapter:
                 return True
             except Exception:
                 return False
-        except Exception:
+        except Exception as exc:
+            if self._activate_local_fallback(reason=f"add_text failed: {exc}") and self.client:
+                try:
+                    self.client.add(messages, infer=False, **kwargs)
+                    return True
+                except TypeError:
+                    try:
+                        self.client.add(messages, **kwargs)
+                        return True
+                    except Exception:
+                        return False
+                except Exception:
+                    return False
             return False
 
     def search(self, query: str, *, top_k: int = 6) -> list[dict[str, Any]]:
@@ -790,8 +703,19 @@ class _Mem0Adapter:
                 raw = self.client.search(query, **kwargs)
             except Exception:
                 return []
-        except Exception:
-            return []
+        except Exception as exc:
+            if self._activate_local_fallback(reason=f"search failed: {exc}") and self.client:
+                try:
+                    raw = self.client.search(query=query, **kwargs)
+                except TypeError:
+                    try:
+                        raw = self.client.search(query, **kwargs)
+                    except Exception:
+                        return []
+                except Exception:
+                    return []
+            else:
+                return []
 
         out: list[dict[str, Any]] = []
         for item in self._rows(raw):
@@ -834,17 +758,73 @@ class _Mem0Adapter:
         out.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
         return out[: max(1, top_k)]
 
+    def update(self, memory_id: str, text: str, *, metadata: dict[str, Any] | None = None) -> bool:
+        if not self.enabled or not self.client or not memory_id.strip() or not text.strip():
+            return False
+        try:
+            if self.mode == "hosted":
+                self.client.update(memory_id, text=text, metadata=metadata)
+            else:
+                self.client.update(memory_id, text)
+            return True
+        except TypeError:
+            try:
+                self.client.update(memory_id, data=text)
+                return True
+            except Exception:
+                return False
+        except Exception as exc:
+            if self._activate_local_fallback(reason=f"update failed: {exc}") and self.client:
+                try:
+                    self.client.update(memory_id, text)
+                    return True
+                except Exception:
+                    return False
+            return False
+
+    def delete(self, memory_id: str) -> bool:
+        if not self.enabled or not self.client or not memory_id.strip():
+            return False
+        try:
+            self.client.delete(memory_id)
+            return True
+        except Exception as exc:
+            if self._activate_local_fallback(reason=f"delete failed: {exc}") and self.client:
+                try:
+                    self.client.delete(memory_id)
+                    return True
+                except Exception:
+                    return False
+            return False
+
+
+class _Mem0RuntimeInfo:
+    """Compatibility surface for places that introspect backend name."""
+
+    active_backend = "mem0"
+
+    @staticmethod
+    def rebuild_event_embeddings(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    @staticmethod
+    def ensure_event_embeddings(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {}
+
 
 class MemoryStore:
-    """Hybrid memory: markdown files + structured events/profile/metrics."""
+    """mem0-first memory store with structured profile/events maintenance."""
 
     PROFILE_KEYS = ("preferences", "stable_facts", "active_projects", "relationships", "constraints")
     EVENT_TYPES = {"preference", "fact", "task", "decision", "constraint", "relationship"}
     PROFILE_STATUS_ACTIVE = "active"
     PROFILE_STATUS_CONFLICTED = "conflicted"
     PROFILE_STATUS_STALE = "stale"
+    CONFLICT_STATUS_OPEN = "open"
+    CONFLICT_STATUS_NEEDS_USER = "needs_user"
+    CONFLICT_STATUS_RESOLVED = "resolved"
 
-    def __init__(self, workspace: Path, embedding_provider: str = "", vector_backend: str = "sqlite"):
+    def __init__(self, workspace: Path):
         self.workspace = workspace
         self.persistence = MemoryPersistence(workspace)
         self.memory_dir = self.persistence.memory_dir
@@ -853,21 +833,7 @@ class MemoryStore:
         self.events_file = self.persistence.events_file
         self.profile_file = self.persistence.profile_file
         self.metrics_file = self.persistence.metrics_file
-        self.index_dir = self.persistence.index_dir
-        self.embedding_provider = embedding_provider or "hash"
-        self.vector_backend = vector_backend or "json"
-        self.retriever = MemoryRetriever(
-            index_dir=self.index_dir,
-            embedding_provider=self.embedding_provider,
-            vector_backend=self.vector_backend,
-            persistence=self.persistence,
-            read_events=self.read_events,
-            to_str_list=self._to_str_list,
-            safe_float=self._safe_float,
-            to_datetime=self._to_datetime,
-            utc_now_iso=self._utc_now_iso,
-            record_metric=self._record_metric,
-        )
+        self.retriever = _Mem0RuntimeInfo()
         self.extractor = MemoryExtractor(
             to_str_list=self._to_str_list,
             coerce_event=self._coerce_event,
@@ -987,8 +953,6 @@ class MemoryStore:
         cases: list[dict[str, Any]],
         *,
         default_top_k: int = 6,
-        recency_half_life_days: float = 30.0,
-        embedding_provider: str | None = None,
     ) -> dict[str, Any]:
         """Evaluate retrieval quality using labeled cases.
 
@@ -1026,8 +990,6 @@ class MemoryStore:
             retrieved = self.retrieve(
                 query,
                 top_k=top_k,
-                recency_half_life_days=recency_half_life_days,
-                embedding_provider=embedding_provider,
             )
 
             hits = 0
@@ -1159,17 +1121,21 @@ class MemoryStore:
         return event_copy
 
     def _event_similarity(self, left: dict[str, Any], right: dict[str, Any]) -> tuple[float, float]:
-        left_text = self.retriever.event_text(left)
-        right_text = self.retriever.event_text(right)
-        lexical = self.retriever.lexical_similarity(left_text, right_text)
+        def _event_text(event: dict[str, Any]) -> str:
+            summary = str(event.get("summary", ""))
+            entities = " ".join(self._to_str_list(event.get("entities")))
+            event_type = str(event.get("type", "fact"))
+            return f"{event_type}. {summary}. {entities}".strip()
 
-        semantic = 0.0
-        try:
-            vectors = self.retriever.get_embedder(self.embedding_provider).embed_texts([left_text, right_text])
-            if len(vectors) == 2:
-                semantic = cosine_similarity(vectors[0], vectors[1])
-        except Exception:
-            semantic = 0.0
+        left_text = _event_text(left)
+        right_text = _event_text(right)
+
+        left_tokens = self._tokenize(left_text)
+        right_tokens = self._tokenize(right_text)
+        overlap = left_tokens & right_tokens
+        union = left_tokens | right_tokens
+        lexical = (len(overlap) / len(union)) if union else 0.0
+        semantic = lexical
         return lexical, semantic
 
     def _find_semantic_duplicate(
@@ -1287,10 +1253,7 @@ class MemoryStore:
 
         self.persistence.write_jsonl(self.events_file, existing_events)
         if merged > 0:
-            self.retriever.rebuild_event_embeddings(existing_events, embedding_provider=self.embedding_provider)
             self._record_metric("event_dedup_merges", merged)
-        elif written > 0:
-            self.retriever.ensure_event_embeddings(appended_events, embedding_provider=self.embedding_provider)
 
         if written > 0 and self.mem0.enabled:
             for event in appended_events:
@@ -1453,65 +1416,270 @@ class MemoryStore:
         for idx, item in enumerate(conflicts):
             if not isinstance(item, dict):
                 continue
-            status = item.get("status", "open")
-            if not include_closed and status != "open":
+            status = str(item.get("status", self.CONFLICT_STATUS_OPEN)).strip().lower()
+            if not include_closed and status not in {self.CONFLICT_STATUS_OPEN, self.CONFLICT_STATUS_NEEDS_USER}:
                 continue
             row = dict(item)
             row["index"] = idx
             out.append(row)
         return out
 
-    def resolve_conflict(self, index: int, action: str) -> bool:
+    @staticmethod
+    def _parse_conflict_user_action(text: str) -> str | None:
+        content = str(text or "").strip().lower()
+        if not content:
+            return None
+        keep_old_markers = {"keep 1", "1", "old", "keep old", "keep_old"}
+        keep_new_markers = {"keep 2", "2", "new", "keep new", "keep_new"}
+        dismiss_markers = {"neither", "dismiss", "none", "skip"}
+        merge_markers = {"merge", "combine"}
+        if content in keep_old_markers:
+            return "keep_old"
+        if content in keep_new_markers:
+            return "keep_new"
+        if content in dismiss_markers:
+            return "dismiss"
+        if content in merge_markers:
+            return "merge"
+        return None
+
+    def _auto_resolution_action(self, conflict: dict[str, Any]) -> str | None:
+        source = str(conflict.get("source", "")).strip().lower()
+        if source == "live_correction":
+            return "keep_new"
+
+        old_conf = self._safe_float(conflict.get("old_confidence"), 0.0)
+        new_conf = self._safe_float(conflict.get("new_confidence"), 0.0)
+        gap = abs(old_conf - new_conf)
+        if gap < 0.25:
+            return None
+        return "keep_new" if new_conf > old_conf else "keep_old"
+
+    def auto_resolve_conflicts(self, *, max_items: int = 10) -> dict[str, int]:
+        profile = self.read_profile()
+        conflicts = profile.get("conflicts", [])
+        if not isinstance(conflicts, list):
+            return {"auto_resolved": 0, "needs_user": 0}
+
+        auto_resolved = 0
+        needs_user = 0
+        touched = False
+        for idx, conflict in enumerate(conflicts):
+            if max_items <= 0:
+                break
+            if not isinstance(conflict, dict):
+                continue
+            status = str(conflict.get("status", self.CONFLICT_STATUS_OPEN)).strip().lower()
+            if status not in {self.CONFLICT_STATUS_OPEN, self.CONFLICT_STATUS_NEEDS_USER}:
+                continue
+            max_items -= 1
+
+            action = self._auto_resolution_action(conflict)
+            if action is None:
+                if status != self.CONFLICT_STATUS_NEEDS_USER:
+                    conflict["status"] = self.CONFLICT_STATUS_NEEDS_USER
+                    touched = True
+                needs_user += 1
+                continue
+
+            details = self.resolve_conflict_details(idx, action)
+            if details.get("ok"):
+                auto_resolved += 1
+                continue
+
+            conflict["status"] = self.CONFLICT_STATUS_NEEDS_USER
+            touched = True
+            needs_user += 1
+
+        if touched:
+            self.write_profile(profile)
+        return {"auto_resolved": auto_resolved, "needs_user": needs_user}
+
+    def get_next_user_conflict(self) -> dict[str, Any] | None:
+        conflicts = self.list_conflicts(include_closed=False)
+        if not conflicts:
+            return None
+
+        asked = [c for c in conflicts if isinstance(c.get("asked_at"), str) and c.get("asked_at")]
+        pool = asked or conflicts
+        if not pool:
+            return None
+        pool.sort(key=lambda c: str(c.get("asked_at", "")))
+        return pool[0]
+
+    def ask_user_for_conflict(self) -> str | None:
+        profile = self.read_profile()
+        conflicts = profile.get("conflicts", [])
+        if not isinstance(conflicts, list):
+            return None
+
+        chosen_idx: int | None = None
+        chosen: dict[str, Any] | None = None
+        for idx, item in enumerate(conflicts):
+            if not isinstance(item, dict):
+                continue
+            status = str(item.get("status", self.CONFLICT_STATUS_OPEN)).strip().lower()
+            if status != self.CONFLICT_STATUS_NEEDS_USER:
+                continue
+            chosen_idx = idx
+            chosen = item
+            break
+
+        if chosen_idx is None or chosen is None:
+            return None
+
+        if not chosen.get("asked_at"):
+            chosen["asked_at"] = self._utc_now_iso()
+            self.write_profile(profile)
+
+        old_value = str(chosen.get("old", "")).strip()
+        new_value = str(chosen.get("new", "")).strip()
+        return (
+            "I found a memory conflict and need your choice:\n"
+            f"1. {old_value}\n"
+            f"2. {new_value}\n"
+            "Reply with: `keep 1`, `keep 2`, `merge`, or `neither`."
+        )
+
+    def handle_user_conflict_reply(self, text: str) -> dict[str, Any]:
+        action = self._parse_conflict_user_action(text)
+        if action is None:
+            return {"handled": False}
+
+        conflict = self.get_next_user_conflict()
+        if not conflict:
+            return {"handled": False}
+
+        idx = int(conflict.get("index", -1))
+        if idx < 0:
+            return {"handled": False}
+
+        selected = "keep_new" if action == "merge" else action
+        details = self.resolve_conflict_details(index=idx, action=selected)
+        if not details.get("ok"):
+            return {
+                "handled": True,
+                "ok": False,
+                "message": "I couldn't resolve that conflict automatically. Please try `keep 1` or `keep 2`.",
+            }
+
+        return {
+            "handled": True,
+            "ok": True,
+            "message": (
+                f"Resolved conflict #{idx} with action `{selected}` "
+                f"(mem0 op: {details.get('mem0_operation', 'none')})."
+            ),
+        }
+
+    def resolve_conflict_details(self, index: int, action: str) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "ok": False,
+            "index": index,
+            "action": str(action or "").strip().lower(),
+            "field": "",
+            "old": "",
+            "new": "",
+            "old_memory_id": "",
+            "new_memory_id": "",
+            "mem0_operation": "none",
+            "mem0_ok": False,
+        }
         profile = self.read_profile()
         conflicts = profile.get("conflicts", [])
         if not isinstance(conflicts, list) or index < 0 or index >= len(conflicts):
-            return False
+            return result
 
         conflict = conflicts[index]
-        if not isinstance(conflict, dict) or conflict.get("status") != "open":
-            return False
+        if not isinstance(conflict, dict) or str(conflict.get("status", "")).strip().lower() not in {
+            self.CONFLICT_STATUS_OPEN,
+            self.CONFLICT_STATUS_NEEDS_USER,
+        }:
+            return result
 
         field = str(conflict.get("field", ""))
+        result["field"] = field
         try:
             key = self._validate_profile_field(field)
         except ValueError:
-            return False
+            return result
 
         old_value = str(conflict.get("old", "")).strip()
         new_value = str(conflict.get("new", "")).strip()
+        result["old"] = old_value
+        result["new"] = new_value
         values = self._to_str_list(profile.get(key))
+        old_memory_id = str(conflict.get("old_memory_id", "")).strip() or self._find_mem0_id_for_text(old_value)
+        new_memory_id = str(conflict.get("new_memory_id", "")).strip() or self._find_mem0_id_for_text(new_value)
+        if old_memory_id:
+            conflict["old_memory_id"] = old_memory_id
+        if new_memory_id:
+            conflict["new_memory_id"] = new_memory_id
+
+        result["old_memory_id"] = old_memory_id
+        result["new_memory_id"] = new_memory_id
 
         def _remove_value(values_in: list[str], target: str) -> list[str]:
             target_norm = self._norm_text(target)
             return [v for v in values_in if self._norm_text(v) != target_norm]
 
         selected = str(action or "").strip().lower()
+        mem0_ok = False
         if selected == "keep_old":
+            if new_memory_id:
+                mem0_ok = self.mem0.delete(new_memory_id)
+                result["mem0_operation"] = "delete_new"
+            else:
+                mem0_ok = True
+                result["mem0_operation"] = "none"
             values = _remove_value(values, new_value)
             old_entry = self._meta_entry(profile, key, old_value)
             self._touch_meta_entry(old_entry, confidence_delta=0.08, status=self.PROFILE_STATUS_ACTIVE)
             new_entry = self._meta_entry(profile, key, new_value)
             new_entry["status"] = self.PROFILE_STATUS_STALE
         elif selected == "keep_new":
+            if old_memory_id:
+                mem0_ok = self.mem0.update(old_memory_id, new_value)
+                result["mem0_operation"] = "update_old_to_new"
+                if mem0_ok and new_memory_id and new_memory_id != old_memory_id:
+                    self.mem0.delete(new_memory_id)
+                    conflict["new_memory_id"] = old_memory_id
+                    result["new_memory_id"] = old_memory_id
+            else:
+                mem0_ok = self.mem0.add_text(
+                    new_value,
+                    metadata={"event_type": "conflict_resolution", "field": key, "source": "resolve_conflict"},
+                )
+                result["mem0_operation"] = "add_new"
             values = _remove_value(values, old_value)
             new_entry = self._meta_entry(profile, key, new_value)
             self._touch_meta_entry(new_entry, confidence_delta=0.08, status=self.PROFILE_STATUS_ACTIVE)
             old_entry = self._meta_entry(profile, key, old_value)
             old_entry["status"] = self.PROFILE_STATUS_STALE
         elif selected == "dismiss":
+            mem0_ok = True
+            result["mem0_operation"] = "none"
             old_entry = self._meta_entry(profile, key, old_value)
             new_entry = self._meta_entry(profile, key, new_value)
             old_entry["status"] = self.PROFILE_STATUS_ACTIVE
             new_entry["status"] = self.PROFILE_STATUS_ACTIVE
         else:
-            return False
+            return result
+
+        result["mem0_ok"] = mem0_ok
+        if not mem0_ok:
+            return result
 
         profile[key] = values
-        conflict["status"] = "resolved"
+        conflict["status"] = self.CONFLICT_STATUS_RESOLVED
         conflict["resolution"] = selected
         conflict["resolved_at"] = self._utc_now_iso()
         self.write_profile(profile)
-        return True
+        result["ok"] = True
+        return result
+
+    def resolve_conflict(self, index: int, action: str) -> bool:
+        return bool(self.resolve_conflict_details(index, action).get("ok"))
 
     def write_profile(self, profile: dict[str, Any]) -> None:
         profile["updated_at"] = self._utc_now_iso()
@@ -1565,29 +1733,16 @@ class MemoryStore:
         query: str,
         *,
         top_k: int = 6,
-        recency_half_life_days: float = 30.0,
-        embedding_provider: str | None = None,
     ) -> list[dict[str, Any]]:
-        retrieved: list[dict[str, Any]] = []
-        mem0_had_results = False
+        # mem0-only retrieval path.
+        if not self.mem0.enabled:
+            return []
 
-        if self.mem0.enabled:
-            self._record_metric("retrieval_queries", 1)
-            retrieved = self.mem0.search(query, top_k=top_k)
-            mem0_had_results = bool(retrieved)
-
-        if not retrieved:
-            # Fallback to legacy retrieval so existing local memories still work.
-            retrieved = self.retriever.retrieve(
-                query,
-                top_k=top_k,
-                recency_half_life_days=recency_half_life_days,
-                embedding_provider=embedding_provider,
-            )
+        self._record_metric("retrieval_queries", 1)
+        retrieved = self.mem0.search(query, top_k=top_k)
         if not retrieved:
             return retrieved
-        if mem0_had_results:
-            self._record_metric("retrieval_hits", 1)
+        self._record_metric("retrieval_hits", 1)
 
         profile = self.read_profile()
         conflicts = profile.get("conflicts", []) if isinstance(profile.get("conflicts"), list) else []
@@ -1740,23 +1895,16 @@ class MemoryStore:
     def get_memory_context(
         self,
         *,
-        mode: str = "legacy",
         query: str | None = None,
         retrieval_k: int = 6,
         token_budget: int = 900,
-        recency_half_life_days: float = 30.0,
-        embedding_provider: str | None = None,
     ) -> str:
         long_term = self.read_long_term()
-        if mode != "hybrid":
-            return f"## Long-term Memory\n{long_term}" if long_term else ""
 
         profile = self.read_profile()
         retrieved = self.retrieve(
             query or "",
             top_k=retrieval_k,
-            recency_half_life_days=recency_half_life_days,
-            embedding_provider=embedding_provider,
         )
 
         lines: list[str] = ["## Long-term Memory"]
@@ -1777,7 +1925,7 @@ class MemoryStore:
                 reason = item.get("retrieval_reason", {})
                 lines.append(
                     f"- [{timestamp}] ({event_type}) {summary} "
-                    f"[sem={reason.get('semantic', 0):.2f}, rec={reason.get('recency', 0):.2f}, src={reason.get('provider', 'hash')}]"
+                    f"[sem={reason.get('semantic', 0):.2f}, rec={reason.get('recency', 0):.2f}, src={reason.get('provider', 'mem0')}]"
                 )
 
         unresolved = self._recent_unresolved(self.read_events(limit=60), max_items=6)
@@ -1867,7 +2015,9 @@ class MemoryStore:
                                     "field": key,
                                     "old": existing,
                                     "new": candidate,
-                                    "status": "open",
+                                    "old_memory_id": self._find_mem0_id_for_text(existing),
+                                    "new_memory_id": self._find_mem0_id_for_text(candidate),
+                                    "status": self.CONFLICT_STATUS_OPEN,
                                     "old_confidence": old_entry.get("confidence"),
                                     "new_confidence": new_entry.get("confidence"),
                                 }
@@ -1898,7 +2048,8 @@ class MemoryStore:
         for item in profile.get("conflicts", []):
             if not isinstance(item, dict):
                 continue
-            if item.get("status") != "open":
+            status = str(item.get("status", self.CONFLICT_STATUS_OPEN)).strip().lower()
+            if status not in {self.CONFLICT_STATUS_OPEN, self.CONFLICT_STATUS_NEEDS_USER}:
                 continue
             if item.get("field") != field:
                 continue
@@ -1909,6 +2060,23 @@ class MemoryStore:
             return True
         return False
 
+    def _find_mem0_id_for_text(self, text: str, *, top_k: int = 8) -> str | None:
+        target = self._norm_text(text)
+        if not target or not self.mem0.enabled:
+            return None
+        rows = self.mem0.search(text, top_k=top_k)
+        if not rows:
+            return None
+
+        for row in rows:
+            summary = self._norm_text(str(row.get("summary", "")))
+            if summary and (summary == target or target in summary or summary in target):
+                value = str(row.get("id", "")).strip()
+                if value:
+                    return value
+        value = str(rows[0].get("id", "")).strip()
+        return value or None
+
     def apply_live_user_correction(
         self,
         content: str,
@@ -1916,15 +2084,15 @@ class MemoryStore:
         channel: str = "",
         chat_id: str = "",
         enable_contradiction_check: bool = True,
-    ) -> dict[str, int]:
+    ) -> dict[str, Any]:
         text = str(content or "").strip()
         if not text:
-            return {"applied": 0, "conflicts": 0, "events": 0}
+            return {"applied": 0, "conflicts": 0, "events": 0, "needs_user": 0, "question": None}
 
         preference_corrections = self.extractor.extract_explicit_preference_corrections(text)
         fact_corrections = self.extractor.extract_explicit_fact_corrections(text)
         if not preference_corrections and not fact_corrections:
-            return {"applied": 0, "conflicts": 0, "events": 0}
+            return {"applied": 0, "conflicts": 0, "events": 0, "needs_user": 0, "question": None}
 
         self._record_metric("user_corrections", len(preference_corrections) + len(fact_corrections))
 
@@ -1985,7 +2153,9 @@ class MemoryStore:
                             "field": field,
                             "old": by_norm[old_norm],
                             "new": by_norm[new_norm],
-                            "status": "open",
+                            "old_memory_id": self._find_mem0_id_for_text(by_norm[old_norm]),
+                            "new_memory_id": self._find_mem0_id_for_text(by_norm[new_norm]),
+                            "status": self.CONFLICT_STATUS_OPEN,
                             "old_confidence": old_entry.get("confidence"),
                             "new_confidence": new_entry.get("confidence"),
                             "source": "live_correction",
@@ -2029,7 +2199,7 @@ class MemoryStore:
         conflicts += pref_conflicts + fact_conflicts
 
         if not applied and not conflicts:
-            return {"applied": 0, "conflicts": 0, "events": 0}
+            return {"applied": 0, "conflicts": 0, "events": 0, "needs_user": 0, "question": None}
 
         profile["last_verified_at"] = self._utc_now_iso()
         self.write_profile(profile)
@@ -2043,6 +2213,14 @@ class MemoryStore:
         if conflicts > 0:
             self._record_metric("conflicts_detected", conflicts)
 
+        needs_user = 0
+        question: str | None = None
+        if conflicts > 0:
+            resolution = self.auto_resolve_conflicts(max_items=10)
+            needs_user = int(resolution.get("needs_user", 0))
+            if needs_user > 0:
+                question = self.ask_user_for_conflict()
+
         if self.mem0.enabled:
             self.mem0.add_text(
                 text,
@@ -2055,7 +2233,13 @@ class MemoryStore:
             )
 
         self.rebuild_memory_snapshot(write=True)
-        return {"applied": applied, "conflicts": conflicts, "events": events_written}
+        return {
+            "applied": applied,
+            "conflicts": conflicts,
+            "events": events_written,
+            "needs_user": needs_user,
+            "question": question,
+        }
 
     def read_long_term(self) -> str:
         return self.persistence.read_text(self.memory_file)
@@ -2139,7 +2323,13 @@ class MemoryStore:
             if profile_touched:
                 self.write_profile(profile)
 
-        open_conflicts = [c for c in profile.get("conflicts", []) if isinstance(c, dict) and c.get("status") == "open"]
+        open_conflicts = [
+            c
+            for c in profile.get("conflicts", [])
+            if isinstance(c, dict)
+            and str(c.get("status", self.CONFLICT_STATUS_OPEN)).strip().lower()
+            in {self.CONFLICT_STATUS_OPEN, self.CONFLICT_STATUS_NEEDS_USER}
+        ]
         report = {
             "events": len(events),
             "profile_items": sum(len(self._to_str_list(profile.get(k))) for k in self.PROFILE_KEYS),
@@ -2237,7 +2427,6 @@ class MemoryStore:
         *,
         archive_all: bool = False,
         memory_window: int = 50,
-        memory_mode: str = "legacy",
         enable_contradiction_check: bool = True,
     ) -> bool:
         """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
@@ -2281,28 +2470,30 @@ class MemoryStore:
 
             self._apply_save_memory_tool_result(args=args, current_memory=current_memory)
 
-            if memory_mode == "hybrid":
-                profile = self.read_profile()
-                events, profile_updates = await self.extractor.extract_structured_memory(
-                    provider,
-                    model,
-                    profile,
-                    lines,
-                    old_messages,
-                    source_start=source_start,
-                )
-                events_written = self.append_events(events)
-                profile_added, _, profile_touched = self._apply_profile_updates(
-                    profile,
-                    profile_updates,
-                    enable_contradiction_check=enable_contradiction_check,
-                )
-                if events_written > 0 or profile_added > 0 or profile_touched > 0:
-                    profile["last_verified_at"] = self._utc_now_iso()
-                    self.write_profile(profile)
-                    self._record_metric("events_extracted", events_written)
+            profile = self.read_profile()
+            events, profile_updates = await self.extractor.extract_structured_memory(
+                provider,
+                model,
+                profile,
+                lines,
+                old_messages,
+                source_start=source_start,
+            )
+            events_written = self.append_events(events)
+            profile_added, _, profile_touched = self._apply_profile_updates(
+                profile,
+                profile_updates,
+                enable_contradiction_check=enable_contradiction_check,
+            )
+            if events_written > 0 or profile_added > 0 or profile_touched > 0:
+                profile["last_verified_at"] = self._utc_now_iso()
+                self.write_profile(profile)
+                self._record_metric("events_extracted", events_written)
 
-                self.rebuild_memory_snapshot(write=True)
+            if profile_added > 0:
+                self.auto_resolve_conflicts(max_items=10)
+
+            self.rebuild_memory_snapshot(write=True)
 
             if self.mem0.enabled:
                 for m in old_messages:

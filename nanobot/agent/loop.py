@@ -54,14 +54,10 @@ class AgentLoop:
         temperature: float = 0.1,
         max_tokens: int = 4096,
         memory_window: int = 100,
-        memory_mode: str = "hybrid",
         memory_retrieval_k: int = 6,
         memory_token_budget: int = 900,
-        memory_recency_half_life_days: float = 30.0,
         memory_uncertainty_threshold: float = 0.6,
         memory_enable_contradiction_check: bool = True,
-        memory_embedding_provider: str = "",
-        memory_vector_backend: str = "sqlite",
         brave_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
@@ -80,14 +76,10 @@ class AgentLoop:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.memory_window = memory_window
-        self.memory_mode = memory_mode
         self.memory_retrieval_k = memory_retrieval_k
         self.memory_token_budget = memory_token_budget
-        self.memory_recency_half_life_days = memory_recency_half_life_days
         self.memory_uncertainty_threshold = memory_uncertainty_threshold
         self.memory_enable_contradiction_check = memory_enable_contradiction_check
-        self.memory_embedding_provider = memory_embedding_provider
-        self.memory_vector_backend = memory_vector_backend
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -95,12 +87,8 @@ class AgentLoop:
 
         self.context = ContextBuilder(
             workspace,
-            memory_mode=self.memory_mode,
             memory_retrieval_k=self.memory_retrieval_k,
             memory_token_budget=self.memory_token_budget,
-            memory_recency_half_life_days=self.memory_recency_half_life_days,
-            memory_embedding_provider=self.memory_embedding_provider,
-            memory_vector_backend=self.memory_vector_backend,
         )
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
@@ -341,8 +329,6 @@ class AgentLoop:
             items = self.context.memory.retrieve(
                 query,
                 top_k=1,
-                recency_half_life_days=self.memory_recency_half_life_days,
-                embedding_provider=self.memory_embedding_provider,
             )
         except Exception:
             return 0.0
@@ -360,6 +346,39 @@ class AgentLoop:
             return False
         confidence = self._estimate_grounding_confidence(text)
         return confidence < self.memory_uncertainty_threshold
+
+    @staticmethod
+    def _build_no_answer_explanation(user_text: str, messages: list[dict[str, Any]]) -> str:
+        """Explain why the agent could not produce an answer on this turn."""
+        tool_results = [m for m in messages if m.get("role") == "tool"]
+        last_tool = tool_results[-1] if tool_results else None
+        last_tool_name = str(last_tool.get("name", "")) if last_tool else ""
+        last_tool_content = str(last_tool.get("content", "")) if last_tool else ""
+        lowered = last_tool_content.lower()
+
+        reasons: list[str] = []
+        if not tool_results:
+            reasons.append("I did not get usable evidence from tools or memory retrieval.")
+        if "exit code: 1" in lowered or "no such file" in lowered or "not found" in lowered:
+            reasons.append(
+                f"My last check with `{last_tool_name or 'a tool'}` returned no matching data."
+            )
+        if "permission denied" in lowered:
+            reasons.append("The lookup failed due to a local permission error.")
+        if "insufficient_quota" in lowered or "429" in lowered:
+            reasons.append("A provider quota/rate limit blocked part of the retrieval.")
+        if not reasons:
+            reasons.append("The model returned no final answer text after tool execution.")
+
+        question = (user_text or "").strip()
+        help_line = (
+            "Please share the fact directly and I can save it to memory."
+            if question
+            else "Please restate your question and I will retry with explicit verification."
+        )
+
+        primary_reason = reasons[0]
+        return f"Sorry, I couldn't answer that just now. {primary_reason} {help_line}"
 
     async def _process_message(
         self,
@@ -431,20 +450,31 @@ class AgentLoop:
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
 
-        if self.memory_mode == "hybrid":
-            try:
-                MemoryStore(
-                    self.workspace,
-                    embedding_provider=self.memory_embedding_provider,
-                    vector_backend=self.memory_vector_backend,
-                ).apply_live_user_correction(
-                    msg.content,
+        memory_store = MemoryStore(self.workspace)
+
+        conflict_reply = memory_store.handle_user_conflict_reply(msg.content)
+        if conflict_reply.get("handled"):
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=str(conflict_reply.get("message", "")),
+            )
+
+        try:
+            correction_result = memory_store.apply_live_user_correction(
+                msg.content,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                enable_contradiction_check=self.memory_enable_contradiction_check,
+            )
+            if correction_result.get("question"):
+                return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
-                    enable_contradiction_check=self.memory_enable_contradiction_check,
+                    content=str(correction_result.get("question", "")),
                 )
-            except Exception:
-                logger.exception("Live correction capture failed")
+        except Exception:
+            logger.exception("Live correction capture failed")
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
@@ -493,7 +523,7 @@ class AgentLoop:
         )
 
         if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+            final_content = self._build_no_answer_explanation(msg.content, all_msgs)
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
@@ -529,13 +559,10 @@ class AgentLoop:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
         return await MemoryStore(
             self.workspace,
-            embedding_provider=self.memory_embedding_provider,
-            vector_backend=self.memory_vector_backend,
         ).consolidate(
             session, self.provider, self.model,
             archive_all=archive_all,
             memory_window=self.memory_window,
-            memory_mode=self.memory_mode,
             enable_contradiction_check=self.memory_enable_contradiction_check,
         )
 

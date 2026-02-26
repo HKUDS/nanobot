@@ -343,14 +343,10 @@ def gateway(
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
-        memory_mode=config.agents.defaults.memory_mode,
         memory_retrieval_k=config.agents.defaults.memory_retrieval_k,
         memory_token_budget=config.agents.defaults.memory_token_budget,
-        memory_recency_half_life_days=config.agents.defaults.memory_recency_half_life_days,
         memory_uncertainty_threshold=config.agents.defaults.memory_uncertainty_threshold,
         memory_enable_contradiction_check=config.agents.defaults.memory_enable_contradiction_check,
-        memory_embedding_provider=config.agents.defaults.memory_embedding_provider,
-        memory_vector_backend=config.agents.defaults.memory_vector_backend,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
@@ -508,14 +504,10 @@ def agent(
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
-        memory_mode=config.agents.defaults.memory_mode,
         memory_retrieval_k=config.agents.defaults.memory_retrieval_k,
         memory_token_budget=config.agents.defaults.memory_token_budget,
-        memory_recency_half_life_days=config.agents.defaults.memory_recency_half_life_days,
         memory_uncertainty_threshold=config.agents.defaults.memory_uncertainty_threshold,
         memory_enable_contradiction_check=config.agents.defaults.memory_enable_contradiction_check,
-        memory_embedding_provider=config.agents.defaults.memory_embedding_provider,
-        memory_vector_backend=config.agents.defaults.memory_vector_backend,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
@@ -1009,13 +1001,10 @@ def cron_run(
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
-        memory_mode=config.agents.defaults.memory_mode,
         memory_retrieval_k=config.agents.defaults.memory_retrieval_k,
         memory_token_budget=config.agents.defaults.memory_token_budget,
-        memory_recency_half_life_days=config.agents.defaults.memory_recency_half_life_days,
         memory_uncertainty_threshold=config.agents.defaults.memory_uncertainty_threshold,
         memory_enable_contradiction_check=config.agents.defaults.memory_enable_contradiction_check,
-        memory_embedding_provider=config.agents.defaults.memory_embedding_provider,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -1072,8 +1061,6 @@ def memory_inspect(
     config = load_config()
     store = MemoryStore(
         config.workspace_path,
-        embedding_provider=config.agents.defaults.memory_embedding_provider,
-        vector_backend=config.agents.defaults.memory_vector_backend,
     )
 
     observability = store.get_observability_report()
@@ -1085,11 +1072,9 @@ def memory_inspect(
     events = store.read_events()
 
     console.print(f"{__logo__} Memory Inspect\n")
-    console.print(f"Mode: [cyan]{config.agents.defaults.memory_mode}[/cyan]")
+    console.print("Mode: [cyan]mem0[/cyan]")
     console.print(f"mem0 enabled: [cyan]{backend.get('mem0_enabled', False)}[/cyan]")
     console.print(f"mem0 mode: [cyan]{backend.get('mem0_mode', 'disabled')}[/cyan]")
-    console.print(f"Vector backend (active): [cyan]{store.retriever.active_backend}[/cyan]")
-    console.print("Vector backend (supported): [cyan]sqlite[/cyan]")
     console.print(f"Events: [green]{len(events)}[/green]")
     console.print(f"Profile items: [green]{report['profile_items']}[/green]")
     console.print(f"Open conflicts: [yellow]{report['open_conflicts']}[/yellow]")
@@ -1131,8 +1116,6 @@ def memory_inspect(
         retrieved = store.retrieve(
             query,
             top_k=top_k,
-            recency_half_life_days=config.agents.defaults.memory_recency_half_life_days,
-            embedding_provider=config.agents.defaults.memory_embedding_provider,
         )
         if not retrieved:
             console.print("\n[dim]No memory retrieved for query.[/dim]")
@@ -1168,8 +1151,6 @@ def memory_rebuild(
     config = load_config()
     store = MemoryStore(
         config.workspace_path,
-        embedding_provider=config.agents.defaults.memory_embedding_provider,
-        vector_backend=config.agents.defaults.memory_vector_backend,
     )
     snapshot = store.rebuild_memory_snapshot(max_events=max_events, write=True)
     line_count = len(snapshot.splitlines())
@@ -1187,8 +1168,6 @@ def memory_verify(
     config = load_config()
     store = MemoryStore(
         config.workspace_path,
-        embedding_provider=config.agents.defaults.memory_embedding_provider,
-        vector_backend=config.agents.defaults.memory_vector_backend,
     )
     report = store.verify_memory(stale_days=stale_days, update_profile=True)
 
@@ -1224,8 +1203,6 @@ def memory_eval(
     config = load_config()
     store = MemoryStore(
         config.workspace_path,
-        embedding_provider=config.agents.defaults.memory_embedding_provider,
-        vector_backend=config.agents.defaults.memory_vector_backend,
     )
 
     path = Path(cases_file) if cases_file else (config.workspace_path / "memory" / "eval_cases.json")
@@ -1259,8 +1236,6 @@ def memory_eval(
     evaluation = store.evaluate_retrieval_cases(
         raw_cases,
         default_top_k=top_k,
-        recency_half_life_days=config.agents.defaults.memory_recency_half_life_days,
-        embedding_provider=config.agents.defaults.memory_embedding_provider,
     )
     obs = store.get_observability_report()
     eval_summary = evaluation.get("summary", {})
@@ -1318,8 +1293,6 @@ def memory_conflicts(
     config = load_config()
     store = MemoryStore(
         config.workspace_path,
-        embedding_provider=config.agents.defaults.memory_embedding_provider,
-        vector_backend=config.agents.defaults.memory_vector_backend,
     )
     rows = store.list_conflicts(include_closed=all)
     if not rows:
@@ -1330,14 +1303,18 @@ def memory_conflicts(
     table.add_column("Index", style="cyan")
     table.add_column("Field")
     table.add_column("Old")
+    table.add_column("Old Mem0 ID", style="dim")
     table.add_column("New")
+    table.add_column("New Mem0 ID", style="dim")
     table.add_column("Status", style="yellow")
     for item in rows:
         table.add_row(
             str(item.get("index", "")),
             str(item.get("field", "")),
             str(item.get("old", ""))[:70],
+            str(item.get("old_memory_id", ""))[:24],
             str(item.get("new", ""))[:70],
+            str(item.get("new_memory_id", ""))[:24],
             str(item.get("status", "")),
         )
     console.print(table)
@@ -1355,14 +1332,23 @@ def memory_resolve(
     config = load_config()
     store = MemoryStore(
         config.workspace_path,
-        embedding_provider=config.agents.defaults.memory_embedding_provider,
-        vector_backend=config.agents.defaults.memory_vector_backend,
     )
-    ok = store.resolve_conflict(index=index, action=action)
-    if not ok:
+    details = store.resolve_conflict_details(index=index, action=action)
+    if not details.get("ok"):
         console.print("[red]Failed to resolve conflict. Check index/action.[/red]")
         raise typer.Exit(1)
     console.print(f"[green]✓[/green] Conflict {index} resolved with action '{action}'")
+    console.print(
+        "mem0 operation: "
+        f"[cyan]{details.get('mem0_operation', 'none')}[/cyan], "
+        f"ok=[cyan]{details.get('mem0_ok', False)}[/cyan]"
+    )
+    if details.get("old_memory_id") or details.get("new_memory_id"):
+        console.print(
+            "mem0 ids: "
+            f"old=[dim]{details.get('old_memory_id', '')}[/dim] "
+            f"new=[dim]{details.get('new_memory_id', '')}[/dim]"
+        )
 
 
 @memory_app.command("pin")
@@ -1377,8 +1363,6 @@ def memory_pin(
     config = load_config()
     store = MemoryStore(
         config.workspace_path,
-        embedding_provider=config.agents.defaults.memory_embedding_provider,
-        vector_backend=config.agents.defaults.memory_vector_backend,
     )
     try:
         ok = store.set_item_pin(field, text, pinned=True)
@@ -1402,8 +1386,6 @@ def memory_unpin(
     config = load_config()
     store = MemoryStore(
         config.workspace_path,
-        embedding_provider=config.agents.defaults.memory_embedding_provider,
-        vector_backend=config.agents.defaults.memory_vector_backend,
     )
     try:
         ok = store.set_item_pin(field, text, pinned=False)
@@ -1427,8 +1409,6 @@ def memory_outdated(
     config = load_config()
     store = MemoryStore(
         config.workspace_path,
-        embedding_provider=config.agents.defaults.memory_embedding_provider,
-        vector_backend=config.agents.defaults.memory_vector_backend,
     )
     try:
         ok = store.mark_item_outdated(field, text)

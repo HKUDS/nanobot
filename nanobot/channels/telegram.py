@@ -233,6 +233,9 @@ class TelegramChannel(BaseChannel):
                     allow_sending_without_reply=True
                 )
 
+        sent_any = False
+        last_error: Exception | None = None
+
         # Send media files
         for media_path in (msg.media or []):
             try:
@@ -249,14 +252,17 @@ class TelegramChannel(BaseChannel):
                         **{param: f},
                         reply_parameters=reply_params
                     )
+                sent_any = True
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
                 logger.error("Failed to send media {}: {}", media_path, e)
+                last_error = e
                 await self._app.bot.send_message(
                     chat_id=chat_id,
                     text=f"[Failed to send: {filename}]",
                     reply_parameters=reply_params
                 )
+                sent_any = True
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
@@ -269,16 +275,25 @@ class TelegramChannel(BaseChannel):
                         parse_mode="HTML",
                         reply_parameters=reply_params
                     )
+                    sent_any = True
                 except Exception as e:
                     logger.warning("HTML parse failed, falling back to plain text: {}", e)
+                    last_error = e
                     try:
                         await self._app.bot.send_message(
                             chat_id=chat_id, 
                             text=chunk,
                             reply_parameters=reply_params
                         )
+                        sent_any = True
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
+                        last_error = e2
+
+        has_payload = bool((msg.media or []) or (msg.content and msg.content != "[empty message]"))
+        if has_payload and not sent_any:
+            err = f": {last_error}" if last_error else ""
+            raise RuntimeError(f"Telegram delivery failed{err}")
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""

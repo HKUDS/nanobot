@@ -26,26 +26,14 @@ class ContextBuilder:
         self,
         workspace: Path,
         *,
-        memory_mode: str = "hybrid",
         memory_retrieval_k: int = 6,
         memory_token_budget: int = 900,
-        memory_recency_half_life_days: float = 30.0,
-        memory_embedding_provider: str = "",
-        memory_vector_backend: str = "sqlite",
     ):
         self.workspace = workspace
-        self.memory = MemoryStore(
-            workspace,
-            embedding_provider=memory_embedding_provider,
-            vector_backend=memory_vector_backend,
-        )
+        self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
-        self.memory_mode = memory_mode
         self.memory_retrieval_k = memory_retrieval_k
         self.memory_token_budget = memory_token_budget
-        self.memory_recency_half_life_days = memory_recency_half_life_days
-        self.memory_embedding_provider = memory_embedding_provider
-        self.memory_vector_backend = memory_vector_backend
     
     def build_system_prompt(
         self,
@@ -73,12 +61,9 @@ class ContextBuilder:
         
         # Memory context
         memory = self.memory.get_memory_context(
-            mode=self.memory_mode,
             query=current_message,
             retrieval_k=self.memory_retrieval_k,
             token_budget=self.memory_token_budget,
-            recency_half_life_days=self.memory_recency_half_life_days,
-            embedding_provider=self.memory_embedding_provider,
         )
         if memory:
             parts.append(f"# Memory\n\n{memory}")

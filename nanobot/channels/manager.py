@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
+from datetime import datetime
+from pathlib import Path
 
 from loguru import logger
 
@@ -28,8 +31,28 @@ class ChannelManager:
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
+        self._dead_letter_file = self.config.workspace_path / "outbound_failed.jsonl"
         
         self._init_channels()
+
+    def _write_dead_letter(self, msg: OutboundMessage, error: Exception | None) -> None:
+        """Persist undelivered outbound messages for manual replay/debugging."""
+        try:
+            path: Path = self._dead_letter_file
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "timestamp": datetime.now().isoformat(),
+                "channel": msg.channel,
+                "chat_id": msg.chat_id,
+                "content": msg.content,
+                "media": list(msg.media or []),
+                "metadata": dict(msg.metadata or {}),
+                "error": str(error) if error else "unknown delivery error",
+            }
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.error("Failed writing outbound dead letter: {}", e)
     
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
@@ -201,10 +224,27 @@ class ChannelManager:
                 
                 channel = self.channels.get(msg.channel)
                 if channel:
-                    try:
-                        await channel.send(msg)
-                    except Exception as e:
-                        logger.error("Error sending to {}: {}", msg.channel, e)
+                    last_error: Exception | None = None
+                    sent = False
+                    for attempt in range(1, 4):
+                        try:
+                            await channel.send(msg)
+                            sent = True
+                            break
+                        except Exception as e:
+                            last_error = e
+                            logger.error(
+                                "Error sending to {} (attempt {}/3): {}",
+                                msg.channel, attempt, e
+                            )
+                            if attempt < 3:
+                                await asyncio.sleep(0.5 * attempt)
+                    if not sent:
+                        self._write_dead_letter(msg, last_error)
+                        logger.error(
+                            "Outbound message persisted to {} after delivery failure",
+                            self._dead_letter_file,
+                        )
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
                     
@@ -212,6 +252,10 @@ class ChannelManager:
                 continue
             except asyncio.CancelledError:
                 break
+            except Exception as e:
+                # Keep dispatcher alive even on unexpected errors.
+                logger.exception("Outbound dispatcher error: {}", e)
+                continue
     
     def get_channel(self, name: str) -> BaseChannel | None:
         """Get a channel by name."""
