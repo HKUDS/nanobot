@@ -57,7 +57,11 @@ class BaseChannel(ABC):
             msg: The message to send.
         """
         pass
-    
+
+    async def init_send(self) -> None:
+        """Initialize minimum state for send() without starting the listener."""
+        pass
+
     def is_allowed(self, sender_id: str) -> bool:
         """
         Check if a sender is allowed to use this bot.
