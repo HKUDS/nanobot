@@ -123,3 +123,23 @@ def test_rollover_does_not_slide_every_turn_before_hard_limit(tmp_path: Path) ->
     history = loop._build_prompt_history(session)
     assert history[0]["content"] == "user-100"
     assert len(history) == 60
+
+
+def test_rollover_keeps_user_turn_when_tail_has_no_user(tmp_path: Path) -> None:
+    """Tool-heavy tails should not cause rollover history to become empty."""
+    loop = _make_loop(tmp_path, memory_window=100)
+    session = Session(key="cli:direct")
+
+    for i in range(40):
+        role = "user" if i % 2 == 0 else "assistant"
+        session.add_message(role, f"{role}-{i}")
+
+    for i in range(40, 130):
+        role = "assistant" if i % 2 == 0 else "tool"
+        session.add_message(role, f"{role}-{i}")
+
+    loop._maybe_rollover_prompt_history(session)
+
+    history = loop._build_prompt_history(session)
+    assert history
+    assert history[0]["role"] == "user"

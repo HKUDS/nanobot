@@ -343,6 +343,32 @@ class AgentLoop:
         base = max(0, session.last_consolidated, base)
         return min(base, len(session.messages))
 
+    def _align_prompt_base_to_user_turn(
+        self,
+        session: Session,
+        start_index: int,
+        candidate_base: int,
+    ) -> int:
+        """
+        Align a rollover base index to a user-turn boundary.
+
+        Prefer a user message at/after candidate_base to keep the recent range.
+        If none exists, fall back to the closest user message before candidate_base.
+        """
+        messages = session.messages
+        end = len(messages)
+        base = max(start_index, min(candidate_base, end))
+
+        for idx in range(base, end):
+            if messages[idx].get("role") == "user":
+                return idx
+
+        for idx in range(base - 1, start_index - 1, -1):
+            if messages[idx].get("role") == "user":
+                return idx
+
+        return start_index
+
     def _maybe_rollover_prompt_history(self, session: Session) -> None:
         """
         Batch-roll prompt history by index only (no summary injection).
@@ -356,7 +382,12 @@ class AgentLoop:
         if available <= hard_limit:
             return
 
-        new_base = max(start_index, len(session.messages) - soft_limit)
+        candidate_base = max(start_index, len(session.messages) - soft_limit)
+        new_base = self._align_prompt_base_to_user_turn(
+            session=session,
+            start_index=start_index,
+            candidate_base=candidate_base,
+        )
         if new_base == start_index:
             return
 
