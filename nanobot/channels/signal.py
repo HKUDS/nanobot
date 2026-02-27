@@ -240,17 +240,25 @@ class SignalChannel(BaseChannel):
 
         # Signal protocol stores messages >~2000 chars as a text/x-signal-plain attachment.
         # The body field is truncated; read the attachment file for the full text.
-        for att in data_msg.get("attachments") or []:
+        attachments = data_msg.get("attachments") or []
+        if attachments:
+            logger.debug("Signal: message has {} attachment(s): {}", len(attachments),
+                         [{"contentType": a.get("contentType"), "filename": a.get("filename")} for a in attachments])
+        for att in attachments:
             if att.get("contentType") == "text/x-signal-plain":
                 att_path = att.get("filename") or ""
+                logger.info("Signal: long message detected, text attachment at {}", att_path)
                 # Remap from signal-cli container path to nanobot container path.
                 # signal-cli: /home/.local/share/signal-cli/... → /root/.nanobot/signal-data/...
                 if att_path:
                     remapped = att_path.replace("/home/.local/share/signal-cli", "/root/.nanobot/signal-data", 1)
+                    logger.info("Signal: reading full message text from {}", remapped)
                     try:
                         from pathlib import Path as _Path
                         full_text = _Path(remapped).read_text(encoding="utf-8").strip()
                         if full_text:
+                            logger.info("Signal: replaced truncated body ({} chars) with full text ({} chars)",
+                                        len(body), len(full_text))
                             body = full_text
                     except Exception as e:
                         logger.warning("Signal: failed to read text attachment {}: {}", remapped, e)
