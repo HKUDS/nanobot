@@ -45,7 +45,7 @@ plan → feat/* or fix/* from main → tests → code → full test suite → ha
 ```
 plan → feat/* or fix/* from orghi-main → tests → code → full test suite + orghi tests → handoff to **/code-simplifier agent** → handoff to **/orghi-change-tracker agent** → merge to orghi-main
 ```
-(Later for Path C: migrate to main, push, handoff to **/orghi-change-tracker agent**, open PR - see Migration section.)
+(Later for Path C: migrate to main, push, handoff to **/orghi-change-tracker agent**, open PR - see ## Feature Migration section.)
 
 ---
 
@@ -227,7 +227,7 @@ When a Path C change on orghi-main becomes upstreamable, or the user asks to mig
 - [ ] **/orghi-change-tracker agent** invoked before push/merge; tracking artifact written
 - [ ] Path A: pushed branch, PR opened
 - [ ] Paths B, C: merged into orghi-main
-- [ ] Path C Migration: PR opened after migration from orghi-main to main
+- [ ] Path C Feature Migration: PR opened after migration from orghi-main to main
 
 ---
 
