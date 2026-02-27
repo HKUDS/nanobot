@@ -389,7 +389,9 @@ class AgentLoop:
                         await self._consolidate_memory(session)
                 finally:
                     self._consolidating.discard(session.key)
-                    if not lock.locked():
+                    waiters = getattr(lock, "_waiters", None)
+                    has_pending_waiters = bool(waiters) and any(not w.done() for w in waiters)
+                    if not lock.locked() and (not has_pending_waiters):
                         self._consolidation_locks.pop(session.key, None)
                     _task = asyncio.current_task()
                     if _task is not None:
