@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -81,13 +80,9 @@ class AgentLoop:
         self.max_tokens = max_tokens
         self.memory_window = memory_window
         self.brave_api_key = brave_api_key
+        self.cursor_api_key = cursor_api_key
+        self.gh_api_key = gh_api_key
         self.exec_config = exec_config or ExecToolConfig()
-        for env_var, value in [
-            ("CURSOR_API_KEY", cursor_api_key),
-            ("GH_TOKEN", gh_api_key),
-        ]:
-            if value:
-                os.environ.setdefault(env_var, value)
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
@@ -111,12 +106,8 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
-        self._consolidating: set[str] = (
-            set()
-        )  # Session keys with consolidation in progress
-        self._consolidation_tasks: set[asyncio.Task] = (
-            set()
-        )  # Strong refs to in-flight tasks
+        self._consolidating: set[str] = set()  # Session keys with consolidation in progress
+        self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._register_default_tools()
 
@@ -124,9 +115,7 @@ class AgentLoop:
         """Register the default set of tools."""
         allowed_dir = self.workspace if self.restrict_to_workspace else None
         for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(
-                cls(workspace=self.workspace, allowed_dir=allowed_dir)
-            )
+            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
         self.tools.register(
             ExecTool(
                 working_dir=str(self.workspace),
@@ -136,9 +125,7 @@ class AgentLoop:
         )
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
-        self.tools.register(
-            MessageTool(send_callback=self.bus.publish_outbound)
-        )
+        self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
@@ -153,14 +140,10 @@ class AgentLoop:
         try:
             self._mcp_stack = AsyncExitStack()
             await self._mcp_stack.__aenter__()
-            await connect_mcp_servers(
-                self._mcp_servers, self.tools, self._mcp_stack
-            )
+            await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
             self._mcp_connected = True
         except Exception as e:
-            logger.error(
-                "Failed to connect MCP servers (will retry next message): {}", e
-            )
+            logger.error("Failed to connect MCP servers (will retry next message): {}", e)
             if self._mcp_stack:
                 try:
                     await self._mcp_stack.aclose()
@@ -170,9 +153,7 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(
-        self, channel: str, chat_id: str, message_id: str | None = None
-    ) -> None:
+    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
@@ -198,18 +179,10 @@ class AgentLoop:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
 
         def _fmt(tc):
-            val = (
-                next(iter(tc.arguments.values()), None)
-                if tc.arguments
-                else None
-            )
+            val = next(iter(tc.arguments.values()), None) if tc.arguments else None
             if not isinstance(val, str):
                 return tc.name
-            return (
-                f'{tc.name}("{val[:40]}…")'
-                if len(val) > 40
-                else f'{tc.name}("{val}")'
-            )
+            return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
 
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
@@ -240,9 +213,7 @@ class AgentLoop:
                     clean = self._strip_think(response.content)
                     if clean:
                         await on_progress(clean)
-                    await on_progress(
-                        self._tool_hint(response.tool_calls), tool_hint=True
-                    )
+                    await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
                 tool_call_dicts = [
                     {
@@ -250,9 +221,7 @@ class AgentLoop:
                         "type": "function",
                         "function": {
                             "name": tc.name,
-                            "arguments": json.dumps(
-                                tc.arguments, ensure_ascii=False
-                            ),
+                            "arguments": json.dumps(tc.arguments, ensure_ascii=False),
                         },
                     }
                     for tc in response.tool_calls
@@ -266,15 +235,9 @@ class AgentLoop:
 
                 for tool_call in response.tool_calls:
                     tools_used.append(tool_call.name)
-                    args_str = json.dumps(
-                        tool_call.arguments, ensure_ascii=False
-                    )
-                    logger.info(
-                        "Tool call: {}({})", tool_call.name, args_str[:200]
-                    )
-                    result = await self.tools.execute(
-                        tool_call.name, tool_call.arguments
-                    )
+                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                    logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -299,9 +262,7 @@ class AgentLoop:
 
         while self._running:
             try:
-                msg = await asyncio.wait_for(
-                    self.bus.consume_inbound(), timeout=1.0
-                )
+                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
                 try:
                     response = await self._process_message(msg)
                     if response is not None:
@@ -348,9 +309,7 @@ class AgentLoop:
             self._consolidation_locks[session_key] = lock
         return lock
 
-    def _prune_consolidation_lock(
-        self, session_key: str, lock: asyncio.Lock
-    ) -> None:
+    def _prune_consolidation_lock(self, session_key: str, lock: asyncio.Lock) -> None:
         """Drop lock entry if no longer in use."""
         if not lock.locked():
             self._consolidation_locks.pop(session_key, None)
@@ -365,16 +324,12 @@ class AgentLoop:
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (
-                msg.chat_id.split(":", 1)
-                if ":" in msg.chat_id
-                else ("cli", msg.chat_id)
+                msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
             )
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            self._set_tool_context(
-                channel, chat_id, msg.metadata.get("message_id")
-            )
+            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=self.memory_window)
             messages = self.context.build_messages(
                 history=history,
@@ -391,9 +346,7 @@ class AgentLoop:
                 content=final_content or "Background task completed.",
             )
 
-        preview = (
-            msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        )
+        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info(
             "Processing message from {}:{}: {}",
             msg.channel,
@@ -415,9 +368,7 @@ class AgentLoop:
                     if snapshot:
                         temp = Session(key=session.key)
                         temp.messages = list(snapshot)
-                        if not await self._consolidate_memory(
-                            temp, archive_all=True
-                        ):
+                        if not await self._consolidate_memory(temp, archive_all=True):
                             return OutboundMessage(
                                 channel=msg.channel,
                                 chat_id=msg.chat_id,
@@ -450,10 +401,7 @@ class AgentLoop:
             )
 
         unconsolidated = len(session.messages) - session.last_consolidated
-        if (
-            unconsolidated >= self.memory_window
-            and session.key not in self._consolidating
-        ):
+        if unconsolidated >= self.memory_window and session.key not in self._consolidating:
             self._consolidating.add(session.key)
             lock = self._get_consolidation_lock(session.key)
 
@@ -471,9 +419,7 @@ class AgentLoop:
             _task = asyncio.create_task(_consolidate_and_unlock())
             self._consolidation_tasks.add(_task)
 
-        self._set_tool_context(
-            msg.channel, msg.chat_id, msg.metadata.get("message_id")
-        )
+        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
@@ -487,9 +433,7 @@ class AgentLoop:
             chat_id=msg.chat_id,
         )
 
-        async def _bus_progress(
-            content: str, *, tool_hint: bool = False
-        ) -> None:
+        async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             meta["_tool_hint"] = tool_hint
@@ -508,27 +452,16 @@ class AgentLoop:
         )
 
         if final_content is None:
-            final_content = (
-                "I've completed processing but have no response to give."
-            )
+            final_content = "I've completed processing but have no response to give."
 
-        preview = (
-            final_content[:120] + "..."
-            if len(final_content) > 120
-            else final_content
-        )
-        logger.info(
-            "Response to {}:{}: {}", msg.channel, msg.sender_id, preview
-        )
+        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
 
         if message_tool := self.tools.get("message"):
-            if (
-                isinstance(message_tool, MessageTool)
-                and message_tool._sent_in_turn
-            ):
+            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
                 return None
 
         return OutboundMessage(
@@ -540,30 +473,21 @@ class AgentLoop:
 
     _TOOL_RESULT_MAX_CHARS = 500
 
-    def _save_turn(
-        self, session: Session, messages: list[dict], skip: int
-    ) -> None:
+    def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
 
         for m in messages[skip:]:
             entry = {k: v for k, v in m.items() if k != "reasoning_content"}
-            if entry.get("role") == "tool" and isinstance(
-                entry.get("content"), str
-            ):
+            if entry.get("role") == "tool" and isinstance(entry.get("content"), str):
                 content = entry["content"]
                 if len(content) > self._TOOL_RESULT_MAX_CHARS:
-                    entry["content"] = (
-                        content[: self._TOOL_RESULT_MAX_CHARS]
-                        + "\n... (truncated)"
-                    )
+                    entry["content"] = content[: self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now()
 
-    async def _consolidate_memory(
-        self, session, archive_all: bool = False
-    ) -> bool:
+    async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
         return await MemoryStore(self.workspace).consolidate(
             session,
@@ -583,9 +507,7 @@ class AgentLoop:
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
-        msg = InboundMessage(
-            channel=channel, sender_id="user", chat_id=chat_id, content=content
-        )
+        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(
             msg, session_key=session_key, on_progress=on_progress
         )

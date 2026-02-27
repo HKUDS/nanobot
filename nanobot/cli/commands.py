@@ -72,9 +72,7 @@ def _restore_terminal() -> None:
     try:
         import termios
 
-        termios.tcsetattr(
-            sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS
-        )
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
     except Exception:
         pass
 
@@ -143,9 +141,7 @@ def version_callback(value: bool):
 
 @app.callback()
 def main(
-    version: bool = typer.Option(
-        None, "--version", "-v", callback=version_callback, is_eager=True
-    ),
+    version: bool = typer.Option(None, "--version", "-v", callback=version_callback, is_eager=True),
 ):
     """nanobot - Personal AI Assistant."""
     pass
@@ -166,21 +162,15 @@ def onboard():
     config_path = get_config_path()
 
     if config_path.exists():
-        console.print(
-            f"[yellow]Config already exists at {config_path}[/yellow]"
-        )
-        console.print(
-            "  [bold]y[/bold] = overwrite with defaults (existing values will be lost)"
-        )
+        console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
+        console.print("  [bold]y[/bold] = overwrite with defaults (existing values will be lost)")
         console.print(
             "  [bold]N[/bold] = refresh config, keeping existing values and adding new fields"
         )
         if typer.confirm("Overwrite?"):
             config = Config()
             save_config(config)
-            console.print(
-                f"[green]✓[/green] Config reset to defaults at {config_path}"
-            )
+            console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
         else:
             config = load_config()
             save_config(config)
@@ -203,9 +193,7 @@ def onboard():
 
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
-    console.print(
-        "  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]"
-    )
+    console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
     console.print("     Get one at: https://openrouter.ai/keys")
     console.print('  2. Chat: [cyan]nanobot agent -m "Hello!"[/cyan]')
     console.print(
@@ -233,9 +221,7 @@ def _create_workspace_templates(workspace: Path):
     memory_template = templates_dir / "memory" / "MEMORY.md"
     memory_file = memory_dir / "MEMORY.md"
     if not memory_file.exists():
-        memory_file.write_text(
-            memory_template.read_text(encoding="utf-8"), encoding="utf-8"
-        )
+        memory_file.write_text(memory_template.read_text(encoding="utf-8"), encoding="utf-8")
         console.print("  [dim]Created memory/MEMORY.md[/dim]")
 
     history_file = memory_dir / "HISTORY.md"
@@ -244,25 +230,6 @@ def _create_workspace_templates(workspace: Path):
         console.print("  [dim]Created memory/HISTORY.md[/dim]")
 
     (workspace / "skills").mkdir(exist_ok=True)
-
-
-def _agent_loop_config_kwargs(config: Config) -> dict:
-    """Common AgentLoop kwargs derived from config."""
-    return {
-        "workspace": config.workspace_path,
-        "model": config.agents.defaults.model,
-        "temperature": config.agents.defaults.temperature,
-        "max_tokens": config.agents.defaults.max_tokens,
-        "max_iterations": config.agents.defaults.max_tool_iterations,
-        "memory_window": config.agents.defaults.memory_window,
-        "brave_api_key": config.tools.web.search.api_key or None,
-        "cursor_api_key": config.tools.cursor.api_key or None,
-        "gh_api_key": config.tools.gh.api_key or None,
-        "exec_config": config.tools.exec,
-        "restrict_to_workspace": config.tools.restrict_to_workspace,
-        "mcp_servers": config.tools.mcp_servers,
-        "channels_config": config.channels,
-    }
 
 
 def _make_provider(config: Config):
@@ -290,15 +257,9 @@ def _make_provider(config: Config):
     from nanobot.providers.registry import find_by_name
 
     spec = find_by_name(provider_name)
-    if (
-        not model.startswith("bedrock/")
-        and not (p and p.api_key)
-        and not (spec and spec.is_oauth)
-    ):
+    if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
         console.print("[red]Error: No API key configured.[/red]")
-        console.print(
-            "Set one in ~/.nanobot/config.json under providers section"
-        )
+        console.print("Set one in ~/.nanobot/config.json under providers section")
         raise typer.Exit(1)
 
     return LiteLLMProvider(
@@ -318,9 +279,7 @@ def _make_provider(config: Config):
 @app.command()
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Verbose output"
-    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the nanobot gateway."""
     from nanobot.agent.loop import AgentLoop
@@ -352,9 +311,21 @@ def gateway(
     agent = AgentLoop(
         bus=bus,
         provider=provider,
+        workspace=config.workspace_path,
+        model=config.agents.defaults.model,
+        temperature=config.agents.defaults.temperature,
+        max_tokens=config.agents.defaults.max_tokens,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        memory_window=config.agents.defaults.memory_window,
+        brave_api_key=config.tools.web.search.api_key or None,
+        cursor_api_key=config.tools.cursor.api_key or None,
+        gh_api_key=config.tools.gh.api_key or None,
+        exec_config=config.tools.exec,
         cron_service=cron,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
-        **_agent_loop_config_kwargs(config),
+        mcp_servers=config.tools.mcp_servers,
+        channels_config=config.channels,
     )
 
     # Set cron callback (needs agent)
@@ -437,17 +408,13 @@ def gateway(
     )
 
     if channels.enabled_channels:
-        console.print(
-            f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}"
-        )
+        console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
 
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
-        console.print(
-            f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs"
-        )
+        console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
@@ -478,12 +445,8 @@ def gateway(
 
 @app.command()
 def agent(
-    message: str = typer.Option(
-        None, "--message", "-m", help="Message to send to the agent"
-    ),
-    session_id: str = typer.Option(
-        "cli:direct", "--session", "-s", help="Session ID"
-    ),
+    message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
+    session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     markdown: bool = typer.Option(
         True,
         "--markdown/--no-markdown",
@@ -518,8 +481,20 @@ def agent(
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
+        workspace=config.workspace_path,
+        model=config.agents.defaults.model,
+        temperature=config.agents.defaults.temperature,
+        max_tokens=config.agents.defaults.max_tokens,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        memory_window=config.agents.defaults.memory_window,
+        brave_api_key=config.tools.web.search.api_key or None,
+        cursor_api_key=config.tools.cursor.api_key or None,
+        gh_api_key=config.tools.gh.api_key or None,
+        exec_config=config.tools.exec,
         cron_service=cron,
-        **_agent_loop_config_kwargs(config),
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        mcp_servers=config.tools.mcp_servers,
+        channels_config=config.channels,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -529,9 +504,7 @@ def agent(
 
             return nullcontext()
         # Animated spinner is safe to use with prompt_toolkit input handling
-        return console.status(
-            "[dim]nanobot is thinking...[/dim]", spinner="dots"
-        )
+        return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
 
     async def _cli_progress(content: str, *, tool_hint: bool = False) -> None:
         ch = agent_loop.channels_config
@@ -582,17 +555,13 @@ def agent(
             async def _consume_outbound():
                 while True:
                     try:
-                        msg = await asyncio.wait_for(
-                            bus.consume_outbound(), timeout=1.0
-                        )
+                        msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
                         if msg.metadata.get("_progress"):
                             is_tool_hint = msg.metadata.get("_tool_hint", False)
                             ch = agent_loop.channels_config
                             if ch and is_tool_hint and not ch.send_tool_hints:
                                 pass
-                            elif (
-                                ch and not is_tool_hint and not ch.send_progress
-                            ):
+                            elif ch and not is_tool_hint and not ch.send_progress:
                                 pass
                             else:
                                 console.print(f"  [dim]↳ {msg.content}[/dim]")
@@ -602,9 +571,7 @@ def agent(
                             turn_done.set()
                         elif msg.content:
                             console.print()
-                            _print_agent_response(
-                                msg.content, render_markdown=markdown
-                            )
+                            _print_agent_response(msg.content, render_markdown=markdown)
                     except asyncio.TimeoutError:
                         continue
                     except asyncio.CancelledError:
@@ -642,9 +609,7 @@ def agent(
                             await turn_done.wait()
 
                         if turn_response:
-                            _print_agent_response(
-                                turn_response[0], render_markdown=markdown
-                            )
+                            _print_agent_response(turn_response[0], render_markdown=markdown)
                     except KeyboardInterrupt:
                         _restore_terminal()
                         console.print("\nGoodbye!")
@@ -656,9 +621,7 @@ def agent(
             finally:
                 agent_loop.stop()
                 outbound_task.cancel()
-                await asyncio.gather(
-                    bus_task, outbound_task, return_exceptions=True
-                )
+                await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
                 await agent_loop.close_mcp()
 
         asyncio.run(run_interactive())
@@ -694,11 +657,7 @@ def channels_status():
 
     # Feishu
     fs = config.channels.feishu
-    fs_config = (
-        f"app_id: {fs.app_id[:10]}..."
-        if fs.app_id
-        else "[dim]not configured[/dim]"
-    )
+    fs_config = f"app_id: {fs.app_id[:10]}..." if fs.app_id else "[dim]not configured[/dim]"
     table.add_row("Feishu", "✓" if fs.enabled else "✗", fs_config)
 
     # Mochat
@@ -708,38 +667,24 @@ def channels_status():
 
     # Telegram
     tg = config.channels.telegram
-    tg_config = (
-        f"token: {tg.token[:10]}..."
-        if tg.token
-        else "[dim]not configured[/dim]"
-    )
+    tg_config = f"token: {tg.token[:10]}..." if tg.token else "[dim]not configured[/dim]"
     table.add_row("Telegram", "✓" if tg.enabled else "✗", tg_config)
 
     # Slack
     slack = config.channels.slack
-    slack_config = (
-        "socket"
-        if slack.app_token and slack.bot_token
-        else "[dim]not configured[/dim]"
-    )
+    slack_config = "socket" if slack.app_token and slack.bot_token else "[dim]not configured[/dim]"
     table.add_row("Slack", "✓" if slack.enabled else "✗", slack_config)
 
     # DingTalk
     dt = config.channels.dingtalk
     dt_config = (
-        f"client_id: {dt.client_id[:10]}..."
-        if dt.client_id
-        else "[dim]not configured[/dim]"
+        f"client_id: {dt.client_id[:10]}..." if dt.client_id else "[dim]not configured[/dim]"
     )
     table.add_row("DingTalk", "✓" if dt.enabled else "✗", dt_config)
 
     # QQ
     qq = config.channels.qq
-    qq_config = (
-        f"app_id: {qq.app_id[:10]}..."
-        if qq.app_id
-        else "[dim]not configured[/dim]"
-    )
+    qq_config = f"app_id: {qq.app_id[:10]}..." if qq.app_id else "[dim]not configured[/dim]"
     table.add_row("QQ", "✓" if qq.enabled else "✗", qq_config)
 
     # Email
@@ -768,12 +713,8 @@ def _get_bridge_dir() -> Path:
         raise typer.Exit(1)
 
     # Find source bridge: first check package data, then source dir
-    pkg_bridge = (
-        Path(__file__).parent.parent / "bridge"
-    )  # nanobot/bridge (installed)
-    src_bridge = (
-        Path(__file__).parent.parent.parent / "bridge"
-    )  # repo root/bridge (dev)
+    pkg_bridge = Path(__file__).parent.parent / "bridge"  # nanobot/bridge (installed)
+    src_bridge = Path(__file__).parent.parent.parent / "bridge"  # repo root/bridge (dev)
 
     source = None
     if (pkg_bridge / "package.json").exists():
@@ -801,9 +742,7 @@ def _get_bridge_dir() -> Path:
     # Install and build
     try:
         console.print("  Installing dependencies...")
-        subprocess.run(
-            ["npm", "install"], cwd=user_bridge, check=True, capture_output=True
-        )
+        subprocess.run(["npm", "install"], cwd=user_bridge, check=True, capture_output=True)
 
         console.print("  Building...")
         subprocess.run(
@@ -858,9 +797,7 @@ app.add_typer(cron_app, name="cron")
 
 @cron_app.command("list")
 def cron_list(
-    all: bool = typer.Option(
-        False, "--all", "-a", help="Include disabled jobs"
-    ),
+    all: bool = typer.Option(False, "--all", "-a", help="Include disabled jobs"),
 ):
     """List scheduled jobs."""
     from nanobot.config.loader import get_data_dir
@@ -909,9 +846,7 @@ def cron_list(
             except Exception:
                 next_run = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
 
-        status = (
-            "[green]enabled[/green]" if job.enabled else "[dim]disabled[/dim]"
-        )
+        status = "[green]enabled[/green]" if job.enabled else "[dim]disabled[/dim]"
 
         table.add_row(job.id, job.name, sched, status, next_run)
 
@@ -921,22 +856,14 @@ def cron_list(
 @cron_app.command("add")
 def cron_add(
     name: str = typer.Option(..., "--name", "-n", help="Job name"),
-    message: str = typer.Option(
-        ..., "--message", "-m", help="Message for agent"
-    ),
-    every: int = typer.Option(
-        None, "--every", "-e", help="Run every N seconds"
-    ),
-    cron_expr: str = typer.Option(
-        None, "--cron", "-c", help="Cron expression (e.g. '0 9 * * *')"
-    ),
+    message: str = typer.Option(..., "--message", "-m", help="Message for agent"),
+    every: int = typer.Option(None, "--every", "-e", help="Run every N seconds"),
+    cron_expr: str = typer.Option(None, "--cron", "-c", help="Cron expression (e.g. '0 9 * * *')"),
     tz: str | None = typer.Option(
         None, "--tz", help="IANA timezone for cron (e.g. 'America/Vancouver')"
     ),
     at: str = typer.Option(None, "--at", help="Run once at time (ISO format)"),
-    deliver: bool = typer.Option(
-        False, "--deliver", "-d", help="Deliver response to channel"
-    ),
+    deliver: bool = typer.Option(False, "--deliver", "-d", help="Deliver response to channel"),
     to: str = typer.Option(None, "--to", help="Recipient for delivery"),
     channel: str = typer.Option(
         None,
@@ -1006,9 +933,7 @@ def cron_remove(
 @cron_app.command("enable")
 def cron_enable(
     job_id: str = typer.Argument(..., help="Job ID"),
-    disable: bool = typer.Option(
-        False, "--disable", help="Disable instead of enable"
-    ),
+    disable: bool = typer.Option(False, "--disable", help="Disable instead of enable"),
 ):
     """Enable or disable a job."""
     from nanobot.config.loader import get_data_dir
@@ -1028,9 +953,7 @@ def cron_enable(
 @cron_app.command("run")
 def cron_run(
     job_id: str = typer.Argument(..., help="Job ID to run"),
-    force: bool = typer.Option(
-        False, "--force", "-f", help="Run even if disabled"
-    ),
+    force: bool = typer.Option(False, "--force", "-f", help="Run even if disabled"),
 ):
     """Manually run a job."""
     from loguru import logger
@@ -1058,14 +981,24 @@ def cron_run(
         console.print(f"[red]Job {job_id} not found[/red]")
         raise typer.Exit(1)
 
-    needs_delivery = (
-        job.payload.deliver and job.payload.to and job.payload.channel
-    )
+    needs_delivery = job.payload.deliver and job.payload.to and job.payload.channel
 
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
-        **_agent_loop_config_kwargs(config),
+        workspace=config.workspace_path,
+        model=config.agents.defaults.model,
+        temperature=config.agents.defaults.temperature,
+        max_tokens=config.agents.defaults.max_tokens,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        memory_window=config.agents.defaults.memory_window,
+        brave_api_key=config.tools.web.search.api_key or None,
+        cursor_api_key=config.tools.cursor.api_key or None,
+        gh_api_key=config.tools.gh.api_key or None,
+        exec_config=config.tools.exec,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        mcp_servers=config.tools.mcp_servers,
+        channels_config=config.channels,
     )
 
     result_holder = []
@@ -1144,9 +1077,7 @@ def status():
             elif spec.is_local:
                 # Local deployments show api_base instead of api_key
                 if p.api_base:
-                    console.print(
-                        f"{spec.label}: [green]✓ {p.api_base}[/green]"
-                    )
+                    console.print(f"{spec.label}: [green]✓ {p.api_base}[/green]")
                 else:
                     console.print(f"{spec.label}: [dim]not set[/dim]")
             else:
@@ -1194,12 +1125,8 @@ def provider_login(
     key = provider.replace("-", "_")
     spec = next((s for s in PROVIDERS if s.name == key and s.is_oauth), None)
     if not spec:
-        names = ", ".join(
-            s.name.replace("_", "-") for s in PROVIDERS if s.is_oauth
-        )
-        console.print(
-            f"[red]Unknown OAuth provider: {provider}[/red]  Supported: {names}"
-        )
+        names = ", ".join(s.name.replace("_", "-") for s in PROVIDERS if s.is_oauth)
+        console.print(f"[red]Unknown OAuth provider: {provider}[/red]  Supported: {names}")
         raise typer.Exit(1)
 
     handler = _LOGIN_HANDLERS.get(spec.name)
@@ -1234,9 +1161,7 @@ def _login_openai_codex() -> None:
             f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]"
         )
     except ImportError:
-        console.print(
-            "[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]"
-        )
+        console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
         raise typer.Exit(1)
 
 
