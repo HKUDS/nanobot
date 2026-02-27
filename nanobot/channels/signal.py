@@ -112,6 +112,10 @@ class SignalChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message via the Signal REST API."""
+        if msg.metadata.get("_typing"):
+            await self._send_typing_indicator(msg.chat_id)
+            return
+
         if not self._http:
             logger.warning("Signal channel not running")
             return

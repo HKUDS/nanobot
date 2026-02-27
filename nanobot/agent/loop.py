@@ -173,6 +173,7 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_typing: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
@@ -192,6 +193,8 @@ class AgentLoop:
             )
 
             if response.has_tool_calls:
+                if on_typing:
+                    await on_typing()
                 if on_progress:
                     clean = self._strip_think(response.content)
                     if clean:
@@ -419,8 +422,15 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
+        async def _bus_typing() -> None:
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id, content="", metadata={"_typing": True},
+            ))
+
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages,
+            on_progress=on_progress or _bus_progress,
+            on_typing=_bus_typing,
         )
 
         if final_content is None:
