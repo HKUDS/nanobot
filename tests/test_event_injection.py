@@ -124,9 +124,22 @@ async def test_agent_loop_checks_events_before_llm():
     workspace = MagicMock()
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
+    with patch("nanobot.agent.loop.ContextBuilder") as MockCtx, \
          patch("nanobot.agent.loop.SessionManager"), \
          patch("nanobot.agent.loop.SubagentManager"):
+        # Configure ContextBuilder mock to properly handle add_assistant_message
+        mock_ctx = MagicMock()
+        def add_assistant(messages, content, tool_calls=None, **kwargs):
+            msg = {"role": "assistant", "content": content}
+            if tool_calls:
+                msg["tool_calls"] = tool_calls
+            if "reasoning_content" in kwargs and kwargs["reasoning_content"] is not None:
+                msg["reasoning_content"] = kwargs["reasoning_content"]
+            messages.append(msg)
+            return messages
+        mock_ctx.add_assistant_message.side_effect = add_assistant
+        MockCtx.return_value = mock_ctx
+
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
 
     # Publish an event before running loop
@@ -261,7 +274,7 @@ async def test_end_to_end_event_injection():
             {"role": "system", "content": "You are nanobot"},
             {"role": "user", "content": "Search for python sorting algorithms"}
         ]
-        mock_ctx.add_assistant_message.side_effect = lambda msgs, c, tc, **kw: msgs + [{"role": "assistant", "content": c, "tool_calls": tc}]
+        mock_ctx.add_assistant_message.side_effect = lambda msgs, c, tc=None, **kw: msgs + [{"role": "assistant", "content": c, "tool_calls": tc}]
         mock_ctx.add_tool_result.side_effect = lambda msgs, tid, tn, res: msgs + [{"role": "tool", "tool_call_id": tid, "name": tn, "content": res}]
         MockCtx.return_value = mock_ctx
 
