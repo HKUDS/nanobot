@@ -242,8 +242,7 @@ class SignalChannel(BaseChannel):
         # The body field is truncated; read the attachment file for the full text.
         attachments = data_msg.get("attachments") or []
         if attachments:
-            logger.debug("Signal: message has {} attachment(s): {}", len(attachments),
-                         [{"contentType": a.get("contentType"), "filename": a.get("filename")} for a in attachments])
+            logger.debug("Signal: message has {} attachment(s): {}", len(attachments), attachments)
         for att in attachments:
             if att.get("contentType") == "text/x-signal-plain":
                 att_path = att.get("filename") or ""
