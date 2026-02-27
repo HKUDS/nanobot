@@ -1,17 +1,62 @@
 """Configuration schema using Pydantic."""
 
+import os
+import re
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
+
+env_pattern = re.compile(r"^\$\{([^}]+)\}$")
 
 
 class Base(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    @model_validator(mode="after")
+    def expand_environment_variables(self) -> "Base":
+        """Expand ${VAR} patterns in string fields from environment variables."""
+        self._expand_env_vars_recursive(self)
+        return self
+
+    @staticmethod
+    def _expand_env_vars_recursive(obj):
+        """Recursively expand ${VAR} in all string fields."""
+        if isinstance(obj, BaseModel):
+            for field_name in obj.model_fields:
+                field_value = getattr(obj, field_name)
+                expanded_value = Base._expand_env_vars_recursive(field_value)
+                setattr(obj, field_name, expanded_value)
+            return obj
+        elif isinstance(obj, dict):
+            for key, value in obj.items():
+                obj[key] = Base._expand_env_vars_recursive(value)
+            return obj
+        elif isinstance(obj, list):
+            for i, item in enumerate(obj):
+                obj[i] = Base._expand_env_vars_recursive(item)
+            return obj
+        elif isinstance(obj, str):
+            return Base._expand_env_var_in_string(obj)
+        return obj
+
+    @staticmethod
+    def _expand_env_var_in_string(s: str) -> str:
+        """Expand ${VAR} patterns in a string using environment variables."""
+
+        def replace_var(match):
+            var_name = match.group(1)
+            var = os.environ.get(var_name)
+            if var is None:
+                print(f"Warning: Environment variable '{var_name}' not found for config expansion.")
+                return match.group(0)  # Return original string if env var is missing
+            return var
+
+        return env_pattern.sub(replace_var, s)
 
 
 class WhatsAppConfig(Base):
