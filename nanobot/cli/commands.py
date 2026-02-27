@@ -179,8 +179,9 @@ def onboard():
         save_config(Config())
         console.print(f"[green]✓[/green] Created config at {config_path}")
     
-    # Create workspace
-    workspace = get_workspace_path()
+    # Create workspace , use config workspace path if exists, otherwise use ~/.nanobot/workspace; try './workspace' will create a workspace
+    # on the root dir of the project
+    workspace = get_workspace_path(config.workspace_path)
     
     if not workspace.exists():
         workspace.mkdir(parents=True, exist_ok=True)
