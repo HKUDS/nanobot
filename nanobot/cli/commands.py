@@ -186,7 +186,8 @@ def onboard():
         console.print(f"[green]✓[/green] Created workspace at {workspace}")
     
     # Create default bootstrap files
-    _create_workspace_templates(workspace)
+    from nanobot.utils.helpers import sync_workspace_templates
+    sync_workspace_templates(workspace)
     
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
@@ -197,36 +198,6 @@ def onboard():
 
 
 
-
-def _create_workspace_templates(workspace: Path):
-    """Create default workspace template files from bundled templates."""
-    from importlib.resources import files as pkg_files
-
-    templates_dir = pkg_files("nanobot") / "templates"
-
-    for item in templates_dir.iterdir():
-        if not item.name.endswith(".md"):
-            continue
-        dest = workspace / item.name
-        if not dest.exists():
-            dest.write_text(item.read_text(encoding="utf-8"), encoding="utf-8")
-            console.print(f"  [dim]Created {item.name}[/dim]")
-
-    memory_dir = workspace / "memory"
-    memory_dir.mkdir(exist_ok=True)
-
-    memory_template = templates_dir / "memory" / "MEMORY.md"
-    memory_file = memory_dir / "MEMORY.md"
-    if not memory_file.exists():
-        memory_file.write_text(memory_template.read_text(encoding="utf-8"), encoding="utf-8")
-        console.print("  [dim]Created memory/MEMORY.md[/dim]")
-
-    history_file = memory_dir / "HISTORY.md"
-    if not history_file.exists():
-        history_file.write_text("", encoding="utf-8")
-        console.print("  [dim]Created memory/HISTORY.md[/dim]")
-
-    (workspace / "skills").mkdir(exist_ok=True)
 
 
 def _make_provider(config: Config):
@@ -294,6 +265,8 @@ def gateway(
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     
     config = load_config()
+    from nanobot.utils.helpers import sync_workspace_templates
+    sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
@@ -447,6 +420,8 @@ def agent(
     from loguru import logger
     
     config = load_config()
+    from nanobot.utils.helpers import sync_workspace_templates
+    sync_workspace_templates(config.workspace_path)
     
     bus = MessageBus()
     provider = _make_provider(config)
@@ -1008,6 +983,8 @@ def status():
     config_path = get_config_path()
     config = load_config()
     workspace = config.workspace_path
+    from nanobot.utils.helpers import sync_workspace_templates
+    sync_workspace_templates(workspace)
 
     console.print(f"{__logo__} nanobot Status\n")
 

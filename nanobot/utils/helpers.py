@@ -77,3 +77,66 @@ def parse_session_key(key: str) -> tuple[str, str]:
     if len(parts) != 2:
         raise ValueError(f"Invalid session key: {key}")
     return parts[0], parts[1]
+
+def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
+    """
+    Synchronize default workspace template files from bundled templates.
+    Only creates files that do not exist. Returns list of added file names.
+    """
+    from importlib.resources import files as pkg_files
+    from rich.console import Console
+    console = Console()
+    added = []
+
+    try:
+        templates_dir = pkg_files("nanobot") / "templates"
+    except Exception:
+        # Fallback for some environments where pkg_files might fail
+        return []
+
+    if not templates_dir.is_dir():
+        return []
+
+    # 1. Sync root templates
+    for item in templates_dir.iterdir():
+        if not item.name.endswith(".md"):
+            continue
+        dest = workspace / item.name
+        if not dest.exists():
+            try:
+                dest.write_text(item.read_text(encoding="utf-8"), encoding="utf-8")
+                added.append(item.name)
+            except Exception:
+                pass
+
+    # 2. Sync memory templates
+    memory_dir = workspace / "memory"
+    memory_dir.mkdir(exist_ok=True)
+    
+    memory_src = templates_dir / "memory" / "MEMORY.md"
+    memory_dest = memory_dir / "MEMORY.md"
+    if memory_src.is_file() and not memory_dest.exists():
+        try:
+            memory_dest.write_text(memory_src.read_text(encoding="utf-8"), encoding="utf-8")
+            added.append("memory/MEMORY.md")
+        except Exception:
+            pass
+
+    # 3. History file (always ensure it exists)
+    history_file = memory_dir / "HISTORY.md"
+    if not history_file.exists():
+        try:
+            history_file.write_text("", encoding="utf-8")
+            added.append("memory/HISTORY.md")
+        except Exception:
+            pass
+
+    # 4. Ensure skills dir exists
+    (workspace / "skills").mkdir(exist_ok=True)
+
+    # Print notices if files were added
+    if added and not silent:
+        for name in added:
+            console.print(f"  [dim]Created {name}[/dim]")
+            
+    return added
