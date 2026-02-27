@@ -44,7 +44,9 @@ class ExecTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Execute a shell command and return its output. Use with caution."
+        return ("Execute a shell command and return its output. Use with caution. "
+                "On Windows, when using 'wt nt' to open a new tab, do NOT quote the entire nested "
+                "command; use 'wt nt cmd /c \"command\"' or 'wt nt powershell -Command \"command\"'.")
     
     @property
     def parameters(self) -> dict[str, Any]:
