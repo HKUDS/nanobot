@@ -9,7 +9,6 @@ x-common-config: &common-config
   cap_drop:
     - NET_RAW      # raw sockets (ping, ICMP, packet crafting); not needed by the app
     - AUDIT_WRITE  # kernel audit log writes; not needed by the app
-  pids_limit: 200
   tmpfs:
     - /tmp:noexec,nodev,nosuid,size=100m
     - /run:noexec,nodev,nosuid,size=50m
@@ -27,6 +26,7 @@ services:
         limits:
           cpus: '1'
           memory: 1G
+          pids: 200
         reservations:
           cpus: '0.25'
           memory: 256M
@@ -38,6 +38,7 @@ services:
     command: ["status"]
     stdin_open: true
     tty: true
+    pids_limit: 200
 
   signal-cli-rest-api:
     image: bbernhard/signal-cli-rest-api:latest
