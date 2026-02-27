@@ -5,8 +5,8 @@ import json
 import time
 from typing import Any
 
-from loguru import logger
 import httpx
+from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -15,11 +15,11 @@ from nanobot.config.schema import DingTalkConfig
 
 try:
     from dingtalk_stream import (
-        DingTalkStreamClient,
-        Credential,
+        AckMessage,
         CallbackHandler,
         CallbackMessage,
-        AckMessage,
+        Credential,
+        DingTalkStreamClient,
     )
     from dingtalk_stream.chatbot import ChatbotMessage
 
@@ -70,7 +70,9 @@ class NanobotDingTalkHandler(CallbackHandler):
             # Forward to Nanobot via _on_message (non-blocking).
             # Store reference to prevent GC before task completes.
             task = asyncio.create_task(
-                self.channel._on_message(content, sender_id, sender_name)
+                self.channel._on_message(
+                    content, sender_id, sender_name, webhook=chatbot_msg.session_webhook
+                )
             )
             self.channel._background_tasks.add(task)
             task.add_done_callback(self.channel._background_tasks.discard)
@@ -113,9 +115,7 @@ class DingTalkChannel(BaseChannel):
         """Start the DingTalk bot with Stream Mode."""
         try:
             if not DINGTALK_AVAILABLE:
-                logger.error(
-                    "DingTalk Stream SDK not installed. Run: pip install dingtalk-stream"
-                )
+                logger.error("DingTalk Stream SDK not installed. Run: pip install dingtalk-stream")
                 return
 
             if not self.config.client_id or not self.config.client_secret:
@@ -195,21 +195,38 @@ class DingTalkChannel(BaseChannel):
         if not token:
             return
 
-        # oToMessages/batchSend: sends to individual users (private chat)
-        # https://open.dingtalk.com/document/orgapp/robot-batch-send-messages
-        url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
-
         headers = {"x-acs-dingtalk-access-token": token}
 
-        data = {
-            "robotCode": self.config.client_id,
-            "userIds": [msg.chat_id],  # chat_id is the user's staffId
-            "msgKey": "sampleMarkdown",
-            "msgParam": json.dumps({
-                "text": msg.content,
-                "title": "Nanobot Reply",
-            }),
+        content = msg.content
+        logger.debug(f"Received DingTalk message: {msg}")
+
+        # Generate dynamic title from content for better preview
+        title = content.replace("\n", " ").strip()[:30]
+        if len(content) > 30:
+            title += "..."
+
+        msg_param_dict = {
+            "text": content,
+            "title": title,
         }
+
+        msg_param = json.dumps(msg_param_dict)
+
+        if msg.metadata.get("webhook"):
+            url = msg.metadata["webhook"]  # Use session webhook for replies
+            data = {
+                "msgtype": "markdown",
+                "markdown": msg_param,
+            }
+        else:
+            # Private chat
+            url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
+            data = {
+                "robotCode": self.config.client_id,
+                "userIds": [msg.chat_id],  # chat_id is the user's staffId
+                "msgKey": "sampleMarkdown",
+                "msgParam": msg_param,
+            }
 
         if not self._http:
             logger.warning("DingTalk HTTP client not initialized, cannot send")
@@ -220,11 +237,13 @@ class DingTalkChannel(BaseChannel):
             if resp.status_code != 200:
                 logger.error(f"DingTalk send failed: {resp.text}")
             else:
-                logger.debug(f"DingTalk message sent to {msg.chat_id}")
+                logger.debug(f"DingTalk message sent to {msg.chat_id}, response: {resp.text}")
         except Exception as e:
             logger.error(f"Error sending DingTalk message: {e}")
 
-    async def _on_message(self, content: str, sender_id: str, sender_name: str) -> None:
+    async def _on_message(
+        self, content: str, sender_id: str, sender_name: str, webhook: str = None
+    ) -> None:
         """Handle incoming message (called by NanobotDingTalkHandler).
 
         Delegates to BaseChannel._handle_message() which enforces allow_from
@@ -239,6 +258,7 @@ class DingTalkChannel(BaseChannel):
                 metadata={
                     "sender_name": sender_name,
                     "platform": "dingtalk",
+                    "webhook": webhook,
                 },
             )
         except Exception as e:
