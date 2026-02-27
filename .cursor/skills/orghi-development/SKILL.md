@@ -188,12 +188,12 @@ When merging main into orghi-main (sync-upstream), conflicts may occur. Use:
 
 ---
 
-## Migration: Orghi-Main -> Upstream PR (Path C only)
+## Feature Migration: Orghi-Main -> Upstream PR (Path C only)
 
-When a Path C change on orghi-main becomes upstreamable:
+When a Path C change on orghi-main becomes upstreamable, or the user asks to migrate a feature to upstream:
 
 1. **Create feat/* or fix/* from main** (main synced with upstream).
-2. **Port the changes** - Copy from orghi-main into the branch. Strip orghi-specific bits. Use the tracking doc as reference (`.orghi/orghi-change-tracking/<prefix>/<slug>.md`).
+2. **Port the changes** - Copy from orghi-main into the branch. Strip orghi-specific bits for the feature. Use the tracking doc as reference (`.orghi/orghi-change-tracking/<prefix>/<slug>.md`).
 3. **Move tests** from `tests/orghi/` to `tests/` if applicable.
 4. **Run** `uv run pytest`, **/code-simplifier agent**, re-run tests.
 5. Use the existing .orghi/orghi-change-tracking/<prefix>/<slug>.md from orghi-main branch as context for PR content, (before push).
@@ -227,7 +227,7 @@ When a Path C change on orghi-main becomes upstreamable:
 - [ ] **/orghi-change-tracker agent** invoked before push/merge; tracking artifact written
 - [ ] Path A: pushed branch, PR opened
 - [ ] Paths B, C: merged into orghi-main
-- [ ] Path C: PR opened after migration from orghi-main to main
+- [ ] Path C Migration: PR opened after migration from orghi-main to main
 
 ---
 
