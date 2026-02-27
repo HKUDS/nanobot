@@ -11,6 +11,8 @@ from loguru import logger
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
+HEARTBEAT_OK_TOKEN = "HEARTBEAT_OK"
+
 _HEARTBEAT_TOOL = [
     {
         "type": "function",
@@ -53,8 +55,9 @@ class HeartbeatService:
     def __init__(
         self,
         workspace: Path,
-        provider: LLMProvider,
-        model: str,
+        provider: LLMProvider | None = None,
+        model: str | None = None,
+        on_heartbeat: Callable[[str], Coroutine[Any, Any, str]] | None = None,
         on_execute: Callable[[str], Coroutine[Any, Any, str]] | None = None,
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
@@ -63,7 +66,8 @@ class HeartbeatService:
         self.workspace = workspace
         self.provider = provider
         self.model = model
-        self.on_execute = on_execute
+        self.on_heartbeat = on_heartbeat
+        self.on_execute = on_execute or on_heartbeat
         self.on_notify = on_notify
         self.interval_s = interval_s
         self.enabled = enabled
@@ -87,6 +91,9 @@ class HeartbeatService:
 
         Returns (action, tasks) where action is 'skip' or 'run'.
         """
+        if not self.provider or not self.model:
+            return "skip", ""
+
         response = await self.provider.chat(
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
@@ -147,6 +154,12 @@ class HeartbeatService:
         logger.info("Heartbeat: checking for tasks...")
 
         try:
+            if self.on_heartbeat:
+                response = await self.on_heartbeat(content)
+                if response and self.on_notify and HEARTBEAT_OK_TOKEN not in response.upper():
+                    await self.on_notify(response)
+                return
+
             action, tasks = await self._decide(content)
 
             if action != "run":
@@ -167,6 +180,11 @@ class HeartbeatService:
         content = self._read_heartbeat_file()
         if not content:
             return None
+        if self.on_heartbeat:
+            response = await self.on_heartbeat(content)
+            if response and HEARTBEAT_OK_TOKEN in response.upper():
+                return None
+            return response
         action, tasks = await self._decide(content)
         if action != "run" or not self.on_execute:
             return None
