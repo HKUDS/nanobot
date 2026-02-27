@@ -250,6 +250,18 @@ class WebSearchConfig(Base):
     max_results: int = 5
 
 
+class CursorConfig(Base):
+    """Cursor CLI configuration."""
+
+    api_key: str = ""  # Cursor API key from https://cursor.com/dashboard
+
+
+class GhConfig(Base):
+    """GitHub CLI configuration."""
+
+    api_key: str = ""  # GH token for gh auth
+
+
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
@@ -278,6 +290,8 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    cursor: CursorConfig = Field(default_factory=CursorConfig)
+    gh: GhConfig = Field(default_factory=GhConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 

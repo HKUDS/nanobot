@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -59,6 +60,8 @@ class AgentLoop:
         max_tokens: int = 4096,
         memory_window: int = 100,
         brave_api_key: str | None = None,
+        cursor_api_key: str | None = None,
+        gh_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
@@ -79,6 +82,12 @@ class AgentLoop:
         self.memory_window = memory_window
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
+        for env_var, value in [
+            ("CURSOR_API_KEY", cursor_api_key),
+            ("GH_TOKEN", gh_api_key),
+        ]:
+            if value:
+                os.environ.setdefault(env_var, value)
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 

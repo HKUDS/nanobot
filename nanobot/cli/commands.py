@@ -246,6 +246,25 @@ def _create_workspace_templates(workspace: Path):
     (workspace / "skills").mkdir(exist_ok=True)
 
 
+def _agent_loop_config_kwargs(config: Config) -> dict:
+    """Common AgentLoop kwargs derived from config."""
+    return {
+        "workspace": config.workspace_path,
+        "model": config.agents.defaults.model,
+        "temperature": config.agents.defaults.temperature,
+        "max_tokens": config.agents.defaults.max_tokens,
+        "max_iterations": config.agents.defaults.max_tool_iterations,
+        "memory_window": config.agents.defaults.memory_window,
+        "brave_api_key": config.tools.web.search.api_key or None,
+        "cursor_api_key": config.tools.cursor.api_key or None,
+        "gh_api_key": config.tools.gh.api_key or None,
+        "exec_config": config.tools.exec,
+        "restrict_to_workspace": config.tools.restrict_to_workspace,
+        "mcp_servers": config.tools.mcp_servers,
+        "channels_config": config.channels,
+    }
+
+
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.custom_provider import CustomProvider
@@ -333,19 +352,9 @@ def gateway(
     agent = AgentLoop(
         bus=bus,
         provider=provider,
-        workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        temperature=config.agents.defaults.temperature,
-        max_tokens=config.agents.defaults.max_tokens,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
-        brave_api_key=config.tools.web.search.api_key or None,
-        exec_config=config.tools.exec,
         cron_service=cron,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
-        mcp_servers=config.tools.mcp_servers,
-        channels_config=config.channels,
+        **_agent_loop_config_kwargs(config),
     )
 
     # Set cron callback (needs agent)
@@ -509,18 +518,8 @@ def agent(
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
-        workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        temperature=config.agents.defaults.temperature,
-        max_tokens=config.agents.defaults.max_tokens,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
-        brave_api_key=config.tools.web.search.api_key or None,
-        exec_config=config.tools.exec,
         cron_service=cron,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-        mcp_servers=config.tools.mcp_servers,
-        channels_config=config.channels,
+        **_agent_loop_config_kwargs(config),
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -1066,17 +1065,7 @@ def cron_run(
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
-        workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        temperature=config.agents.defaults.temperature,
-        max_tokens=config.agents.defaults.max_tokens,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
-        brave_api_key=config.tools.web.search.api_key or None,
-        exec_config=config.tools.exec,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-        mcp_servers=config.tools.mcp_servers,
-        channels_config=config.channels,
+        **_agent_loop_config_kwargs(config),
     )
 
     result_holder = []
@@ -1165,6 +1154,13 @@ def status():
                 console.print(
                     f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}"
                 )
+
+        console.print(
+            f"Cursor CLI: {'[green]✓[/green]' if config.tools.cursor.api_key else '[dim]not set[/dim]'}"
+        )
+        console.print(
+            f"gh CLI: {'[green]✓[/green]' if config.tools.gh.api_key else '[dim]not set[/dim]'}"
+        )
 
 
 # ============================================================================
