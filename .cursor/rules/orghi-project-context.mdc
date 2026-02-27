@@ -40,3 +40,15 @@ Always flow upstream/main into origin/main, then into origin/orghi-main to keep 
 - `orghi-main` has a deployment action that deploys orghi (nanobot) to a VPS on Digital Ocean via SSH
 - Every push to `orghi-main` deploys to the droplet
 - Development often happens in Cursor IDE on the remote droplet via SSH
+
+# Commands
+When I ask for commands in nanobot, you should always return the commands to be run on the remote droplet. 
+We will always need to run the commands from the /opt/orghi directory.
+
+## Examples:
+`docker exec -t nanobot-gateway nanobot cron run 1745e8ff` - run a cron job by ID
+`docker exec -it nanobot-gateway nanobot agent` - run the agent on the remote droplet
+`docker exec -t nanobot-gateway nanobot cron list` - list all cron jobs
+`docker exec -t nanobot-gateway nanobot cron remove <job_id>` - remove a cron job by ID
+`docker exec -it nanobot-gateway nanobot agent --logs` - chat with agent with logs
+`docker exec -it nanobot-gateway nanobot provider login openai-codex` - login to the provider
