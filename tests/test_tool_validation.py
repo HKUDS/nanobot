@@ -1,6 +1,9 @@
+from pathlib import Path
 from typing import Any
 
+import pytest
 from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry
 
 
@@ -86,3 +89,31 @@ async def test_registry_returns_validation_error() -> None:
     reg.register(SampleTool())
     result = await reg.execute("sample", {"query": "hi"})
     assert "Invalid parameters" in result
+
+
+@pytest.mark.asyncio
+async def test_registry_executes_write_and_read_tools_with_real_io(tmp_path: Path) -> None:
+    reg = ToolRegistry()
+    reg.register(WriteFileTool(workspace=tmp_path, allowed_dir=tmp_path))
+    reg.register(ReadFileTool(workspace=tmp_path, allowed_dir=tmp_path))
+
+    write_result = await reg.execute(
+        "write_file",
+        {"path": "notes/todo.txt", "content": "ship-ci"},
+    )
+    read_result = await reg.execute("read_file", {"path": "notes/todo.txt"})
+
+    assert write_result.startswith("Successfully wrote")
+    assert read_result == "ship-ci"
+    assert (tmp_path / "notes" / "todo.txt").read_text(encoding="utf-8") == "ship-ci"
+
+
+@pytest.mark.asyncio
+async def test_registry_reports_write_file_validation_error() -> None:
+    reg = ToolRegistry()
+    reg.register(WriteFileTool())
+
+    result = await reg.execute("write_file", {"path": "only-path.txt"})
+
+    assert "Invalid parameters" in result
+    assert "missing required content" in result
