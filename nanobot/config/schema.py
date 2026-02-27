@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -72,9 +72,9 @@ class MatrixConfig(Base):
     access_token: str = ""
     user_id: str = ""  # @bot:matrix.org
     device_id: str = ""
-    e2ee_enabled: bool = True # Enable Matrix E2EE support (encryption + encrypted room handling).
-    sync_stop_grace_seconds: int = 2 # Max seconds to wait for sync_forever to stop gracefully before cancellation fallback.
-    max_media_bytes: int = 20 * 1024 * 1024 # Max attachment size accepted for Matrix media handling (inbound + outbound).
+    e2ee_enabled: bool = True  # Enable Matrix E2EE support (encryption + encrypted room handling)
+    sync_stop_grace_seconds: int = 2  # Max seconds to wait for sync_forever to stop gracefully before cancellation fallback
+    max_media_bytes: int = 20 * 1024 * 1024  # Max attachment size for Matrix media (inbound + outbound)
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention", "allowlist"] = "open"
     group_allow_from: list[str] = Field(default_factory=list)
@@ -184,20 +184,6 @@ class QQConfig(Base):
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
-class MatrixConfig(Base):
-    """Matrix (Element) channel configuration."""
-    enabled: bool = False
-    homeserver: str = "https://matrix.org"
-    access_token: str = ""
-    user_id: str = ""                       # e.g. @bot:matrix.org
-    device_id: str = ""
-    e2ee_enabled: bool = True               # end-to-end encryption support
-    sync_stop_grace_seconds: int = 2        # graceful sync_forever shutdown timeout
-    max_media_bytes: int = 20 * 1024 * 1024 # inbound + outbound attachment limit
-    allow_from: list[str] = Field(default_factory=list)
-    group_policy: Literal["open", "mention", "allowlist"] = "open"
-    group_allow_from: list[str] = Field(default_factory=list)
-    allow_room_mentions: bool = False
 
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
@@ -286,6 +272,18 @@ class WebSearchConfig(Base):
     max_results: int = 5
 
 
+class CursorConfig(Base):
+    """Cursor CLI configuration."""
+
+    api_key: str = ""  # Cursor API key from https://cursor.com/dashboard
+
+
+class GhConfig(Base):
+    """GitHub CLI configuration."""
+
+    api_key: str = ""  # GH token for gh auth
+
+
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
@@ -315,6 +313,8 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    cursor: CursorConfig = Field(default_factory=CursorConfig)
+    gh: GhConfig = Field(default_factory=GhConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
