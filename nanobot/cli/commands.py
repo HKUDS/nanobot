@@ -38,6 +38,18 @@ _PROMPT_SESSION: PromptSession | None = None
 _SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
 
 
+def _route_session_key(channel: str, chat_id: str) -> str:
+    """Build the canonical session key for a routable channel target."""
+    return f"{channel}:{chat_id}"
+
+
+def _cron_execution_session_key(job_id: str, deliver: bool, channel: str, chat_id: str, to: str | None) -> str:
+    """Pick cron execution session key; delivered jobs must write into user session history."""
+    if deliver and to:
+        return _route_session_key(channel, chat_id)
+    return f"cron:{job_id}"
+
+
 def _flush_pending_tty_input() -> None:
     """Drop unread keypresses typed while the model was generating output."""
     try:
@@ -349,16 +361,25 @@ def gateway(
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
+        target_channel = job.payload.channel or "cli"
+        target_chat_id = job.payload.to or "direct"
+        session_key = _cron_execution_session_key(
+            job_id=job.id,
+            deliver=job.payload.deliver,
+            channel=target_channel,
+            chat_id=target_chat_id,
+            to=job.payload.to,
+        )
         response = await agent.process_direct(
             job.payload.message,
-            session_key=f"cron:{job.id}",
-            channel=job.payload.channel or "cli",
-            chat_id=job.payload.to or "direct",
+            session_key=session_key,
+            channel=target_channel,
+            chat_id=target_chat_id,
         )
         if job.payload.deliver and job.payload.to:
             from nanobot.bus.events import OutboundMessage
             await bus.publish_outbound(OutboundMessage(
-                channel=job.payload.channel or "cli",
+                channel=target_channel,
                 chat_id=job.payload.to,
                 content=response or ""
             ))
@@ -388,17 +409,20 @@ def gateway(
     hb_cfg = config.gateway.heartbeat
     hb_model = hb_cfg.model.strip() or agent.model
     hb_provider = _make_provider(config, model=hb_model) if hb_cfg.model.strip() else provider
+    heartbeat_target: tuple[str, str] | None = None
 
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
+        nonlocal heartbeat_target
         channel, chat_id = _pick_heartbeat_target()
+        heartbeat_target = (channel, chat_id)
 
         async def _silent(*_args, **_kwargs):
             pass
 
         return await agent.process_direct(
             tasks,
-            session_key="heartbeat",
+            session_key=_route_session_key(channel, chat_id),
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
@@ -408,8 +432,10 @@ def gateway(
 
     async def on_heartbeat_notify(response: str) -> None:
         """Deliver a heartbeat response to the user's channel."""
+        nonlocal heartbeat_target
         from nanobot.bus.events import OutboundMessage
-        channel, chat_id = _pick_heartbeat_target()
+        channel, chat_id = heartbeat_target or _pick_heartbeat_target()
+        heartbeat_target = None
         if channel == "cli":
             return  # No external channel available to deliver to
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
