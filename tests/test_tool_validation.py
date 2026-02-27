@@ -1,5 +1,7 @@
+from pathlib import Path
 from typing import Any
 
+from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 
@@ -86,3 +88,34 @@ async def test_registry_returns_validation_error() -> None:
     reg.register(SampleTool())
     result = await reg.execute("sample", {"query": "hi"})
     assert "Invalid parameters" in result
+
+
+async def test_registry_executes_write_and_read_tools(tmp_path: Path) -> None:
+    reg = ToolRegistry()
+    reg.register(WriteFileTool(workspace=tmp_path, allowed_dir=tmp_path))
+    reg.register(ReadFileTool(workspace=tmp_path, allowed_dir=tmp_path))
+
+    write_result = await reg.execute("write_file", {"path": "a/b.txt", "content": "abc"})
+    assert write_result.startswith("Successfully wrote")
+
+    read_result = await reg.execute("read_file", {"path": "a/b.txt"})
+    assert read_result == "abc"
+
+
+async def test_registry_write_file_validation_prevents_execution(tmp_path: Path) -> None:
+    reg = ToolRegistry()
+    reg.register(WriteFileTool(workspace=tmp_path, allowed_dir=tmp_path))
+
+    result = await reg.execute("write_file", {"path": "x.txt"})
+    assert "Invalid parameters" in result
+    assert not (tmp_path / "x.txt").exists()
+
+
+async def test_write_file_blocks_path_outside_allowed_dir(tmp_path: Path) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    tool = WriteFileTool(workspace=allowed, allowed_dir=allowed)
+
+    result = await tool.execute(path="../escape.txt", content="blocked")
+    assert result.startswith("Error:")
+    assert not (tmp_path / "escape.txt").exists()
