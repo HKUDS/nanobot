@@ -196,10 +196,8 @@ When a Path C change on orghi-main becomes upstreamable:
 2. **Port the changes** - Copy from orghi-main into the branch. Strip orghi-specific bits. Use the tracking doc as reference (`.orghi/orghi-change-tracking/<prefix>/<slug>.md`).
 3. **Move tests** from `tests/orghi/` to `tests/` if applicable.
 4. **Run** `uv run pytest`, **/code-simplifier agent**, re-run tests.
-5. **Handoff to orghi-change-tracker agent** for the new branch context (before push).
+5. Use the existing .orghi/orghi-change-tracking/<prefix>/<slug>.md from orghi-main branch as context for PR content, (before push).
 6. **Push branch**, open PR to upstream/main.
-7. **After upstream merge**: Sync main, merge into orghi-main. Remove duplicate; orghi-main uses upstream.
-
 ---
 
 ## TDD Rules (Strict)
@@ -229,7 +227,7 @@ When a Path C change on orghi-main becomes upstreamable:
 - [ ] **/orghi-change-tracker agent** invoked before push/merge; tracking artifact written
 - [ ] Path A: pushed branch, PR opened
 - [ ] Paths B, C: merged into orghi-main
-- [ ] PR (if applicable) has title, problem, solution, use case
+- [ ] Path C: PR opened after migration from orghi-main to main
 
 ---
 
