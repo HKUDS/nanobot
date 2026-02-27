@@ -1,3 +1,6 @@
 {
-  "ruff.lineLength": 100
+  "ruff.lineLength": 100,
+  "editor.rulers": [
+    100
+  ]
 }
