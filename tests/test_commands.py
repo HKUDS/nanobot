@@ -5,7 +5,12 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from nanobot.cli.commands import app, _make_provider
+from nanobot.cli.commands import (
+    app,
+    _cron_execution_session_key,
+    _make_provider,
+    _route_session_key,
+)
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
@@ -19,7 +24,7 @@ def mock_paths():
     """Mock config/workspace paths for test isolation."""
     with patch("nanobot.config.loader.get_config_path") as mock_cp, \
          patch("nanobot.config.loader.save_config") as mock_sc, \
-         patch("nanobot.config.loader.load_config") as mock_lc, \
+         patch("nanobot.config.loader.load_config"), \
          patch("nanobot.utils.helpers.get_workspace_path") as mock_ws:
 
         base_dir = Path("./test_onboard_data")
@@ -144,3 +149,40 @@ def test_make_provider_uses_target_model_provider_config():
     assert provider.default_model == "gemini/gemini-2.5-flash"
     assert provider.api_key == "gemini-key"
     assert provider.api_base == "https://gemini.example/v1"
+
+
+def test_route_session_key_uses_channel_and_chat() -> None:
+    assert _route_session_key("telegram", "12345") == "telegram:12345"
+
+
+def test_cron_execution_session_key_uses_target_session_for_deliver() -> None:
+    key = _cron_execution_session_key(
+        job_id="abc12345",
+        deliver=True,
+        channel="telegram",
+        chat_id="12345",
+        to="12345",
+    )
+    assert key == "telegram:12345"
+
+
+def test_cron_execution_session_key_keeps_job_session_for_non_deliver() -> None:
+    key = _cron_execution_session_key(
+        job_id="abc12345",
+        deliver=False,
+        channel="telegram",
+        chat_id="12345",
+        to="12345",
+    )
+    assert key == "cron:abc12345"
+
+
+def test_cron_execution_session_key_keeps_job_session_when_target_missing() -> None:
+    key = _cron_execution_session_key(
+        job_id="abc12345",
+        deliver=True,
+        channel="telegram",
+        chat_id="direct",
+        to=None,
+    )
+    assert key == "cron:abc12345"
