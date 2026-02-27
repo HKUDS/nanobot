@@ -161,12 +161,23 @@ class AgentLoop:
 
     @staticmethod
     def _tool_hint(tool_calls: list) -> str:
-        """Format tool calls as concise hint, e.g. 'web_search("query")'."""
-        def _fmt(tc):
-            val = next(iter(tc.arguments.values()), None) if tc.arguments else None
-            if not isinstance(val, str):
-                return tc.name
-            return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
+        """Format tool calls as concise hint with all arguments, e.g. 'exec(command="ls", working_dir="/tmp")'."""
+        _max_val = 40
+
+        def _fmt_val(val: Any) -> str:
+            if val is None:
+                return "None"
+            s = val if isinstance(val, str) else repr(val)
+            if len(s) > _max_val:
+                return s[:_max_val] + "…"
+            return s
+
+        def _fmt(tc) -> str:
+            if not tc.arguments:
+                return tc.name + "()"
+            parts = [f'{k}={_fmt_val(v)}' for k, v in tc.arguments.items()]
+            return f"{tc.name}({', '.join(parts)})"
+
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
     async def _run_agent_loop(
