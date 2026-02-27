@@ -81,8 +81,9 @@ def test_validate_params_ignores_unknown_fields() -> None:
     assert errors == []
 
 
-async def test_registry_returns_validation_error() -> None:
+def test_registry_returns_validation_error() -> None:
+    import asyncio
     reg = ToolRegistry()
     reg.register(SampleTool())
-    result = await reg.execute("sample", {"query": "hi"})
+    result = asyncio.run(reg.execute("sample", {"query": "hi"}))
     assert "Invalid parameters" in result
