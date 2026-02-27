@@ -190,7 +190,10 @@ Connect nanobot to your favorite chat platform.
     "telegram": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
+      "allowFrom": ["YOUR_USER_ID"],
+      "groupPolicy": "mention",
+      "groupHistoryOnMention": 8,
+      "mentionByReply": true
     }
   }
 }
@@ -198,6 +201,12 @@ Connect nanobot to your favorite chat platform.
 
 > You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`.
 > Copy this value **without the `@` symbol** and paste it into the config file.
+>
+> `groupPolicy` controls group behavior:
+> - `open`: process every group message
+> - `mention`: only process when `@YourBotName` is mentioned (or when replying to the bot if `mentionByReply` is true)
+>
+> `groupHistoryOnMention` prepends recent non-mention group messages when a mention finally triggers the bot.
 
 
 **3. Run**
