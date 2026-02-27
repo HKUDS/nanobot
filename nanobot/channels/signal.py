@@ -245,22 +245,25 @@ class SignalChannel(BaseChannel):
             logger.debug("Signal: message has {} attachment(s): {}", len(attachments), attachments)
         for att in attachments:
             if att.get("contentType") == "text/x-signal-plain":
-                att_path = att.get("filename") or ""
-                logger.info("Signal: long message detected, text attachment at {}", att_path)
-                # Remap from signal-cli container path to nanobot container path.
-                # signal-cli: /home/.local/share/signal-cli/... → /root/.nanobot/signal-data/...
+                # filename is None in json-rpc mode; fall back to id-based path
+                att_path = att.get("filename") or att.get("id") or ""
+                logger.info("Signal: long message detected, text attachment id={} filename={}", att.get("id"), att.get("filename"))
                 if att_path:
-                    remapped = att_path.replace("/home/.local/share/signal-cli", "/root/.nanobot/signal-data", 1)
-                    logger.info("Signal: reading full message text from {}", remapped)
+                    from pathlib import Path as _Path
+                    p = _Path(att_path)
+                    if not p.is_absolute():
+                        p = _Path("/root/.nanobot/signal-data/attachments") / p.name
+                    else:
+                        p = _Path(att_path.replace("/home/.local/share/signal-cli", "/root/.nanobot/signal-data", 1))
+                    logger.info("Signal: reading full message text from {}", p)
                     try:
-                        from pathlib import Path as _Path
-                        full_text = _Path(remapped).read_text(encoding="utf-8").strip()
+                        full_text = p.read_text(encoding="utf-8").strip()
                         if full_text:
                             logger.info("Signal: replaced truncated body ({} chars) with full text ({} chars)",
                                         len(body), len(full_text))
                             body = full_text
                     except Exception as e:
-                        logger.warning("Signal: failed to read text attachment {}: {}", remapped, e)
+                        logger.warning("Signal: failed to read text attachment {}: {}", p, e)
                 break
 
         if not body:
