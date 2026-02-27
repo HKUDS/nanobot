@@ -194,6 +194,7 @@ class SignalConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers (empty = all)
     mode: str = "auto"  # "auto" | "websocket" (json-rpc) | "polling" (normal/native)
     poll_interval: float = 2.0  # Polling interval in seconds (used in polling mode)
+    typing_indicator: bool = True  # Show typing indicator while processing messages
 
 
 class ChannelsConfig(Base):

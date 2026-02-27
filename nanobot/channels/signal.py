@@ -100,6 +100,16 @@ class SignalChannel(BaseChannel):
             await self._http.aclose()
             self._http = None
 
+    async def _send_typing_indicator(self, recipient: str) -> None:
+        """Send a typing indicator to the given recipient or group."""
+        if not self._http or not self.config.typing_indicator:
+            return
+        url = f"{self.config.api_url}/v1/typing-indicator/{quote(self.config.phone_number, safe='')}"
+        try:
+            await self._http.put(url, json={"recipient": recipient})
+        except Exception as e:
+            logger.debug("Failed to send Signal typing indicator: {}", e)
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message via the Signal REST API."""
         if not self._http:
@@ -243,6 +253,7 @@ class SignalChannel(BaseChannel):
 
         logger.debug("Signal message from {}: {}...", source, body[:50])
 
+        await self._send_typing_indicator(chat_id)
         await self._handle_message(
             sender_id=source,
             chat_id=chat_id,
