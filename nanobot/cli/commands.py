@@ -211,10 +211,39 @@ def onboard():
     console.print("\nNext steps:")
     console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
     console.print("     Get one at: https://openrouter.ai/keys")
-    console.print('  2. Chat: [cyan]nanobot agent -m "Hello!"[/cyan]')
-    console.print(
-        "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]"
-    )
+    console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
+    console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
+
+
+def _create_workspace_templates(workspace: Path):
+    """Create default workspace template files from bundled templates."""
+    from importlib.resources import files as pkg_files
+
+    templates_dir = pkg_files("nanobot") / "templates"
+
+    for item in templates_dir.iterdir():
+        if not item.name.endswith(".md"):
+            continue
+        dest = workspace / item.name
+        if not dest.exists():
+            dest.write_text(item.read_text(encoding="utf-8"), encoding="utf-8")
+            console.print(f"  [dim]Created {item.name}[/dim]")
+
+    memory_dir = workspace / "memory"
+    memory_dir.mkdir(exist_ok=True)
+
+    memory_template = templates_dir / "memory" / "MEMORY.md"
+    memory_file = memory_dir / "MEMORY.md"
+    if not memory_file.exists():
+        memory_file.write_text(memory_template.read_text(encoding="utf-8"), encoding="utf-8")
+        console.print("  [dim]Created memory/MEMORY.md[/dim]")
+
+    history_file = memory_dir / "HISTORY.md"
+    if not history_file.exists():
+        history_file.write_text("", encoding="utf-8")
+        console.print("  [dim]Created memory/HISTORY.md[/dim]")
+
+    (workspace / "skills").mkdir(exist_ok=True)
 
 
 def _make_provider(config: Config):
