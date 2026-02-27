@@ -36,6 +36,9 @@ _HEARTBEAT_TOOL = [
     }
 ]
 
+_HEARTBEAT_SYSTEM_MSG = "You are a heartbeat agent. Call the heartbeat tool to report your decision."
+_HEARTBEAT_USER_PREFIX = "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
+
 
 class HeartbeatService:
     """
@@ -69,18 +72,21 @@ class HeartbeatService:
         self.enabled = enabled
         self._running = False
         self._task: asyncio.Task | None = None
+        self._heartbeat_path = workspace / "HEARTBEAT.md"
 
     @property
     def heartbeat_file(self) -> Path:
-        return self.workspace / "HEARTBEAT.md"
+        return self._heartbeat_path
 
-    def _read_heartbeat_file(self) -> str | None:
-        if self.heartbeat_file.exists():
-            try:
-                return self.heartbeat_file.read_text(encoding="utf-8")
-            except Exception:
-                return None
-        return None
+    async def _read_heartbeat_file(self) -> str | None:
+        """Read HEARTBEAT.md in a thread to avoid blocking the event loop."""
+        path = self._heartbeat_path
+        if not path.exists():
+            return None
+        try:
+            return await asyncio.to_thread(path.read_text, encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
 
     async def _decide(self, content: str) -> tuple[str, str]:
         """Phase 1: ask LLM to decide skip/run via virtual tool call.
@@ -89,11 +95,8 @@ class HeartbeatService:
         """
         response = await self.provider.chat(
             messages=[
-                {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
-                {"role": "user", "content": (
-                    "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
-                    f"{content}"
-                )},
+                {"role": "system", "content": _HEARTBEAT_SYSTEM_MSG},
+                {"role": "user", "content": _HEARTBEAT_USER_PREFIX + content},
             ],
             tools=_HEARTBEAT_TOOL,
             model=self.model,
@@ -139,7 +142,7 @@ class HeartbeatService:
 
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
-        content = self._read_heartbeat_file()
+        content = await self._read_heartbeat_file()
         if not content:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
             return
@@ -164,7 +167,7 @@ class HeartbeatService:
 
     async def trigger_now(self) -> str | None:
         """Manually trigger a heartbeat."""
-        content = self._read_heartbeat_file()
+        content = await self._read_heartbeat_file()
         if not content:
             return None
         action, tasks = await self._decide(content)
