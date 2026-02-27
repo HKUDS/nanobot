@@ -4,6 +4,15 @@ x-common-config: &common-config
     dockerfile: Dockerfile
   volumes:
     - ~/.nanobot:/root/.nanobot
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - NET_RAW      # raw sockets (ping, ICMP, packet crafting); not needed by the app
+    - AUDIT_WRITE  # kernel audit log writes; not needed by the app
+  pids_limit: 200
+  tmpfs:
+    - /tmp:noexec,nodev,nosuid,size=100m
+    - /run:noexec,nodev,nosuid,size=50m
 
 services:
   nanobot-gateway:
@@ -21,7 +30,7 @@ services:
         reservations:
           cpus: '0.25'
           memory: 256M
-  
+
   nanobot-cli:
     <<: *common-config
     profiles:
@@ -35,6 +44,15 @@ services:
     container_name: signal-cli-rest-api
     profiles:
       - signal
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - NET_RAW
+      - AUDIT_WRITE
+    pids_limit: 100
+    tmpfs:
+      - /tmp:noexec,nodev,nosuid,size=50m
+      - /run:noexec,nodev,nosuid,size=25m
     environment:
       - MODE=json-rpc  # json-rpc enables WebSocket receive; use "native" for polling mode
     ports:
