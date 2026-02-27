@@ -692,7 +692,7 @@ class FeishuChannel(BaseChannel):
             msg_type = message.message_type
 
             # Add reaction
-            await self._add_reaction(message_id, "THUMBSUP")
+            await self._add_reaction(message_id, self.config.react_emoji)
 
             # Parse content
             content_parts = []
