@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import codecs
 from typing import Any
 from uuid import uuid4
 
@@ -94,6 +95,11 @@ class LiteLLMProvider(LLMProvider):
         # Standard mode: auto-prefix for known providers
         spec = find_by_model(model)
         if spec and spec.litellm_prefix:
+            if spec.name == "gemini":
+                if model.startswith("gemini/models/"):
+                    model = f"gemini/{model[len('gemini/models/'):]}"
+                elif model.startswith("models/"):
+                    model = model[len("models/"):]
             model = self._canonicalize_explicit_prefix(model, spec.name, spec.litellm_prefix)
             if not any(model.startswith(s) for s in spec.skip_prefixes):
                 model = f"{spec.litellm_prefix}/{model}"
@@ -151,6 +157,7 @@ class LiteLLMProvider(LLMProvider):
                 if pattern in model_lower:
                     kwargs.update(overrides)
                     return
+
     def _preview_text(self, text: str | None, limit: int = 240) -> str:
         """Build a single-line truncated preview for logs."""
         if text is None:
@@ -261,6 +268,19 @@ class LiteLLMProvider(LLMProvider):
         """Return a stable, searchable exception summary."""
         name = type(exc).__name__
         msg = str(exc).strip()
+        if msg:
+            # Best effort: decode escaped unicode/byte sequences in upstream error payloads.
+            try:
+                decoded = codecs.decode(msg, "unicode_escape")
+                if "\\x" in msg:
+                    try:
+                        decoded = decoded.encode("latin-1").decode("utf-8")
+                    except Exception:
+                        pass
+                if decoded and decoded != msg:
+                    msg = decoded
+            except Exception:
+                pass
         return f"{name}: {msg}" if msg else name
 
     async def chat(

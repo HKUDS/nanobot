@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from nanobot.cli.commands import app
+from nanobot.cli.commands import app, _make_provider
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
@@ -128,3 +128,19 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_make_provider_uses_target_model_provider_config():
+    config = Config()
+    config.agents.defaults.model = "anthropic/claude-opus-4-6"
+    config.providers.anthropic.api_key = "anthropic-key"
+    config.providers.anthropic.api_base = "https://anthropic.example/v1"
+    config.providers.gemini.api_key = "gemini-key"
+    config.providers.gemini.api_base = "https://gemini.example/v1"
+
+    provider = _make_provider(config, model="gemini/gemini-2.5-flash")
+
+    assert isinstance(provider, LiteLLMProvider)
+    assert provider.default_model == "gemini/gemini-2.5-flash"
+    assert provider.api_key == "gemini-key"
+    assert provider.api_base == "https://gemini.example/v1"

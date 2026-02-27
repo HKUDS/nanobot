@@ -236,13 +236,13 @@ def _create_workspace_templates(workspace: Path):
     (workspace / "skills").mkdir(exist_ok=True)
 
 
-def _make_provider(config: Config):
+def _make_provider(config: Config, model: str | None = None):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.custom_provider import CustomProvider
 
-    model = config.agents.defaults.model
+    model = model or config.agents.defaults.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
 
@@ -309,6 +309,11 @@ def gateway(
     config = load_config()
     bus = MessageBus()
     provider = _make_provider(config)
+    consolidation_provider = (
+        _make_provider(config, model=config.agents.defaults.memory_consolidation_model)
+        if config.agents.defaults.memory_consolidation_model
+        else None
+    )
     session_manager = SessionManager(config.workspace_path)
     
     # Create cron service first (callback set after agent creation)
@@ -319,6 +324,7 @@ def gateway(
     agent = AgentLoop(
         bus=bus,
         provider=provider,
+        memory_consolidation_provider=consolidation_provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
         temperature=config.agents.defaults.temperature,
@@ -326,6 +332,7 @@ def gateway(
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
         compression_window_size=config.agents.defaults.compression_window_size,
+        memory_consolidation_model=config.agents.defaults.memory_consolidation_model,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
@@ -378,6 +385,10 @@ def gateway(
         return "cli", "direct"
 
     # Create heartbeat service
+    hb_cfg = config.gateway.heartbeat
+    hb_model = hb_cfg.model.strip() or agent.model
+    hb_provider = _make_provider(config, model=hb_model) if hb_cfg.model.strip() else provider
+
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
@@ -392,6 +403,7 @@ def gateway(
             chat_id=chat_id,
             on_progress=_silent,
             model_override=hb_model,
+            provider_override=hb_provider,
         )
 
     async def on_heartbeat_notify(response: str) -> None:
@@ -402,11 +414,9 @@ def gateway(
             return  # No external channel available to deliver to
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
 
-    hb_cfg = config.gateway.heartbeat
-    hb_model = hb_cfg.model.strip() or agent.model
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
-        provider=provider,
+        provider=hb_provider,
         model=hb_model,
         on_execute=on_heartbeat_execute,
         on_notify=on_heartbeat_notify,
@@ -479,6 +489,11 @@ def agent(
 
     bus = MessageBus()
     provider = _make_provider(config)
+    consolidation_provider = (
+        _make_provider(config, model=config.agents.defaults.memory_consolidation_model)
+        if config.agents.defaults.memory_consolidation_model
+        else None
+    )
 
     # Always write logs to file for troubleshooting
     from nanobot.utils.helpers import setup_file_logging
@@ -496,6 +511,7 @@ def agent(
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
+        memory_consolidation_provider=consolidation_provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
         temperature=config.agents.defaults.temperature,
@@ -503,6 +519,7 @@ def agent(
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
         compression_window_size=config.agents.defaults.compression_window_size,
+        memory_consolidation_model=config.agents.defaults.memory_consolidation_model,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
@@ -990,16 +1007,23 @@ def cron_run(
 
     config = load_config()
     provider = _make_provider(config)
+    consolidation_provider = (
+        _make_provider(config, model=config.agents.defaults.memory_consolidation_model)
+        if config.agents.defaults.memory_consolidation_model
+        else None
+    )
     bus = MessageBus()
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
+        memory_consolidation_provider=consolidation_provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
         temperature=config.agents.defaults.temperature,
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
+        memory_consolidation_model=config.agents.defaults.memory_consolidation_model,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -1146,6 +1170,10 @@ def status():
         from nanobot.providers.registry import PROVIDERS
 
         console.print(f"Model: {config.agents.defaults.model}")
+        if config.agents.defaults.memory_consolidation_model:
+            console.print(
+                f"Memory consolidation model: {config.agents.defaults.memory_consolidation_model}"
+            )
         
         # Check API keys from registry
         for spec in PROVIDERS:

@@ -104,6 +104,19 @@ def test_format_exception_without_message() -> None:
     assert provider._format_exception(NoMessageError()) == "NoMessageError"
 
 
+def test_format_exception_decodes_escaped_utf8_bytes() -> None:
+    provider = LiteLLMProvider(default_model="test-model")
+
+    class EscapedError(Exception):
+        pass
+
+    err = EscapedError("BadRequestError: b'{\"message\":\"\\xe6\\x9c\\xaa\\xe6\\x8c\\x87\\xe5\\xae\\x9a\\xe6\\xa8\\xa1\\xe5\\x9e\\x8b\"}'")
+    text = provider._format_exception(err)
+
+    assert "EscapedError: " in text
+    assert "未指定模型" in text
+
+
 def test_extract_usage_supports_openai_prompt_cache_details() -> None:
     provider = LiteLLMProvider(default_model="test-model")
     usage = SimpleNamespace(
@@ -138,3 +151,9 @@ def test_extract_usage_supports_anthropic_cache_fields() -> None:
         "cache_creation_input_tokens": 50,
         "cache_read_input_tokens": 120,
     }
+
+
+def test_resolve_model_normalizes_gemini_models_prefix() -> None:
+    provider = LiteLLMProvider(default_model="test-model")
+    assert provider._resolve_model("gemini/models/gemini-2.5-flash") == "gemini/gemini-2.5-flash"
+    assert provider._resolve_model("models/gemini-2.5-flash") == "gemini/gemini-2.5-flash"

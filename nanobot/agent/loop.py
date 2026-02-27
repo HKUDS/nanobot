@@ -44,12 +44,14 @@ class AgentLoop:
         bus: MessageBus,
         provider: LLMProvider,
         workspace: Path,
+        memory_consolidation_provider: LLMProvider | None = None,
         model: str | None = None,
         max_iterations: int = 50,
         temperature: float = 0.7,
         max_tokens: int = 4096,
         memory_window: int = 50,
         compression_window_size: int = 12,
+        memory_consolidation_model: str = "",
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
@@ -67,6 +69,7 @@ class AgentLoop:
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
+        self.memory_consolidation_provider = memory_consolidation_provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
@@ -74,6 +77,7 @@ class AgentLoop:
         self.max_tokens = max_tokens
         self.memory_window = memory_window
         self.compression_window_size = max(1, compression_window_size)
+        self.memory_consolidation_model = memory_consolidation_model.strip()
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -506,6 +510,7 @@ class AgentLoop:
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
         model_override: str | None = None,
+        provider_override: LLMProvider | None = None,
     ) -> tuple[str, str, list[tuple[str, str, str]]]:
         """Run the agent iteration loop and return final content + metadata."""
         messages = initial_messages
@@ -515,10 +520,11 @@ class AgentLoop:
         tool_use_log: list[tuple[str, str, str]] = []
         stashed_content: str | None = None
         model_to_use = model_override or self.model
+        provider_to_use = provider_override or self.provider
 
         while iteration < self.max_iterations:
             iteration += 1
-            response = await self.provider.chat(
+            response = await provider_to_use.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=model_to_use,
@@ -635,6 +641,7 @@ class AgentLoop:
         session_key: str | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
         model_override: str | None = None,
+        provider_override: LLMProvider | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message."""
         if msg.channel == "system":
@@ -710,6 +717,7 @@ class AgentLoop:
             messages,
             on_progress=on_progress or _bus_progress,
             model_override=model_override,
+            provider_override=provider_override,
         )
 
         silent_requested = self._contains_silent_marker(final_content)
@@ -937,8 +945,10 @@ class AgentLoop:
 
 Respond with ONLY valid JSON, no markdown fences."""
 
+        consolidation_model = self.memory_consolidation_model or self.model
+        consolidation_provider = self.memory_consolidation_provider or self.provider
         try:
-            response = await self.provider.chat(
+            response = await consolidation_provider.chat(
                 messages=[
                     {
                         "role": "system",
@@ -946,7 +956,7 @@ Respond with ONLY valid JSON, no markdown fences."""
                     },
                     {"role": "user", "content": prompt},
                 ],
-                model=self.model,
+                model=consolidation_model,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
             )
@@ -976,8 +986,9 @@ Respond with ONLY valid JSON, no markdown fences."""
             if persist_session and not archive_all:
                 self.sessions.save(session)
             logger.info(
-                "Memory consolidation done: {} messages, last_consolidated={}, last_consolidated_at={}",
+                "Memory consolidation done: {} messages, model={}, last_consolidated={}, last_consolidated_at={}",
                 total_messages,
+                consolidation_model,
                 session.last_consolidated,
                 session.last_consolidated_at,
             )
@@ -992,6 +1003,7 @@ Respond with ONLY valid JSON, no markdown fences."""
         chat_id: str = "direct",
         on_progress: Callable[..., Awaitable[None]] | None = None,
         model_override: str | None = None,
+        provider_override: LLMProvider | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self.start_mcp()
@@ -1001,5 +1013,6 @@ Respond with ONLY valid JSON, no markdown fences."""
             session_key=session_key,
             on_progress=on_progress,
             model_override=model_override,
+            provider_override=provider_override,
         )
         return response.content if response else ""
