@@ -100,6 +100,20 @@ tmux -S "$SOCKET" capture-pane -p -t agent-1 -S -500
 - Check for shell prompt (`❯` or `$`) to detect completion
 - Codex needs `--yolo` or `--full-auto` for non-interactive fixes
 
+
+### Codex Command
+
+```bash
+# ✅ 推荐：交互模式
+codex --full-auto "你的 prompt"
+
+# ✅ 非交互模式（后台跑完直接退出）
+codex exec "你的 prompt"
+
+# ❌ 错误：不要手动指定 --model
+# ❌ 错误：不要加 --writable-root、--quiet 等不存在的参数
+```
+
 ## Cleanup
 
 - Kill a session: `tmux -S "$SOCKET" kill-session -t "$SESSION"`.
