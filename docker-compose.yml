@@ -38,7 +38,7 @@ services:
     environment:
       - MODE=json-rpc  # json-rpc enables WebSocket receive; use "native" for polling mode
     ports:
-      - "8080:8080"
+      - "8090:8080"
     volumes:
       - ~/.nanobot/signal-data:/home/.local/share/signal-cli
     restart: unless-stopped
