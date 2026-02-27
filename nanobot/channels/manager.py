@@ -125,6 +125,17 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Slack channel not available: {}", e)
 
+        # Signal channel
+        if self.config.channels.signal.enabled:
+            try:
+                from nanobot.channels.signal import SignalChannel
+                self.channels["signal"] = SignalChannel(
+                    self.config.channels.signal, self.bus
+                )
+                logger.info("Signal channel enabled")
+            except ImportError as e:
+                logger.warning("Signal channel not available: {}", e)
+
         # QQ channel
         if self.config.channels.qq.enabled:
             try:

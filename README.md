@@ -173,6 +173,7 @@ Connect nanobot to your favorite chat platform.
 | **Slack** | Bot token + App-Level token |
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
+| **Signal** | signal-cli-rest-api sidecar |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -628,6 +629,75 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 ```bash
 nanobot gateway
 ```
+
+</details>
+
+<details>
+<summary><b>Signal</b></summary>
+
+Uses [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) as a sidecar — no third-party service required.
+
+**1. Start the sidecar** (Docker Compose, recommended)
+
+```bash
+docker compose --profile signal up -d signal-cli-rest-api
+```
+
+Or manually with Docker:
+
+```bash
+docker run -d \
+  --name signal-cli-rest-api \
+  -p 8080:8080 \
+  -e MODE=json-rpc \
+  -v ~/.nanobot/signal-data:/home/.local/share/signal-cli \
+  bbernhard/signal-cli-rest-api:latest
+```
+
+> `MODE=json-rpc` enables the WebSocket receive endpoint (recommended). Use `MODE=native` or `MODE=normal` for polling mode — set `"mode": "polling"` in nanobot config to match.
+
+**2. Register your Signal number**
+
+```bash
+# Request a verification code (use --captcha if Signal requires it)
+docker exec signal-cli-rest-api signal-cli -a +12345678900 register
+
+# Verify with the code you received by SMS
+docker exec signal-cli-rest-api signal-cli -a +12345678900 verify 123456
+```
+
+**3. Configure nanobot**
+
+```json
+{
+  "channels": {
+    "signal": {
+      "enabled": true,
+      "apiUrl": "http://localhost:8080",
+      "phoneNumber": "+12345678900",
+      "allowFrom": ["+19876543210"]
+    }
+  }
+}
+```
+
+> `allowFrom`: leave empty to accept messages from anyone, or list phone numbers in international format to restrict access.
+
+**4. Run**
+
+```bash
+nanobot gateway
+```
+
+**Configuration reference**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `apiUrl` | `http://localhost:8080` | Base URL of the signal-cli-rest-api instance |
+| `phoneNumber` | — | Your registered Signal number (international format, e.g. `+12345678900`) |
+| `allowFrom` | `[]` (all) | Allowed sender numbers. Empty = allow everyone. |
+| `mode` | `auto` | `auto` (tries WebSocket, falls back to polling), `websocket` (json-rpc), `polling` (normal/native) |
+| `pollInterval` | `2.0` | Polling interval in seconds (used in polling mode) |
 
 </details>
 

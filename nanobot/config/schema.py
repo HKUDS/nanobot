@@ -184,6 +184,17 @@ class QQConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
 
+class SignalConfig(Base):
+    """Signal channel configuration using signal-cli-rest-api."""
+
+    enabled: bool = False
+    api_url: str = "http://localhost:8080"  # Base URL of the signal-cli-rest-api instance
+    phone_number: str = ""  # Registered Signal phone number (e.g. +12345678900)
+    allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers (empty = all)
+    mode: str = "auto"  # "auto" | "websocket" (json-rpc) | "polling" (normal/native)
+    poll_interval: float = 2.0  # Polling interval in seconds (used in polling mode)
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -199,6 +210,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    signal: SignalConfig = Field(default_factory=SignalConfig)
 
 
 class AgentDefaults(Base):

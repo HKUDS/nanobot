@@ -698,6 +698,15 @@ def channels_status():
         em_config
     )
 
+    # Signal
+    sig = config.channels.signal
+    sig_config = f"{sig.api_url} ({sig.phone_number})" if sig.phone_number else sig.api_url
+    table.add_row(
+        "Signal",
+        "✓" if sig.enabled else "✗",
+        sig_config
+    )
+
     console.print(table)
 
 

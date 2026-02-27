@@ -29,3 +29,16 @@ services:
     command: ["status"]
     stdin_open: true
     tty: true
+
+  signal-cli-rest-api:
+    image: bbernhard/signal-cli-rest-api:latest
+    container_name: signal-cli-rest-api
+    profiles:
+      - signal
+    environment:
+      - MODE=json-rpc  # json-rpc enables WebSocket receive; use "native" for polling mode
+    ports:
+      - "8080:8080"
+    volumes:
+      - ~/.nanobot/signal-data:/home/.local/share/signal-cli
+    restart: unless-stopped
