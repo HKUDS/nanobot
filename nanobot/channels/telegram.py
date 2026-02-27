@@ -403,8 +403,8 @@ class TelegramChannel(BaseChannel):
         
         content = "\n".join(content_parts) if content_parts else "[empty message]"
 
-        # In group chats, prefix content with sender name so the LLM can
-        # attribute messages to individual users.
+        # In non-private chats (group/supergroup/channel), prefix content with
+        # sender name so the LLM can attribute messages to individual users.
         is_group = message.chat.type != "private"
         if is_group:
             display_name = user.first_name or user.username or str(user.id)
@@ -450,7 +450,7 @@ class TelegramChannel(BaseChannel):
                 "user_id": user.id,
                 "username": user.username,
                 "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
+                "is_group": is_group
             }
         )
     
