@@ -19,6 +19,30 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect changed Python files
+        id: changed_py
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git fetch --no-tags --prune --depth=1 origin "${{ github.base_ref }}"
+            files="$(git diff --name-only --diff-filter=ACMR "origin/${{ github.base_ref }}"...HEAD -- '*.py')"
+          else
+            if [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]]; then
+              files="$(git ls-files '*.py')"
+            else
+              files="$(git diff --name-only --diff-filter=ACMR "${{ github.event.before }}" "${{ github.sha }}" -- '*.py')"
+            fi
+          fi
+          printf '%s\n' "${files}" > changed_python_files.txt
+          {
+            echo "files<<EOF"
+            cat changed_python_files.txt
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -32,13 +56,16 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Lint (ruff)
-        run: ruff check .
+        if: steps.changed_py.outputs.files != ''
+        run: xargs ruff check < changed_python_files.txt
 
       - name: Format check (black)
-        run: black --check .
+        if: steps.changed_py.outputs.files != ''
+        run: xargs black --check < changed_python_files.txt
 
       - name: Type check (mypy)
-        run: mypy nanobot tests
+        if: steps.changed_py.outputs.files != ''
+        run: xargs mypy < changed_python_files.txt
 
       - name: Run tests with coverage
         run: pytest --cov=nanobot --cov-report=term-missing --cov-report=xml
