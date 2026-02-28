@@ -5,14 +5,25 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.redaction import is_sensitive_path
 
 
-def _resolve_path(path: str, workspace: Path | None = None, allowed_dir: Path | None = None) -> Path:
+def _resolve_path(
+    path: str,
+    workspace: Path | None = None,
+    allowed_dir: Path | None = None,
+    block_sensitive: bool = True,
+) -> Path:
     """Resolve path against workspace (if relative) and enforce directory restriction."""
     p = Path(path).expanduser()
     if not p.is_absolute() and workspace:
         p = workspace / p
     resolved = p.resolve()
+
+    # Block sensitive files (pass Path object directly)
+    if block_sensitive and is_sensitive_path(resolved):
+        raise PermissionError(f"Access to sensitive path is blocked by redaction policy: {path}")
+    
     if allowed_dir:
         try:
             resolved.relative_to(allowed_dir.resolve())
@@ -24,9 +35,15 @@ def _resolve_path(path: str, workspace: Path | None = None, allowed_dir: Path | 
 class ReadFileTool(Tool):
     """Tool to read file contents."""
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        block_sensitive_files: bool = True,
+    ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
+        self._block_sensitive = block_sensitive_files
 
     @property
     def name(self) -> str:
@@ -51,7 +68,7 @@ class ReadFileTool(Tool):
     
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
-            file_path = _resolve_path(path, self._workspace, self._allowed_dir)
+            file_path = _resolve_path(path, self._workspace, self._allowed_dir, self._block_sensitive)
             if not file_path.exists():
                 return f"Error: File not found: {path}"
             if not file_path.is_file():
@@ -68,9 +85,15 @@ class ReadFileTool(Tool):
 class WriteFileTool(Tool):
     """Tool to write content to a file."""
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        block_sensitive_files: bool = True,
+    ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
+        self._block_sensitive = block_sensitive_files
 
     @property
     def name(self) -> str:
@@ -99,7 +122,7 @@ class WriteFileTool(Tool):
     
     async def execute(self, path: str, content: str, **kwargs: Any) -> str:
         try:
-            file_path = _resolve_path(path, self._workspace, self._allowed_dir)
+            file_path = _resolve_path(path, self._workspace, self._allowed_dir, self._block_sensitive)
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
             return f"Successfully wrote {len(content)} bytes to {file_path}"
@@ -112,9 +135,15 @@ class WriteFileTool(Tool):
 class EditFileTool(Tool):
     """Tool to edit a file by replacing text."""
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        block_sensitive_files: bool = True,
+    ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
+        self._block_sensitive = block_sensitive_files
 
     @property
     def name(self) -> str:
@@ -147,7 +176,7 @@ class EditFileTool(Tool):
     
     async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
         try:
-            file_path = _resolve_path(path, self._workspace, self._allowed_dir)
+            file_path = _resolve_path(path, self._workspace, self._allowed_dir, self._block_sensitive)
             if not file_path.exists():
                 return f"Error: File not found: {path}"
 
@@ -196,9 +225,15 @@ class EditFileTool(Tool):
 class ListDirTool(Tool):
     """Tool to list directory contents."""
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        block_sensitive_files: bool = True,
+    ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
+        self._block_sensitive = block_sensitive_files
 
     @property
     def name(self) -> str:
@@ -223,7 +258,7 @@ class ListDirTool(Tool):
     
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
-            dir_path = _resolve_path(path, self._workspace, self._allowed_dir)
+            dir_path = _resolve_path(path, self._workspace, self._allowed_dir, self._block_sensitive)
             if not dir_path.exists():
                 return f"Error: Directory not found: {path}"
             if not dir_path.is_dir():

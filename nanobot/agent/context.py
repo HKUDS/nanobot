@@ -10,6 +10,7 @@ from typing import Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.agent.tools.redaction import redact_content, redact_messages
 
 
 class ContextBuilder:
@@ -18,10 +19,12 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, redact_tool_outputs: bool = True, redact_context: bool = True):
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self.redact_tool_outputs = redact_tool_outputs
+        self.redact_context = redact_context
     
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
@@ -112,12 +115,18 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         chat_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
-        return [
+        messages = [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
             *history,
             {"role": "user", "content": self._build_runtime_context(channel, chat_id)},
             {"role": "user", "content": self._build_user_content(current_message, media)},
         ]
+        
+        # Layer 3: redact sensitive data before sending to LLM
+        if self.redact_context:
+            messages = redact_messages(messages)
+        
+        return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""
@@ -141,7 +150,10 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         self, messages: list[dict[str, Any]],
         tool_call_id: str, tool_name: str, result: str,
     ) -> list[dict[str, Any]]:
-        """Add a tool result to the message list."""
+        """Add a tool result to the message list, with optional redaction."""
+        # Layer 2: redact sensitive data from tool outputs
+        if self.redact_tool_outputs:
+            result = redact_content(result) if isinstance(result, str) else result
         messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
         return messages
     

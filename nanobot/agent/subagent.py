@@ -31,6 +31,7 @@ class SubagentManager:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        block_sensitive_files: bool = True,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.provider = provider
@@ -42,6 +43,7 @@ class SubagentManager:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.block_sensitive_files = block_sensitive_files
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
     
@@ -91,10 +93,10 @@ class SubagentManager:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
             allowed_dir = self.workspace if self.restrict_to_workspace else None
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, block_sensitive_files=self.block_sensitive_files))
+            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir, block_sensitive_files=self.block_sensitive_files))
+            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir, block_sensitive_files=self.block_sensitive_files))
+            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir, block_sensitive_files=self.block_sensitive_files))
             tools.register(ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,

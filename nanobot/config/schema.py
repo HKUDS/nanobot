@@ -316,6 +316,9 @@ class ToolsConfig(Base):
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
+    block_sensitive_files: bool = True   # If true, block access to sensitive files (env, keys, etc.)
+    redact_tool_outputs: bool = True     # If true, redact sensitive data from tool outputs
+    redact_context: bool = True          # If true, redact sensitive data before sending to LLM
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
