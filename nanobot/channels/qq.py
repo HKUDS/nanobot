@@ -2,14 +2,18 @@
 
 import asyncio
 from collections import deque
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
+import httpx
 from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import QQConfig
+
+MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 
 try:
     import botpy
@@ -54,6 +58,7 @@ class QQChannel(BaseChannel):
         super().__init__(config, bus)
         self.config: QQConfig = config
         self._client: "botpy.Client | None" = None
+        self._http: httpx.AsyncClient | None = None
         self._processed_ids: deque = deque(maxlen=1000)
 
     async def start(self) -> None:
@@ -67,6 +72,7 @@ class QQChannel(BaseChannel):
             return
 
         self._running = True
+        self._http = httpx.AsyncClient(timeout=30.0)
         BotClass = _make_bot_class(self)
         self._client = BotClass()
 
@@ -87,6 +93,12 @@ class QQChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the QQ bot."""
         self._running = False
+        if self._http:
+            try:
+                await self._http.aclose()
+            except Exception:
+                pass
+            self._http = None
         if self._client:
             try:
                 await self._client.close()
@@ -108,8 +120,24 @@ class QQChannel(BaseChannel):
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
 
+    def _attachment_info(self, att: Any) -> dict[str, Any]:
+        """Get url, filename, size from an attachment (dict or object)."""
+        if isinstance(att, dict):
+            return {
+                "url": att.get("url"),
+                "filename": att.get("filename") or "attachment",
+                "size": att.get("size") or 0,
+                "content_type": att.get("content_type") or "",
+            }
+        return {
+            "url": getattr(att, "url", None),
+            "filename": getattr(att, "filename", None) or "attachment",
+            "size": getattr(att, "size", None) or 0,
+            "content_type": getattr(att, "content_type", None) or "",
+        }
+
     async def _on_message(self, data: "C2CMessage") -> None:
-        """Handle incoming message from QQ."""
+        """Handle incoming message from QQ (text and/or attachments)."""
         try:
             # Dedup by message ID
             if data.id in self._processed_ids:
@@ -117,15 +145,45 @@ class QQChannel(BaseChannel):
             self._processed_ids.append(data.id)
 
             author = data.author
-            user_id = str(getattr(author, 'id', None) or getattr(author, 'user_openid', 'unknown'))
+            user_id = str(getattr(author, "id", None) or getattr(author, "user_openid", "unknown"))
             content = (data.content or "").strip()
-            if not content:
+            attachments = getattr(data, "attachments", None) or []
+
+            if not content and not attachments:
                 return
+
+            content_parts = [content] if content else []
+            media_paths: list[str] = []
+            media_dir = Path.home() / ".nanobot" / "media"
+
+            for idx, att in enumerate(attachments):
+                info = self._attachment_info(att)
+                url = info["url"]
+                filename = info["filename"]
+                size = info["size"]
+                if not url or not self._http:
+                    continue
+                if size and size > MAX_ATTACHMENT_BYTES:
+                    content_parts.append(f"[attachment: {filename} - too large]")
+                    continue
+                try:
+                    media_dir.mkdir(parents=True, exist_ok=True)
+                    safe_name = filename.replace("/", "_").replace("\\", "_") or "attachment"
+                    file_path = media_dir / f"qq_{data.id}_{idx}_{safe_name}"
+                    resp = await self._http.get(url)
+                    resp.raise_for_status()
+                    file_path.write_bytes(resp.content)
+                    media_paths.append(str(file_path))
+                    content_parts.append(f"[attachment: {file_path}]")
+                except Exception as e:
+                    logger.warning("Failed to download QQ attachment {}: {}", filename, e)
+                    content_parts.append(f"[attachment: {filename} - download failed]")
 
             await self._handle_message(
                 sender_id=user_id,
                 chat_id=user_id,
-                content=content,
+                content="\n".join(p for p in content_parts if p) or "[empty message]",
+                media=media_paths if media_paths else None,
                 metadata={"message_id": data.id},
             )
         except Exception:
