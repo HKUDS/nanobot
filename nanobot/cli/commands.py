@@ -1,11 +1,13 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import json
 import os
 import signal
 from pathlib import Path
 import select
 import sys
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -968,6 +970,605 @@ def cron_run(
             _print_agent_response(result_holder[0], render_markdown=True)
     else:
         console.print(f"[red]Failed to run job {job_id}[/red]")
+
+
+# ============================================================================
+# Mobile Testing Commands
+# ============================================================================
+
+mobile_app = typer.Typer(help="Manage mobile app automation setup")
+app.add_typer(mobile_app, name="mobile")
+
+
+def _mobile_layout(workspace: Path) -> dict[str, Path]:
+    """Return canonical workspace paths for mobile automation."""
+    mobile_root = workspace / "mobile"
+    reports_root = workspace / "reports" / "mobile"
+    return {
+        "mobile_root": mobile_root,
+        "apps_dir": mobile_root / "apps",
+        "flows_dir": mobile_root / "flows",
+        "artifacts_dir": reports_root / "artifacts",
+        "runs_dir": reports_root / "runs",
+        "summary_file": reports_root / "summary-latest.json",
+        "sample_flow": mobile_root / "flows" / "smoke.yaml",
+    }
+
+
+def _write_if_missing(path: Path, content: str) -> bool:
+    """Create a file only when absent. Returns True if created."""
+    if path.exists():
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return True
+
+
+def _mobile_slug(name: str) -> str:
+    """Build a safe filename token from a flow name."""
+    cleaned = "".join(ch if (ch.isalnum() or ch in "-_.") else "-" for ch in name)
+    cleaned = cleaned.strip("-._")
+    return cleaned or "flow"
+
+
+def _resolve_mobile_flows(
+    workspace: Path,
+    flows_dir: Path,
+    selected_flows: list[str] | None,
+    pattern: str,
+) -> list[Path]:
+    """Resolve flow file paths from explicit args or glob pattern."""
+    candidates: list[Path] = []
+    if selected_flows:
+        for raw in selected_flows:
+            p = Path(raw).expanduser()
+            if not p.is_absolute():
+                p = workspace / p
+            candidates.append(p.resolve())
+    else:
+        patterns = [p.strip() for p in pattern.split(",") if p.strip()]
+        if not patterns:
+            patterns = ["*.yaml", "*.yml"]
+        for pat in patterns:
+            candidates.extend(sorted(flows_dir.glob(pat)))
+    seen: set[Path] = set()
+    flows: list[Path] = []
+    for p in candidates:
+        rp = p.resolve()
+        if rp not in seen:
+            seen.add(rp)
+            flows.append(rp)
+    return flows
+
+
+def _mobile_mcp_run_tool_name(tool_names: list[str], server_name: str) -> str | None:
+    """Pick preferred Maestro MCP run tool from registered names."""
+    preferred = (
+        f"mcp_{server_name}_run_flow_files",
+        f"mcp_{server_name}_run_flow",
+    )
+    for name in preferred:
+        if name in tool_names:
+            return name
+    return None
+
+
+def _mobile_build_mcp_payload_candidates(
+    schema: dict[str, Any],
+    flow_path: Path,
+    flow_output_dir: Path,
+    suite: str,
+    platform: str,
+) -> list[dict[str, Any]]:
+    """Build multiple payload candidates to tolerate MCP schema variants."""
+    props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+    required = schema.get("required", []) if isinstance(schema, dict) else []
+    flow = str(flow_path)
+    out_dir = str(flow_output_dir)
+    candidates: list[dict[str, Any]] = []
+
+    def _append(payload: dict[str, Any]) -> None:
+        if payload not in candidates:
+            candidates.append(payload)
+
+    # 1) Schema-driven required payload (best effort)
+    auto_payload: dict[str, Any] = {}
+    unresolved = False
+    for key in required if isinstance(required, list) else []:
+        key_lower = str(key).lower()
+        key_schema = props.get(key, {}) if isinstance(props, dict) else {}
+        key_type = key_schema.get("type") if isinstance(key_schema, dict) else None
+
+        if any(token in key_lower for token in ("flow", "file", "path")):
+            auto_payload[key] = [flow] if key_type == "array" else flow
+        elif any(token in key_lower for token in ("output", "artifact", "report")):
+            auto_payload[key] = out_dir
+        elif "suite" in key_lower and suite:
+            auto_payload[key] = suite
+        elif "platform" in key_lower and platform:
+            auto_payload[key] = platform
+        else:
+            unresolved = True
+            break
+
+    if not unresolved:
+        _append(auto_payload)
+
+    # 2) Common cross-version payload names
+    fallback_payloads = [
+        {"flow_files": [flow], "test_output_dir": out_dir},
+        {"flowFiles": [flow], "testOutputDir": out_dir},
+        {"flows": [flow], "test_output_dir": out_dir},
+        {"files": [flow], "output_dir": out_dir},
+        {"flow": flow, "test_output_dir": out_dir},
+        {"flowFile": flow, "testOutputDir": out_dir},
+        {"file": flow, "outputDir": out_dir},
+        {"path": flow, "output_dir": out_dir},
+    ]
+
+    for payload in fallback_payloads:
+        if suite:
+            payload.setdefault("suite", suite)
+            payload.setdefault("test_suite", suite)
+        if platform:
+            payload.setdefault("platform", platform)
+        _append(payload)
+
+    return candidates
+
+
+async def _mobile_run_with_mcp(
+    config: Config,
+    server_name: str,
+    flows: list[Path],
+    artifacts_dir: Path,
+    run_dir: Path,
+    suite: str,
+    platform: str,
+    continue_on_fail: bool,
+) -> tuple[list[dict[str, Any]], list[Path], list[Path], str]:
+    """Run flows via Maestro MCP tool wrappers."""
+    from contextlib import AsyncExitStack
+    from nanobot.agent.tools.mcp import connect_mcp_servers
+    from nanobot.agent.tools.registry import ToolRegistry
+
+    mcp_cfg = config.tools.mcp_servers.get(server_name)
+    if not mcp_cfg:
+        raise RuntimeError(f"MCP server '{server_name}' not configured")
+
+    registry = ToolRegistry()
+    async with AsyncExitStack() as stack:
+        await connect_mcp_servers({server_name: mcp_cfg}, registry, stack)
+        run_tool = _mobile_mcp_run_tool_name(registry.tool_names, server_name)
+        if not run_tool:
+            raise RuntimeError(
+                f"No runnable mobile test tool found on MCP server '{server_name}'. "
+                f"Expected one of: run_flow_files, run_flow"
+            )
+
+        tool = registry.get(run_tool)
+        schema = tool.parameters if tool else {}
+        results: list[dict[str, Any]] = []
+        logs: list[Path] = []
+        output_dirs: list[Path] = []
+
+        for idx, flow_path in enumerate(flows, 1):
+            label = _mobile_slug(flow_path.stem)
+            flow_output_dir = artifacts_dir / f"{idx:02d}-{label}"
+            flow_output_dir.mkdir(parents=True, exist_ok=True)
+            output_dirs.append(flow_output_dir)
+            log_file = run_dir / f"{idx:02d}-{label}.log"
+
+            candidates = _mobile_build_mcp_payload_candidates(
+                schema=schema,
+                flow_path=flow_path,
+                flow_output_dir=flow_output_dir,
+                suite=suite,
+                platform=platform,
+            )
+
+            selected_payload: dict[str, Any] = {}
+            selected_result = "Error: no MCP payload candidates were generated"
+            success = False
+            for payload in candidates:
+                out = await registry.execute(run_tool, payload)
+                selected_payload = payload
+                selected_result = out
+                if not (isinstance(out, str) and out.startswith("Error")):
+                    success = True
+                    break
+
+            log_file.write_text(
+                (
+                    f"Tool: {run_tool}\n"
+                    f"Flow: {flow_path}\n"
+                    f"Payload: {json.dumps(selected_payload, ensure_ascii=False)}\n\n"
+                    f"Result:\n{selected_result}\n"
+                ),
+                encoding="utf-8",
+            )
+            logs.append(log_file)
+            results.append(
+                {
+                    "flow": str(flow_path),
+                    "status": "passed" if success else "failed",
+                    "exitCode": 0 if success else 1,
+                    "logFile": str(log_file),
+                    "artifactDir": str(flow_output_dir),
+                }
+            )
+
+            if not success and not continue_on_fail:
+                break
+
+        return results, logs, output_dirs, run_tool
+
+
+@mobile_app.command("setup")
+def mobile_setup(
+    maestro_command: str = typer.Option(
+        "maestro",
+        "--maestro-command",
+        help="Maestro CLI executable name or absolute path",
+    ),
+    tool_timeout: int = typer.Option(
+        180,
+        "--tool-timeout",
+        min=10,
+        help="MCP tool timeout in seconds",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing maestro MCP config if present",
+    ),
+):
+    """Initialize workspace layout and Maestro MCP config for mobile automation."""
+    import shutil
+    from nanobot.config.loader import load_config, save_config
+    from nanobot.config.schema import MCPServerConfig
+
+    config = load_config()
+    workspace = config.workspace_path
+    sync_workspace_templates(workspace)
+
+    layout = _mobile_layout(workspace)
+    created_dirs: list[Path] = []
+    for key in ("apps_dir", "flows_dir", "artifacts_dir", "runs_dir"):
+        path = layout[key]
+        if not path.exists():
+            path.mkdir(parents=True, exist_ok=True)
+            created_dirs.append(path)
+
+    sample_flow_created = _write_if_missing(
+        layout["sample_flow"],
+        """appId: com.example.app
+---
+- launchApp
+- assertVisible: "Home"
+""",
+    )
+
+    summary_created = _write_if_missing(
+        layout["summary_file"],
+        """{
+  "runId": "",
+  "status": "not-started",
+  "platform": "",
+  "suite": "",
+  "startedAt": "",
+  "finishedAt": "",
+  "artifacts": []
+}
+""",
+    )
+
+    existing = config.tools.mcp_servers.get("maestro")
+    updated_mcp = False
+
+    if existing and not force:
+        console.print("[yellow]maestro MCP config already exists. Use --force to overwrite.[/yellow]")
+    else:
+        env = existing.env if existing else {}
+        config.tools.mcp_servers["maestro"] = MCPServerConfig(
+            command=maestro_command,
+            args=["mcp"],
+            env=env,
+            tool_timeout=tool_timeout,
+        )
+        save_config(config)
+        updated_mcp = True
+
+    console.print(f"{__logo__} Mobile automation setup complete\n")
+    console.print(f"Workspace: [cyan]{workspace}[/cyan]")
+
+    if created_dirs:
+        for path in created_dirs:
+            console.print(f"  [green]✓[/green] Created dir: {path}")
+    else:
+        console.print("  [dim]No new directories created[/dim]")
+
+    console.print(
+        f"  {'[green]✓[/green]' if sample_flow_created else '[dim]•[/dim]'} "
+        f"Sample flow: {layout['sample_flow']}"
+    )
+    console.print(
+        f"  {'[green]✓[/green]' if summary_created else '[dim]•[/dim]'} "
+        f"Summary file: {layout['summary_file']}"
+    )
+
+    if updated_mcp:
+        console.print(
+            f"  [green]✓[/green] Configured MCP server 'maestro' => "
+            f"`{maestro_command} mcp` (toolTimeout={tool_timeout}s)"
+        )
+    else:
+        console.print("  [dim]• MCP config unchanged[/dim]")
+
+    if shutil.which(maestro_command) is None:
+        console.print("\n[yellow]Maestro CLI not found on PATH.[/yellow]")
+        console.print("Install: [cyan]curl -fsSL \"https://get.maestro.mobile.dev\" | bash[/cyan]")
+        console.print("or: [cyan]brew tap mobile-dev-inc/tap && brew install maestro[/cyan]")
+
+    console.print("\nNext steps:")
+    console.print("  1. Start simulator/emulator (or run: [cyan]maestro start-device --platform android[/cyan])")
+    console.print("  2. Adjust appId and assertions in [cyan]mobile/flows/smoke.yaml[/cyan]")
+    console.print("  3. Run locally: [cyan]maestro test mobile/flows/smoke.yaml[/cyan]")
+    console.print("  4. Ask agent to run MCP tools after launching [cyan]nanobot agent[/cyan] or [cyan]nanobot gateway[/cyan]")
+
+
+@mobile_app.command("run")
+def mobile_run(
+    flow: list[str] | None = typer.Option(
+        None,
+        "--flow",
+        "-f",
+        help="Specific flow files to run (repeatable, relative to workspace or absolute).",
+    ),
+    pattern: str = typer.Option(
+        "*.yaml,*.yml",
+        "--pattern",
+        help="Glob pattern(s) under mobile/flows when --flow is not provided. Comma-separated supported.",
+    ),
+    suite: str = typer.Option(
+        "default",
+        "--suite",
+        help="Suite label written into run summary.",
+    ),
+    platform: str = typer.Option(
+        "",
+        "--platform",
+        help="Optional platform label for summary (android/ios).",
+    ),
+    continue_on_fail: bool = typer.Option(
+        True,
+        "--continue-on-fail/--fail-fast",
+        help="Continue running remaining flows after a failure.",
+    ),
+    mode: str = typer.Option(
+        "auto",
+        "--mode",
+        help="Execution mode: auto, local, or mcp.",
+    ),
+    mcp_server: str = typer.Option(
+        "maestro",
+        "--mcp-server",
+        help="MCP server name from tools.mcpServers (used in mcp/auto mode).",
+    ),
+    maestro_command: str = typer.Option(
+        "maestro",
+        "--maestro-command",
+        help="Maestro CLI executable name or absolute path.",
+    ),
+):
+    """Run mobile flow files and persist summary/report artifacts."""
+    import shutil
+    import subprocess
+    import uuid
+    from datetime import datetime
+    from nanobot.config.loader import load_config
+
+    config = load_config()
+    workspace = config.workspace_path
+    layout = _mobile_layout(workspace)
+    flows = _resolve_mobile_flows(workspace, layout["flows_dir"], flow, pattern)
+    mode = mode.lower().strip()
+
+    if not flows:
+        console.print(f"[red]No flow files found.[/red] pattern={pattern}, flows_dir={layout['flows_dir']}")
+        raise typer.Exit(1)
+
+    missing = [str(p) for p in flows if not p.exists()]
+    if missing:
+        console.print(f"[red]Flow file not found:[/red] {missing[0]}")
+        raise typer.Exit(1)
+
+    if mode not in {"auto", "local", "mcp"}:
+        console.print(f"[red]Invalid mode:[/red] {mode}. Use auto/local/mcp.")
+        raise typer.Exit(1)
+
+    has_mcp = mcp_server in config.tools.mcp_servers
+    use_mcp = mode == "mcp" or (mode == "auto" and has_mcp)
+
+    if mode == "mcp" and not has_mcp:
+        console.print(f"[red]MCP server not configured:[/red] {mcp_server}")
+        console.print("Configure it in ~/.nanobot/config.json under tools.mcpServers")
+        raise typer.Exit(1)
+
+    if not use_mcp and shutil.which(maestro_command) is None:
+        console.print(f"[red]Maestro CLI not found:[/red] {maestro_command}")
+        console.print('Install: [cyan]curl -fsSL "https://get.maestro.mobile.dev" | bash[/cyan]')
+        raise typer.Exit(1)
+
+    run_id = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
+    started_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    run_dir = layout["runs_dir"] / run_id
+    artifacts_dir = layout["artifacts_dir"] / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    def _rel(path: Path) -> str:
+        try:
+            return str(path.relative_to(workspace))
+        except ValueError:
+            return str(path)
+
+    results: list[dict[str, object]] = []
+    logs: list[Path] = []
+    output_dirs: list[Path] = []
+    exec_mode = "mcp" if use_mcp else "local"
+    console.print(f"Execution mode: [cyan]{exec_mode}[/cyan]")
+
+    if use_mcp:
+        try:
+            raw_results, logs, output_dirs, run_tool = asyncio.run(
+                _mobile_run_with_mcp(
+                    config=config,
+                    server_name=mcp_server,
+                    flows=flows,
+                    artifacts_dir=artifacts_dir,
+                    run_dir=run_dir,
+                    suite=suite,
+                    platform=platform,
+                    continue_on_fail=continue_on_fail,
+                )
+            )
+            console.print(f"MCP tool: [cyan]{run_tool}[/cyan]")
+            for item in raw_results:
+                status = str(item.get("status", "failed"))
+                symbol = "[green]✓[/green]" if status == "passed" else "[red]✗[/red]"
+                flow_name = Path(str(item.get("flow", ""))).name
+                console.print(f"{symbol} {flow_name} ({status})")
+                results.append(
+                    {
+                        "flow": _rel(Path(str(item.get("flow", "")))),
+                        "status": status,
+                        "exitCode": int(item.get("exitCode", 1)),
+                        "logFile": _rel(Path(str(item.get("logFile", "")))),
+                        "artifactDir": _rel(Path(str(item.get("artifactDir", "")))),
+                    }
+                )
+        except Exception as e:
+            if mode == "auto":
+                console.print(f"[yellow]MCP execution failed in auto mode, fallback to local: {e}[/yellow]")
+                use_mcp = False
+            else:
+                console.print(f"[red]MCP execution failed:[/red] {e}")
+                raise typer.Exit(1)
+
+    if not use_mcp:
+        for idx, flow_path in enumerate(flows, 1):
+            label = _mobile_slug(flow_path.stem)
+            log_file = run_dir / f"{idx:02d}-{label}.log"
+            flow_output_dir = artifacts_dir / f"{idx:02d}-{label}"
+            flow_output_dir.mkdir(parents=True, exist_ok=True)
+            cmd = [maestro_command, "test", str(flow_path), "--test-output-dir", str(flow_output_dir)]
+            proc = subprocess.run(
+                cmd,
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+            )
+            log_file.write_text(
+                f"$ {' '.join(cmd)}\n\nSTDOUT:\n{proc.stdout or ''}\n\nSTDERR:\n{proc.stderr or ''}\n",
+                encoding="utf-8",
+            )
+            logs.append(log_file)
+            output_dirs.append(flow_output_dir)
+            status = "passed" if proc.returncode == 0 else "failed"
+            results.append(
+                {
+                    "flow": _rel(flow_path),
+                    "status": status,
+                    "exitCode": proc.returncode,
+                    "logFile": _rel(log_file),
+                    "artifactDir": _rel(flow_output_dir),
+                }
+            )
+
+            symbol = "[green]✓[/green]" if status == "passed" else "[red]✗[/red]"
+            console.print(f"{symbol} {flow_path.name} ({status}) -> {log_file.name}")
+            if proc.returncode != 0 and not continue_on_fail:
+                console.print("[yellow]Fail-fast enabled; stopping remaining flows.[/yellow]")
+                break
+
+    passed = sum(1 for item in results if item["status"] == "passed")
+    failed = len(results) - passed
+    finished_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    summary = {
+        "runId": run_id,
+        "status": "passed" if failed == 0 else "failed",
+        "platform": platform,
+        "suite": suite,
+        "startedAt": started_at,
+        "finishedAt": finished_at,
+        "requestedFlows": len(flows),
+        "executedFlows": len(results),
+        "passedFlows": passed,
+        "failedFlows": failed,
+        "executionMode": "mcp" if use_mcp else "local",
+        "mcpServer": mcp_server if use_mcp else "",
+        "flows": results,
+        "artifacts": (
+            [{"type": "log", "path": _rel(p)} for p in logs]
+            + [{"type": "maestro-output-dir", "path": _rel(p)} for p in output_dirs]
+        ),
+    }
+
+    run_summary = run_dir / "summary.json"
+    run_summary.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    layout["summary_file"].parent.mkdir(parents=True, exist_ok=True)
+    layout["summary_file"].write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    table = Table(title=f"Mobile Run Summary ({run_id})")
+    table.add_column("Suite", style="cyan")
+    table.add_column("Requested")
+    table.add_column("Executed")
+    table.add_column("Passed", style="green")
+    table.add_column("Failed", style="red")
+    table.add_row(suite, str(len(flows)), str(len(results)), str(passed), str(failed))
+    console.print()
+    console.print(table)
+    console.print(f"Summary: [cyan]{layout['summary_file']}[/cyan]")
+    console.print(f"Run dir: [cyan]{run_dir}[/cyan]")
+
+    if failed > 0:
+        raise typer.Exit(1)
+
+
+@mobile_app.command("status")
+def mobile_status():
+    """Show mobile automation workspace and maestro MCP status."""
+    from nanobot.config.loader import load_config, get_config_path
+
+    config_path = get_config_path()
+    config = load_config()
+    workspace = config.workspace_path
+    layout = _mobile_layout(workspace)
+    maestro = config.tools.mcp_servers.get("maestro")
+    cwd = Path.cwd()
+
+    table = Table(title="Mobile Automation Status")
+    table.add_column("Item", style="cyan")
+    table.add_column("Value", style="yellow")
+
+    table.add_row("Config", str(config_path))
+    table.add_row("Workspace", str(workspace))
+    if not str(workspace).startswith(str(cwd)):
+        table.add_row("Workspace scope", f"outside current cwd ({cwd})")
+    table.add_row("Flows dir", str(layout["flows_dir"]))
+    table.add_row("Apps dir", str(layout["apps_dir"]))
+    table.add_row("Reports dir", str(layout["runs_dir"].parent))
+    table.add_row("Sample flow exists", "✓" if layout["sample_flow"].exists() else "✗")
+
+    if maestro:
+        cmd = " ".join([maestro.command, *maestro.args]).strip()
+        table.add_row("MCP maestro", f"✓ {cmd}")
+        table.add_row("MCP toolTimeout", f"{maestro.tool_timeout}s")
+    else:
+        table.add_row("MCP maestro", "✗ not configured")
+
+    console.print(table)
 
 
 # ============================================================================
