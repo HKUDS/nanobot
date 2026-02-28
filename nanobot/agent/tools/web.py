@@ -99,6 +99,61 @@ class WebSearchTool(Tool):
             return f"Error: {e}"
 
 
+class TavilySearchTool(Tool):
+    """Search the web using Tavily API (optimized for LLMs)."""
+
+    name = "web_search"  # Same name so it can swap seamlessly
+    description = "Search the web. Returns titles, URLs, and snippets."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query"},
+            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10}
+        },
+        "required": ["query"]
+    }
+
+    def __init__(self, api_key: str | None = None, max_results: int = 5):
+        self._init_api_key = api_key
+        self.max_results = max_results
+
+    @property
+    def api_key(self) -> str:
+        return self._init_api_key or os.environ.get("TAVILY_API_KEY", "")
+
+    async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
+        if not self.api_key:
+            return "Error: TAVILY_API_KEY not configured."
+
+        try:
+            n = min(max(count or self.max_results, 1), 10)
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    "https://api.tavily.com/search",
+                    json={
+                        "api_key": self.api_key,
+                        "query": query,
+                        "search_depth": "basic",
+                        "max_results": n
+                    },
+                    timeout=15.0
+                )
+                r.raise_for_status()
+
+            results = r.json().get("results", [])
+            if not results:
+                return f"No results for: {query}"
+
+            lines = [f"Tavily Search Results for: {query}\n"]
+            for i, item in enumerate(results, 1):
+                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
+                if content := item.get('content'):
+                    lines.append(f"   {content}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Tavily Error: {e}"
+
+
 class WebFetchTool(Tool):
     """Fetch and extract content from a URL using Readability."""
     

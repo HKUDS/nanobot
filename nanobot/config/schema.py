@@ -284,6 +284,7 @@ class WebSearchConfig(Base):
     """Web search tool configuration."""
 
     api_key: str = ""  # Brave Search API key
+    tavily_api_key: str = ""  # Tavily Search API key
     max_results: int = 5
 
 
