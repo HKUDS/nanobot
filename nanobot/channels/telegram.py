@@ -267,8 +267,10 @@ class TelegramChannel(BaseChannel):
                 )
 
         # Send text content
+        had_text_send_error = False
         if msg.content and msg.content != "[empty message]":
             for chunk in _split_message(msg.content):
+                sent = False
                 try:
                     html = _markdown_to_telegram_html(chunk)
                     await self._app.bot.send_message(
@@ -277,6 +279,7 @@ class TelegramChannel(BaseChannel):
                         parse_mode="HTML",
                         reply_parameters=reply_params
                     )
+                    sent = True
                 except Exception as e:
                     logger.warning("HTML parse failed, falling back to plain text: {}", e)
                     try:
@@ -285,8 +288,19 @@ class TelegramChannel(BaseChannel):
                             text=chunk,
                             reply_parameters=reply_params
                         )
+                        sent = True
                     except Exception as e2:
-                        logger.error("Error sending Telegram message: {}", e2)
+                        logger.warning("Error sending Telegram message with reply params: {}", e2)
+                        # Last fallback: send without reply params to avoid reply-thread errors.
+                        try:
+                            await self._app.bot.send_message(chat_id=chat_id, text=chunk)
+                            sent = True
+                        except Exception as e3:
+                            logger.error("Error sending Telegram message without reply params: {}", e3)
+                if not sent:
+                    had_text_send_error = True
+        if had_text_send_error:
+            raise RuntimeError("Failed to send one or more Telegram text chunks")
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""

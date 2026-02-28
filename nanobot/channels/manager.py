@@ -213,10 +213,21 @@ class ChannelManager:
                 
                 channel = self.channels.get(msg.channel)
                 if channel:
-                    try:
-                        await channel.send(msg)
-                    except Exception as e:
-                        logger.error("Error sending to {}: {}", msg.channel, e)
+                    max_retries = 3
+                    for attempt in range(1, max_retries + 1):
+                        try:
+                            await channel.send(msg)
+                            break
+                        except Exception as e:
+                            if attempt >= max_retries:
+                                logger.error("Error sending to {} after {} attempts: {}", msg.channel, attempt, e)
+                            else:
+                                delay = 0.5 * attempt
+                                logger.warning(
+                                    "Send to {} failed (attempt {}/{}): {}. Retrying in {:.1f}s",
+                                    msg.channel, attempt, max_retries, e, delay,
+                                )
+                                await asyncio.sleep(delay)
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
                     

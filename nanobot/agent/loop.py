@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
+import shutil
 import weakref
 from contextlib import AsyncExitStack
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -45,6 +48,8 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 500
+    _MOBILE_SHORTCUT_TIMEOUT_S = 120
+    _APP_ID_RE = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+(?![A-Za-z0-9_])")
 
     def __init__(
         self,
@@ -171,6 +176,347 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    @classmethod
+    def _extract_mobile_transfer_app_id(cls, content: str) -> str | None:
+        """Detect 'open app and go to transfer page' intent from plain text."""
+        text = (content or "").strip()
+        if not text:
+            return None
+        lowered = text.lower()
+        has_open = any(k in text for k in ("打开", "启动")) or any(k in lowered for k in ("open", "launch", "start"))
+        has_transfer = any(k in text for k in ("转账", "转帳")) or any(k in lowered for k in ("transfer", "send"))
+        if not (has_open and has_transfer):
+            return None
+        matched = cls._APP_ID_RE.search(text)
+        return matched.group(0) if matched else None
+
+    @staticmethod
+    def _extract_selected_token_symbol(content: str) -> str | None:
+        """Extract token symbol from user command, e.g. '选择ETH' / 'select ETH'."""
+        text = (content or "").strip()
+        if not text:
+            return None
+        lowered = text.lower()
+        if "地址" in text or "address" in lowered:
+            return None
+        patterns = [
+            r"(?:选择|选中|切换到)\s*([A-Za-z][A-Za-z0-9._-]{1,15})",
+            r"(?:select|choose|pick)\s+([A-Za-z][A-Za-z0-9._-]{1,15})",
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, text, flags=re.IGNORECASE)
+            if not m:
+                continue
+            symbol = re.sub(r"[^A-Za-z0-9_]", "", m.group(1).upper())
+            if symbol:
+                return symbol
+        return None
+
+    @staticmethod
+    def _extract_address_network(content: str) -> str | None:
+        """
+        Extract address-network selection from text:
+        e.g. '选择Ethereum地址' / 'select ethereum address'
+        """
+        text = (content or "").strip()
+        if not text:
+            return None
+        patterns = [
+            r"(?:选择|选中|切换到)\s*([A-Za-z][A-Za-z0-9._-]{1,20})\s*地址",
+            r"(?:select|choose|pick)\s+([A-Za-z][A-Za-z0-9._-]{1,20})\s+address",
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, text, flags=re.IGNORECASE)
+            if not m:
+                continue
+            token = re.sub(r"[^A-Za-z0-9._-]", "", m.group(1)).strip()
+            if token:
+                return token
+        return None
+
+    @staticmethod
+    def _extract_input_payload(content: str) -> str | None:
+        """Extract input payload from text, e.g. '输入0x11111' / 'input 0x11111'."""
+        text = (content or "").strip()
+        if not text:
+            return None
+        patterns = [
+            r"(?:输入|填入|粘贴)\s*([^\s，,。；;]+)",
+            r"(?:input|type|enter)\s+([^\s，,。；;]+)",
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, text, flags=re.IGNORECASE)
+            if not m:
+                continue
+            payload = m.group(1).strip()
+            if payload:
+                return payload
+        return None
+
+    @staticmethod
+    def _yaml_quote(value: str) -> str:
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f"\"{escaped}\""
+
+    @staticmethod
+    def _split_instruction_segments(content: str) -> list[str]:
+        """Split natural-language command into ordered segments."""
+        text = (content or "").strip()
+        if not text:
+            return []
+        return [seg.strip() for seg in re.split(r"[，,。；;、\n]+", text) if seg.strip()]
+
+    @classmethod
+    def _build_mobile_flow_from_instruction(cls, app_id: str, instruction: str) -> tuple[list[str], str]:
+        """
+        Build Maestro flow lines from instruction semantics instead of fixed script.
+
+        Supported action segments:
+        - enter transfer page
+        - select token symbol (e.g. ETH/USDT)
+        """
+        segments = cls._split_instruction_segments(instruction)
+        transfer_opened = False
+        screenshot_idx = 0
+        action_desc: list[str] = []
+
+        flow_lines = [
+            f"appId: {app_id}",
+            "---",
+            "- launchApp",
+        ]
+        action_desc.append("打开应用")
+
+        def _append_open_transfer() -> None:
+            nonlocal transfer_opened
+            if transfer_opened:
+                return
+            flow_lines.extend(
+                [
+                    "- assertVisible:",
+                    '    id: "FunctionBar.转账"',
+                    "- tapOn:",
+                    '    id: "FunctionBar.转账"',
+                    "- assertVisible:",
+                    '    id: "modal-header-close-button"',
+                ]
+            )
+            transfer_opened = True
+            action_desc.append("进入转账页面")
+
+        for seg in segments:
+            lowered = seg.lower()
+            if ("转账" in seg) or ("transfer" in lowered):
+                _append_open_transfer()
+
+            if selected_token := cls._extract_selected_token_symbol(seg):
+                _append_open_transfer()
+                token_id = f"TokenSelectModal.TokenSymbol.{selected_token}"
+                flow_lines.extend(
+                    [
+                        "- assertVisible:",
+                        f'    id: "{token_id}"',
+                        "- tapOn:",
+                        f'    id: "{token_id}"',
+                    ]
+                )
+                action_desc.append(f"选择{selected_token}")
+
+            if addr_network := cls._extract_address_network(seg):
+                flow_lines.extend(
+                    [
+                        "- tapOn:",
+                        f"    text: {cls._yaml_quote(addr_network)}",
+                    ]
+                )
+                action_desc.append(f"选择{addr_network}地址")
+
+            if payload := cls._extract_input_payload(seg):
+                flow_lines.append(f"- inputText: {cls._yaml_quote(payload)}")
+                action_desc.append(f"输入{payload}")
+
+            if any(k in seg for k in ("截图", "截屏", "屏幕截图")) or any(k in lowered for k in ("screenshot", "screen shot", "snapshot")):
+                screenshot_idx += 1
+                flow_lines.append(f"- takeScreenshot: shot-{screenshot_idx:02d}")
+                action_desc.append("截图")
+
+            if ("返回" in seg) or ("回退" in seg) or ("back" in lowered):
+                flow_lines.append("- back")
+                action_desc.append("返回")
+
+        flow_lines.append("")
+        if len(action_desc) <= 1:
+            target_desc = action_desc[0]
+        else:
+            target_desc = "，".join(action_desc[1:])
+        return flow_lines, target_desc
+
+    @staticmethod
+    def _classify_mobile_failure(stdout_text: str, stderr_text: str) -> str:
+        """Classify failure reason into user-facing categories."""
+        combined = f"{stdout_text}\n{stderr_text}"
+        text = combined.lower()
+        if "not enough devices connected" in text or "0 devices connected" in text:
+            return "未检测到可用设备"
+        if re.search(r"launch app .*?\.\.\. failed", text) or "unable to launch app" in text:
+            return "应用启动失败"
+        if m := re.search(r"assert that (.+?)\.\.\. failed", combined, flags=re.IGNORECASE):
+            detail = m.group(1).strip()
+            return f"页面断言失败（{detail}）"
+        if m := re.search(r"tap on (.+?)\.\.\. failed", combined, flags=re.IGNORECASE):
+            detail = m.group(1).strip()
+            return f"点击失败（{detail}）"
+        if m := re.search(r"input text (.+?)\.\.\. failed", combined, flags=re.IGNORECASE):
+            detail = m.group(1).strip()
+            return f"输入失败（{detail}）"
+        if "assert" in text and "failed" in text:
+            return "页面断言失败"
+        if "timeout" in text or "timed out" in text:
+            return "执行超时"
+        return "Maestro执行失败"
+
+    @staticmethod
+    def _summarize_mobile_result(final_content: str) -> str:
+        """Build a short completion notification for remote channels."""
+        content = (final_content or "").strip()
+        run_id_match = re.search(r"runId:\s*([^\n]+)", content)
+        run_id = run_id_match.group(1).strip() if run_id_match else ""
+        reason_match = re.search(r"reason:\s*([^\n]+)", content)
+        reason = reason_match.group(1).strip() if reason_match else ""
+        success = content.startswith("已完成移动自动化测试")
+        if success:
+            base = "移动自动化任务已结束：成功。"
+            return f"{base}\nrunId: {run_id}" if run_id else base
+        base = f"移动自动化任务已结束：失败。{reason}" if reason else "移动自动化任务已结束：失败。"
+        return f"{base}\nrunId: {run_id}" if run_id else base
+
+    async def _run_mobile_transfer_shortcut(
+        self,
+        app_id: str,
+        *,
+        instruction: str,
+        expose_paths: bool = True,
+        timeout_s: int | None = None,
+        on_progress: Callable[[str], Awaitable[None]] | None = None,
+    ) -> str:
+        """
+        Generate and run Maestro flow from explicit user command:
+        launch app -> open transfer -> optional token selection.
+        """
+        if shutil.which("maestro") is None:
+            return (
+                "检测到移动测试指令，但未找到 maestro CLI。"
+                "请先安装 maestro（curl -fsSL \"https://get.maestro.mobile.dev\" | bash）。"
+            )
+
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        app_slug = re.sub(r"[^a-z0-9]+", "-", app_id.lower()).strip("-") or "app"
+        run_id = f"intent-{stamp}-{app_slug[:24]}"
+
+        flow_dir = self.workspace / "mobile" / "flows" / "generated"
+        run_dir = self.workspace / "reports" / "mobile" / "runs" / run_id
+        artifact_dir = self.workspace / "reports" / "mobile" / "artifacts" / run_id / "transfer"
+        maestro_home = self.workspace / ".maestro-home"
+        flow_dir.mkdir(parents=True, exist_ok=True)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        maestro_home.mkdir(parents=True, exist_ok=True)
+
+        flow_lines, target_desc = self._build_mobile_flow_from_instruction(app_id, instruction)
+
+        flow_file = flow_dir / f"{run_id}.yaml"
+        log_file = run_dir / "transfer.log"
+        flow_file.write_text("\n".join(flow_lines), encoding="utf-8")
+        timeout = timeout_s or self._MOBILE_SHORTCUT_TIMEOUT_S
+        if on_progress:
+            await on_progress(f"已生成脚本，准备执行：{target_desc}（timeout={timeout}s）")
+
+        cmd = ["maestro", "test", str(flow_file), "--test-output-dir", str(artifact_dir)]
+        env = dict(os.environ)
+        env["HOME"] = str(maestro_home)
+        existing_opts = env.get("MAESTRO_OPTS", "").strip()
+        user_home_opt = f"-Duser.home={maestro_home}"
+        env["MAESTRO_OPTS"] = f"{existing_opts} {user_home_opt}".strip()
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(self.workspace),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            log_file.write_text(
+                f"$ {' '.join(cmd)}\n\n[timeout] execution exceeded {timeout}s\n",
+                encoding="utf-8",
+            )
+            if on_progress:
+                await on_progress(f"执行超时：{timeout}s")
+            if not expose_paths:
+                return (
+                    f"移动自动化执行超时（{timeout}s）。\n"
+                    f"app: {app_id}\n"
+                    f"runId: {run_id}\n"
+                    "详情日志已保存到本地服务器（已脱敏，不返回本地目录路径）。"
+                )
+            return (
+                f"移动自动化执行超时（{timeout}s）。\n"
+                f"flow: {flow_file}\nlog: {log_file}\nartifact: {artifact_dir}"
+            )
+
+        stdout_text = (stdout_bytes or b"").decode("utf-8", errors="replace")
+        stderr_text = (stderr_bytes or b"").decode("utf-8", errors="replace")
+        log_file.write_text(
+            f"$ {' '.join(cmd)}\n\nSTDOUT:\n{stdout_text}\n\nSTDERR:\n{stderr_text}\n",
+            encoding="utf-8",
+        )
+
+        if proc.returncode == 0:
+            if on_progress:
+                await on_progress("执行完成：通过")
+            if not expose_paths:
+                return (
+                    "已完成移动自动化测试。\n"
+                    f"app: {app_id}\n"
+                    f"target: {target_desc}\n"
+                    f"runId: {run_id}\n"
+                    "执行证据已保存到本地服务器（已脱敏，不返回本地目录路径）。"
+                )
+            return (
+                "已完成移动自动化测试。\n"
+                f"app: {app_id}\n"
+                f"target: {target_desc}\n"
+                f"flow: {flow_file}\n"
+                f"log: {log_file}\n"
+                f"artifact: {artifact_dir}"
+            )
+
+        reason = self._classify_mobile_failure(stdout_text, stderr_text)
+        if on_progress:
+            await on_progress(f"执行失败：{reason}")
+        tail = "\n".join((stdout_text + "\n" + stderr_text).strip().splitlines()[-20:])
+        if not expose_paths:
+            return (
+                "移动自动化测试执行失败。\n"
+                f"app: {app_id}\n"
+                f"reason: {reason}\n"
+                f"runId: {run_id}\n"
+                "详情日志已保存到本地服务器（已脱敏，不返回本地目录路径）。"
+            )
+        return (
+            "移动自动化测试执行失败。\n"
+            f"app: {app_id}\n"
+            f"reason: {reason}\n"
+            f"flow: {flow_file}\n"
+            f"log: {log_file}\n"
+            f"artifact: {artifact_dir}\n"
+            "最后输出:\n"
+            f"{tail}"
+        )
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -250,7 +596,6 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
-        await self._connect_mcp()
         logger.info("Agent loop started")
 
         while self._running:
@@ -327,6 +672,7 @@ class AgentLoop:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
+            await self._connect_mcp()
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
                                 else ("cli", msg.chat_id))
             logger.info("Processing system message from {}", msg.sender_id)
@@ -384,6 +730,42 @@ class AgentLoop:
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
 
+        async def _shortcut_progress(content: str, *, final: bool = False) -> None:
+            if on_progress:
+                await on_progress(content)
+                return
+            meta = dict(msg.metadata or {})
+            if not final:
+                meta["_progress"] = True
+            await self.bus.publish_outbound(
+                OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta)
+            )
+
+        if app_id := self._extract_mobile_transfer_app_id(msg.content):
+            await _shortcut_progress(f"Detected mobile transfer intent for {app_id}; running Maestro flow.")
+            expose_paths = msg.channel in {"cli", "system"}
+            final_content = await self._run_mobile_transfer_shortcut(
+                app_id,
+                instruction=msg.content,
+                expose_paths=expose_paths,
+                timeout_s=self._MOBILE_SHORTCUT_TIMEOUT_S,
+                on_progress=_shortcut_progress,
+            )
+            now = datetime.now().isoformat()
+            completion_notice = self._summarize_mobile_result(final_content)
+            await _shortcut_progress(completion_notice, final=True)
+            session.messages.append({"role": "user", "content": msg.content, "timestamp": now})
+            session.messages.append({"role": "assistant", "content": final_content, "timestamp": now})
+            self.sessions.save(session)
+            if msg.channel not in {"cli", "system"}:
+                return None
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=final_content,
+                metadata=msg.metadata or {},
+            )
+
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
             self._consolidating.add(session.key)
@@ -406,6 +788,8 @@ class AgentLoop:
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
+
+        await self._connect_mcp()
 
         history = session.get_history(max_messages=self.memory_window)
         initial_messages = self.context.build_messages(
@@ -483,7 +867,6 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
-        await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
         return response.content if response else ""
