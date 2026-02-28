@@ -1,5 +1,5 @@
 # Orghi image: upstream nanobot + gh CLI + Cursor CLI
-# Stage 1: Keep in sync with Dockerfile. When syncing upstream, merge Dockerfile and update this stage.
+# Stage 1: Keep in sync with upstream Dockerfile. When syncing upstream, merge Dockerfile and update this stage.
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS nanobot-base
 
