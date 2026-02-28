@@ -786,6 +786,52 @@ class TestConsolidationDeduplicationGuard:
         )
 
     @pytest.mark.asyncio
+    async def test_bang_commands_work_like_slash_commands(self, tmp_path: Path) -> None:
+        """!new clears session and !help returns help text, same as /new and /help."""
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.bus.events import InboundMessage
+        from nanobot.bus.queue import MessageBus
+        from nanobot.providers.base import LLMResponse
+
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        loop = AgentLoop(
+            bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
+        )
+
+        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        # --- !help returns help text ---
+        help_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="!help")
+        help_resp = await loop._process_message(help_msg)
+        assert help_resp is not None
+        assert "nanobot commands" in help_resp.content.lower()
+        assert "!new" in help_resp.content
+
+        # --- !new clears session after archival ---
+        session = loop.sessions.get_or_create("cli:test")
+        for i in range(5):
+            session.add_message("user", f"msg{i}")
+            session.add_message("assistant", f"resp{i}")
+        loop.sessions.save(session)
+        assert len(session.messages) == 10
+
+        async def _ok_consolidate(sess, archive_all: bool = False) -> bool:
+            return True
+
+        loop._consolidate_memory = _ok_consolidate  # type: ignore[method-assign]
+
+        new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="!new")
+        new_resp = await loop._process_message(new_msg)
+        assert new_resp is not None
+        assert "new session started" in new_resp.content.lower()
+
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert session_after.messages == [], "!new should clear session just like /new"
+
+    @pytest.mark.asyncio
     async def test_new_cleans_up_consolidation_lock_for_invalidated_session(
         self, tmp_path: Path
     ) -> None:
