@@ -70,6 +70,13 @@ class NanobotDingTalkHandler(CallbackHandler):
             sender_id = chatbot_msg.sender_staff_id or chatbot_msg.sender_id
             sender_name = chatbot_msg.sender_nick or "Unknown"
 
+            # Extract conversation info
+            conversation_type = message.data.get("conversationType", "1")
+            conversation_id = message.data.get("conversationId") or message.data.get("openConversationId")
+
+            if conversation_type == "2" and conversation_id:
+                sender_id = f"group:{conversation_id}"
+
             logger.info("Received DingTalk message from {} ({}): {}", sender_name, sender_id, content)
 
             # Forward to Nanobot via _on_message (non-blocking).
