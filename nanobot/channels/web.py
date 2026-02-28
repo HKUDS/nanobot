@@ -26,13 +26,16 @@ class WebChannel(BaseChannel):
     Each browser tab gets a UUID session (stored in localStorage).
     POST /api/chat returns an SSE stream:
 
-        event: token      — LLM text token (streams live)
-        event: progress   — tool hint or intermediate progress line
-        event: done       — turn complete; carries the final cleaned text
-        event: error      — something went wrong
+        event: token       — LLM text token (streams live)
+        event: progress    — non-tool progress line (rarely fires with streaming)
+        event: tool_call   — a tool is about to execute {tool, call_str}
+        event: tool_result — tool finished {tool, output, truncated}
+        event: done        — turn complete; carries the final cleaned text
+        event: error       — something went wrong
     """
 
     name = "web"
+    _TOOL_OUTPUT_MAX = 4_000   # chars forwarded to browser per tool result
 
     def __init__(self, config: WebConfig, bus: MessageBus, agent_loop: "AgentLoop | None" = None):
         super().__init__(config, bus)
@@ -148,6 +151,13 @@ class WebChannel(BaseChannel):
         async def on_progress(content: str, *, tool_hint: bool = False) -> None:
             await q.put(("progress", content, tool_hint))
 
+        async def on_tool_call(tool_name: str, call_str: str, arguments: dict) -> None:
+            await q.put(("tool_call", tool_name, call_str, arguments))
+
+        async def on_tool_result(tool_name: str, output: str) -> None:
+            truncated = len(output) > self._TOOL_OUTPUT_MAX
+            await q.put(("tool_result", tool_name, output[:self._TOOL_OUTPUT_MAX], truncated))
+
         # Launch agent as background task; result/errors go into the queue
         session_key = f"web:{session_id}"
 
@@ -162,6 +172,8 @@ class WebChannel(BaseChannel):
                     chat_id=session_id,
                     on_progress=on_progress,
                     on_token=on_token,
+                    on_tool_call=on_tool_call,
+                    on_tool_result=on_tool_result,
                 )
                 await q.put(("done", final or ""))
             except asyncio.CancelledError:
@@ -213,6 +225,18 @@ class WebChannel(BaseChannel):
                     await response.write(_sse("progress", {
                         "text": item[1],
                         "tool_hint": item[2],
+                    }))
+                elif kind == "tool_call":
+                    await response.write(_sse("tool_call", {
+                        "tool": item[1],
+                        "call_str": item[2],
+                        "args": item[3],
+                    }))
+                elif kind == "tool_result":
+                    await response.write(_sse("tool_result", {
+                        "tool": item[1],
+                        "output": item[2],
+                        "truncated": item[3],
                     }))
                 elif kind == "done":
                     await response.write(_sse("done", {"text": item[1]}))
