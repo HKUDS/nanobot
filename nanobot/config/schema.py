@@ -284,6 +284,7 @@ class WebSearchConfig(Base):
 
     api_key: str = ""  # Brave Search API key
     max_results: int = 5
+    provider: Literal["brave", "tavily"] = "brave"
 
 
 class WebToolsConfig(Base):
@@ -297,6 +298,12 @@ class ExecToolConfig(Base):
 
     timeout: int = 60
     path_append: str = ""
+    max_output_chars: int = 10000
+    env_strip: list[str] = Field(default_factory=lambda: [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+    ])
 
 
 class MCPServerConfig(Base):

@@ -20,9 +20,13 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
+        max_output_chars: int = 10000,
+        env_strip: list[str] | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
+        self.max_output_chars = max_output_chars
+        self.env_strip = env_strip if env_strip is not None else []
         self.deny_patterns = deny_patterns or [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
@@ -70,6 +74,8 @@ class ExecTool(Tool):
             return guard_error
         
         env = os.environ.copy()
+        for key in self.env_strip:
+            env.pop(key, None)
         if self.path_append:
             env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
 
@@ -113,7 +119,7 @@ class ExecTool(Tool):
             result = "\n".join(output_parts) if output_parts else "(no output)"
             
             # Truncate very long output
-            max_len = 10000
+            max_len = self.max_output_chars
             if len(result) > max_len:
                 result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
             
