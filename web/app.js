@@ -63,11 +63,31 @@ const form          = document.getElementById('chat-form');
 const input         = document.getElementById('input');
 const btnSend       = document.getElementById('btn-send');
 const btnNew        = document.getElementById('btn-new');
+const btnMenu       = document.getElementById('btn-menu');
+const sidebar       = document.getElementById('sidebar');
+const sidebarOverlay = document.getElementById('sidebar-overlay');
 const sessionListEl = document.getElementById('session-list');
 
 /* ── marked config ────────────────────────────────────────────────────── */
 
 marked.setOptions({ breaks: true, gfm: true });
+
+/* ── Sidebar toggle (mobile) ──────────────────────────────────────────── */
+
+function openSidebar() {
+  sidebar.classList.add('open');
+  sidebarOverlay.classList.add('visible');
+}
+
+function closeSidebar() {
+  sidebar.classList.remove('open');
+  sidebarOverlay.classList.remove('visible');
+}
+
+btnMenu.addEventListener('click', () =>
+  sidebar.classList.contains('open') ? closeSidebar() : openSidebar()
+);
+sidebarOverlay.addEventListener('click', closeSidebar);
 
 /* ── Helpers ──────────────────────────────────────────────────────────── */
 
@@ -118,6 +138,7 @@ function switchSession(id) {
   if (id === sessionId || isStreaming) return;
   sessionId = id;
   localStorage.setItem('nanobot_session', id);
+  closeSidebar();
   renderSidebar();
   replayHistory(id);
 }
@@ -482,3 +503,9 @@ btnNew.addEventListener('click', newConversation);
 renderSidebar();
 replayHistory(sessionId);
 input.focus();
+
+/* ── Service worker ───────────────────────────────────────────────────── */
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}

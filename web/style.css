@@ -135,6 +135,7 @@ body {
 header {
   display: flex;
   align-items: center;
+  gap: 10px;
   padding: 12px 20px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-surface);
@@ -144,6 +145,34 @@ header {
 .logo-img {
   height: 26px;
   width: auto;
+}
+
+/* Hamburger — hidden on desktop, shown on mobile */
+#btn-menu {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 8px;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+#btn-menu:hover { background: var(--bg-hover); color: var(--text); }
+
+/* Sidebar backdrop — hidden by default */
+#sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 99;
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
 }
 
 /* ── Message list ───────────────────────────────────────────────────────── */
@@ -474,3 +503,54 @@ header {
 #messages::-webkit-scrollbar { width: 5px; }
 #messages::-webkit-scrollbar-track { background: transparent; }
 #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+/* ── Mobile responsive ──────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* Full-bleed, no max-width cap */
+  #app { max-width: 100%; }
+
+  /* Sidebar becomes a fixed drawer */
+  #sidebar {
+    position: fixed;
+    top: 0;
+    left: -260px;
+    width: 260px;
+    height: 100%;
+    height: 100dvh;
+    z-index: 100;
+    transition: left 0.25s ease;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.35);
+  }
+  #sidebar.open { left: 0; }
+
+  /* Show backdrop when sidebar is open */
+  #sidebar-overlay.visible { display: block; }
+
+  /* Show hamburger button */
+  #btn-menu { display: flex; }
+
+  /* Tighter header */
+  header { padding: 10px 14px; }
+  .logo-img { height: 22px; }
+
+  /* Messages area — safe-area padding for iPhone notch */
+  #messages { padding: 14px 12px 6px; }
+
+  /* Input form — safe-area bottom padding */
+  #chat-form {
+    padding: 8px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  /* Prevent iOS from zooming on input focus — must be >= 16px */
+  #input { font-size: 16px; }
+
+  /* Bigger send button tap target */
+  #btn-send { width: 42px; height: 42px; }
+
+  /* Message bubbles slightly tighter */
+  .message { margin-bottom: 14px; }
+
+  /* Tool output max-height smaller on phone */
+  .tool-output { max-height: 200px; }
+  .tool-file-content { max-height: 260px; }
+}
