@@ -198,6 +198,19 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # Claude Code: uses OAuth token from ~/.claude/.credentials.json (Max plan).
+    # LiteLLM auto-detects sk-ant-oat prefix → Bearer auth + oauth beta header.
+    ProviderSpec(
+        name="claude_code",
+        keywords=("claude-code",),
+        env_key="",
+        display_name="Claude Code",
+        litellm_prefix="anthropic",
+        skip_prefixes=("anthropic/", "claude-code/", "claude_code/"),
+        is_oauth=True,
+        supports_prompt_caching=True,
+    ),
+
     # OpenAI Codex: uses OAuth, not API key.
     ProviderSpec(
         name="openai_codex",

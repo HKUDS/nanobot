@@ -213,6 +213,11 @@ def _make_provider(config: Config):
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         return OpenAICodexProvider(default_model=model)
 
+    # Claude Code subscription (OAuth)
+    if provider_name == "claude_code" or model.startswith("claude-code/"):
+        from nanobot.providers.claude_code_provider import ClaudeCodeProvider
+        return ClaudeCodeProvider(default_model=model)
+
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     if provider_name == "custom":
         return CustomProvider(
@@ -1048,6 +1053,27 @@ def provider_login(
 
     console.print(f"{__logo__} OAuth Login - {spec.label}\n")
     handler()
+
+
+@_register_login("claude_code")
+def _login_claude_code() -> None:
+    try:
+        from nanobot.providers.claude_code_credentials import read_credentials, is_expired
+        creds = read_credentials()
+        if is_expired(creds):
+            console.print("[red]✗ Claude Code token has expired.[/red]")
+            console.print("  Please open Claude Code and log in again, then rerun this command.")
+            raise typer.Exit(1)
+        sub = creds.get("subscriptionType", "unknown")
+        tier = creds.get("rateLimitTier", "")
+        console.print(f"[green]✓ Claude Code credentials valid[/green]  [dim]{sub} ({tier})[/dim]")
+    except FileNotFoundError:
+        console.print("[red]✗ Claude Code not found. Install Claude Code and log in first.[/red]")
+        console.print("  https://docs.anthropic.com/en/docs/claude-code")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]✗ {e}[/red]")
+        raise typer.Exit(1)
 
 
 @_register_login("openai_codex")

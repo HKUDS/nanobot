@@ -671,8 +671,37 @@ Config file: `~/.nanobot/config.json`
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
+| `claude_code` | LLM (Claude Code subscription, OAuth) | Uses existing Claude Code login |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
+
+<details>
+<summary><b>Claude Code (OAuth — Max Plan)</b></summary>
+
+Uses your existing Claude Code subscription (Max plan). No separate API key needed — nanobot reads the OAuth token that Claude Code already stores on your machine.
+
+**1. Prerequisites:** Install [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and log in.
+
+**2. Set provider and model** (merge into `~/.nanobot/config.json`):
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-sonnet-4-6",
+      "provider": "claude_code"
+    }
+  }
+}
+```
+
+**3. Chat:**
+```bash
+nanobot agent -m "Hello!"
+```
+
+> Token refresh is handled by Claude Code — nanobot re-reads the stored token on each request. If it expires, open Claude Code to refresh it.
+
+</details>
 
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>
