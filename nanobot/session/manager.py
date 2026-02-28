@@ -1,7 +1,9 @@
 """Session management for conversation history."""
 
 import json
+import os
 import shutil
+import tempfile
 from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -160,21 +162,36 @@ class SessionManager:
             return None
     
     def save(self, session: Session) -> None:
-        """Save a session to disk."""
-        path = self._get_session_path(session.key)
+        """Save a session to disk atomically.
 
-        with open(path, "w", encoding="utf-8") as f:
-            metadata_line = {
-                "_type": "metadata",
-                "key": session.key,
-                "created_at": session.created_at.isoformat(),
-                "updated_at": session.updated_at.isoformat(),
-                "metadata": session.metadata,
-                "last_consolidated": session.last_consolidated
-            }
-            f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
-            for msg in session.messages:
-                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        Writes to a temporary file first, then replaces the target via
+        os.replace() so a crash mid-write never leaves a truncated file.
+        """
+        path = self._get_session_path(session.key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                metadata_line = {
+                    "_type": "metadata",
+                    "key": session.key,
+                    "created_at": session.created_at.isoformat(),
+                    "updated_at": session.updated_at.isoformat(),
+                    "metadata": session.metadata,
+                    "last_consolidated": session.last_consolidated
+                }
+                f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
+                for msg in session.messages:
+                    f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+            os.replace(tmp_path, path)
+        except BaseException:
+            # Clean up temp file on any failure
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
         self._cache[session.key] = session
     
