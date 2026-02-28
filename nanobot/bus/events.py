@@ -25,6 +25,16 @@ class InboundMessage:
 
 
 @dataclass
+class PollData:
+    """Poll/quiz data for sending a poll."""
+    
+    question: str
+    options: list[str]
+    is_anonymous: bool = True
+    allows_multiple_answers: bool = False
+
+
+@dataclass
 class OutboundMessage:
     """Message to send to a chat channel."""
     
@@ -34,5 +44,9 @@ class OutboundMessage:
     reply_to: str | None = None
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Inline keyboard buttons: list of rows, each row is list of (label, callback_data) tuples
+    buttons: list[list[tuple[str, str]]] = field(default_factory=list)
+    # Poll data (optional)
+    poll: PollData | None = None
 
 
