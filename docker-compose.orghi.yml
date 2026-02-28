@@ -1,4 +1,4 @@
-# Production: pulls image from GHCR. No local build.
+# Orghi production: pulls image from GHCR (built from Dockerfile.orghi)
 # ORGHI_IMAGE=ghcr.io/owner/orghi:{version}-{shortSha} - Actions sets this on deploy
 
 x-common-config: &common-config

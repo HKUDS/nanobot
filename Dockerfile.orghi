@@ -1,0 +1,59 @@
+# Orghi image: upstream nanobot + gh CLI + Cursor CLI
+# Stage 1: Keep in sync with Dockerfile. When syncing upstream, merge Dockerfile and update this stage.
+
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS nanobot-base
+
+# Install Node.js 20 for the WhatsApp bridge
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates gnupg git && \
+    mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends nodejs && \
+    apt-get purge -y gnupg && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies first (cached layer)
+COPY pyproject.toml README.md LICENSE ./
+RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
+    uv pip install --system --no-cache . && \
+    rm -rf nanobot bridge
+
+# Copy the full source and install
+COPY nanobot/ nanobot/
+COPY bridge/ bridge/
+RUN uv pip install --system --no-cache .
+
+# Build the WhatsApp bridge
+WORKDIR /app/bridge
+RUN npm install && npm run build
+WORKDIR /app
+
+# Create config directory
+RUN mkdir -p /root/.nanobot
+
+# Gateway default port
+EXPOSE 18790
+
+# Stage 2: Orghi-specific tools (gh, Cursor CLI)
+FROM nanobot-base AS orghi
+
+# Install gh CLI (GitHub official repo)
+RUN mkdir -p -m 755 /etc/apt/keyrings && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends gh && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Cursor CLI (agent command)
+RUN curl https://cursor.com/install -fsS | bash
+ENV PATH="/root/.local/bin:${PATH}"
+
+ENTRYPOINT ["nanobot"]
+CMD ["status"]

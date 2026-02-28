@@ -40,6 +40,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile.orghi
           push: true
           tags: |
             ghcr.io/${{ github.repository }}:${{ steps.tag.outputs.tag }}
@@ -55,5 +56,5 @@ jobs:
             export ORGHI_IMAGE=ghcr.io/${{ github.repository }}:${{ steps.tag.outputs.tag }}
             cd ${{ secrets.DEPLOY_PATH || '/opt/orghi' }}
             git pull origin orghi-main
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
+            docker compose -f docker-compose.orghi.yml pull
+            docker compose -f docker-compose.orghi.yml up -d
