@@ -56,6 +56,9 @@ matrix = [
     "mistune>=3.0.0,<4.0.0",
     "nh3>=0.2.17,<1.0.0",
 ]
+web = [
+    "aiohttp>=3.9.0,<4.0.0",
+]
 dev = [
     "pytest>=9.0.0,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",
@@ -81,25 +84,28 @@ packages = ["nanobot"]
 [tool.hatch.build.targets.wheel.sources]
 "nanobot" = "nanobot"
 
-# Include non-Python files in skills and templates
+# Include non-Python files in skills, templates, and web frontend
 [tool.hatch.build]
 include = [
     "nanobot/**/*.py",
     "nanobot/templates/**/*.md",
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",
+    "web/**",
 ]
 
 [tool.hatch.build.targets.sdist]
 include = [
     "nanobot/",
     "bridge/",
+    "web/",
     "README.md",
     "LICENSE",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]
 "bridge" = "nanobot/bridge"
+"web" = "nanobot/web"
 
 [tool.ruff]
 line-length = 100

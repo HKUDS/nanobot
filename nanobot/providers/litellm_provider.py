@@ -4,7 +4,7 @@ import hashlib
 import os
 import secrets
 import string
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import json_repair
 import litellm
@@ -342,6 +342,99 @@ class LiteLLMProvider(LLMProvider):
             reasoning_content=reasoning_content,
             thinking_blocks=thinking_blocks,
         )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        on_token: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        """Stream response tokens via LiteLLM with stream=True."""
+        original_model = model or self.default_model
+        resolved = self._resolve_model(original_model)
+
+        if self._supports_cache_control(original_model):
+            messages, tools = self._apply_cache_control(messages, tools)
+
+        max_tokens = max(1, self.generation.max_tokens)
+        temperature = self.generation.temperature
+        reasoning_effort = self.generation.reasoning_effort
+
+        kwargs: dict[str, Any] = {
+            "model": resolved,
+            "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": True,
+        }
+
+        self._apply_model_overrides(resolved, kwargs)
+
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        if self.extra_headers:
+            kwargs["extra_headers"] = self.extra_headers
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+
+        try:
+            accumulated_content = ""
+            accumulated_tool_calls: dict[int, dict] = {}
+            finish_reason = "stop"
+            reasoning_content = None
+
+            response_stream = await acompletion(**kwargs)
+            async for chunk in response_stream:
+                choice = chunk.choices[0]
+                delta = choice.delta
+
+                if delta.content:
+                    accumulated_content += delta.content
+                    if on_token:
+                        await on_token(delta.content)
+
+                if getattr(delta, "reasoning_content", None):
+                    reasoning_content = (reasoning_content or "") + delta.reasoning_content
+
+                if delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in accumulated_tool_calls:
+                            accumulated_tool_calls[idx] = {"id": "", "name": "", "args": ""}
+                        if tc_delta.id:
+                            accumulated_tool_calls[idx]["id"] = tc_delta.id
+                        if tc_delta.function and tc_delta.function.name:
+                            accumulated_tool_calls[idx]["name"] = tc_delta.function.name
+                        if tc_delta.function and tc_delta.function.arguments:
+                            accumulated_tool_calls[idx]["args"] += tc_delta.function.arguments
+
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+
+            tool_calls = []
+            for idx in sorted(accumulated_tool_calls.keys()):
+                tc = accumulated_tool_calls[idx]
+                args = json_repair.loads(tc["args"]) if tc["args"] else {}
+                tool_calls.append(ToolCallRequest(
+                    id=tc["id"] or _short_tool_id(),
+                    name=tc["name"],
+                    arguments=args,
+                ))
+
+            return LLMResponse(
+                content=accumulated_content or None,
+                tool_calls=tool_calls,
+                finish_reason=finish_reason,
+                reasoning_content=reasoning_content,
+            )
+        except Exception as e:
+            return LLMResponse(content=f"Error calling LLM: {str(e)}", finish_reason="error")
 
     def get_default_model(self) -> str:
         """Get the default model."""

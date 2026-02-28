@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import json_repair
 from openai import AsyncOpenAI
@@ -56,6 +56,70 @@ class CustomProvider(LLMProvider):
             usage={"prompt_tokens": u.prompt_tokens, "completion_tokens": u.completion_tokens, "total_tokens": u.total_tokens} if u else {},
             reasoning_content=getattr(msg, "reasoning_content", None) or None,
         )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        on_token: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        """Stream response tokens using the OpenAI streaming API."""
+        kwargs: dict[str, Any] = {
+            "model": model or self.default_model,
+            "messages": self._sanitize_empty_content(messages),
+            "max_tokens": max(1, self.generation.max_tokens),
+            "temperature": self.generation.temperature,
+            "stream": True,
+        }
+        if tools:
+            kwargs.update(tools=tools, tool_choice="auto")
+
+        try:
+            accumulated_content = ""
+            accumulated_tool_calls: dict[int, dict] = {}
+            finish_reason = "stop"
+
+            stream = await self._client.chat.completions.create(**kwargs)
+            async for chunk in stream:
+                choice = chunk.choices[0]
+                delta = choice.delta
+
+                if delta.content:
+                    accumulated_content += delta.content
+                    if on_token:
+                        await on_token(delta.content)
+
+                if delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in accumulated_tool_calls:
+                            accumulated_tool_calls[idx] = {"id": "", "name": "", "args": ""}
+                        if tc_delta.id:
+                            accumulated_tool_calls[idx]["id"] = tc_delta.id
+                        if tc_delta.function and tc_delta.function.name:
+                            accumulated_tool_calls[idx]["name"] = tc_delta.function.name
+                        if tc_delta.function and tc_delta.function.arguments:
+                            accumulated_tool_calls[idx]["args"] += tc_delta.function.arguments
+
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+
+            tool_calls = [
+                ToolCallRequest(
+                    id=tc["id"] or f"tc_{idx}",
+                    name=tc["name"],
+                    arguments=json_repair.loads(tc["args"]) if tc["args"] else {},
+                )
+                for idx, tc in sorted(accumulated_tool_calls.items())
+            ]
+            return LLMResponse(
+                content=accumulated_content or None,
+                tool_calls=tool_calls,
+                finish_reason=finish_reason,
+            )
+        except Exception as e:
+            return LLMResponse(content=f"Error: {e}", finish_reason="error")
 
     def get_default_model(self) -> str:
         return self.default_model
