@@ -95,7 +95,7 @@ class DiscordChannel(BaseChannel):
             await self._http.aclose()
             self._http = None
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def send(self, msg: OutboundMessage) -> str | None:
         """Send a message through Discord REST API."""
         if not self._http:
             logger.warning("Discord HTTP client not initialized")
@@ -121,6 +121,8 @@ class DiscordChannel(BaseChannel):
                     break  # Abort remaining chunks on failure
         finally:
             await self._stop_typing(msg.chat_id)
+        
+        return None
 
     async def _send_payload(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]

@@ -191,7 +191,7 @@ class DingTalkChannel(BaseChannel):
             logger.error("Failed to get DingTalk access token: {}", e)
             return None
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def send(self, msg: OutboundMessage) -> str | None:
         """Send a message through DingTalk."""
         token = await self._get_access_token()
         if not token:

@@ -218,11 +218,15 @@ class TelegramChannel(BaseChannel):
             return "audio"
         return "document"
 
-    async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Telegram."""
+    async def send(self, msg: OutboundMessage) -> str | None:
+        """Send a message through Telegram.
+        
+        Returns:
+            The message ID of the last sent message, or None if not available.
+        """
         if not self._app:
             logger.warning("Telegram bot not running")
-            return
+            return None
 
         self._stop_typing(msg.chat_id)
 
@@ -230,16 +234,21 @@ class TelegramChannel(BaseChannel):
             chat_id = int(msg.chat_id)
         except ValueError:
             logger.error("Invalid chat_id: {}", msg.chat_id)
-            return
+            return None
 
+        # Determine reply target: explicit reply_to > metadata message_id
         reply_params = None
-        if self.config.reply_to_message:
-            reply_to_message_id = msg.metadata.get("message_id")
-            if reply_to_message_id:
+        reply_to_id = msg.reply_to or (msg.metadata.get("message_id") if self.config.reply_to_message else None)
+        if reply_to_id:
+            try:
                 reply_params = ReplyParameters(
-                    message_id=reply_to_message_id,
+                    message_id=int(reply_to_id),
                     allow_sending_without_reply=True
                 )
+            except (ValueError, TypeError):
+                logger.warning("Invalid reply_to message_id: {}", reply_to_id)
+
+        last_message_id = None
 
         # Send media files
         for media_path in (msg.media or []):
@@ -252,41 +261,47 @@ class TelegramChannel(BaseChannel):
                 }.get(media_type, self._app.bot.send_document)
                 param = "photo" if media_type == "photo" else media_type if media_type in ("voice", "audio") else "document"
                 with open(media_path, 'rb') as f:
-                    await sender(
+                    result = await sender(
                         chat_id=chat_id, 
                         **{param: f},
                         reply_parameters=reply_params
                     )
+                    last_message_id = str(result.message_id) if result else None
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
                 logger.error("Failed to send media {}: {}", media_path, e)
-                await self._app.bot.send_message(
+                result = await self._app.bot.send_message(
                     chat_id=chat_id,
                     text=f"[Failed to send: {filename}]",
                     reply_parameters=reply_params
                 )
+                last_message_id = str(result.message_id) if result else None
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
             for chunk in _split_message(msg.content):
                 try:
                     html = _markdown_to_telegram_html(chunk)
-                    await self._app.bot.send_message(
+                    result = await self._app.bot.send_message(
                         chat_id=chat_id, 
                         text=html, 
                         parse_mode="HTML",
                         reply_parameters=reply_params
                     )
+                    last_message_id = str(result.message_id) if result else None
                 except Exception as e:
                     logger.warning("HTML parse failed, falling back to plain text: {}", e)
                     try:
-                        await self._app.bot.send_message(
+                        result = await self._app.bot.send_message(
                             chat_id=chat_id, 
                             text=chunk,
                             reply_parameters=reply_params
                         )
+                        last_message_id = str(result.message_id) if result else None
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
+        
+        return last_message_id
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -432,6 +447,11 @@ class TelegramChannel(BaseChannel):
         # Start typing indicator before processing
         self._start_typing(str_chat_id)
         
+        # Extract reply_to_message_id if user replied to a message
+        reply_to_id = None
+        if message.reply_to_message:
+            reply_to_id = message.reply_to_message.message_id
+        
         # Forward to the message bus
         await self._handle_message(
             sender_id=sender_id,
@@ -443,7 +463,8 @@ class TelegramChannel(BaseChannel):
                 "user_id": user.id,
                 "username": user.username,
                 "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
+                "is_group": message.chat.type != "private",
+                "reply_to_message_id": reply_to_id
             }
         )
     

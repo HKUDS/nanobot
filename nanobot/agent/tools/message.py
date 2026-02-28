@@ -61,6 +61,10 @@ class MessageTool(Tool):
                     "type": "string",
                     "description": "Optional: target chat/user ID"
                 },
+                "reply_to": {
+                    "type": "string",
+                    "description": "Optional: message ID to reply to (for threaded conversations)"
+                },
                 "media": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -75,6 +79,7 @@ class MessageTool(Tool):
         content: str,
         channel: str | None = None,
         chat_id: str | None = None,
+        reply_to: str | None = None,
         message_id: str | None = None,
         media: list[str] | None = None,
         **kwargs: Any
@@ -93,6 +98,7 @@ class MessageTool(Tool):
             channel=channel,
             chat_id=chat_id,
             content=content,
+            reply_to=reply_to,
             media=media or [],
             metadata={
                 "message_id": message_id,
@@ -100,10 +106,16 @@ class MessageTool(Tool):
         )
 
         try:
-            await self._send_callback(msg)
+            result = await self._send_callback(msg)
             if channel == self._default_channel and chat_id == self._default_chat_id:
                 self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
-            return f"Message sent to {channel}:{chat_id}{media_info}"
+            reply_info = f" (reply to {reply_to})" if reply_to else ""
+            
+            # Return message_id if available from channel
+            sent_id = result if isinstance(result, str) else None
+            if sent_id:
+                return f"Message sent to {channel}:{chat_id}{media_info}{reply_info} [id={sent_id}]"
+            return f"Message sent to {channel}:{chat_id}{media_info}{reply_info}"
         except Exception as e:
             return f"Error sending message: {str(e)}"

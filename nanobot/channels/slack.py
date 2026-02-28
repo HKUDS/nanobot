@@ -73,7 +73,7 @@ class SlackChannel(BaseChannel):
                 logger.warning("Slack socket close failed: {}", e)
             self._socket_client = None
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def send(self, msg: OutboundMessage) -> str | None:
         """Send a message through Slack."""
         if not self._web_client:
             logger.warning("Slack client not running")
@@ -104,6 +104,8 @@ class SlackChannel(BaseChannel):
                     logger.error("Failed to upload file {}: {}", media_path, e)
         except Exception as e:
             logger.error("Error sending Slack message: {}", e)
+        
+        return None
 
     async def _on_socket_request(
         self,

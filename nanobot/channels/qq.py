@@ -94,7 +94,7 @@ class QQChannel(BaseChannel):
                 pass
         logger.info("QQ bot stopped")
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def send(self, msg: OutboundMessage) -> str | None:
         """Send a message through QQ."""
         if not self._client:
             logger.warning("QQ client not initialized")
@@ -107,6 +107,8 @@ class QQChannel(BaseChannel):
             )
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
+        
+        return None
 
     async def _on_message(self, data: "C2CMessage") -> None:
         """Handle incoming message from QQ."""
