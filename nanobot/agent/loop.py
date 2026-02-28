@@ -414,11 +414,14 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.memory_window)
+        meta = msg.metadata or {}
+        sender_name = meta.get("first_name") or meta.get("username")
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            sender_name=sender_name,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
