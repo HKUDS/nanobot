@@ -150,12 +150,33 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         content: str | None,
         tool_calls: list[dict[str, Any]] | None = None,
         reasoning_content: str | None = None,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Add an assistant message to the message list."""
         msg: dict[str, Any] = {"role": "assistant", "content": content}
         if tool_calls:
             msg["tool_calls"] = tool_calls
+        
+        # For reasoning models (e.g., Moonshot Kimi k2.5, DeepSeek-R1), if any previous
+        # assistant message had reasoning_content, all subsequent assistant messages must
+        # also include it (even if None/empty) to satisfy the API requirements.
+        # Check if this is a reasoning model or if previous messages had reasoning_content
+        is_reasoning_model = model and any(
+            keyword in model.lower() for keyword in ("kimi", "reason", "deepseek-r1", "deepseek-reason")
+        )
+        has_previous_reasoning = any(
+            m.get("role") == "assistant" and "reasoning_content" in m
+            for m in messages
+        )
+        
+        # Include reasoning_content if provided, or if this is a reasoning model and
+        # previous messages had it, or if this message has tool_calls and is a reasoning model
         if reasoning_content is not None:
             msg["reasoning_content"] = reasoning_content
+        elif (is_reasoning_model or has_previous_reasoning) and tool_calls:
+            # For reasoning models with tool calls, include empty reasoning_content if not provided
+            # This ensures API compatibility (some models require the field to be present)
+            msg["reasoning_content"] = ""
+        
         messages.append(msg)
         return messages
