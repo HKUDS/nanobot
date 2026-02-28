@@ -463,12 +463,25 @@ class AgentLoop:
                 if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
                     continue
                 if isinstance(content, list):
-                    entry["content"] = [
-                        {"type": "text", "text": "[image]"} if (
+                    # Strip base64 images and collapse to plain text for history.
+                    # Keep only genuine text parts, dropping [image: /path] markers
+                    # that duplicate the base64 vision content.
+                    text_parts = []
+                    had_image = False
+                    for c in content:
+                        if (
                             c.get("type") == "image_url"
                             and c.get("image_url", {}).get("url", "").startswith("data:image/")
-                        ) else c for c in content
-                    ]
+                        ):
+                            had_image = True
+                        elif c.get("type") == "text":
+                            txt = c.get("text", "")
+                            # Drop the "[image: /path]" / "[file: /path]" markers
+                            if not re.match(r"^\[(image|file):\s+.+\]$", txt.strip()):
+                                text_parts.append(txt)
+                    if had_image:
+                        text_parts.insert(0, "[user sent an image]")
+                    entry["content"] = "\n".join(text_parts).strip() or "[user sent an image]"
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now()
