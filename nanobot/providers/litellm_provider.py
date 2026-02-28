@@ -288,6 +288,7 @@ class LiteLLMProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         on_token: Callable[[str], Awaitable[None]] | None = None,
+        reasoning_effort: str | None = None,
     ) -> LLMResponse:
         """Stream response tokens via LiteLLM with stream=True."""
         original_model = model or self.default_model
@@ -317,6 +318,8 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
 
         try:
             accumulated_content = ""
