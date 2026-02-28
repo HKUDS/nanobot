@@ -21,4 +21,3 @@ poetry.lock
 botpy.log
 tests/
 .idea
-uv.lock
