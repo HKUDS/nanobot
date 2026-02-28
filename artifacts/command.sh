@@ -1,0 +1,1 @@
+docker run  -v ~/.nanobot:/root/.nanobot --rm nanobot:latest $@
