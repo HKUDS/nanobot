@@ -255,12 +255,35 @@ async function sendMessage(text) {
   appendUserMessage(text);
   const { wrapper, bubble } = appendBotSkeleton();
 
-  const streamEl = document.createElement('div');
-  streamEl.className = 'streaming-content';
-  bubble.appendChild(streamEl);
+  // Active streaming section — always appended at end of bubble
+  let currentStreamEl = document.createElement('div');
+  currentStreamEl.className = 'streaming-content';
+  bubble.appendChild(currentStreamEl);
 
   let tokenBuffer = '';
+  let lastToolBlock = null;
   const collectedHints = [];
+
+  // Freeze the current streaming section into a rendered-content div,
+  // then add a fresh streaming section at the end of bubble.
+  function freezeCurrentSection() {
+    if (tokenBuffer.trim()) {
+      const rendered = document.createElement('div');
+      rendered.className = 'rendered-content';
+      rendered.innerHTML = marked.parse(tokenBuffer);
+      if (currentStreamEl.parentNode === bubble) {
+        bubble.replaceChild(rendered, currentStreamEl);
+      } else {
+        bubble.appendChild(rendered);
+      }
+    } else {
+      currentStreamEl.remove();
+    }
+    tokenBuffer = '';
+    currentStreamEl = document.createElement('div');
+    currentStreamEl.className = 'streaming-content';
+    bubble.appendChild(currentStreamEl);
+  }
 
   // Name the session after the first message
   const history = getHistory(sessionId);
@@ -297,20 +320,78 @@ async function sendMessage(text) {
       for (const { type, data } of events) {
         if (type === 'token') {
           tokenBuffer += data.text;
-          streamEl.textContent = tokenBuffer;
+          currentStreamEl.textContent = tokenBuffer;
+          scrollToBottom();
+
+        } else if (type === 'tool_call') {
+          // Freeze current text, insert inline tool block before new stream section
+          freezeCurrentSection();
+
+          const block = document.createElement('div');
+          block.className = 'tool-block tool-pending';
+
+          if (data.tool === 'write_file' && data.args && data.args.path) {
+            // Special rendering: filename in header, file content in a code body
+            const ext = data.args.path.split('.').pop() || '';
+            block.innerHTML = `
+              <div class="tool-header">
+                <span class="tool-spinner">⟳</span>
+                <span class="tool-name tool-filepath">✎ ${escapeHtml(data.args.path)}</span>
+              </div>
+              <pre class="tool-file-content"><code class="lang-${escapeHtml(ext)}">${escapeHtml(data.args.content || '')}</code></pre>
+              <div class="tool-output"></div>
+            `;
+          } else {
+            block.innerHTML = `
+              <div class="tool-header">
+                <span class="tool-spinner">⟳</span>
+                <span class="tool-name">${escapeHtml(data.call_str || data.tool)}</span>
+              </div>
+              <div class="tool-output"></div>
+            `;
+          }
+          bubble.insertBefore(block, currentStreamEl);
+          lastToolBlock = block;
+          collectedHints.push({ toolName: data.tool, fullText: data.call_str || data.tool });
+          scrollToBottom();
+
+        } else if (type === 'tool_result') {
+          if (lastToolBlock) {
+            lastToolBlock.classList.remove('tool-pending');
+            const spinner = lastToolBlock.querySelector('.tool-spinner');
+            if (spinner) spinner.textContent = '$';
+            const outputEl = lastToolBlock.querySelector('.tool-output');
+            if (outputEl && data.output) {
+              outputEl.textContent = data.output;
+              if (data.truncated) {
+                const notice = document.createElement('div');
+                notice.className = 'tool-truncated';
+                notice.textContent = '… output truncated';
+                lastToolBlock.appendChild(notice);
+              }
+            }
+          }
           scrollToBottom();
 
         } else if (type === 'progress') {
+          // Fallback: old-style progress chips (channels without tool_call support)
           const hint = appendHint(data.text, wrapper);
           collectedHints.push(hint);
 
         } else if (type === 'done') {
           const finalText = data.text || tokenBuffer;
-          streamEl.remove();
-          const rendered = document.createElement('div');
-          rendered.className = 'rendered-content';
-          rendered.innerHTML = marked.parse(finalText);
-          bubble.appendChild(rendered);
+          if (finalText.trim()) {
+            const rendered = document.createElement('div');
+            rendered.className = 'rendered-content';
+            rendered.innerHTML = marked.parse(finalText);
+            if (currentStreamEl.parentNode === bubble) {
+              bubble.replaceChild(rendered, currentStreamEl);
+            } else {
+              bubble.appendChild(rendered);
+            }
+          } else {
+            currentStreamEl.remove();
+          }
           scrollToBottom();
 
           // Persist bot turn
@@ -322,7 +403,7 @@ async function sendMessage(text) {
           return;
 
         } else if (type === 'error') {
-          streamEl.remove();
+          currentStreamEl.remove();
           const err = document.createElement('div');
           err.className = 'error-bubble';
           err.textContent = '⚠ ' + (data.message || 'Unknown error');
@@ -335,16 +416,19 @@ async function sendMessage(text) {
 
     // Stream ended without a 'done' event — render whatever we have
     if (tokenBuffer) {
-      streamEl.remove();
       const rendered = document.createElement('div');
       rendered.className = 'rendered-content';
       rendered.innerHTML = marked.parse(tokenBuffer);
-      bubble.appendChild(rendered);
+      if (currentStreamEl.parentNode === bubble) {
+        bubble.replaceChild(rendered, currentStreamEl);
+      } else {
+        bubble.appendChild(rendered);
+      }
       scrollToBottom();
     }
 
   } catch (err) {
-    streamEl.remove();
+    currentStreamEl.remove();
     const errEl = document.createElement('div');
     errEl.className = 'error-bubble';
     errEl.textContent = '⚠ ' + err.message;

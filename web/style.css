@@ -373,6 +373,96 @@ header {
 #empty-state .big-logo { font-size: 48px; }
 #empty-state p { font-size: 15px; }
 
+/* ── Tool blocks (inline terminal-style) ────────────────────────────────── */
+.tool-block {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+.tool-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+.tool-spinner {
+  color: var(--accent);
+  animation: spin 1s linear infinite;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.tool-block:not(.tool-pending) .tool-spinner {
+  animation: none;
+  color: var(--text-hint);
+}
+
+.tool-name {
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.tool-output {
+  padding: 8px 12px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+.tool-output:empty { display: none; }
+
+.tool-filepath {
+  color: var(--accent);
+}
+
+.tool-file-content {
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 400px;
+  overflow-y: auto;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.tool-file-content code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+  border-radius: 0;
+}
+
+.tool-truncated {
+  padding: 2px 12px 6px;
+  font-size: 11px;
+  color: var(--text-hint);
+  font-style: italic;
+}
+
 /* ── Error bubble ───────────────────────────────────────────────────────── */
 .error-bubble {
   color: #f87171;
