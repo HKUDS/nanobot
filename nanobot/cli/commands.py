@@ -232,6 +232,14 @@ def _create_workspace_templates(workspace: Path):
     (workspace / "skills").mkdir(exist_ok=True)
 
 
+def _inject_cli_env(config: Config) -> None:
+    """Inject GH_TOKEN and CURSOR_API_KEY into os.environ for subprocess inheritance."""
+    if config.tools.gh.api_key:
+        os.environ["GH_TOKEN"] = config.tools.gh.api_key
+    if config.tools.cursor.api_key:
+        os.environ["CURSOR_API_KEY"] = config.tools.cursor.api_key
+
+
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.custom_provider import CustomProvider
@@ -299,6 +307,8 @@ def gateway(
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
 
     config = load_config()
+    _inject_cli_env(config)
+
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
@@ -318,8 +328,6 @@ def gateway(
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
         brave_api_key=config.tools.web.search.api_key or None,
-        cursor_api_key=config.tools.cursor.api_key or None,
-        gh_api_key=config.tools.gh.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -465,6 +473,7 @@ def agent(
     from nanobot.cron.service import CronService
 
     config = load_config()
+    _inject_cli_env(config)
 
     bus = MessageBus()
     provider = _make_provider(config)
@@ -488,8 +497,6 @@ def agent(
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
         brave_api_key=config.tools.web.search.api_key or None,
-        cursor_api_key=config.tools.cursor.api_key or None,
-        gh_api_key=config.tools.gh.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -968,6 +975,8 @@ def cron_run(
     logger.disable("nanobot")
 
     config = load_config()
+    _inject_cli_env(config)
+
     provider = _make_provider(config)
     bus = MessageBus()
     store_path = get_data_dir() / "cron" / "jobs.json"
@@ -993,8 +1002,6 @@ def cron_run(
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
         brave_api_key=config.tools.web.search.api_key or None,
-        cursor_api_key=config.tools.cursor.api_key or None,
-        gh_api_key=config.tools.gh.api_key or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,

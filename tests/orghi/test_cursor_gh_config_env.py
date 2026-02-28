@@ -1,7 +1,7 @@
 """Tests for Cursor and gh API keys via config (feat/cursor-gh-variables)."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+import os
+from unittest.mock import patch
 
 from typer.testing import CliRunner
 
@@ -36,24 +36,20 @@ def test_config_loads_cursor_gh_from_json():
     assert config.tools.gh.api_key == "gh-token-456"
 
 
-def test_agent_loop_stores_cursor_and_gh_api_keys():
-    """AgentLoop stores cursor_api_key and gh_api_key on self when passed."""
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.bus.queue import MessageBus
+def test_inject_cli_env_sets_gh_token_and_cursor_api_key():
+    """_inject_cli_env sets GH_TOKEN and CURSOR_API_KEY in os.environ."""
+    from nanobot.cli.commands import _inject_cli_env
 
-    bus = MessageBus()
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-    loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=Path("/tmp/test"),
-        model="test-model",
-        cursor_api_key="cursor-secret",
-        gh_api_key="gh-secret",
+    config = Config.model_validate(
+        {"tools": {"cursor": {"apiKey": "cursor-secret"}, "gh": {"apiKey": "gh-secret"}}}
     )
-    assert loop.cursor_api_key == "cursor-secret"
-    assert loop.gh_api_key == "gh-secret"
+    try:
+        _inject_cli_env(config)
+        assert os.environ.get("GH_TOKEN") == "gh-secret"
+        assert os.environ.get("CURSOR_API_KEY") == "cursor-secret"
+    finally:
+        os.environ.pop("GH_TOKEN", None)
+        os.environ.pop("CURSOR_API_KEY", None)
 
 
 def test_status_shows_cursor_and_gh_cli(tmp_path):
