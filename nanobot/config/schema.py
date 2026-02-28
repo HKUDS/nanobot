@@ -196,6 +196,8 @@ class WeComConfig(Base):
     callback_aes_key: str = ""  # 回调加密 AESKey (43字符 Base64)
     webhook_path: str = "/wecom/callback"  # Webhook 路径
     webhook_port: int = 18790  # Webhook HTTP server port
+    ssl_cert: str = ""  # SSL 证书路径（可选，启用 HTTPS）
+    ssl_key: str = ""  # SSL 私钥路径（可选，启用 HTTPS）
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs (empty = all users)
 
 

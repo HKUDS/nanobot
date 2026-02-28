@@ -152,7 +152,7 @@ class WeComChannel(BaseChannel):
         self._media_upload_api: str | None = None
 
     async def start(self) -> None:
-        """Start WeCom channel with HTTP webhook server."""
+        """Start WeCom channel with HTTP/HTTPS webhook server."""
         if not self.config.corp_id or not self.config.corp_secret:
             logger.error("WeCom corp_id and corp_secret not configured")
             return
@@ -186,12 +186,33 @@ class WeComChannel(BaseChannel):
         # Get port from config or use default
         port = getattr(self.config, 'webhook_port', 18790)
 
-        site = web.TCPSite(runner, "0.0.0.0", port)
-        await site.start()
-        self._site = site
+        # Check if SSL is enabled
+        ssl_cert = getattr(self.config, 'ssl_cert', '')
+        ssl_key = getattr(self.config, 'ssl_key', '')
 
-        logger.info("WeCom webhook server started on port {}", port)
-        logger.info("Webhook URL: http://your-domain:{}{}", port, self.config.webhook_path)
+        if ssl_cert and ssl_key:
+            # HTTPS server with SSL
+            import ssl
+            ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            ssl_context.load_cert_chain(ssl_cert, ssl_key)
+
+            site = web.TCPSite(runner, "0.0.0.0", port, ssl_context=ssl_context)
+            await site.start()
+            self._site = site
+
+            logger.info("WeCom webhook server started with HTTPS on port {}", port)
+            logger.info("Webhook URL: https://your-domain:{}{}", port, self.config.webhook_path)
+        else:
+            # HTTP server (without SSL)
+            site = web.TCPSite(runner, "0.0.0.0", port)
+            await site.start()
+            self._site = site
+
+            logger.warning("WeCom webhook running in HTTP mode (without SSL)")
+            logger.warning("Enterprise WeChat requires HTTPS for callback URL!")
+            logger.warning("Consider using a reverse proxy (nginx/caddy) or configuring SSL certificates")
+            logger.info("WeCom webhook server started on port {}", port)
+            logger.info("Webhook URL: http://your-domain:{}{}", port, self.config.webhook_path)
 
         # Keep running
         while self._running:
