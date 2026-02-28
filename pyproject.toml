@@ -45,6 +45,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+matrix = [
+    "matrix-nio[e2e]>=0.25.2",
+    "mistune>=3.0.0,<4.0.0",
+    "nh3>=0.2.17,<1.0.0",
+]
 dev = [
     "pytest>=9.0.0,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",

@@ -3,6 +3,8 @@
 import json
 import json_repair
 import os
+import secrets
+import string
 from typing import Any
 
 import litellm
@@ -15,6 +17,11 @@ from nanobot.providers.registry import find_by_model, find_gateway
 # Standard OpenAI chat-completion message keys plus reasoning_content for
 # thinking-enabled models (Kimi k2.5, DeepSeek-R1, etc.).
 _ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
+_ALNUM = string.ascii_letters + string.digits
+
+def _short_tool_id() -> str:
+    """Generate a 9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
+    return "".join(secrets.choice(_ALNUM) for _ in range(9))
 
 
 class LiteLLMProvider(LLMProvider):
@@ -245,7 +252,7 @@ class LiteLLMProvider(LLMProvider):
                     args = json_repair.loads(args)
                 
                 tool_calls.append(ToolCallRequest(
-                    id=tc.id,
+                    id=_short_tool_id(),
                     name=tc.function.name,
                     arguments=args,
                 ))

@@ -812,7 +812,7 @@ class TestConsolidationDeduplicationGuard:
         loop.sessions.save(session)
 
         # Ensure lock exists before /new.
-        _ = loop._get_consolidation_lock(session.key)
+        loop._consolidation_locks.setdefault(session.key, asyncio.Lock())
         assert session.key in loop._consolidation_locks
 
         async def _ok_consolidate(sess, archive_all: bool = False) -> bool:
