@@ -139,10 +139,13 @@ class TelegramChannel(BaseChannel):
         self._running = True
         
         # Build the application with larger connection pool to avoid pool-timeout on long runs
-        req = HTTPXRequest(connection_pool_size=16, pool_timeout=5.0, connect_timeout=30.0, read_timeout=30.0)
-        builder = Application.builder().token(self.config.token).request(req).get_updates_request(req)
+        # When proxy is configured, pass it into HTTPXRequest directly (builder.proxy() conflicts with custom request instances)
+        # When no proxy, omit the proxy parameter entirely to avoid changing default behavior
         if self.config.proxy:
-            builder = builder.proxy(self.config.proxy).get_updates_proxy(self.config.proxy)
+            req = HTTPXRequest(connection_pool_size=16, pool_timeout=5.0, connect_timeout=30.0, read_timeout=30.0, proxy=self.config.proxy)
+        else:
+            req = HTTPXRequest(connection_pool_size=16, pool_timeout=5.0, connect_timeout=30.0, read_timeout=30.0)
+        builder = Application.builder().token(self.config.token).request(req).get_updates_request(req)
         self._app = builder.build()
         self._app.add_error_handler(self._on_error)
         
