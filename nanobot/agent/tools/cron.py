@@ -78,14 +78,14 @@ class CronTool(Tool):
         **kwargs: Any
     ) -> str:
         if action == "add":
-            return self._add_job(message, every_seconds, cron_expr, tz, at)
+            return await self._add_job(message, every_seconds, cron_expr, tz, at)
         elif action == "list":
-            return self._list_jobs()
+            return await self._list_jobs()
         elif action == "remove":
-            return self._remove_job(job_id)
+            return await self._remove_job(job_id)
         return f"Unknown action: {action}"
     
-    def _add_job(
+    async def _add_job(
         self,
         message: str,
         every_seconds: int | None,
@@ -121,7 +121,7 @@ class CronTool(Tool):
         else:
             return "Error: either every_seconds, cron_expr, or at is required"
         
-        job = self._cron.add_job(
+        job = await self._cron.add_job(
             name=message[:30],
             schedule=schedule,
             message=message,
@@ -132,16 +132,16 @@ class CronTool(Tool):
         )
         return f"Created job '{job.name}' (id: {job.id})"
     
-    def _list_jobs(self) -> str:
-        jobs = self._cron.list_jobs()
+    async def _list_jobs(self) -> str:
+        jobs = await self._cron.list_jobs()
         if not jobs:
             return "No scheduled jobs."
         lines = [f"- {j.name} (id: {j.id}, {j.schedule.kind})" for j in jobs]
         return "Scheduled jobs:\n" + "\n".join(lines)
     
-    def _remove_job(self, job_id: str | None) -> str:
+    async def _remove_job(self, job_id: str | None) -> str:
         if not job_id:
             return "Error: job_id is required for remove"
-        if self._cron.remove_job(job_id):
+        if await self._cron.remove_job(job_id):
             return f"Removed job {job_id}"
         return f"Job {job_id} not found"
