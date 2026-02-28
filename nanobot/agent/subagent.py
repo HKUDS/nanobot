@@ -140,11 +140,16 @@ class SubagentManager:
                         }
                         for tc in response.tool_calls
                     ]
-                    messages.append({
+                    msg = {
                         "role": "assistant",
                         "content": response.content or "",
                         "tool_calls": tool_call_dicts,
-                    })
+                    }
+                    # Include reasoning_content for reasoning models (e.g., Moonshot Kimi, DeepSeek-R1)
+                    # Even if None, some models require this field to be present
+                    if response.reasoning_content is not None:
+                        msg["reasoning_content"] = response.reasoning_content
+                    messages.append(msg)
                     
                     # Execute tools
                     for tool_call in response.tool_calls:
