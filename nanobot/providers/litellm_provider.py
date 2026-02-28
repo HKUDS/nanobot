@@ -208,6 +208,11 @@ class LiteLLMProvider(LLMProvider):
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
+
+        # In gateway mode (for example OpenRouter), force provider routing in LiteLLM.
+        # This avoids model-keyword mis-detection (e.g. "gemini" in model name).
+        if self._gateway and self._gateway.name:
+            kwargs["custom_llm_provider"] = self._gateway.name
         
         # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
         self._apply_model_overrides(model, kwargs)
