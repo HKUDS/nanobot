@@ -21,6 +21,36 @@ def _resolve_path(path: str, workspace: Path | None = None, allowed_dir: Path | 
     return resolved
 
 
+def _is_legacy_memory_path(resolved: Path, workspace: Path | None) -> bool:
+    """Block deprecated file-memory locations in workspace runtime."""
+    if workspace is None:
+        return False
+
+    ws = workspace.resolve()
+    memory_dir = (ws / "memory").resolve()
+    sessions_dir = (ws / "sessions").resolve()
+
+    try:
+        resolved.relative_to(memory_dir)
+        return True
+    except ValueError:
+        pass
+
+    try:
+        resolved.relative_to(sessions_dir)
+        return resolved.suffix.lower() == ".jsonl"
+    except ValueError:
+        return False
+
+
+def _assert_not_legacy_memory_path(resolved: Path, workspace: Path | None) -> None:
+    if _is_legacy_memory_path(resolved, workspace):
+        raise PermissionError(
+            "Access to legacy file-based memory is blocked. "
+            "Use Qdrant-backed memory instead."
+        )
+
+
 class ReadFileTool(Tool):
     """Tool to read file contents."""
 
@@ -52,6 +82,7 @@ class ReadFileTool(Tool):
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
+            _assert_not_legacy_memory_path(file_path, self._workspace)
             if not file_path.exists():
                 return f"Error: File not found: {path}"
             if not file_path.is_file():
@@ -100,6 +131,7 @@ class WriteFileTool(Tool):
     async def execute(self, path: str, content: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
+            _assert_not_legacy_memory_path(file_path, self._workspace)
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
             return f"Successfully wrote {len(content)} bytes to {file_path}"
@@ -148,6 +180,7 @@ class EditFileTool(Tool):
     async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
+            _assert_not_legacy_memory_path(file_path, self._workspace)
             if not file_path.exists():
                 return f"Error: File not found: {path}"
 
@@ -224,6 +257,7 @@ class ListDirTool(Tool):
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
             dir_path = _resolve_path(path, self._workspace, self._allowed_dir)
+            _assert_not_legacy_memory_path(dir_path, self._workspace)
             if not dir_path.exists():
                 return f"Error: Directory not found: {path}"
             if not dir_path.is_dir():

@@ -73,12 +73,15 @@ class SessionManager:
     """
     Manages conversation sessions.
 
-    Sessions are stored as JSONL files in the sessions directory.
+    Sessions can be stored as JSONL files or kept in memory-only mode.
     """
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, persist_to_disk: bool = True):
         self.workspace = workspace
-        self.sessions_dir = ensure_dir(self.workspace / "sessions")
+        self.persist_to_disk = persist_to_disk
+        self.sessions_dir = self.workspace / "sessions"
+        if self.persist_to_disk:
+            ensure_dir(self.sessions_dir)
         self.legacy_sessions_dir = Path.home() / ".nanobot" / "sessions"
         self._cache: dict[str, Session] = {}
     
@@ -114,6 +117,9 @@ class SessionManager:
     
     def _load(self, key: str) -> Session | None:
         """Load a session from disk."""
+        if not self.persist_to_disk:
+            return None
+
         path = self._get_session_path(key)
         if not path.exists():
             legacy_path = self._get_legacy_session_path(key)
@@ -161,6 +167,10 @@ class SessionManager:
     
     def save(self, session: Session) -> None:
         """Save a session to disk."""
+        if not self.persist_to_disk:
+            self._cache[session.key] = session
+            return
+
         path = self._get_session_path(session.key)
 
         with open(path, "w", encoding="utf-8") as f:
@@ -190,7 +200,17 @@ class SessionManager:
             List of session info dicts.
         """
         sessions = []
-        
+
+        if not self.persist_to_disk:
+            for session in self._cache.values():
+                sessions.append({
+                    "key": session.key,
+                    "created_at": session.created_at.isoformat(),
+                    "updated_at": session.updated_at.isoformat(),
+                    "path": None,
+                })
+            return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+
         for path in self.sessions_dir.glob("*.jsonl"):
             try:
                 # Read just the metadata line
@@ -208,5 +228,5 @@ class SessionManager:
                             })
             except Exception:
                 continue
-        
+
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)

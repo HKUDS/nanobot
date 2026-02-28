@@ -35,7 +35,10 @@ def safe_filename(name: str) -> str:
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
-    """Sync bundled templates to workspace. Only creates missing files."""
+    """Sync bundled markdown templates to workspace recursively.
+
+    Only creates missing files and preserves relative template paths.
+    """
     from importlib.resources import files as pkg_files
     try:
         tpl = pkg_files("nanobot") / "templates"
@@ -53,11 +56,16 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         dest.write_text(src.read_text(encoding="utf-8") if src else "", encoding="utf-8")
         added.append(str(dest.relative_to(workspace)))
 
-    for item in tpl.iterdir():
-        if item.name.endswith(".md"):
-            _write(item, workspace / item.name)
-    _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
-    _write(None, workspace / "memory" / "HISTORY.md")
+    for item in tpl.rglob("*.md"):
+        try:
+            rel = Path(str(item.relative_to(tpl)))
+        except Exception:
+            continue
+        # Deprecated: file-based memory docs are informational only and should
+        # not be materialized into workspace runtime state.
+        if rel.parts and rel.parts[0] == "memory":
+            continue
+        _write(item, workspace / rel)
     (workspace / "skills").mkdir(exist_ok=True)
 
     if added and not silent:

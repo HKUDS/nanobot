@@ -267,7 +267,10 @@ def gateway(
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
-    session_manager = SessionManager(config.workspace_path)
+    session_manager = SessionManager(
+        config.workspace_path,
+        persist_to_disk=config.agents.defaults.persist_sessions,
+    )
     
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
@@ -416,6 +419,7 @@ def agent(
     from nanobot.bus.queue import MessageBus
     from nanobot.agent.loop import AgentLoop
     from nanobot.cron.service import CronService
+    from nanobot.session.manager import SessionManager
     from loguru import logger
     
     config = load_config()
@@ -427,6 +431,10 @@ def agent(
     # Create cron service for tool usage (no callback needed for CLI unless running)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
+    session_manager = SessionManager(
+        config.workspace_path,
+        persist_to_disk=config.agents.defaults.persist_sessions,
+    )
 
     if logs:
         logger.enable("nanobot")
@@ -447,6 +455,7 @@ def agent(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
     )
@@ -920,11 +929,16 @@ def cron_run(
     from nanobot.cron.types import CronJob
     from nanobot.bus.queue import MessageBus
     from nanobot.agent.loop import AgentLoop
+    from nanobot.session.manager import SessionManager
     logger.disable("nanobot")
 
     config = load_config()
     provider = _make_provider(config)
     bus = MessageBus()
+    session_manager = SessionManager(
+        config.workspace_path,
+        persist_to_disk=config.agents.defaults.persist_sessions,
+    )
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -938,6 +952,7 @@ def cron_run(
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
     )
