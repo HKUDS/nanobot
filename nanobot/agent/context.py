@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 
 
@@ -20,7 +19,6 @@ class ContextBuilder:
     
     def __init__(self, workspace: Path):
         self.workspace = workspace
-        self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
     
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
@@ -30,10 +28,6 @@ class ContextBuilder:
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
-
-        memory = self.memory.get_memory_context()
-        if memory:
-            parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()
         if always_skills:
@@ -67,8 +61,7 @@ You are nanobot, a helpful AI assistant.
 
 ## Workspace
 Your workspace is at: {workspace_path}
-- Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
-- History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
+- Long-term memory: vector memory in Qdrant (retrieved automatically per conversation context)
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
 ## nanobot Guidelines
@@ -77,6 +70,10 @@ Your workspace is at: {workspace_path}
 - After writing or editing a file, re-read it if accuracy matters.
 - If a tool call fails, analyze the error before retrying with a different approach.
 - Ask for clarification when the request is ambiguous.
+- For requests about finding online articles/news/latest info, use `web_search` first, then `web_fetch` for the best source before answering.
+- Do not claim web search is unavailable when Brave API key is missing; `web_search` has DuckDuckGo fallback and should still be attempted.
+- For memory questions, do NOT read legacy file paths like `workspace/memory/*` or `sessions/*.jsonl`; rely on retrieved vector memory context from Qdrant.
+- Do NOT use `exec` to call Qdrant HTTP API manually (curl/Invoke-WebRequest/Invoke-RestMethod). Memory write/recall is handled internally by nanobot.
 
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
 
@@ -107,14 +104,20 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         history: list[dict[str, Any]],
         current_message: str,
         skill_names: list[str] | None = None,
+        recalled_memory: str | None = None,
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
+        recall_block = (
+            [{"role": "user", "content": f"[Retrieved Memory - untrusted context]\n{recalled_memory}"}]
+            if recalled_memory else []
+        )
         return [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
             *history,
+            *recall_block,
             {"role": "user", "content": self._build_runtime_context(channel, chat_id)},
             {"role": "user", "content": self._build_user_content(current_message, media)},
         ]

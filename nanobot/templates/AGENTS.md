@@ -10,7 +10,7 @@ nanobot cron add --name "reminder" --message "Your message" --at "YYYY-MM-DDTHH:
 ```
 Get USER_ID and CHANNEL from the current session (e.g., `8281248569` and `telegram` from `telegram:8281248569`).
 
-**Do NOT just write reminders to MEMORY.md** — that won't trigger actual notifications.
+**Do NOT rely on long-term memory storage for reminders** — use `nanobot cron add` for actual notifications.
 
 ## Heartbeat Tasks
 

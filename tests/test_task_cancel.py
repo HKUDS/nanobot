@@ -165,3 +165,29 @@ class TestSubagentCancellation:
         provider.get_default_model.return_value = "test-model"
         mgr = SubagentManager(provider=provider, workspace=MagicMock(), bus=bus)
         assert await mgr.cancel_by_session("nonexistent") == 0
+
+
+class TestQdrantExecGuard:
+    def test_blocks_manual_qdrant_exec_with_curl(self):
+        from nanobot.agent.loop import AgentLoop
+
+        blocked = AgentLoop._is_manual_qdrant_exec(
+            "exec",
+            {"command": 'curl -X POST "http://localhost:6333/collections/vectors/points" -d "{}"'},
+        )
+        assert blocked is True
+
+    def test_blocks_manual_qdrant_exec_with_powershell(self):
+        from nanobot.agent.loop import AgentLoop
+
+        blocked = AgentLoop._is_manual_qdrant_exec(
+            "exec",
+            {"command": 'Invoke-RestMethod -Uri "http://127.0.0.1:6333/collections/foo/points/query" -Method Post'},
+        )
+        assert blocked is True
+
+    def test_allows_non_qdrant_exec(self):
+        from nanobot.agent.loop import AgentLoop
+
+        blocked = AgentLoop._is_manual_qdrant_exec("exec", {"command": "echo hello"})
+        assert blocked is False

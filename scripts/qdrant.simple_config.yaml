@@ -1,0 +1,8 @@
+log_level: INFO
+
+storage:
+  storage_path: ./data
+
+service:
+  host: 0.0.0.0
+  http_port: 6333

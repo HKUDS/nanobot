@@ -1,23 +1,9 @@
-# Long-term Memory
+# Vector Memory
 
-This file stores important information that should persist across sessions.
+nanobot stores long-term memory in Qdrant using Gemini embeddings.
 
-## User Information
+This template file is informational only and is not used as the memory backend.
 
-(Important facts about the user)
-
-## Preferences
-
-(User preferences learned over time)
-
-## Project Context
-
-(Information about ongoing projects)
-
-## Important Notes
-
-(Things to remember)
-
----
-
-*This file is automatically updated by nanobot when important information should be remembered.*
+Configure vector memory in `~/.nanobot/config.json` under:
+- `agents.memory.gemini`
+- `agents.memory.qdrant`

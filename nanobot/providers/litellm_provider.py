@@ -1,5 +1,6 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import asyncio
 import json
 import json_repair
 import os
@@ -9,6 +10,7 @@ from typing import Any
 
 import litellm
 from litellm import acompletion
+from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
@@ -167,7 +169,12 @@ class LiteLLMProvider(LLMProvider):
             clean = {k: v for k, v in msg.items() if k in _ALLOWED_MSG_KEYS}
             # Strict providers require "content" even when assistant only has tool_calls
             if clean.get("role") == "assistant" and "content" not in clean:
-                clean["content"] = None
+                clean["content"] = " "
+            elif clean.get("role") == "assistant" and (
+                clean.get("content") is None or clean.get("content") == ""
+            ):
+                # Some providers reject null/empty values and require explicit non-empty text.
+                clean["content"] = " "
             sanitized.append(clean)
         return sanitized
 
@@ -233,15 +240,25 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
         
-        try:
-            response = await acompletion(**kwargs)
-            return self._parse_response(response)
-        except Exception as e:
-            # Return error as content for graceful handling
-            return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
-                finish_reason="error",
-            )
+        for attempt in (1, 2):
+            try:
+                response = await acompletion(**kwargs)
+                return self._parse_response(response)
+            except Exception as e:
+                msg = str(e)
+                retryable = "Unable to get json response" in msg and attempt == 1
+                if retryable:
+                    logger.warning("LiteLLM transient JSON parse error; retrying once")
+                    await asyncio.sleep(0.4)
+                    continue
+                # Return error as content for graceful handling
+                return LLMResponse(
+                    content=f"Error calling LLM: {msg}",
+                    finish_reason="error",
+                )
+
+        # Unreachable, but keeps static analyzers happy.
+        return LLMResponse(content="Error calling LLM: unknown error", finish_reason="error")
     
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""

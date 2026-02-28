@@ -54,7 +54,7 @@ class LLMProvider(ABC):
 
             if isinstance(content, str) and not content:
                 clean = dict(msg)
-                clean["content"] = None if (msg.get("role") == "assistant" and msg.get("tool_calls")) else "(empty)"
+                clean["content"] = " " if (msg.get("role") == "assistant" and msg.get("tool_calls")) else "(empty)"
                 result.append(clean)
                 continue
 
@@ -72,7 +72,7 @@ class LLMProvider(ABC):
                     if filtered:
                         clean["content"] = filtered
                     elif msg.get("role") == "assistant" and msg.get("tool_calls"):
-                        clean["content"] = None
+                        clean["content"] = " "
                     else:
                         clean["content"] = "(empty)"
                     result.append(clean)

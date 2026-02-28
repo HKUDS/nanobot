@@ -4,6 +4,8 @@
 dist/
 build/
 docs/
+!docs/
+!docs/web_tools.md
 *.egg-info/
 *.egg
 *.pyc
@@ -20,3 +22,4 @@ poetry.lock
 .pytest_cache/
 botpy.log
 tests/
+.vscode/

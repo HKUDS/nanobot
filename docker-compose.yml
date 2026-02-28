@@ -6,11 +6,22 @@ x-common-config: &common-config
     - ~/.nanobot:/root/.nanobot
 
 services:
+  qdrant:
+    container_name: nanobot-qdrant
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    ports:
+      - 6333:6333
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
   nanobot-gateway:
     container_name: nanobot-gateway
     <<: *common-config
     command: ["gateway"]
     restart: unless-stopped
+    depends_on:
+      - qdrant
     ports:
       - 18790:18790
     deploy:
@@ -27,5 +38,10 @@ services:
     profiles:
       - cli
     command: ["status"]
+    depends_on:
+      - qdrant
     stdin_open: true
     tty: true
+
+volumes:
+  qdrant_storage:

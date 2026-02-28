@@ -54,6 +54,11 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     data = config.model_dump(by_alias=True)
+    # Keep saved config clean: expose only generic embedding config.
+    agents = data.get("agents", {})
+    memory = agents.get("memory", {})
+    if isinstance(memory, dict):
+        memory.pop("gemini", None)
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -66,4 +71,21 @@ def _migrate_config(data: dict) -> dict:
     exec_cfg = tools.get("exec", {})
     if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
         tools["restrictToWorkspace"] = exec_cfg.pop("restrictToWorkspace")
+
+    # Migrate legacy memory.gemini.* to memory.embedding.* for clearer config.
+    agents = data.get("agents", {})
+    memory = agents.get("memory", {})
+    if isinstance(memory, dict):
+        embedding = memory.get("embedding")
+        legacy_gemini = memory.get("gemini")
+        if not isinstance(embedding, dict) and isinstance(legacy_gemini, dict):
+            memory["embedding"] = {
+                "provider": "gemini",
+                "apiKey": legacy_gemini.get("apiKey", ""),
+                "apiBase": legacy_gemini.get("apiBase", "https://generativelanguage.googleapis.com/v1beta"),
+                "model": legacy_gemini.get("model", "models/gemini-embedding-001"),
+                "outputDimensionality": legacy_gemini.get("outputDimensionality", 768),
+                "timeoutS": legacy_gemini.get("timeoutS", 30),
+                "extraHeaders": {},
+            }
     return data

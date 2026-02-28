@@ -1,9 +1,11 @@
 """Web tools: web_search and web_fetch."""
 
+import asyncio
 import html
 import json
 import os
 import re
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -67,36 +69,78 @@ class WebSearchTool(Tool):
         return self._init_api_key or os.environ.get("BRAVE_API_KEY", "")
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        if not self.api_key:
-            return (
-                "Error: Brave Search API key not configured. "
-                "Set it in ~/.nanobot/config.json under tools.web.search.apiKey "
-                "(or export BRAVE_API_KEY), then restart the gateway."
-            )
-        
+        n = min(max(count or self.max_results, 1), 10)
+
+        # Primary: Brave Search when API key is configured.
+        if self.api_key:
+            try:
+                async with httpx.AsyncClient() as client:
+                    r = await client.get(
+                        "https://api.search.brave.com/res/v1/web/search",
+                        params={"q": query, "count": n},
+                        headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
+                        timeout=10.0
+                    )
+                    r.raise_for_status()
+
+                results = r.json().get("web", {}).get("results", [])
+                if results:
+                    return self._format_results(query, results[:n], source="Brave")
+            except Exception:
+                # Fallback to DuckDuckGo below.
+                pass
+
+        # Fallback: DuckDuckGo (no API key required).
         try:
-            n = min(max(count or self.max_results, 1), 10)
-            async with httpx.AsyncClient() as client:
-                r = await client.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
-                    timeout=10.0
-                )
-                r.raise_for_status()
-            
-            results = r.json().get("web", {}).get("results", [])
+            results = await asyncio.to_thread(self._duckduckgo_search, query, n)
             if not results:
                 return f"No results for: {query}"
-            
-            lines = [f"Results for: {query}\n"]
-            for i, item in enumerate(results[:n], 1):
-                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
-                if desc := item.get("description"):
-                    lines.append(f"   {desc}")
-            return "\n".join(lines)
+            return self._format_results(query, results, source="DuckDuckGo")
         except Exception as e:
             return f"Error: {e}"
+
+    @staticmethod
+    def _format_results(query: str, results: list[dict[str, Any]], source: str) -> str:
+        lines = [f"Results for: {query} (source: {source})\n"]
+        for i, item in enumerate(results, 1):
+            title = item.get("title", "") or ""
+            url = item.get("url", "") or item.get("href", "") or ""
+            desc = item.get("description", "") or item.get("body", "") or ""
+            lines.append(f"{i}. {title}\n   {url}")
+            if desc:
+                lines.append(f"   {desc}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _duckduckgo_search(query: str, max_results: int) -> list[dict[str, Any]]:
+        try:
+            from ddgs import DDGS
+            from ddgs.exceptions import DDGSException
+        except Exception as e:
+            raise RuntimeError(
+                "DuckDuckGo fallback unavailable: install dependency 'ddgs'."
+            ) from e
+
+        last_error: Exception | None = None
+        # Try multiple backends to reduce provider-side rate-limit failures.
+        for backend in ("api", "html", "lite"):
+            try:
+                with DDGS() as ddgs:
+                    results = list(ddgs.text(query, max_results=max_results, backend=backend))
+                if results:
+                    return results
+            except DDGSException as e:
+                last_error = e
+                # Brief backoff before trying another backend.
+                time.sleep(0.4)
+                continue
+            except Exception as e:
+                last_error = e
+                continue
+
+        if last_error is not None:
+            raise RuntimeError(f"DuckDuckGo search failed: {last_error}") from last_error
+        return []
 
 
 class WebFetchTool(Tool):

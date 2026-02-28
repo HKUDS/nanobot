@@ -227,12 +227,56 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    persist_sessions: bool = False  # If false, do not write workspace/sessions/*.jsonl
+
+
+class GeminiEmbeddingConfig(Base):
+    """Gemini embedding configuration for vector memory."""
+
+    api_key: str = ""
+    api_base: str = "https://generativelanguage.googleapis.com/v1beta"
+    model: str = "models/gemini-embedding-001"
+    output_dimensionality: int = 768
+    timeout_s: int = 30
+
+
+class EmbeddingProviderConfig(Base):
+    """Generic embedding provider config for vector memory."""
+
+    provider: Literal["gemini", "openai_compatible"] = "gemini"
+    api_key: str = ""
+    api_base: str = "https://generativelanguage.googleapis.com/v1beta"
+    model: str = "models/gemini-embedding-001"
+    output_dimensionality: int = 768
+    timeout_s: int = 30
+    extra_headers: dict[str, str] = Field(default_factory=dict)
+
+
+class QdrantMemoryConfig(Base):
+    """Qdrant configuration for vector memory storage and retrieval."""
+
+    url: str = "http://localhost:6333"
+    api_key: str = ""
+    collection: str = "nanobot_memory"
+    distance: Literal["Cosine", "Euclid", "Dot", "Manhattan"] = "Cosine"
+    top_k: int = 8
+    score_threshold: float = 0.2
+    timeout_s: int = 30
+
+
+class MemoryConfig(Base):
+    """Vector memory configuration."""
+
+    embedding: EmbeddingProviderConfig = Field(default_factory=EmbeddingProviderConfig)
+    gemini: GeminiEmbeddingConfig = Field(default_factory=GeminiEmbeddingConfig)
+    qdrant: QdrantMemoryConfig = Field(default_factory=QdrantMemoryConfig)
 
 
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
 
 
 class ProviderConfig(Base):

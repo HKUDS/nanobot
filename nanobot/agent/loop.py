@@ -28,7 +28,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, MemoryConfig
     from nanobot.cron.service import CronService
 
 
@@ -45,6 +45,10 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 500
+    _SEARCH_INTENT_RE = re.compile(
+        r"\b(cari|carikan|search|artikel|berita|latest|terbaru|internet|web)\b",
+        re.IGNORECASE,
+    )
 
     def __init__(
         self,
@@ -64,6 +68,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        memory_config: MemoryConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -82,6 +87,8 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
 
         self.context = ContextBuilder(workspace)
+        from nanobot.config.schema import MemoryConfig
+        self.memory_store = MemoryStore(workspace, memory_config or MemoryConfig())
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -174,6 +181,54 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    @classmethod
+    def _is_search_intent(cls, text: str) -> bool:
+        return bool(cls._SEARCH_INTENT_RE.search(text or ""))
+
+    @staticmethod
+    def _claims_search_unavailable(text: str | None) -> bool:
+        t = (text or "").lower()
+        return (
+            "api key" in t
+            and ("web search" in t or "brave" in t)
+            and ("tidak" in t or "cannot" in t or "can't" in t or "unable" in t)
+        )
+
+    @staticmethod
+    def _is_legacy_memory_file_read(tool_name: str, arguments: dict[str, Any] | None) -> bool:
+        """Detect attempts to read deprecated file-based memory backends."""
+        if tool_name != "read_file" or not isinstance(arguments, dict):
+            return False
+        path = arguments.get("path")
+        if not isinstance(path, str):
+            return False
+        p = path.replace("\\", "/").lower()
+        return (
+            "/workspace/memory/" in p
+            or p.endswith(".jsonl") and "/sessions/" in p
+            or "/memory/docs/" in p
+            or "/memory/sessions/" in p
+        )
+
+    @staticmethod
+    def _is_manual_qdrant_exec(tool_name: str, arguments: dict[str, Any] | None) -> bool:
+        """Detect manual Qdrant HTTP access attempted via exec (curl/PowerShell)."""
+        if tool_name != "exec" or not isinstance(arguments, dict):
+            return False
+        command = arguments.get("command")
+        if not isinstance(command, str):
+            return False
+        cmd = command.lower().replace("\\", "/")
+        has_qdrant_target = any(
+            marker in cmd
+            for marker in ("localhost:6333", "127.0.0.1:6333", "qdrant", "/collections/")
+        )
+        has_http_cli = any(
+            marker in cmd
+            for marker in ("curl ", "invoke-webrequest", "invoke-restmethod", "irm ", "iwr ")
+        )
+        return has_qdrant_target and has_http_cli
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -184,6 +239,8 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        last_tool_signature: str | None = None
+        same_tool_repeat_count = 0
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -198,6 +255,25 @@ class AgentLoop:
             )
 
             if response.has_tool_calls:
+                # Guard against provider/model loops repeatedly calling the same tool payload.
+                current_signature = "|".join(
+                    f"{tc.name}:{json.dumps(tc.arguments, sort_keys=True, ensure_ascii=False)}"
+                    for tc in response.tool_calls
+                )
+                if current_signature == last_tool_signature:
+                    same_tool_repeat_count += 1
+                else:
+                    last_tool_signature = current_signature
+                    same_tool_repeat_count = 1
+
+                if same_tool_repeat_count >= 6:
+                    logger.warning("Detected repeated identical tool calls; stopping loop")
+                    final_content = (
+                        "I am stuck repeating the same tool call and stopped to avoid an infinite loop. "
+                        "Please try rephrasing your request or adding more specific constraints."
+                    )
+                    break
+
                 if on_progress:
                     clean = self._strip_think(response.content)
                     if clean:
@@ -225,7 +301,20 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    if self._is_legacy_memory_file_read(tool_call.name, tool_call.arguments):
+                        result = (
+                            "Error: file-based memory backend is deprecated. "
+                            "Do not read workspace/memory or sessions/*.jsonl. "
+                            "Use retrieved vector memory context from Qdrant instead."
+                        )
+                    elif self._is_manual_qdrant_exec(tool_call.name, tool_call.arguments):
+                        result = (
+                            "Error: direct Qdrant HTTP calls via exec are disabled. "
+                            "Do not use curl/PowerShell to access Qdrant for memory operations. "
+                            "Use nanobot's built-in memory pipeline (automatic recall + consolidation)."
+                        )
+                    else:
+                        result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -340,8 +429,9 @@ class AgentLoop:
             session = self.sessions.get_or_create(key)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=self.memory_window)
+            recalled = await self.memory_store.recall(msg.content, session.key)
             messages = self.context.build_messages(
-                history=history,
+                history=history, recalled_memory=recalled,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
@@ -414,8 +504,10 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.memory_window)
+        recalled = await self.memory_store.recall(msg.content, session.key)
         initial_messages = self.context.build_messages(
             history=history,
+            recalled_memory=recalled,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
@@ -429,12 +521,27 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, tools_used, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
+
+        # Runtime safety net: if user asks for online lookup but model refuses due to missing API key,
+        # run web_search anyway (it has DuckDuckGo fallback) and return the result.
+        if (
+            self._is_search_intent(msg.content)
+            and "web_search" not in tools_used
+            and self._claims_search_unavailable(final_content)
+            and self.tools.has("web_search")
+        ):
+            fallback = await self.tools.execute("web_search", {"query": msg.content, "count": 1})
+            if isinstance(fallback, str) and not fallback.startswith("Error"):
+                final_content = (
+                    "Saya tetap mencoba pencarian web dengan fallback otomatis.\n\n"
+                    f"{fallback}"
+                )
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
@@ -475,7 +582,7 @@ class AgentLoop:
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
-        return await MemoryStore(self.workspace).consolidate(
+        return await self.memory_store.consolidate(
             session, self.provider, self.model,
             archive_all=archive_all, memory_window=self.memory_window,
         )
