@@ -115,8 +115,7 @@ You are nanobot, a helpful AI assistant.
 ## Runtime
 {runtime}
 
-## Workspace
-Your workspace is at: {workspace_path}
+## Your Personal Data
 - Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
 - History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
