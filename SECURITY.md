@@ -67,7 +67,7 @@ The `exec` tool can execute shell commands. While dangerous command patterns are
 - ✅ Review all tool usage in agent logs
 - ✅ Understand what commands the agent is running
 - ✅ Use a dedicated user account with limited privileges
-- ✅ Never run nanobot as root
+- ✅ Never run nanobot as root — `nanobot gateway` will warn you at startup if it detects root
 - ❌ Don't disable security checks
 - ❌ Don't run on systems with sensitive data without careful review
 
@@ -92,11 +92,13 @@ File operations have path traversal protection, but:
 **API Calls:**
 - All external API calls use HTTPS by default
 - Timeouts are configured to prevent hanging requests
+- MCP server connections have a 30-second connect/init timeout
 - Consider using a firewall to restrict outbound connections if needed
 
 **WhatsApp Bridge:**
 - The bridge binds to `127.0.0.1:3001` (localhost only, not accessible from external network)
 - Set `bridgeToken` in config to enable shared-secret authentication between Python and Node.js
+- The token is passed via a temporary `0600` file (`BRIDGE_TOKEN_FILE`), **not** as a plain environment variable, to prevent exposure in `/proc/<pid>/environ` or `ps e` output
 - Keep authentication data in `~/.nanobot/whatsapp-auth` secure (mode 0700)
 
 ### 6. Dependency Security
@@ -213,6 +215,7 @@ If you suspect a security breach:
 
 ✅ **Authentication**
 - Allow-list based access control
+- **Startup warning** emitted when any channel's `allowFrom` list is empty (open access)
 - Failed authentication attempt logging
 - Open by default (configure allowFrom for production use)
 
@@ -220,6 +223,8 @@ If you suspect a security breach:
 - Command execution timeouts (60s default)
 - Output truncation (10KB limit)
 - HTTP request timeouts (10-30s)
+- MCP server connection/init timeout (30s) — prevents a hung MCP server from blocking startup
+- Tool argument logging scrubs known-sensitive key names (`password`, `token`, `api_key`, `secret`, etc.) before writing to log files
 
 ✅ **Secure Communication**
 - HTTPS for all external API calls
@@ -253,7 +258,7 @@ Before deploying nanobot:
 
 ## Updates
 
-**Last Updated**: 2026-02-03
+**Last Updated**: 2026-02-27
 
 For the latest security updates and announcements, check:
 - GitHub Security Advisories: https://github.com/HKUDS/nanobot/security/advisories

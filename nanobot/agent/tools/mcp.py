@@ -60,40 +60,47 @@ async def connect_mcp_servers(
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
+    _connect_timeout = 30  # seconds for the initial handshake / tool listing
+
     for name, cfg in mcp_servers.items():
         try:
-            if cfg.command:
-                params = StdioServerParameters(
-                    command=cfg.command, args=cfg.args, env=cfg.env or None
-                )
-                read, write = await stack.enter_async_context(stdio_client(params))
-            elif cfg.url:
-                from mcp.client.streamable_http import streamable_http_client
-                # Always provide an explicit httpx client so MCP HTTP transport does not
-                # inherit httpx's default 5s timeout and preempt the higher-level tool timeout.
-                http_client = await stack.enter_async_context(
-                    httpx.AsyncClient(
-                        headers=cfg.headers or None,
-                        follow_redirects=True,
-                        timeout=None,
+            async with asyncio.timeout(_connect_timeout):
+                if cfg.command:
+                    params = StdioServerParameters(
+                        command=cfg.command, args=cfg.args, env=cfg.env or None
                     )
-                )
-                read, write, _ = await stack.enter_async_context(
-                    streamable_http_client(cfg.url, http_client=http_client)
-                )
-            else:
-                logger.warning("MCP server '{}': no command or url configured, skipping", name)
-                continue
+                    read, write = await stack.enter_async_context(stdio_client(params))
+                elif cfg.url:
+                    from mcp.client.streamable_http import streamable_http_client
+                    # Provide an explicit httpx client so the MCP HTTP transport does not
+                    # inherit httpx's default 5 s read timeout and preempt the higher-level
+                    # per-tool asyncio.wait_for timeout in MCPToolWrapper.execute().
+                    # We DO set a connection timeout so a hung server cannot block startup.
+                    http_client = await stack.enter_async_context(
+                        httpx.AsyncClient(
+                            headers=cfg.headers or None,
+                            follow_redirects=True,
+                            timeout=httpx.Timeout(connect=_connect_timeout, read=None, write=None, pool=None),
+                        )
+                    )
+                    read, write, _ = await stack.enter_async_context(
+                        streamable_http_client(cfg.url, http_client=http_client)
+                    )
+                else:
+                    logger.warning("MCP server '{}': no command or url configured, skipping", name)
+                    continue
 
-            session = await stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
+                session = await stack.enter_async_context(ClientSession(read, write))
+                await session.initialize()
 
-            tools = await session.list_tools()
-            for tool_def in tools.tools:
-                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
-                registry.register(wrapper)
-                logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
+                tools = await session.list_tools()
+                for tool_def in tools.tools:
+                    wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
+                    registry.register(wrapper)
+                    logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
 
-            logger.info("MCP server '{}': connected, {} tools registered", name, len(tools.tools))
+                logger.info("MCP server '{}': connected, {} tools registered", name, len(tools.tools))
+        except TimeoutError:
+            logger.error("MCP server '{}': connection timed out after {}s", name, _connect_timeout)
         except Exception as e:
             logger.error("MCP server '{}': failed to connect: {}", name, e)

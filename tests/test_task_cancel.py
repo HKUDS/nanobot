@@ -125,6 +125,70 @@ class TestDispatch:
         await asyncio.gather(t1, t2)
         assert order == ["start-a", "end-a", "start-b", "end-b"]
 
+    @pytest.mark.asyncio
+    async def test_different_sessions_run_concurrently(self):
+        """Messages from different sessions should not be serialized by each other's lock."""
+        from nanobot.bus.events import InboundMessage, OutboundMessage
+
+        loop, bus = _make_loop()
+        started = []
+        barrier = asyncio.Event()
+
+        async def mock_process(m, **kwargs):
+            started.append(m.chat_id)
+            # Both tasks must reach this point before either can proceed,
+            # proving they run concurrently.
+            if len(started) == 2:
+                barrier.set()
+            await asyncio.wait_for(barrier.wait(), timeout=2.0)
+            return OutboundMessage(channel="test", chat_id=m.chat_id, content=m.content)
+
+        loop._process_message = mock_process
+        msg1 = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="s1")
+        msg2 = InboundMessage(channel="test", sender_id="u2", chat_id="c2", content="s2")
+
+        t1 = asyncio.create_task(loop._dispatch(msg1))
+        t2 = asyncio.create_task(loop._dispatch(msg2))
+        # Both tasks must complete; if they were serialized the barrier would never be set
+        # by the second task while the first holds the lock, causing a timeout.
+        await asyncio.wait_for(asyncio.gather(t1, t2), timeout=3.0)
+        assert set(started) == {"c1", "c2"}
+
+
+class TestResolveModel:
+    def test_returns_default_model_when_no_channel(self):
+        loop, _ = _make_loop()
+        loop.model = "default-model"
+        assert loop._resolve_model() == "default-model"
+
+    def test_returns_default_model_when_channel_has_no_override(self):
+        from nanobot.config.schema import ChannelsConfig
+
+        loop, _ = _make_loop()
+        loop.model = "default-model"
+        loop.channels_config = ChannelsConfig()
+        # telegram.model defaults to ""
+        assert loop._resolve_model("telegram") == "default-model"
+
+    def test_returns_channel_override_when_set(self):
+        from nanobot.config.schema import ChannelsConfig, TelegramConfig
+
+        loop, _ = _make_loop()
+        loop.model = "default-model"
+        loop.channels_config = ChannelsConfig(
+            telegram=TelegramConfig(model="channel-override-model")
+        )
+        assert loop._resolve_model("telegram") == "channel-override-model"
+
+    def test_falls_back_when_channel_not_in_config(self):
+        from nanobot.config.schema import ChannelsConfig
+
+        loop, _ = _make_loop()
+        loop.model = "default-model"
+        loop.channels_config = ChannelsConfig()
+        # "unknown_channel" has no attribute on ChannelsConfig, falls back to default
+        assert loop._resolve_model("unknown_channel") == "default-model"
+
 
 class TestSubagentCancellation:
     @pytest.mark.asyncio

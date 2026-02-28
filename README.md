@@ -1024,6 +1024,155 @@ If you edit the `.service` file itself, run `systemctl --user daemon-reload` bef
 > loginctl enable-linger $USER
 > ```
 
+## 🧠 How It Works Internally
+
+<details>
+<summary><b>Skills System</b></summary>
+
+Skills are Markdown files that teach the agent how to use tools or perform specific workflows. nanobot ships with built-in skills (GitHub, weather, tmux, cron, memory, and more). You can add your own in `~/.nanobot/workspace/skills/`.
+
+### Skill file format
+
+Each skill lives at `<skills-dir>/<name>/SKILL.md`:
+
+```markdown
+---
+name: my-skill
+description: "One-line description shown in the agent's skill list."
+metadata: {"nanobot":{"emoji":"🔧","always":false,"requires":{"bins":["mytool"],"env":["MY_API_KEY"]}}}
+---
+
+# My Skill
+
+Write instructions for the agent here…
+```
+
+| Frontmatter field | Description |
+|-------------------|-------------|
+| `name` | Skill identifier (matches directory name) |
+| `description` | Short description injected into the system prompt |
+| `metadata.nanobot.always` | If `true`, skill content is loaded at startup automatically |
+| `metadata.nanobot.requires.bins` | CLI tools that must be on PATH for this skill to appear |
+| `metadata.nanobot.requires.env` | Env vars that must be set for this skill to appear |
+
+### Loading behaviour
+
+- At startup the agent receives an XML summary of all available skills (name, description, location).
+- Skills with `always: true` have their **full content** loaded immediately.
+- For all other skills the agent reads the file on demand using `read_file`.
+- Workspace skills (`~/.nanobot/workspace/skills/`) override built-in skills with the same name.
+- Skills with unmet requirements are shown as unavailable with a reason — the agent won't attempt to use them.
+
+### Install a skill from the web
+
+Any public URL to a SKILL.md works. For example:
+
+```
+Read https://example.com/my-skill/SKILL.md and install the skill.
+```
+
+The agent will read the file, save it to `~/.nanobot/workspace/skills/<name>/SKILL.md`, and use it immediately.
+
+</details>
+
+<details>
+<summary><b>Session Storage (JSONL format)</b></summary>
+
+Each conversation is stored as a JSONL file at:
+
+```
+~/.nanobot/workspace/sessions/<channel>_<chat_id>.jsonl
+```
+
+The file format has one JSON object per line:
+
+**Line 1 — Metadata record:**
+```json
+{
+  "_type": "metadata",
+  "key": "telegram:123456789",
+  "created_at": "2026-02-01T10:00:00",
+  "updated_at": "2026-02-27T15:30:00",
+  "metadata": {},
+  "last_consolidated": 42
+}
+```
+
+**Subsequent lines — Message records:**
+```json
+{"role": "user", "content": "Hello!", "timestamp": "2026-02-27T15:30:00"}
+{"role": "assistant", "content": "Hi there!", "timestamp": "2026-02-27T15:30:01"}
+{"role": "assistant", "content": null, "timestamp": "...", "tool_calls": [...]}
+{"role": "tool", "content": "result text", "tool_call_id": "abc123", "name": "exec"}
+```
+
+| Field | Description |
+|-------|-------------|
+| `role` | `user`, `assistant`, or `tool` |
+| `content` | Message text (may be `null` for tool-calling turns) |
+| `timestamp` | ISO 8601 datetime |
+| `tool_calls` | Array of tool call objects (assistant turns only) |
+| `tool_call_id` | Matches a prior `tool_calls` entry (tool turns only) |
+| `name` | Tool name (tool turns only) |
+
+`last_consolidated` tracks how many messages have already been summarised into `memory/MEMORY.md` — only messages after this index are sent to the LLM.
+
+Sessions are never automatically deleted. To start fresh: send `/new` to the agent, or delete the JSONL file.
+
+</details>
+
+<details>
+<summary><b>Heartbeat (Two-Phase Wake-Up)</b></summary>
+
+`nanobot gateway` wakes up every 30 minutes and checks `~/.nanobot/workspace/HEARTBEAT.md` for active tasks. The process is:
+
+**Phase 1 — Decision (cheap LLM call):**
+- The LLM reads `HEARTBEAT.md` and calls a virtual `heartbeat` tool with `action: "skip"` or `action: "run"`.
+- If `skip`, nothing happens until the next interval.
+- If `run`, the LLM also provides a natural-language summary of the active tasks.
+
+**Phase 2 — Execution (full agent loop, only when Phase 1 = `run`):**
+- The task summary is sent through the full agent loop.
+- The result is delivered to your most recently active chat channel.
+
+This two-phase design keeps heartbeat cheap: Phase 1 uses a minimal tool-call prompt (no conversation history), and Phase 2 only runs when there's actual work to do.
+
+**HEARTBEAT.md format:**
+
+```markdown
+## Periodic Tasks
+
+- [ ] Check weather forecast and send a summary
+- [ ] Scan inbox for urgent emails
+- [x] Done task (already completed, won't trigger)
+```
+
+Unchecked `- [ ]` items are considered active. The agent can check items off as it completes them.
+
+**Configuration:**
+
+The heartbeat interval is 30 minutes by default. It is not currently configurable in `config.json` (planned for a future release). To disable: set `"heartbeat": {"enabled": false}` in your agent config (if supported by your version), or delete/empty `HEARTBEAT.md`.
+
+</details>
+
+<details>
+<summary><b>Memory System</b></summary>
+
+nanobot uses a two-layer memory system:
+
+| File | Purpose |
+|------|---------|
+| `~/.nanobot/workspace/memory/MEMORY.md` | Long-term facts — injected into every conversation |
+| `~/.nanobot/workspace/memory/HISTORY.md` | Timestamped log — searchable with grep |
+
+**When consolidation runs:** after every 50 messages (configurable via `memory_window` in agent config), old messages are summarised by the LLM using a `save_memory` tool call. The LLM is asked to:
+- Write a 2–5 sentence history entry (timestamp + key events) → appended to `HISTORY.md`
+- Update `MEMORY.md` with any new long-term facts
+
+The raw session messages are preserved in the JSONL file — only the in-context window shrinks.
+
+</details>
+
 ## 📁 Project Structure
 
 ```

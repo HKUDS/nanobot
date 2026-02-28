@@ -7,7 +7,7 @@ import json
 import re
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from loguru import logger
 
@@ -31,6 +31,20 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
 
 
+_SENSITIVE_ARG_SUBSTRINGS = frozenset({
+    "password", "passwd", "token", "api_key", "apikey", "secret",
+    "auth", "credential", "private_key", "access_key",
+})
+
+
+def _scrub_args_for_log(arguments: dict) -> dict:
+    """Return a copy of arguments with sensitive values replaced by '***'."""
+    return {
+        k: "***" if any(s in k.lower() for s in _SENSITIVE_ARG_SUBSTRINGS) else v
+        for k, v in arguments.items()
+    }
+
+
 class AgentLoop:
     """
     The agent loop is the core processing engine.
@@ -43,7 +57,7 @@ class AgentLoop:
     5. Sends responses back
     """
 
-    _TOOL_RESULT_MAX_CHARS = 500
+    _TOOL_RESULT_MAX_CHARS = 5000
 
     def __init__(
         self,
@@ -91,6 +105,8 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            cron_service=cron_service,
+            mcp_servers=mcp_servers,
         )
 
         self._running = False
@@ -102,7 +118,7 @@ class AgentLoop:
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
-        self._processing_lock = asyncio.Lock()
+        self._session_locks: dict[str, asyncio.Lock] = {}  # Per-session processing locks
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -169,16 +185,28 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    def _resolve_model(self, channel: str | None = None) -> str:
+        """Return the effective model for this channel, falling back to the agent default."""
+        if channel and self.channels_config:
+            ch_cfg = getattr(self.channels_config, channel, None)
+            if ch_cfg:
+                ch_model = getattr(ch_cfg, "model", None)
+                if ch_model:
+                    return ch_model
+        return self.model
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        model: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        effective_model = model or self.model
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -186,7 +214,7 @@ class AgentLoop:
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
-                model=self.model,
+                model=effective_model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
@@ -216,8 +244,8 @@ class AgentLoop:
 
                 for tool_call in response.tool_calls:
                     tools_used.append(tool_call.name)
-                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                    logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    safe_args = json.dumps(_scrub_args_for_log(tool_call.arguments), ensure_ascii=False)
+                    logger.info("Tool call: {}({})", tool_call.name, safe_args[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
@@ -275,8 +303,9 @@ class AgentLoop:
         ))
 
     async def _dispatch(self, msg: InboundMessage) -> None:
-        """Process a message under the global lock."""
-        async with self._processing_lock:
+        """Process a message under a per-session lock (allows concurrent processing across different sessions)."""
+        lock = self._session_locks.setdefault(msg.session_key, asyncio.Lock())
+        async with lock:
             try:
                 response = await self._process_message(msg)
                 if response is not None:
@@ -330,7 +359,9 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(
+                messages, model=self._resolve_model(channel),
+            )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -386,7 +417,14 @@ class AgentLoop:
             async def _consolidate_and_unlock():
                 try:
                     async with lock:
-                        await self._consolidate_memory(session)
+                        # Snapshot messages *before* the first await to avoid a race
+                        # with _save_turn() which may append to session.messages concurrently.
+                        snap = Session(key=session.key)
+                        snap.messages = list(session.messages)
+                        snap.last_consolidated = session.last_consolidated
+                        success = await self._consolidate_memory(snap)
+                        if success:
+                            session.last_consolidated = snap.last_consolidated
                 finally:
                     self._consolidating.discard(session.key)
                     if not lock.locked():
@@ -420,7 +458,9 @@ class AgentLoop:
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages,
+            on_progress=on_progress or _bus_progress,
+            model=self._resolve_model(msg.channel),
         )
 
         if final_content is None:

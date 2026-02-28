@@ -22,10 +22,28 @@ if (!globalThis.crypto) {
 import { BridgeServer } from './server.js';
 import { homedir } from 'os';
 import { join } from 'path';
+import { readFileSync, unlinkSync, existsSync } from 'fs';
 
 const PORT = parseInt(process.env.BRIDGE_PORT || '3001', 10);
 const AUTH_DIR = process.env.AUTH_DIR || join(homedir(), '.nanobot', 'whatsapp-auth');
-const TOKEN = process.env.BRIDGE_TOKEN || undefined;
+
+// Prefer BRIDGE_TOKEN_FILE (a 0600 temp file written by the Python side) over the
+// legacy BRIDGE_TOKEN env var to avoid token exposure in process listings.
+function readToken(): string | undefined {
+  const tokenFile = process.env.BRIDGE_TOKEN_FILE;
+  if (tokenFile && existsSync(tokenFile)) {
+    try {
+      const token = readFileSync(tokenFile, 'utf-8').trim();
+      unlinkSync(tokenFile); // delete immediately after reading
+      return token || undefined;
+    } catch {
+      console.warn('Warning: could not read BRIDGE_TOKEN_FILE, falling back to env var');
+    }
+  }
+  return process.env.BRIDGE_TOKEN || undefined;
+}
+
+const TOKEN = readToken();
 
 console.log('🐈 nanobot WhatsApp Bridge');
 console.log('========================\n');

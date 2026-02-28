@@ -30,8 +30,15 @@ WORKDIR /app/bridge
 RUN npm install && npm run build
 WORKDIR /app
 
-# Create config directory
-RUN mkdir -p /root/.nanobot
+# Create a non-root user to run nanobot (the exec tool can run shell commands)
+RUN useradd --system --create-home --shell /bin/bash nanobot && \
+    chown -R nanobot:nanobot /app && \
+    mkdir -p /home/nanobot/.nanobot && \
+    chown -R nanobot:nanobot /home/nanobot/.nanobot
+
+ENV HOME=/home/nanobot
+
+USER nanobot
 
 # Gateway default port
 EXPOSE 18790

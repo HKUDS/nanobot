@@ -12,10 +12,21 @@ try:
     import nh3
     from mistune import create_markdown
     from nio import (
-        AsyncClient, AsyncClientConfig, ContentRepositoryConfigError,
-        DownloadError, InviteEvent, JoinError, MatrixRoom, MemoryDownloadResponse,
-        RoomEncryptedMedia, RoomMessage, RoomMessageMedia, RoomMessageText,
-        RoomSendError, RoomTypingError, SyncError, UploadError,
+        AsyncClient,
+        AsyncClientConfig,
+        DownloadError,
+        InviteEvent,
+        JoinError,
+        MatrixRoom,
+        MemoryDownloadResponse,
+        RoomEncryptedMedia,
+        RoomMessage,
+        RoomMessageMedia,
+        RoomMessageText,
+        RoomSendError,
+        RoomTypingError,
+        SyncError,
+        UploadError,
     )
     from nio.crypto.attachments import decrypt_attachment
     from nio.exceptions import EncryptionError
