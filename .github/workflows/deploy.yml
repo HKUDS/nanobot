@@ -55,6 +55,15 @@ jobs:
           script: |
             export ORGHI_IMAGE=ghcr.io/${{ github.repository }}:${{ steps.tag.outputs.tag }}
             cd ${{ secrets.DEPLOY_PATH || '/opt/orghi' }}
+
+            # Capture current image before deploy (empty on first deploy)
+            OLD_IMAGE=$(docker inspect nanobot-gateway --format '{{.Config.Image}}' 2>/dev/null || true)
+
             git pull origin orghi-main
             docker compose -f docker-compose.orghi.yml pull
             docker compose -f docker-compose.orghi.yml up -d
+
+            # Remove previous image to free space
+            if [ -n "$OLD_IMAGE" ] && [ "$OLD_IMAGE" != "$ORGHI_IMAGE" ]; then
+              docker rmi "$OLD_IMAGE" 2>/dev/null || true
+            fi
