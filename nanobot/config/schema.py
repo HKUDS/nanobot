@@ -184,6 +184,21 @@ class QQConfig(Base):
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
+class XmppConfig(Base):
+    """XMPP channel configuration."""
+
+    enabled: bool = False
+    jid: str = ""  # Bot's Jabber ID (user@example.com)
+    password: str = ""
+    server: str = ""  # Optional XMPP server override
+    port: int = 5222
+    use_tls: bool = True
+    nickname: str = "nanobot"
+    rooms: list[str] = Field(default_factory=list)  # MUC rooms to join (e.g. room@conference.example.com)
+    allow_from: list[str] = Field(default_factory=list)  # Allowed JIDs
+    group_policy: Literal["open", "mention", "allowlist"] = "open"
+    group_allow_from: list[str] = Field(default_factory=list)  # Allowed MUC room JIDs
+
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
     enabled: bool = False
@@ -214,6 +229,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    xmpp: XmppConfig = Field(default_factory=XmppConfig)
 
 
 class AgentDefaults(Base):

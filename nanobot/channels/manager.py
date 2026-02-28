@@ -148,6 +148,17 @@ class ChannelManager:
                 logger.info("Matrix channel enabled")
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
+
+        # XMPP channel
+        if self.config.channels.xmpp.enabled:
+            try:
+                from nanobot.channels.xmpp import XmppChannel
+                self.channels["xmpp"] = XmppChannel(
+                    self.config.channels.xmpp, self.bus
+                )
+                logger.info("XMPP channel enabled")
+            except ImportError as e:
+                logger.warning("XMPP channel not available: {}", e)
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
