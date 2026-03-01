@@ -111,13 +111,36 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         channel: str | None = None,
         chat_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Build the complete message list for an LLM call."""
-        return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
-            *history,
-            {"role": "user", "content": self._build_runtime_context(channel, chat_id)},
-            {"role": "user", "content": self._build_user_content(current_message, media)},
-        ]
+        """
+        Build the complete message list for an LLM call.
+
+        Args:
+            history: Previous conversation messages.
+            current_message: The new user message.
+            skill_names: Optional skills to include.
+            media: Optional list of local file paths for images/media.
+            channel: Current channel (telegram, feishu, etc.).
+            chat_id: Current chat/user ID.
+
+        Returns:
+            List of messages including system prompt.
+        """
+        messages = []
+
+        # System prompt
+        system_prompt = self.build_system_prompt(skill_names)
+        messages.append({"role": "system", "content": system_prompt})
+
+        # History
+        messages.extend(history)
+
+        # Inject current timestamp into user message (keeps system prompt static for caching)
+        # Current message (with optional image attachments)
+        user_content = self._build_user_content(current_message, media)
+        user_content = self._inject_runtime_context(user_content, channel, chat_id)
+        messages.append({"role": "user", "content": user_content})
+
+        return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""
