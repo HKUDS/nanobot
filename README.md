@@ -118,8 +118,7 @@ pip install scorpion-ai
 ## 🚀 Quick Start
 
 > [!TIP]
-> Set your API key in `~/.scorpion/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
+> For the full guide, see [QUICKSTART.md](QUICKSTART.md).
 
 **1. Initialize**
 
@@ -127,32 +126,19 @@ pip install scorpion-ai
 scorpion onboard
 ```
 
-**2. Configure** (`~/.scorpion/config.json`)
+**2. Configure** (`~/.scorpion/config.json`) — add your Gemini API key:
 
-Add or merge these **two parts** into your config (other options have defaults).
-
-*Set your API key* (e.g. OpenRouter, recommended for global users):
 ```json
 {
   "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
+    "gemini": {
+      "apiKey": "YOUR_GEMINI_API_KEY"
     }
   }
 }
 ```
 
-*Set your model* (optionally pin a provider — defaults to auto-detection):
-```json
-{
-  "agents": {
-    "defaults": {
-      "model": "anthropic/claude-opus-4-5",
-      "provider": "openrouter"
-    }
-  }
-}
-```
+Get a key at [aistudio.google.com](https://aistudio.google.com).
 
 **3. Chat**
 
@@ -749,7 +735,6 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `scorpion agent --logs` | Show runtime logs during chat |
 | `scorpion gateway` | Start the gateway |
 | `scorpion status` | Show status |
-| `scorpion provider login openai-codex` | OAuth login for providers |
 | `scorpion channels login` | Link WhatsApp (scan QR) |
 | `scorpion channels status` | Show channel status |
 
@@ -900,7 +885,7 @@ scorpion/
 ├── bus/            # 🚌 Message routing
 ├── cron/           # ⏰ Scheduled tasks
 ├── heartbeat/      # 💓 Proactive wake-up
-├── providers/      # 🤖 LLM providers (OpenRouter, etc.)
+├── providers/      # 🤖 LLM provider (Gemini)
 ├── session/        # 💬 Conversation sessions
 ├── config/         # ⚙️ Configuration
 └── cli/            # 🖥️ Commands

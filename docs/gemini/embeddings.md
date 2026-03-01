@@ -1,4 +1,4 @@
-# Embeddings
+1# Embeddings
 
 > **Status: Not implemented**
 > **Gemini docs:** https://ai.google.dev/gemini-api/docs/embeddings
