@@ -457,10 +457,13 @@ class TelegramChannel(BaseChannel):
 
                 media_paths.append(str(file_path))
                 
-                # Handle voice transcription (Groq auto-transcription; ElevenLabs via explicit request)
+                # Handle voice transcription (ElevenLabs primary; Groq fallback)
                 if media_type == "voice" or media_type == "audio":
-                    from nanobot.providers.transcription import GroqTranscriptionProvider
-                    transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
+                    from nanobot.providers.transcription import ElevenLabsTranscriptionProvider, GroqTranscriptionProvider
+                    if self.elevenlabs_api_key:
+                        transcriber = ElevenLabsTranscriptionProvider(api_key=self.elevenlabs_api_key)
+                    else:
+                        transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
                     transcription = await transcriber.transcribe(file_path)
                     if transcription:
                         logger.info("Transcribed {}: {}...", media_type, transcription[:50])
