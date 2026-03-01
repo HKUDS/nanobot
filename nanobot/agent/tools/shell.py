@@ -19,6 +19,7 @@ class ExecTool(Tool):
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
+        path_append: str = "",
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -35,6 +36,7 @@ class ExecTool(Tool):
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
+        self.path_append = path_append
 
     @property
     def name(self) -> str:
@@ -64,12 +66,18 @@ class ExecTool(Tool):
         if guard_error:
             return guard_error
 
+        env = None
+        if self.path_append:
+            env = os.environ.copy()
+            env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
+
         try:
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
+                env=env,
             )
 
             try:
@@ -128,13 +136,7 @@ class ExecTool(Tool):
 
             cwd_path = Path(cwd).resolve()
 
-            win_paths = re.findall(r"[A-Za-z]:\\[^\\\"']+", cmd)
-            # Only match absolute paths — avoid false positives on relative
-            # paths like ".venv/bin/python" where "/bin/python" would be
-            # incorrectly extracted by the old pattern.
-            posix_paths = re.findall(r"(?:^|[\s|>])(/[^\s\"'>]+)", cmd)
-
-            for raw in win_paths + posix_paths:
+            for raw in self._extract_absolute_paths(cmd):
                 try:
                     p = Path(raw.strip()).resolve()
                 except Exception:
@@ -143,3 +145,9 @@ class ExecTool(Tool):
                     return "Error: Command blocked by safety guard (path outside working dir)"
 
         return None
+
+    @staticmethod
+    def _extract_absolute_paths(command: str) -> list[str]:
+        win_paths = re.findall(r"[A-Za-z]:\\[^\s\"'|><;]+", command)   # Windows: C:\...
+        posix_paths = re.findall(r"(?:^|[\s|>])(/[^\s\"'>]+)", command) # POSIX: /absolute only
+        return win_paths + posix_paths

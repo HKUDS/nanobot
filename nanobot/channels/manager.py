@@ -144,6 +144,19 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("QQ channel not available: {}", e)
 
+        # Matrix channel
+        if self.config.channels.matrix.enabled:
+            try:
+                from nanobot.channels.matrix import MatrixChannel
+
+                self.channels["matrix"] = MatrixChannel(
+                    self.config.channels.matrix,
+                    self.bus,
+                )
+                logger.info("Matrix channel enabled")
+            except ImportError as e:
+                logger.warning("Matrix channel not available: {}", e)
+
     async def _start_channel(
         self,
         name: str,
@@ -172,9 +185,7 @@ class ChannelManager:
         tasks = []
         for name, channel in self.channels.items():
             logger.info("Starting {} channel...", name)
-            tasks.append(
-                asyncio.create_task(self._start_channel(name, channel))
-            )
+            tasks.append(asyncio.create_task(self._start_channel(name, channel)))
 
         # Wait for all to complete (they should run forever)
         await asyncio.gather(*tasks, return_exceptions=True)
