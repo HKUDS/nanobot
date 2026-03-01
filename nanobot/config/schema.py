@@ -212,6 +212,7 @@ class A2AChannelConfig(Base):
         default_factory=list
     )  # [{"id": "chat", "name": "Chat", "description": "..."}]
     allow_from: list[str] = Field(default_factory=list)
+    task_retention_days: float = 14.0  # How long to keep completed tasks in memory
 
 
 
