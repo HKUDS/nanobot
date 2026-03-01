@@ -2,8 +2,12 @@
 
 import asyncio
 import json
+import mimetypes
+import os
 import time
+from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from loguru import logger
 import httpx
@@ -96,6 +100,9 @@ class DingTalkChannel(BaseChannel):
     """
 
     name = "dingtalk"
+    _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
+    _AUDIO_EXTS = {".amr", ".mp3", ".wav", ".ogg", ".m4a", ".aac"}
+    _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
     def __init__(self, config: DingTalkConfig, bus: MessageBus):
         super().__init__(config, bus)
@@ -191,40 +198,224 @@ class DingTalkChannel(BaseChannel):
             logger.error("Failed to get DingTalk access token: {}", e)
             return None
 
+    @staticmethod
+    def _is_http_url(value: str) -> bool:
+        return urlparse(value).scheme in ("http", "https")
+
+    def _guess_upload_type(self, media_ref: str) -> str:
+        ext = Path(urlparse(media_ref).path).suffix.lower()
+        if ext in self._IMAGE_EXTS: return "image"
+        if ext in self._AUDIO_EXTS: return "voice"
+        if ext in self._VIDEO_EXTS: return "video"
+        return "file"
+
+    def _guess_filename(self, media_ref: str, upload_type: str) -> str:
+        name = os.path.basename(urlparse(media_ref).path)
+        return name or {"image": "image.jpg", "voice": "audio.amr", "video": "video.mp4"}.get(upload_type, "file.bin")
+
+    async def _read_media_bytes(
+        self,
+        media_ref: str,
+    ) -> tuple[bytes | None, str | None, str | None]:
+        if not media_ref:
+            return None, None, None
+
+        if self._is_http_url(media_ref):
+            if not self._http:
+                return None, None, None
+            try:
+                resp = await self._http.get(media_ref, follow_redirects=True)
+                if resp.status_code >= 400:
+                    logger.warning(
+                        "DingTalk media download failed status={} ref={}",
+                        resp.status_code,
+                        media_ref,
+                    )
+                    return None, None, None
+                content_type = (resp.headers.get("content-type") or "").split(";")[0].strip()
+                filename = self._guess_filename(media_ref, self._guess_upload_type(media_ref))
+                return resp.content, filename, content_type or None
+            except Exception as e:
+                logger.error("DingTalk media download error ref={} err={}", media_ref, e)
+                return None, None, None
+
+        try:
+            if media_ref.startswith("file://"):
+                parsed = urlparse(media_ref)
+                local_path = Path(unquote(parsed.path))
+            else:
+                local_path = Path(os.path.expanduser(media_ref))
+            if not local_path.is_file():
+                logger.warning("DingTalk media file not found: {}", local_path)
+                return None, None, None
+            data = await asyncio.to_thread(local_path.read_bytes)
+            content_type = mimetypes.guess_type(local_path.name)[0]
+            return data, local_path.name, content_type
+        except Exception as e:
+            logger.error("DingTalk media read error ref={} err={}", media_ref, e)
+            return None, None, None
+
+    async def _upload_media(
+        self,
+        token: str,
+        data: bytes,
+        media_type: str,
+        filename: str,
+        content_type: str | None,
+    ) -> str | None:
+        if not self._http:
+            return None
+        url = f"https://oapi.dingtalk.com/media/upload?access_token={token}&type={media_type}"
+        mime = content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        files = {"media": (filename, data, mime)}
+
+        try:
+            resp = await self._http.post(url, files=files)
+            text = resp.text
+            result = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            if resp.status_code >= 400:
+                logger.error("DingTalk media upload failed status={} type={} body={}", resp.status_code, media_type, text[:500])
+                return None
+            errcode = result.get("errcode", 0)
+            if errcode != 0:
+                logger.error("DingTalk media upload api error type={} errcode={} body={}", media_type, errcode, text[:500])
+                return None
+            sub = result.get("result") or {}
+            media_id = result.get("media_id") or result.get("mediaId") or sub.get("media_id") or sub.get("mediaId")
+            if not media_id:
+                logger.error("DingTalk media upload missing media_id body={}", text[:500])
+                return None
+            return str(media_id)
+        except Exception as e:
+            logger.error("DingTalk media upload error type={} err={}", media_type, e)
+            return None
+
+    async def _send_batch_message(
+        self,
+        token: str,
+        chat_id: str,
+        msg_key: str,
+        msg_param: dict[str, Any],
+    ) -> bool:
+        if not self._http:
+            logger.warning("DingTalk HTTP client not initialized, cannot send")
+            return False
+
+        url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
+        headers = {"x-acs-dingtalk-access-token": token}
+        payload = {
+            "robotCode": self.config.client_id,
+            "userIds": [chat_id],
+            "msgKey": msg_key,
+            "msgParam": json.dumps(msg_param, ensure_ascii=False),
+        }
+
+        try:
+            resp = await self._http.post(url, json=payload, headers=headers)
+            body = resp.text
+            if resp.status_code != 200:
+                logger.error("DingTalk send failed msgKey={} status={} body={}", msg_key, resp.status_code, body[:500])
+                return False
+            try: result = resp.json()
+            except Exception: result = {}
+            errcode = result.get("errcode")
+            if errcode not in (None, 0):
+                logger.error("DingTalk send api error msgKey={} errcode={} body={}", msg_key, errcode, body[:500])
+                return False
+            logger.debug("DingTalk message sent to {} with msgKey={}", chat_id, msg_key)
+            return True
+        except Exception as e:
+            logger.error("Error sending DingTalk message msgKey={} err={}", msg_key, e)
+            return False
+
+    async def _send_markdown_text(self, token: str, chat_id: str, content: str) -> bool:
+        return await self._send_batch_message(
+            token,
+            chat_id,
+            "sampleMarkdown",
+            {"text": content, "title": "Nanobot Reply"},
+        )
+
+    async def _send_media_ref(self, token: str, chat_id: str, media_ref: str) -> bool:
+        media_ref = (media_ref or "").strip()
+        if not media_ref:
+            return True
+
+        upload_type = self._guess_upload_type(media_ref)
+        if upload_type == "image" and self._is_http_url(media_ref):
+            ok = await self._send_batch_message(
+                token,
+                chat_id,
+                "sampleImageMsg",
+                {"photoURL": media_ref},
+            )
+            if ok:
+                return True
+            logger.warning("DingTalk image url send failed, trying upload fallback: {}", media_ref)
+
+        data, filename, content_type = await self._read_media_bytes(media_ref)
+        if not data:
+            logger.error("DingTalk media read failed: {}", media_ref)
+            return False
+
+        filename = filename or self._guess_filename(media_ref, upload_type)
+        file_type = Path(filename).suffix.lower().lstrip(".")
+        if not file_type:
+            guessed = mimetypes.guess_extension(content_type or "")
+            file_type = (guessed or ".bin").lstrip(".")
+        if file_type == "jpeg":
+            file_type = "jpg"
+
+        media_id = await self._upload_media(
+            token=token,
+            data=data,
+            media_type=upload_type,
+            filename=filename,
+            content_type=content_type,
+        )
+        if not media_id:
+            return False
+
+        if upload_type == "image":
+            # Verified in production: sampleImageMsg accepts media_id in photoURL.
+            ok = await self._send_batch_message(
+                token,
+                chat_id,
+                "sampleImageMsg",
+                {"photoURL": media_id},
+            )
+            if ok:
+                return True
+            logger.warning("DingTalk image media_id send failed, falling back to file: {}", media_ref)
+
+        return await self._send_batch_message(
+            token,
+            chat_id,
+            "sampleFile",
+            {"mediaId": media_id, "fileName": filename, "fileType": file_type},
+        )
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through DingTalk."""
         token = await self._get_access_token()
         if not token:
             return
 
-        # oToMessages/batchSend: sends to individual users (private chat)
-        # https://open.dingtalk.com/document/orgapp/robot-batch-send-messages
-        url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
+        if msg.content and msg.content.strip():
+            await self._send_markdown_text(token, msg.chat_id, msg.content.strip())
 
-        headers = {"x-acs-dingtalk-access-token": token}
-
-        data = {
-            "robotCode": self.config.client_id,
-            "userIds": [msg.chat_id],  # chat_id is the user's staffId
-            "msgKey": "sampleMarkdown",
-            "msgParam": json.dumps({
-                "text": msg.content,
-                "title": "Nanobot Reply",
-            }, ensure_ascii=False),
-        }
-
-        if not self._http:
-            logger.warning("DingTalk HTTP client not initialized, cannot send")
-            return
-
-        try:
-            resp = await self._http.post(url, json=data, headers=headers)
-            if resp.status_code != 200:
-                logger.error("DingTalk send failed: {}", resp.text)
-            else:
-                logger.debug("DingTalk message sent to {}", msg.chat_id)
-        except Exception as e:
-            logger.error("Error sending DingTalk message: {}", e)
+        for media_ref in msg.media or []:
+            ok = await self._send_media_ref(token, msg.chat_id, media_ref)
+            if ok:
+                continue
+            logger.error("DingTalk media send failed for {}", media_ref)
+            # Send visible fallback so failures are observable by the user.
+            filename = self._guess_filename(media_ref, self._guess_upload_type(media_ref))
+            await self._send_markdown_text(
+                token,
+                msg.chat_id,
+                f"[Attachment send failed: {filename}]",
+            )
 
     async def _on_message(self, content: str, sender_id: str, sender_name: str) -> None:
         """Handle incoming message (called by NanobotDingTalkHandler).
