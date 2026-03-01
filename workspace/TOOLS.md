@@ -1,119 +1,98 @@
-# Available Tools
+# 可用工具
 
-This document describes the tools available to nanobot.
+本文档介绍 nanobot 可用的工具。
 
-## File Operations
+## 文件操作
 
 ### read_file
-Read the contents of a file.
+读取文件内容。
 ```
 read_file(path: str) -> str
 ```
 
 ### write_file
-Write content to a file (creates parent directories if needed).
+写入文件内容（必要时会创建父目录）。
 ```
 write_file(path: str, content: str) -> str
 ```
 
 ### edit_file
-Edit a file by replacing specific text.
+通过替换指定文本编辑文件。
 ```
 edit_file(path: str, old_text: str, new_text: str) -> str
 ```
 
 ### list_dir
-List contents of a directory.
+列出目录内容。
 ```
 list_dir(path: str) -> str
 ```
 
-## Shell Execution
+## Shell 执行
 
 ### exec
-Execute a shell command and return output.
+执行一条 Shell 命令并返回输出。
 ```
 exec(command: str, working_dir: str = None) -> str
 ```
 
-**Safety Notes:**
-- Commands have a configurable timeout (default 60s)
-- Dangerous commands are blocked (rm -rf, format, dd, shutdown, etc.)
-- Output is truncated at 10,000 characters
-- Optional `restrictToWorkspace` config to limit paths
+**安全说明：**
+- 命令具有可配置超时（默认 60 秒）
+- 危险命令会被拦截（如 rm -rf、format、dd、shutdown 等）
+- 输出默认截断至 10,000 字符
+- 可选 `restrictToWorkspace` 配置用于限制路径
 
-## Web Access
-
-### web_search
-Search the web using Brave Search API.
-```
-web_search(query: str, count: int = 5) -> str
-```
-
-Returns search results with titles, URLs, and snippets. Requires `tools.web.search.apiKey` in config.
-
-### web_fetch
-Fetch and extract main content from a URL.
-```
-web_fetch(url: str, extractMode: str = "markdown", maxChars: int = 50000) -> str
-```
-
-**Notes:**
-- Content is extracted using readability
-- Supports markdown or plain text extraction
-- Output is truncated at 50,000 characters by default
-
-## Communication
+## 通信
 
 ### message
-Send a message to the user (used internally).
+向用户发送消息（内部使用）。
 ```
 message(content: str, channel: str = None, chat_id: str = None) -> str
 ```
 
-## Background Tasks
+## 后台任务
 
 ### spawn
-Spawn a subagent to handle a task in the background.
+启动一个子代理在后台处理任务。
 ```
 spawn(task: str, label: str = None) -> str
 ```
 
-Use for complex or time-consuming tasks that can run independently. The subagent will complete the task and report back when done.
+用于复杂或耗时的任务，子代理会独立完成并在结束后回报结果。
 
-## Scheduled Reminders (Cron)
+## 定时提醒（Cron）
 
-Use the `exec` tool to create scheduled reminders with `nanobot cron add`:
+使用 `exec` 与 `nanobot cron add` 创建定时提醒：
 
-### Set a recurring reminder
+### 设置重复提醒
 ```bash
-# Every day at 9am
+# 每天 9 点
 nanobot cron add --name "morning" --message "Good morning! ☀️" --cron "0 9 * * *"
 
-# Every 2 hours
+# 每 2 小时
 nanobot cron add --name "water" --message "Drink water! 💧" --every 7200
 ```
 
-### Set a one-time reminder
+### 设置一次性提醒
 ```bash
-# At a specific time (ISO format)
+# 在指定时间（ISO 格式）
 nanobot cron add --name "meeting" --message "Meeting starts now!" --at "2025-01-31T15:00:00"
 ```
 
-### Manage reminders
+### 管理提醒
 ```bash
-nanobot cron list              # List all jobs
-nanobot cron remove <job_id>   # Remove a job
+nanobot cron list              # 列出所有任务
+nanobot cron remove <job_id>   # 移除任务
 ```
 
-## Heartbeat Task Management
+## 心跳任务管理
 
-The `HEARTBEAT.md` file in the workspace is checked every 30 minutes.
-Use file operations to manage periodic tasks:
+工作空间中的 `HEARTBEAT.md` 每 30 分钟检查一次。
+使用文件操作管理周期性任务：
 
-### Add a heartbeat task
+### 添加心跳任务
 ```python
-# Append a new task
+# 追加新任务
 edit_file(
     path="HEARTBEAT.md",
     old_text="## Example Tasks",
@@ -121,9 +100,9 @@ edit_file(
 )
 ```
 
-### Remove a heartbeat task
+### 移除心跳任务
 ```python
-# Remove a specific task
+# 移除指定任务
 edit_file(
     path="HEARTBEAT.md",
     old_text="- [ ] Task to remove\n",
@@ -131,9 +110,9 @@ edit_file(
 )
 ```
 
-### Rewrite all tasks
+### 重写全部任务
 ```python
-# Replace the entire file
+# 替换整个文件
 write_file(
     path="HEARTBEAT.md",
     content="# Heartbeat Tasks\n\n- [ ] Task 1\n- [ ] Task 2\n"
@@ -142,9 +121,9 @@ write_file(
 
 ---
 
-## Adding Custom Tools
+## 添加自定义工具
 
-To add custom tools:
-1. Create a class that extends `Tool` in `nanobot/agent/tools/`
-2. Implement `name`, `description`, `parameters`, and `execute`
-3. Register it in `AgentLoop._register_default_tools()`
+添加新工具的步骤：
+1. 在 `nanobot/agent/tools/` 中创建继承 `Tool` 的类
+2. 实现 `name`、`description`、`parameters`、`execute`
+3. 在 `AgentLoop._register_default_tools()` 中注册

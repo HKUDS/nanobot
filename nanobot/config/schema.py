@@ -165,6 +165,16 @@ class QQConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
 
+class YingdaoConfig(Base):
+    """Yingdao RPA channel configuration (HTTP API)."""
+
+    enabled: bool = False
+    host: str = "0.0.0.0"  # HTTP server host
+    port: int = 18791  # HTTP server port
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs (empty = public access)
+    secret: str = ""  # Optional secret for authentication
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -177,6 +187,7 @@ class ChannelsConfig(Base):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    yingdao: YingdaoConfig = Field(default_factory=YingdaoConfig)
 
 
 class AgentDefaults(Base):

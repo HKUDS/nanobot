@@ -136,6 +136,18 @@ class ChannelManager:
                 logger.info("QQ channel enabled")
             except ImportError as e:
                 logger.warning("QQ channel not available: {}", e)
+
+        # Yingdao channel
+        if self.config.channels.yingdao.enabled:
+            try:
+                from nanobot.channels.yingdao import YingdaoChannel
+                self.channels["yingdao"] = YingdaoChannel(
+                    self.config.channels.yingdao,
+                    self.bus,
+                )
+                logger.info("Yingdao channel enabled")
+            except ImportError as e:
+                logger.warning("Yingdao channel not available: {}", e)
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
@@ -194,6 +206,7 @@ class ChannelManager:
                 )
                 
                 channel = self.channels.get(msg.channel)
+                logger.info(f"Dispatching outbound: channel={msg.channel}, chat_id={msg.chat_id}, available_channels={list(self.channels.keys())}")
                 if channel:
                     try:
                         await channel.send(msg)
