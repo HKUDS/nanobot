@@ -28,6 +28,7 @@ class SubagentManager:
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        reasoning_effort: str | None = None,
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
@@ -39,6 +40,7 @@ class SubagentManager:
         self.model = model or provider.get_default_model()
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.reasoning_effort = reasoning_effort
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
@@ -104,8 +106,7 @@ class SubagentManager:
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
             
-            # Build messages with subagent-specific prompt
-            system_prompt = self._build_subagent_prompt(task)
+            system_prompt = self._build_subagent_prompt()
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
@@ -125,6 +126,7 @@ class SubagentManager:
                     model=self.model,
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
+                    reasoning_effort=self.reasoning_effort,
                 )
                 
                 if response.has_tool_calls:
@@ -204,42 +206,27 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         await self.bus.publish_inbound(msg)
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
     
-    def _build_subagent_prompt(self, task: str) -> str:
+    def _build_subagent_prompt(self) -> str:
         """Build a focused system prompt for the subagent."""
-        from datetime import datetime
-        import time as _time
-        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
-        tz = _time.strftime("%Z") or "UTC"
+        from nanobot.agent.context import ContextBuilder
+        from nanobot.agent.skills import SkillsLoader
 
-        return f"""# Subagent
+        time_ctx = ContextBuilder._build_runtime_context(None, None)
+        parts = [f"""# Subagent
 
-## Current Time
-{now} ({tz})
+{time_ctx}
 
 You are a subagent spawned by the main agent to complete a specific task.
-
-## Rules
-1. Stay focused - complete only the assigned task, nothing else
-2. Your final response will be reported back to the main agent
-3. Do not initiate conversations or take on side tasks
-4. Be concise but informative in your findings
-
-## What You Can Do
-- Read and write files in the workspace
-- Execute shell commands
-- Search the web and fetch web pages
-- Complete the task thoroughly
-
-## What You Cannot Do
-- Send messages directly to users (no message tool available)
-- Spawn other subagents
-- Access the main agent's conversation history
+Stay focused on the assigned task. Your final response will be reported back to the main agent.
 
 ## Workspace
-Your workspace is at: {self.workspace}
-Skills are available at: {self.workspace}/skills/ (read SKILL.md files as needed)
+{self.workspace}"""]
 
-When you have completed the task, provide a clear summary of your findings or actions."""
+        skills_summary = SkillsLoader(self.workspace).build_skills_summary()
+        if skills_summary:
+            parts.append(f"## Skills\n\nRead SKILL.md with read_file to use a skill.\n\n{skills_summary}")
+
+        return "\n\n".join(parts)
     
     async def cancel_by_session(self, session_key: str) -> int:
         """Cancel all subagents for the given session. Returns count cancelled."""
