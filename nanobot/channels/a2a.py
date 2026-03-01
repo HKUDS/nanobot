@@ -13,6 +13,7 @@ from loguru import logger
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.schema import A2AChannelConfig
 
 if TYPE_CHECKING:
     from a2a.types import AgentCard as AgentCardType, Task as TaskType
@@ -53,6 +54,9 @@ except ImportError:
 # Default timeout for task completion (5 minutes)
 DEFAULT_TASK_TIMEOUT_SECONDS = 300
 
+# ID length for task and context IDs
+ID_LENGTH = 12
+
 
 class A2ARequestHandler(RequestHandler):
     """A2A request handler that bridges to Nanobot's message bus."""
@@ -91,10 +95,10 @@ class A2ARequestHandler(RequestHandler):
             if message and message.context_id:
                 context_id = message.context_id
             else:
-                context_id = f"a2a:{uuid.uuid4().hex[:12]}"
+                context_id = f"a2a:{uuid.uuid4().hex[:ID_LENGTH]}"
 
             content = self._extract_content(message)
-            task_id = uuid.uuid4().hex[:12]
+            task_id = uuid.uuid4().hex[:ID_LENGTH]
 
             # Check for existing task in this context
             if context_id in self._context_to_task:
@@ -308,13 +312,11 @@ class A2AChannel(BaseChannel):
 
     def __init__(
         self,
-        config: Any,
+        config: A2AChannelConfig,
         bus: MessageBus,
-        session_manager: Any = None,
     ):
         super().__init__(config, bus)
-        self._session_manager = session_manager
-        self._dispatch_task: asyncio.Task | None = None
+        self.config = config
         self._app: A2AStarletteApplication | None = None
         self._agent_card: AgentCardType | None = None
         self._handler: A2ARequestHandler | None = None
@@ -361,7 +363,6 @@ class A2AChannel(BaseChannel):
 
     async def start(self) -> None:
         self._running = True
-        self._dispatch_task = asyncio.create_task(self._dispatch_responses())
         logger.info("A2A channel started")
 
     async def stop(self) -> None:
@@ -371,40 +372,23 @@ class A2AChannel(BaseChannel):
         if self._handler:
             await self._handler.cancel_all_pending_tasks()
 
-        # Stop dispatch task
-        if self._dispatch_task:
-            self._dispatch_task.cancel()
-            try:
-                await self._dispatch_task
-            except asyncio.CancelledError:
-                pass
         logger.info("A2A channel stopped")
 
     async def send(self, msg: OutboundMessage) -> None:
-        if not self._handler:
-            return
+        try:
+            if not self._handler:
+                return
 
-        task_id = msg.metadata.get("task_id") if msg.metadata else None
+            task_id = msg.metadata.get("task_id") if msg.metadata else None
 
-        if not task_id:
-            context_id = msg.chat_id
-            task_id = self._handler._context_to_task.get(context_id)
+            if not task_id:
+                context_id = msg.chat_id
+                task_id = self._handler._context_to_task.get(context_id)
 
-        if task_id:
-            self._handler.deliver_response(task_id, msg.content)
-
-    async def _dispatch_responses(self) -> None:
-        while self._running:
-            try:
-                msg = await asyncio.wait_for(self.bus.consume_outbound(), timeout=1.0)
-                if msg.channel == "a2a":
-                    await self.send(msg)
-            except asyncio.TimeoutError:
-                continue
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("A2A dispatch error: {}", e)
+            if task_id:
+                self._handler.deliver_response(task_id, msg.content)
+        except Exception as e:
+            logger.error("A2A send error: {}", e)
 
     def get_asgi_app(self):
         if self._app:
