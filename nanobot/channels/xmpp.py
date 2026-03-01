@@ -60,33 +60,33 @@ class XmppClient(ClientXMPP):
             except Exception as e:
                 logger.warning("Failed to join XMPP room {}: {}", room, e)
 
-    async def _on_message(self, msg: Any) -> None:
+    def _on_message(self, msg: Any) -> None:
         """Handle incoming messages."""
+        # Ignore messages from ourselves to prevent loops
+        if str(msg["from"].bare) == self.boundjid.bare:
+            return
+
         if msg["type"] in ("chat", "normal"):
             # Direct message
-            await self._channel._handle_dm(
+            asyncio.create_task(self._channel._handle_dm(
                 sender_jid=str(msg["from"]),
                 body=str(msg["body"]) if msg["body"] else "",
-            )
+            ))
         elif msg["type"] == "groupchat":
             # MUC message
-            await self._channel._handle_muc_message(
+            asyncio.create_task(self._channel._handle_muc_message(
                 room_jid=str(msg["from"].bare),
                 sender_nick=str(msg["from"].resource),
                 sender_jid=str(msg["from"]),
                 body=str(msg["body"]) if msg["body"] else "",
-            )
+            ))
 
-    async def _on_disconnected(self, event: Any) -> None:
+    def _on_disconnected(self, event: Any) -> None:
         """Handle disconnection."""
         logger.warning("XMPP disconnected, will reconnect...")
         self._joined_rooms.clear()
 
-    async def send_message(self, to_jid: str, body: str, mtype: str = "chat") -> None:
-        """Send a message."""
-        self.send_message(mto=to_jid, mbody=body, mtype=mtype)
-
-    async def send_typing(self, to_jid: str, typing: bool = True) -> None:
+    def send_typing(self, to_jid: str, typing: bool = True) -> None:
         """Send typing notification."""
         state = "composing" if typing else "paused"
         msg = self.make_message(mto=to_jid, mtype="chat")
@@ -175,7 +175,7 @@ class XmppChannel(BaseChannel):
         await self._stop_typing(msg.chat_id)
 
         content = msg.content or ""
-        self.client.send_message(mto=msg.chat_id, mbody=content, mtype="chat")
+        self.client.send_message(msg.chat_id, content, mtype="chat")
 
     async def _handle_dm(self, sender_jid: str, body: str) -> None:
         """Handle direct message."""
