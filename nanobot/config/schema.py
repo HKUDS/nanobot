@@ -199,6 +199,16 @@ class MatrixConfig(Base):
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
 
+class WebConfig(Base):
+    """Web chat channel configuration (HTTP + SSE streaming)."""
+
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 8080
+    static_dir: str = ""  # Path to frontend directory; defaults to ./web relative to CWD
+    allow_from: list[str] = Field(default_factory=list)  # empty = allow all
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -214,6 +224,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    web: WebConfig = Field(default_factory=WebConfig)
 
 
 class AgentDefaults(Base):

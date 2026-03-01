@@ -174,10 +174,24 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    @staticmethod
+    def _tool_call_str(tc) -> str:
+        """Format a single tool call with full untruncated arguments."""
+        args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
+        if not args:
+            return f"{tc.name}()"
+        val = next(iter(args.values()), None) if isinstance(args, dict) else None
+        if isinstance(val, str) and len(args) == 1:
+            return f'{tc.name}("{val}")'
+        return f"{tc.name}({json.dumps(args, ensure_ascii=False)})"
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_token: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call: Callable[[str, str, dict], Awaitable[None]] | None = None,
+        on_tool_result: Callable[[str, str], Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
@@ -188,21 +202,25 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await self.provider.chat(
+            response = await self.provider.chat_stream(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
+                on_token=on_token,
             )
 
             if response.has_tool_calls:
                 if on_progress:
                     clean = self._strip_think(response.content)
-                    if clean:
+                    # Skip content echo when on_token already streamed the tokens live
+                    if clean and not on_token:
                         await on_progress(clean)
-                    await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
+                    # Emit batch hint only for channels without per-tool callbacks
+                    if not on_tool_call:
+                        await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
                 tool_call_dicts = [
                     {
@@ -225,7 +243,12 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    if on_tool_call:
+                        raw_args = (tool_call.arguments[0] if isinstance(tool_call.arguments, list) else tool_call.arguments) or {}
+                        await on_tool_call(tool_call.name, self._tool_call_str(tool_call), raw_args)
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    if on_tool_result:
+                        await on_tool_result(tool_call.name, result)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -329,6 +352,9 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_token: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call: Callable[[str, str, dict], Awaitable[None]] | None = None,
+        on_tool_result: Callable[[str, str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -430,7 +456,8 @@ class AgentLoop:
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages, on_progress=on_progress or _bus_progress, on_token=on_token,
+            on_tool_call=on_tool_call, on_tool_result=on_tool_result,
         )
 
         if final_content is None:
@@ -487,9 +514,15 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_token: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call: Callable[[str, str, dict], Awaitable[None]] | None = None,
+        on_tool_result: Callable[[str, str], Awaitable[None]] | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        response = await self._process_message(
+            msg, session_key=session_key, on_progress=on_progress, on_token=on_token,
+            on_tool_call=on_tool_call, on_tool_result=on_tool_result,
+        )
         return response.content if response else ""
