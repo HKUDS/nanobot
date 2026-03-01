@@ -210,6 +210,7 @@ class A2AChannelConfig(Base):
     agent_description: str = "Nanobot AI Agent"
     skills: list[dict] = Field(default_factory=list)  # [{"id": "chat", "name": "Chat", "description": "..."}]
     allow_from: list[str] = Field(default_factory=list)
+    task_timeout_seconds: float = 300.0  # Timeout for task completion
 
 
 

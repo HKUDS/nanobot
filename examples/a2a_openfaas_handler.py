@@ -94,4 +94,10 @@ handle = main_app
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+    # For local development: run the handle function as ASGI app
+    uvicorn.run(
+        "a2a_openfaas_handler:handle",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8000")),
+        reload=False,
+    )

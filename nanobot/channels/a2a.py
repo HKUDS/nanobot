@@ -15,7 +15,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 
 if TYPE_CHECKING:
-    from a2a.types import AgentCard, Task
+    from a2a.types import AgentCard as AgentCardType, Task as TaskType
 
 try:
     from a2a.server.apps.jsonrpc.starlette_app import A2AStarletteApplication
@@ -36,6 +36,7 @@ try:
         DeleteTaskPushNotificationConfigParams,
         GetTaskPushNotificationConfigParams,
         ListTaskPushNotificationConfigParams,
+        Artifact,
     )
 
     A2A_AVAILABLE = True
@@ -46,15 +47,25 @@ except ImportError:
     AgentCardType = None
     AgentSkill = None
     ServerCallContext = None
+    Artifact = None
+
+
+# Default timeout for task completion (5 minutes)
+DEFAULT_TASK_TIMEOUT_SECONDS = 300
 
 
 class A2ARequestHandler(RequestHandler):
     """A2A request handler that bridges to Nanobot's message bus."""
 
-    def __init__(self, channel: "A2AChannel"):
+    def __init__(
+        self, channel: "A2AChannel", task_timeout_seconds: float = DEFAULT_TASK_TIMEOUT_SECONDS
+    ):
         self._channel = channel
+        self._task_timeout = task_timeout_seconds
         self._pending_tasks: dict[str, asyncio.Future[str]] = {}
         self._context_to_task: dict[str, str] = {}
+        self._tasks: dict[str, TaskType] = {}  # Task storage for status retrieval
+        self._context_lock = asyncio.Lock()  # Prevent race conditions in context mapping
 
     async def on_message_send(
         self,
@@ -66,22 +77,51 @@ class A2ARequestHandler(RequestHandler):
             raise RuntimeError("a2a-sdk not installed")
 
         message = params.message
-        # Get or generate context_id
-        if message and message.context_id:
-            context_id = message.context_id
-        else:
-            context_id = f"a2a:{uuid.uuid4().hex[:12]}"
-        
-        content = self._extract_content(message)
-        task_id = uuid.uuid4().hex[:12]
 
-        response_future: asyncio.Future[str] = asyncio.Future()
-        self._pending_tasks[task_id] = response_future
-        self._context_to_task[context_id] = task_id
+        # Extract sender for authorization check
+        sender_id = message.role.value if message else "a2a-client"
+
+        # Authorization check (is_allowed returns True if allow_from is empty)
+        if not self._channel.is_allowed(sender_id):
+            logger.warning("A2A request from unauthorized sender: {}", sender_id)
+            raise PermissionError(f"Sender '{sender_id}' not authorized")
+
+        # Get or generate context_id with race condition protection
+        async with self._context_lock:
+            if message and message.context_id:
+                context_id = message.context_id
+            else:
+                context_id = f"a2a:{uuid.uuid4().hex[:12]}"
+
+            content = self._extract_content(message)
+            task_id = uuid.uuid4().hex[:12]
+
+            # Check for existing task in this context
+            if context_id in self._context_to_task:
+                existing_task_id = self._context_to_task[context_id]
+                if (
+                    existing_task_id in self._pending_tasks
+                    and not self._pending_tasks[existing_task_id].done()
+                ):
+                    logger.warning(
+                        "Context {} already has active task {}", context_id, existing_task_id
+                    )
+
+            response_future: asyncio.Future[str] = asyncio.Future()
+            self._pending_tasks[task_id] = response_future
+            self._context_to_task[context_id] = task_id
+
+        # Create task object
+        task = TaskType(
+            id=task_id,
+            context_id=context_id,
+            status=TaskStatus(state=TaskState.working),
+        )
+        self._tasks[task_id] = task
 
         inbound = InboundMessage(
             channel="a2a",
-            sender_id=message.role if message else "a2a-client",
+            sender_id=sender_id,
             chat_id=context_id,
             content=content,
             metadata={"task_id": task_id, "a2a_context_id": context_id},
@@ -91,12 +131,7 @@ class A2ARequestHandler(RequestHandler):
         await self._channel.bus.publish_inbound(inbound)
         logger.debug("A2A task {} published to bus", task_id)
 
-        task = TaskType(
-            id=task_id,
-            context_id=context_id,
-            status=TaskStatus(state=TaskState.working),
-        )
-
+        # Start background task to wait for response
         asyncio.create_task(self._wait_for_response(task_id, context_id, response_future))
 
         return task
@@ -106,8 +141,8 @@ class A2ARequestHandler(RequestHandler):
         params: MessageSendParams,
         context: ServerCallContext | None = None,
     ) -> AsyncGenerator[Any, None]:
-        """Handle message/send streaming (not implemented)."""
-        # For now, just delegate to non-streaming
+        """Handle message/send streaming - delegates to non-streaming for now."""
+        # Streaming not fully implemented; delegate to non-streaming
         task = await self.on_message_send(params, context)
         yield task
 
@@ -119,12 +154,36 @@ class A2ARequestHandler(RequestHandler):
     ) -> None:
         """Wait for agent response and update task state."""
         try:
-            await asyncio.wait_for(future, timeout=300.0)
+            content = await asyncio.wait_for(future, timeout=self._task_timeout)
             logger.debug("A2A task {} completed", task_id)
+
+            # Update task to completed with artifacts
+            if task_id in self._tasks:
+                task = self._tasks[task_id]
+                task.status = TaskStatus(state=TaskState.completed)
+                task.artifacts = [
+                    Artifact(
+                        artifact_id="0",
+                        parts=[Part(type="text", text=content)],
+                    )
+                ]
+
         except asyncio.TimeoutError:
-            logger.warning("A2A task {} timed out", task_id)
+            logger.warning("A2A task {} timed out after {}s", task_id, self._task_timeout)
+            if task_id in self._tasks:
+                self._tasks[task_id].status = TaskStatus(
+                    state=TaskState.failed,
+                )
+        except asyncio.CancelledError:
+            logger.info("A2A task {} was cancelled", task_id)
+            if task_id in self._tasks:
+                self._tasks[task_id].status = TaskStatus(state=TaskState.canceled)
         except Exception as e:
             logger.error("A2A task {} failed: {}", task_id, e)
+            if task_id in self._tasks:
+                self._tasks[task_id].status = TaskStatus(
+                    state=TaskState.failed,
+                )
         finally:
             self._pending_tasks.pop(task_id, None)
             self._context_to_task.pop(context_id, None)
@@ -134,8 +193,9 @@ class A2ARequestHandler(RequestHandler):
         params: TaskQueryParams,
         context: ServerCallContext | None = None,
     ) -> TaskType | None:
-        """Handle tasks/get."""
-        return None
+        """Handle tasks/get - return task status."""
+        task_id = params.id
+        return self._tasks.get(task_id)
 
     async def on_cancel_task(
         self,
@@ -143,12 +203,19 @@ class A2ARequestHandler(RequestHandler):
         context: ServerCallContext | None = None,
     ) -> TaskType | None:
         """Handle tasks/cancel."""
-        task_id = params.taskId
+        task_id = params.id
+
+        # Cancel pending future
         if task_id in self._pending_tasks:
             future = self._pending_tasks[task_id]
             if not future.done():
                 future.cancel()
-            self._pending_tasks.pop(task_id, None)
+
+        # Update task status
+        if task_id in self._tasks:
+            self._tasks[task_id].status = TaskStatus(state=TaskState.canceled)
+            return self._tasks[task_id]
+
         return None
 
     async def on_set_task_push_notification_config(
@@ -199,10 +266,10 @@ class A2ARequestHandler(RequestHandler):
         texts = []
         for part in message.parts:
             # Part is a RootModel wrapping TextPart/DataPart/etc. Access via .root
-            inner = part.root if hasattr(part, 'root') else part
-            if hasattr(inner, 'kind') and inner.kind == "text" and hasattr(inner, 'text'):
+            inner = part.root if hasattr(part, "root") else part
+            if hasattr(inner, "kind") and inner.kind == "text" and hasattr(inner, "text"):
                 texts.append(inner.text)
-            elif hasattr(inner, 'kind') and inner.kind == "data" and hasattr(inner, 'data'):
+            elif hasattr(inner, "kind") and inner.kind == "data" and hasattr(inner, "data"):
                 texts.append(json.dumps(inner.data))
 
         return "\n".join(texts)
@@ -216,6 +283,18 @@ class A2ARequestHandler(RequestHandler):
                 logger.debug("A2A response delivered to task {}", task_id)
                 return True
         return False
+
+    async def cancel_all_pending_tasks(self) -> None:
+        """Cancel all pending tasks during shutdown."""
+        for task_id, future in list(self._pending_tasks.items()):
+            if not future.done():
+                future.cancel()
+                if task_id in self._tasks:
+                    self._tasks[task_id].status = TaskStatus(
+                        state=TaskState.canceled,
+                    )
+        self._pending_tasks.clear()
+        logger.info("All pending A2A tasks cancelled")
 
 
 class A2AChannel(BaseChannel):
@@ -244,31 +323,37 @@ class A2AChannel(BaseChannel):
             logger.warning("a2a-sdk not installed, A2A channel will not function")
             return
 
+        # Get configurable timeout
+        task_timeout = getattr(config, "task_timeout_seconds", DEFAULT_TASK_TIMEOUT_SECONDS)
+
         # Convert skill dicts to AgentSkill objects
         skill_dicts = getattr(config, "skills", [])
         skills = []
         for skill_data in skill_dicts:
             if isinstance(skill_data, dict):
-                skills.append(AgentSkill(
-                    id=skill_data.get("id", "skill"),
-                    name=skill_data.get("name", "Skill"),
-                    description=skill_data.get("description", ""),
-                    tags=skill_data.get("tags", []),
-                ))
+                skills.append(
+                    AgentSkill(
+                        id=skill_data.get("id", "skill"),
+                        name=skill_data.get("name", "Skill"),
+                        description=skill_data.get("description", ""),
+                        tags=skill_data.get("tags", []),
+                    )
+                )
 
+        # Streaming not fully implemented yet
         self._agent_card = AgentCardType(
             name=getattr(config, "agent_name", "Nanobot"),
             url=getattr(config, "agent_url", "http://localhost:8000"),
             description=getattr(config, "agent_description", "Nanobot AI Agent"),
             version="1.0.0",
-            capabilities={"streaming": True, "pushNotifications": False},
+            capabilities={"streaming": False, "pushNotifications": False},
             skills=skills,
             defaultInputModes=["text/plain"],
             defaultOutputModes=["text/plain"],
             supportsAuthenticatedExtendedCard=False,
         )
 
-        self._handler = A2ARequestHandler(self)
+        self._handler = A2ARequestHandler(self, task_timeout_seconds=task_timeout)
         self._app = A2AStarletteApplication(
             agent_card=self._agent_card,
             http_handler=self._handler,
@@ -281,6 +366,12 @@ class A2AChannel(BaseChannel):
 
     async def stop(self) -> None:
         self._running = False
+
+        # Cancel all pending tasks gracefully
+        if self._handler:
+            await self._handler.cancel_all_pending_tasks()
+
+        # Stop dispatch task
         if self._dispatch_task:
             self._dispatch_task.cancel()
             try:
@@ -321,5 +412,5 @@ class A2AChannel(BaseChannel):
         raise RuntimeError("A2A server not initialized")
 
     @property
-    def agent_card(self) -> AgentCard | None:
+    def agent_card(self) -> AgentCardType | None:
         return self._agent_card
