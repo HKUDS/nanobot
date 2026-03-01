@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from typing import Any
 
+import httpx
 from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
@@ -12,23 +14,68 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
 
+_INFLECTION_URL = "https://api.inflection.ai/external/api/inference"
+
+_EQ_PROMPT = (
+    "You are an emotionally intelligent conversational assistant. "
+    "A user has sent a message to their personal AI, and the AI has drafted a response. "
+    "Your job is to rewrite the response so it picks up on social cues — matching the "
+    "emotional tone, energy level, and conversational style of the exchange. "
+    "Make it feel warm, natural, and personal, like a thoughtful friend rather than a formal assistant. "
+    "Preserve ALL factual content, answers, and information exactly — only adjust tone and social awareness. "
+    "Do NOT add preamble or explanation — just return the rewritten response.\n\n"
+    "Draft response to rewrite:\n{content}"
+)
+
+
+async def _inflection_eq(content: str, api_key: str) -> str:
+    """Post-process a response through Inflection Pi-3.1 for social/emotional intelligence."""
+    if not content or not api_key:
+        return content
+    # Skip pure code responses — no EQ rewrite needed
+    stripped = content.strip()
+    if stripped.startswith("```") and stripped.endswith("```"):
+        return content
+    try:
+        prompt = _EQ_PROMPT.format(content=content)
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                _INFLECTION_URL,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"context": [{"text": prompt, "type": "Human"}], "config": "Pi-3.1"},
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if "text" in data:
+                return data["text"]
+            if "context" in data:
+                for item in reversed(data["context"]):
+                    if item.get("type") == "AI":
+                        return item["text"]
+    except Exception as e:
+        logger.warning("Inflection EQ post-processing failed, using original: {}", e)
+    return content
+
 
 class ChannelManager:
     """
     Manages chat channels and coordinates message routing.
-    
+
     Responsibilities:
     - Initialize enabled channels (Telegram, WhatsApp, etc.)
     - Start/stop channels
-    - Route outbound messages
+    - Route outbound messages (with Inflection EQ post-processing on final responses)
     """
-    
+
     def __init__(self, config: Config, bus: MessageBus):
         self.config = config
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
-        
+        import os
+        self._inflection_api_key = os.environ.get("INFLECTION_API_KEY", "")
+
         self._init_channels()
     
     def _init_channels(self) -> None:
@@ -42,6 +89,7 @@ class ChannelManager:
                     self.config.channels.telegram,
                     self.bus,
                     groq_api_key=self.config.providers.groq.api_key,
+                    elevenlabs_api_key=self.config.providers.elevenlabs.api_key,
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:
@@ -210,7 +258,14 @@ class ChannelManager:
                         continue
                     if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
                         continue
-                
+                else:
+                    # Final response — apply Inflection EQ to pick up on social cues
+                    if msg.content and self._inflection_api_key:
+                        msg = dataclasses.replace(
+                            msg,
+                            content=await _inflection_eq(msg.content, self._inflection_api_key),
+                        )
+
                 channel = self.channels.get(msg.channel)
                 if channel:
                     try:
