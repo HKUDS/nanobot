@@ -26,16 +26,30 @@ _SAVE_MEMORY_TOOL = [
                 "properties": {
                     "history_entry": {
                         "type": "string",
-                        "description": "A paragraph (2-5 sentences) summarizing key events/decisions/topics. "
-                        "Start with [YYYY-MM-DD HH:MM]. Include detail useful for grep search.",
+                        "description": (
+                            "A paragraph (2-5 sentences) recording meaningful user decisions, "
+                            "preferences, or confirmed outcomes. Start with [YYYY-MM-DD HH:MM]. "
+                            "Omit this field entirely if nothing worth preserving occurred. "
+                            "DO NOT record: heartbeat runs, cron executions, weather or news queries, "
+                            "tool errors, OAuth failures, routine status checks, or any automated "
+                            "operational activity. Only record outcomes confirmed successful — "
+                            "not attempted actions whose results were unclear or failed."
+                        ),
                     },
                     "memory_update": {
                         "type": "string",
-                        "description": "Full updated long-term memory as markdown. Include all existing "
-                        "facts plus new ones. Return unchanged if nothing new.",
+                        "description": (
+                            "Full updated long-term memory as markdown. Contains ONLY stable facts: "
+                            "user identity, preferences, values, relationships, standing instructions, "
+                            "and knowledge explicitly worth retaining across sessions. "
+                            "Preserve all existing facts unless explicitly superseded in this conversation. "
+                            "DO NOT include: skill bugs, tool errors, transient technical issues, "
+                            "operational events, or anything that may change without a conversation. "
+                            "Return unchanged if nothing in long-term memory needs updating."
+                        ),
                     },
                 },
-                "required": ["history_entry", "memory_update"],
+                "required": ["memory_update"],
             },
         },
     }
@@ -102,7 +116,10 @@ class MemoryStore:
             lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
 
         current_memory = self.read_long_term()
-        prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
+        prompt = f"""Review this conversation and call save_memory to record anything worth preserving.
+
+If the conversation contains only routine automated activity (heartbeat, cron, status checks,
+failed tools), call save_memory with only memory_update (unchanged) and no history_entry.
 
 ## Current Long-term Memory
 {current_memory or "(empty)"}
@@ -113,7 +130,11 @@ class MemoryStore:
         try:
             response = await provider.chat(
                 messages=[
-                    {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+                    {"role": "system", "content": (
+                        "You are a memory consolidation agent. Your job is to extract signal from noise. "
+                        "Call save_memory with only what genuinely matters long-term. "
+                        "When in doubt, leave it out."
+                    )},
                     {"role": "user", "content": prompt},
                 ],
                 tools=_SAVE_MEMORY_TOOL,
