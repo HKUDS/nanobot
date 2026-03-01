@@ -19,23 +19,58 @@ from nanobot.config.schema import TelegramConfig
 
 
 _USERS_FILE = Path.home() / ".nanobot" / "users.json"
+_COHERE_RAG_TOOL = str(Path.home() / ".nanobot" / "tools" / "cohere-rag.py")
 
 
-def _track_user(user) -> None:
-    """Persist a Telegram user's info to ~/.nanobot/users.json."""
+def _track_user(user) -> dict:
+    """Persist a Telegram user's info to ~/.nanobot/users.json. Returns {is_new, record}."""
     try:
         users = json.loads(_USERS_FILE.read_text()) if _USERS_FILE.exists() else {}
         uid = str(user.id)
+        is_new = uid not in users
         users[uid] = {
             "id": user.id,
             "username": user.username,
             "first_name": user.first_name,
             "last_name": getattr(user, "last_name", None),
             "last_seen": datetime.utcnow().isoformat(),
+            **({"first_seen": datetime.utcnow().isoformat()} if is_new else {}),
         }
         _USERS_FILE.write_text(json.dumps(users, indent=2, ensure_ascii=False))
+        return {"is_new": is_new, "record": users[uid]}
     except Exception as e:
         logger.warning("Failed to track user: {}", e)
+        return {"is_new": False, "record": {}}
+
+
+async def _rag_track(user, content: str, is_new: bool) -> None:
+    """Fire-and-forget: store user profile + message snippet in cohere-rag."""
+    try:
+        name = f"{user.first_name or ''} {getattr(user, 'last_name', '') or ''}".strip()
+        handle = f"@{user.username}" if user.username else f"id:{user.id}"
+
+        if is_new:
+            # First contact — store full profile
+            memory = (
+                f"[user-profile] {handle} (id={user.id}) name={name!r} "
+                f"first_seen={datetime.utcnow().date()}"
+            )
+            proc = await asyncio.create_subprocess_exec(
+                _COHERE_RAG_TOOL, "remember", memory, "--tag", "user-profile",
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+
+        # Store a snippet of this message for skill/interest tracking
+        snippet = content[:200].replace("\n", " ")
+        skill_memory = f"[skill-trace] {handle}: {snippet}"
+        proc = await asyncio.create_subprocess_exec(
+            _COHERE_RAG_TOOL, "remember", skill_memory, "--tag", "skill-trace",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+    except Exception as e:
+        logger.debug("RAG skill tracking failed: {}", e)
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -364,8 +399,8 @@ class TelegramChannel(BaseChannel):
         
         # Store chat_id for replies and track user
         self._chat_ids[sender_id] = chat_id
-        _track_user(user)
-        
+        tracked = _track_user(user)
+
         # Build content from text and/or media
         content_parts = []
         media_paths = []
@@ -438,7 +473,10 @@ class TelegramChannel(BaseChannel):
                 content_parts.append(f"[{media_type}: download failed]")
         
         content = "\n".join(content_parts) if content_parts else "[empty message]"
-        
+
+        # Background: skill-trace user message in cohere-rag (non-blocking)
+        asyncio.create_task(_rag_track(user, content, tracked.get("is_new", False)))
+
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
         
         str_chat_id = str(chat_id)
