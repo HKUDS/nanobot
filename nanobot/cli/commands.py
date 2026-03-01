@@ -274,7 +274,7 @@ def _make_provider(config: Config):
 
 @app.command()
 def gateway(
-    port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the nanobot gateway."""
@@ -291,9 +291,11 @@ def gateway(
         import logging
         logging.basicConfig(level=logging.DEBUG)
     
-    console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    
     config = load_config()
+    actual_port = port if port is not None else config.gateway.port
+    
+    console.print(f"{__logo__} Starting nanobot gateway on port {actual_port}...")
+    
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
