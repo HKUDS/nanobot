@@ -138,8 +138,10 @@ class XmppChannel(BaseChannel):
         """Run the XMPP client with reconnection logic."""
         while self._running:
             try:
-                self.client.connect()
-                self.client.process()
+                await self.client.connect()
+                # Keep the task alive until disconnected
+                while self.client.connected and self._running:
+                    await asyncio.sleep(1)
             except Exception as e:
                 logger.warning("XMPP connection error: {}", e)
             if self._running:
