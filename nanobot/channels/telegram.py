@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
+from datetime import datetime
+from pathlib import Path
 from loguru import logger
 from telegram import BotCommand, Update, ReplyParameters
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -13,6 +16,26 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
+
+
+_USERS_FILE = Path.home() / ".nanobot" / "users.json"
+
+
+def _track_user(user) -> None:
+    """Persist a Telegram user's info to ~/.nanobot/users.json."""
+    try:
+        users = json.loads(_USERS_FILE.read_text()) if _USERS_FILE.exists() else {}
+        uid = str(user.id)
+        users[uid] = {
+            "id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "last_name": getattr(user, "last_name", None),
+            "last_seen": datetime.utcnow().isoformat(),
+        }
+        _USERS_FILE.write_text(json.dumps(users, indent=2, ensure_ascii=False))
+    except Exception as e:
+        logger.warning("Failed to track user: {}", e)
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -120,10 +143,12 @@ class TelegramChannel(BaseChannel):
         config: TelegramConfig,
         bus: MessageBus,
         groq_api_key: str = "",
+        elevenlabs_api_key: str = "",
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
+        self.elevenlabs_api_key = elevenlabs_api_key
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -337,8 +362,9 @@ class TelegramChannel(BaseChannel):
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
         
-        # Store chat_id for replies
+        # Store chat_id for replies and track user
         self._chat_ids[sender_id] = chat_id
+        _track_user(user)
         
         # Build content from text and/or media
         content_parts = []
@@ -372,18 +398,17 @@ class TelegramChannel(BaseChannel):
             try:
                 file = await self._app.bot.get_file(media_file.file_id)
                 ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
-                
-                # Save to workspace/media/
-                from pathlib import Path
+
                 media_dir = Path.home() / ".nanobot" / "media"
                 media_dir.mkdir(parents=True, exist_ok=True)
-                
-                file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
+
+                ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                file_path = media_dir / f"{media_type}_{ts}{ext}"
                 await file.download_to_drive(str(file_path))
                 
                 media_paths.append(str(file_path))
                 
-                # Handle voice transcription
+                # Handle voice transcription (Groq auto-transcription; ElevenLabs via explicit request)
                 if media_type == "voice" or media_type == "audio":
                     from nanobot.providers.transcription import GroqTranscriptionProvider
                     transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
