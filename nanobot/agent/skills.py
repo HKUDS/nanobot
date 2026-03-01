@@ -5,6 +5,9 @@ import os
 import re
 import shutil
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
@@ -166,13 +169,26 @@ class SkillsLoader:
                 return content[match.end():].strip()
         return content
     
-    def _parse_nanobot_metadata(self, raw: str) -> dict:
-        """Parse skill metadata JSON from frontmatter (supports nanobot and openclaw keys)."""
-        try:
-            data = json.loads(raw)
-            return data.get("nanobot", data.get("openclaw", {})) if isinstance(data, dict) else {}
-        except (json.JSONDecodeError, TypeError):
+    def _parse_nanobot_metadata(self, raw: Any) -> dict:
+        """Parse skill metadata from frontmatter (stringified JSON or YAML object)."""
+        data: Any = raw
+        if isinstance(raw, str):
+            try:
+                data = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+
+        if not isinstance(data, dict):
             return {}
+
+        # Accept historical aliases used by third-party skills.
+        if isinstance(data.get("nanobot"), dict):
+            return data["nanobot"]
+        if isinstance(data.get("openclaw"), dict):
+            return data["openclaw"]
+        if isinstance(data.get("clawdbot"), dict):
+            return data["clawdbot"]
+        return data
     
     def _check_requirements(self, skill_meta: dict) -> bool:
         """Check if skill requirements are met (bins, env vars)."""
@@ -213,16 +229,62 @@ class SkillsLoader:
         content = self.load_skill(name)
         if not content:
             return None
-        
+
         if content.startswith("---"):
             match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
             if match:
-                # Simple YAML parsing
-                metadata = {}
-                for line in match.group(1).split("\n"):
-                    if ":" in line:
-                        key, value = line.split(":", 1)
-                        metadata[key.strip()] = value.strip().strip('"\'')
-                return metadata
-        
+                try:
+                    raw = yaml.safe_load(match.group(1))
+                    if isinstance(raw, dict):
+                        return raw
+                except Exception:
+                    pass
+
         return None
+
+    def detect_relevant_skills(self, message: str, max_skills: int = 4) -> list[str]:
+        """Select skills that match the user message via trigger phrases."""
+        text = self._normalize_text(message)
+        if not text:
+            return []
+
+        matches: list[str] = []
+        for skill in self.list_skills(filter_unavailable=True):
+            name = skill["name"]
+            triggers = self._skill_triggers(name)
+            if any(t in text for t in triggers):
+                matches.append(name)
+                if len(matches) >= max_skills:
+                    break
+        return matches
+
+    def _skill_triggers(self, name: str) -> list[str]:
+        """Build normalized trigger phrases from metadata and skill name."""
+        meta = self.get_skill_metadata(name) or {}
+        triggers: list[str] = []
+
+        raw_triggers = meta.get("triggers")
+        if isinstance(raw_triggers, list):
+            for t in raw_triggers:
+                if isinstance(t, str):
+                    triggers.append(t)
+        elif isinstance(raw_triggers, str):
+            triggers.append(raw_triggers)
+
+        triggers.append(name)
+        triggers.append(name.replace("-", " "))
+        triggers.append(name.replace("_", " "))
+
+        deduped: list[str] = []
+        for t in triggers:
+            norm = self._normalize_text(t)
+            if norm and norm not in deduped:
+                deduped.append(norm)
+        return deduped
+
+    @staticmethod
+    def _normalize_text(value: str) -> str:
+        text = value.lower()
+        text = re.sub(r"[^a-z0-9\s_-]+", " ", text)
+        text = text.replace("-", " ").replace("_", " ")
+        return re.sub(r"\s+", " ", text).strip()

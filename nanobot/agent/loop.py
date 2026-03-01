@@ -404,9 +404,13 @@ class AgentLoop:
             session = self.sessions.get_or_create(key)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=self.memory_window)
+            skill_names = self.context.skills.detect_relevant_skills(msg.content)
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=msg.content,
+                skill_names=skill_names,
+                channel=channel,
+                chat_id=chat_id,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
@@ -510,9 +514,11 @@ class AgentLoop:
 
         history = session.get_history(max_messages=self.memory_window)
         verify_before_answer = self._should_force_verification(msg.content)
+        skill_names = self.context.skills.detect_relevant_skills(msg.content)
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
+            skill_names=skill_names,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
             verify_before_answer=verify_before_answer,
