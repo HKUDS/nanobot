@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
@@ -59,10 +60,13 @@ ID_LENGTH = 12
 class A2ARequestHandler(RequestHandler):
     """A2A request handler that bridges to Nanobot's message bus."""
 
+    COMPLETED_TASK_TTL_SECONDS = 60
+
     def __init__(self, channel: "A2AChannel"):
         self._channel = channel
         self._task_store = InMemoryTaskStore()
         self._context_to_task: dict[str, str] = {}
+        self._completed_tasks: dict[str, float] = {}
         self._context_lock = asyncio.Lock()
 
     async def on_message_send(
@@ -70,7 +74,12 @@ class A2ARequestHandler(RequestHandler):
         params: MessageSendParams,
         context: ServerCallContext | None = None,
     ) -> TaskType:
-        """Handle message/send - create task and route to bus."""
+        """Handle message/send - create task and route to bus.
+
+        Authorization note: sender_id is derived from message.role.value which is
+        client-controlled. ServerCallContext does not provide authenticated identity.
+        For stronger auth, deploy behind an authenticating proxy.
+        """
         if not A2A_AVAILABLE:
             raise RuntimeError("a2a-sdk not installed")
 
@@ -108,8 +117,12 @@ class A2ARequestHandler(RequestHandler):
             session_key_override=context_id,
         )
 
-        await self._channel.bus.publish_inbound(inbound)
-        logger.debug("A2A task {} published to bus", task_id)
+        try:
+            await self._channel.bus.publish_inbound(inbound)
+            logger.debug("A2A task {} published to bus", task_id)
+        except Exception:
+            del self._context_to_task[context_id]
+            raise
 
         return task
 
@@ -140,6 +153,8 @@ class A2ARequestHandler(RequestHandler):
         if task:
             task.status = TaskStatus(state=TaskState.canceled)
             await self._task_store.save(task)
+            if task.context_id and task.context_id in self._context_to_task:
+                del self._context_to_task[task.context_id]
             return task
         return None
 
@@ -199,6 +214,27 @@ class A2ARequestHandler(RequestHandler):
 
         return "\n".join(texts)
 
+    def _cleanup_completed_tasks(self) -> None:
+        """Remove completed tasks tracking that have exceeded TTL.
+
+        Note: This cleans up our tracking dicts but relies on InMemoryTaskStore
+        having a delete method (if available) to actually remove tasks from the store.
+        """
+        now = time.time()
+        expired = [
+            task_id
+            for task_id, completed_at in self._completed_tasks.items()
+            if now - completed_at > self.COMPLETED_TASK_TTL_SECONDS
+        ]
+        for task_id in expired:
+            del self._completed_tasks[task_id]
+            delete_fn = getattr(self._task_store, "delete", None)
+            if delete_fn:
+                try:
+                    delete_fn(task_id)
+                except Exception:
+                    pass
+
     async def deliver_response(self, task_id: str, content: str) -> bool:
         """Deliver agent response to a pending task."""
         task = await self._task_store.get(task_id)
@@ -211,6 +247,10 @@ class A2ARequestHandler(RequestHandler):
                 )
             ]
             await self._task_store.save(task)
+            if task.context_id and task.context_id in self._context_to_task:
+                del self._context_to_task[task.context_id]
+            self._completed_tasks[task_id] = time.time()
+            self._cleanup_completed_tasks()
             logger.debug("A2A response delivered to task {}", task_id)
             return True
         return False
@@ -280,20 +320,21 @@ class A2AChannel(BaseChannel):
         logger.info("A2A channel stopped")
 
     async def send(self, msg: OutboundMessage) -> None:
-        try:
-            if not self._handler:
-                return
+        if not self._handler:
+            return
 
-            task_id = msg.metadata.get("task_id") if msg.metadata else None
+        task_id = msg.metadata.get("task_id") if msg.metadata else None
 
-            if not task_id:
-                context_id = msg.chat_id
-                task_id = self._handler._context_to_task.get(context_id)
+        if not task_id:
+            context_id = msg.chat_id
+            task_id = self._handler._context_to_task.get(context_id)
 
-            if task_id:
+        if task_id:
+            try:
                 await self._handler.deliver_response(task_id, msg.content)
-        except Exception as e:
-            logger.error("A2A send error: {}", e)
+            except Exception as e:
+                logger.error("A2A send error: {}", e)
+                raise
 
     def get_asgi_app(self):
         if self._app:

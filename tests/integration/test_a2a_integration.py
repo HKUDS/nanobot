@@ -18,7 +18,6 @@ def mock_config():
         {"id": "test", "name": "Test", "description": "Test skill", "tags": []},
     ]
     config.allow_from = []  # Allow all senders
-    config.task_timeout_seconds = 300.0
     return config
 
 
