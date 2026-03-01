@@ -316,7 +316,9 @@ def gateway(
         memory_window=config.agents.defaults.memory_window,
         compression_window_size=config.agents.defaults.compression_window_size,
         memory_consolidation_model=config.agents.defaults.memory_consolidation_model,
+        reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
+        web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -332,6 +334,8 @@ def gateway(
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
+        from nanobot.agent.tools.message import MessageTool
+
         target_channel = job.payload.channel or "cli"
         target_chat_id = job.payload.to or "direct"
         session_key = _cron_execution_session_key(
@@ -341,18 +345,28 @@ def gateway(
             chat_id=target_chat_id,
             to=job.payload.to,
         )
+        reminder_note = (
+            "[Scheduled Task] Timer finished.\n\n"
+            f"Task '{job.name}' has been triggered.\n"
+            f"Scheduled instruction: {job.payload.message}"
+        )
         response = await agent.process_direct(
-            job.payload.message,
+            reminder_note,
             session_key=session_key,
             channel=target_channel,
             chat_id=target_chat_id,
         )
-        if job.payload.deliver and job.payload.to:
+
+        message_tool = agent.tools.get("message")
+        if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+            return response
+
+        if job.payload.deliver and job.payload.to and response:
             from nanobot.bus.events import OutboundMessage
             await bus.publish_outbound(OutboundMessage(
                 channel=target_channel,
                 chat_id=job.payload.to,
-                content=response or ""
+                content=response
             ))
         return response
     cron.on_job = on_cron_job
@@ -518,7 +532,9 @@ def agent(
         memory_window=config.agents.defaults.memory_window,
         compression_window_size=config.agents.defaults.compression_window_size,
         memory_consolidation_model=config.agents.defaults.memory_consolidation_model,
+        reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
+        web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -1022,10 +1038,12 @@ def cron_run(
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
         memory_consolidation_model=config.agents.defaults.memory_consolidation_model,
+        reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
+        web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
-        mcp_servers=config.tools.mcp_servers,
+        mcp_servers=_enabled_mcp_servers(config) or None,
         channels_config=config.channels,
     )
 

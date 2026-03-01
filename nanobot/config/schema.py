@@ -238,6 +238,7 @@ class AgentDefaults(Base):
     temperature: float = 0.7
     max_tool_iterations: int = 50
     memory_window: int = 50
+    reasoning_effort: str | None = None  # low / medium / high — enables provider reasoning mode
     compression_window_size: int = 12  # Consolidate only after this many compressible messages accumulate
     memory_consolidation_model: str = ""  # Optional dedicated model for MEMORY/HISTORY consolidation
     thinking: str | None = None  # "enabled" (Opus 4.5) or "adaptive" (Opus 4.6), None = off
@@ -309,6 +310,7 @@ class WebSearchConfig(Base):
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
+    proxy: str | None = None  # HTTP/SOCKS5 proxy URL
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 

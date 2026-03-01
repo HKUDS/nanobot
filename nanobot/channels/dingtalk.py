@@ -373,6 +373,11 @@ class DingTalkChannel(BaseChannel):
             return preview
         return f"{preview[:max_chars - 3]}..."
 
+    @staticmethod
+    def _is_http_url(value: str) -> bool:
+        """Return True when the media reference is an HTTP(S) URL."""
+        return urlparse(value).scheme in ("http", "https")
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through DingTalk (private or group)."""
         if self._is_progress_notice(msg):
@@ -434,10 +439,13 @@ class DingTalkChannel(BaseChannel):
 
         # Send images (if any)
         for media_path in (msg.media or []):
-            media_id = await self._upload_media(media_path)
-            if not media_id:
-                logger.warning(f"Skipping image send, upload failed: {media_path}")
-                continue
+            photo_ref = media_path
+            if not self._is_http_url(media_path):
+                media_id = await self._upload_media(media_path)
+                if not media_id:
+                    logger.warning(f"Skipping image send, upload failed: {media_path}")
+                    continue
+                photo_ref = media_id
 
             if is_group:
                 img_url = "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
@@ -445,7 +453,7 @@ class DingTalkChannel(BaseChannel):
                     "robotCode": self.config.client_id,
                     "openConversationId": msg.chat_id,
                     "msgKey": "sampleImageMsg",
-                    "msgParam": json.dumps({"photoURL": media_id}),
+                    "msgParam": json.dumps({"photoURL": photo_ref}),
                 }
             else:
                 img_url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
@@ -453,7 +461,7 @@ class DingTalkChannel(BaseChannel):
                     "robotCode": self.config.client_id,
                     "userIds": [msg.chat_id],
                     "msgKey": "sampleImageMsg",
-                    "msgParam": json.dumps({"photoURL": media_id}),
+                    "msgParam": json.dumps({"photoURL": photo_ref}),
                 }
 
             try:

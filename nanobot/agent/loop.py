@@ -55,7 +55,9 @@ class AgentLoop:
         memory_window: int = 50,
         compression_window_size: int = 12,
         memory_consolidation_model: str = "",
+        reasoning_effort: str | None = None,
         brave_api_key: str | None = None,
+        web_proxy: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
@@ -81,7 +83,9 @@ class AgentLoop:
         self.memory_window = memory_window
         self.compression_window_size = max(1, compression_window_size)
         self.memory_consolidation_model = memory_consolidation_model.strip()
+        self.reasoning_effort = reasoning_effort
         self.brave_api_key = brave_api_key
+        self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -99,7 +103,9 @@ class AgentLoop:
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            reasoning_effort=reasoning_effort,
             brave_api_key=brave_api_key,
+            web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
             mcp_servers=mcp_servers,
@@ -136,8 +142,8 @@ class AgentLoop:
             )
         )
 
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key))
-        self.tools.register(WebFetchTool())
+        self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
+        self.tools.register(WebFetchTool(proxy=self.web_proxy))
 
         self.tools.register(MessageTool(send_callback=self._publish_outbound_with_ack))
         self.tools.register(SpawnTool(manager=self.subagents))
@@ -164,6 +170,7 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
+        await self.start_mcp()
         logger.info("Agent loop started")
 
         while self._running:
@@ -489,6 +496,7 @@ class AgentLoop:
                 model=model_to_use,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
+                reasoning_effort=self.reasoning_effort,
                 thinking=self.thinking,
                 thinking_budget=self.thinking_budget,
                 effort=self.effort,
@@ -519,6 +527,7 @@ class AgentLoop:
                     response.content,
                     tool_call_dicts,
                     reasoning_content=response.reasoning_content,
+                    thinking_blocks=response.thinking_blocks,
                 )
 
                 if response.content and response.content.strip():

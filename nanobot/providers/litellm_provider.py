@@ -19,7 +19,9 @@ from nanobot.providers.registry import find_by_model, find_gateway
 
 # Standard OpenAI chat-completion message keys plus reasoning_content for
 # thinking-enabled models (Kimi k2.5, DeepSeek-R1, etc.).
-_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
+_ALLOWED_MSG_KEYS = frozenset(
+    {"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"}
+)
 _ALNUM = string.ascii_letters + string.digits
 
 def _short_tool_id() -> str:
@@ -58,6 +60,8 @@ class LiteLLMProvider(LLMProvider):
         # Configure environment variables
         if api_key:
             self._setup_env(api_key, api_base, default_model)
+        if api_base:
+            litellm.api_base = api_base
 
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
@@ -297,6 +301,7 @@ class LiteLLMProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        reasoning_effort: str | None = None,
         thinking: str | None = None,
         thinking_budget: int = 10000,
         effort: str | None = None,
@@ -334,10 +339,6 @@ class LiteLLMProvider(LLMProvider):
         # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
         self._apply_model_overrides(model, kwargs)
 
-        # Pass api_key directly — more reliable than env vars alone
-        if self.api_key:
-            kwargs["api_key"] = self.api_key
-
         # Pass api_base for custom endpoints
         if self.api_base:
             kwargs["api_base"] = self.api_base
@@ -349,6 +350,10 @@ class LiteLLMProvider(LLMProvider):
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
+
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
+            kwargs["drop_params"] = True
 
         if tools:
             kwargs["tools"] = tools
@@ -609,12 +614,14 @@ class LiteLLMProvider(LLMProvider):
 
         usage = self._extract_usage(response.usage if hasattr(response, "usage") else None)
         reasoning_content = getattr(message, "reasoning_content", None) or None
+        thinking_blocks = getattr(message, "thinking_blocks", None) or None
         return LLMResponse(
             content=message.content,
             tool_calls=tool_calls,
             finish_reason=choice.finish_reason or "stop",
             usage=usage,
             reasoning_content=reasoning_content,
+            thinking_blocks=thinking_blocks,
         )
 
     def get_default_model(self) -> str:
