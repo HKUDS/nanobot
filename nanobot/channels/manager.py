@@ -152,7 +152,6 @@ class ChannelManager:
                 self.channels["telegram"] = TelegramChannel(
                     self.config.channels.telegram,
                     self.bus,
-                    groq_api_key=self.config.providers.groq.api_key,
                     elevenlabs_api_key=self.config.providers.elevenlabs.api_key,
                 )
                 logger.info("Telegram channel enabled")

@@ -177,12 +177,10 @@ class TelegramChannel(BaseChannel):
         self,
         config: TelegramConfig,
         bus: MessageBus,
-        groq_api_key: str = "",
         elevenlabs_api_key: str = "",
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
-        self.groq_api_key = groq_api_key
         self.elevenlabs_api_key = elevenlabs_api_key
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
@@ -457,13 +455,10 @@ class TelegramChannel(BaseChannel):
 
                 media_paths.append(str(file_path))
                 
-                # Handle voice transcription (ElevenLabs primary; Groq fallback)
+                # Handle voice transcription via ElevenLabs Scribe
                 if media_type == "voice" or media_type == "audio":
-                    from nanobot.providers.transcription import ElevenLabsTranscriptionProvider, GroqTranscriptionProvider
-                    if self.elevenlabs_api_key:
-                        transcriber = ElevenLabsTranscriptionProvider(api_key=self.elevenlabs_api_key)
-                    else:
-                        transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
+                    from nanobot.providers.transcription import ElevenLabsTranscriptionProvider
+                    transcriber = ElevenLabsTranscriptionProvider(api_key=self.elevenlabs_api_key)
                     transcription = await transcriber.transcribe(file_path)
                     if transcription:
                         logger.info("Transcribed {}: {}...", media_type, transcription[:50])

@@ -1,65 +1,49 @@
-"""Voice transcription provider using Groq."""
+"""Voice transcription via ElevenLabs Scribe."""
 
 import os
 from pathlib import Path
-from typing import Any
 
 import httpx
 from loguru import logger
 
 
-class GroqTranscriptionProvider:
+class ElevenLabsTranscriptionProvider:
     """
-    Voice transcription provider using Groq's Whisper API.
-    
-    Groq offers extremely fast transcription with a generous free tier.
+    Voice transcription using ElevenLabs Scribe (scribe_v1).
+    Primary and only transcription provider.
     """
-    
+
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or os.environ.get("GROQ_API_KEY")
-        self.api_url = "https://api.groq.com/openai/v1/audio/transcriptions"
-    
+        self.api_key = api_key or os.environ.get("ELEVENLABS_API_KEY")
+        self.api_url = "https://api.elevenlabs.io/v1/speech-to-text"
+
     async def transcribe(self, file_path: str | Path) -> str:
-        """
-        Transcribe an audio file using Groq.
-        
-        Args:
-            file_path: Path to the audio file.
-            
-        Returns:
-            Transcribed text.
-        """
         if not self.api_key:
-            logger.warning("Groq API key not configured for transcription")
+            logger.warning("ElevenLabs API key not configured for transcription")
             return ""
-        
+
         path = Path(file_path)
         if not path.exists():
             logger.error("Audio file not found: {}", file_path)
             return ""
-        
+
         try:
             async with httpx.AsyncClient() as client:
                 with open(path, "rb") as f:
-                    files = {
-                        "file": (path.name, f),
-                        "model": (None, "whisper-large-v3"),
-                    }
-                    headers = {
-                        "Authorization": f"Bearer {self.api_key}",
-                    }
-                    
+                    # Both fields in files= to guarantee multipart form encoding
                     response = await client.post(
                         self.api_url,
-                        headers=headers,
-                        files=files,
-                        timeout=60.0
+                        headers={"xi-api-key": self.api_key},
+                        files={
+                            "audio": (path.name, f, "audio/ogg"),
+                            "model_id": (None, "scribe_v1"),
+                        },
+                        timeout=60.0,
                     )
-                    
                     response.raise_for_status()
-                    data = response.json()
-                    return data.get("text", "")
-                    
+                    result = response.json().get("text", "")
+                    logger.info("ElevenLabs transcribed {} chars from {}", len(result), path.name)
+                    return result
         except Exception as e:
-            logger.error("Groq transcription error: {}", e)
+            logger.error("ElevenLabs transcription error: {}", e)
             return ""
