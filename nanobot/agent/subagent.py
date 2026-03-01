@@ -31,7 +31,7 @@ class SubagentManager:
         reasoning_effort: str | None = None,
         brave_api_key: str | None = None,
         web_proxy: str | None = None,
-        exec_config: "ExecToolConfig | None" = None,
+        exec_config: ExecToolConfig | None = None,
         restrict_to_workspace: bool = False,
         mcp_servers: dict | None = None,
     ):
