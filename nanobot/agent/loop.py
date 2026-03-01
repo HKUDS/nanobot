@@ -192,6 +192,7 @@ class AgentLoop:
 
         while iteration < self.max_iterations:
             iteration += 1
+            logger.debug("=== Agent iteration {} ===", iteration)
 
             response = await self.provider.chat(
                 messages=messages,
@@ -201,6 +202,16 @@ class AgentLoop:
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
             )
+
+            # Log reasoning content and thinking blocks
+            if response.reasoning_content:
+                logger.trace("Reasoning content: {}", response.reasoning_content)
+            if response.thinking_blocks:
+                for i, block in enumerate(response.thinking_blocks):
+                    logger.trace("Thinking block {}: {}", i, block.get('text', str(block)))
+
+            logger.debug("LLM response: finish_reason={}, tool_calls={}, content_length={}", 
+                        response.finish_reason, len(response.tool_calls), len(response.content or ""))
 
             if response.has_tool_calls:
                 if on_progress:
@@ -231,6 +242,11 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    
+                    # Log tool result (truncated for space)
+                    result_preview = result[:200] + "..." if len(result) > 200 else result
+                    logger.debug("Tool result for {}: {}", tool_call.name, result_preview)
+                    
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -242,6 +258,8 @@ class AgentLoop:
                     logger.error("LLM returned error: {}", (clean or "")[:200])
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
+                
+                logger.debug("Final response content: {}", (clean or "")[:500])
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
@@ -336,6 +354,12 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        # Set session context for logging
+        try:
+            from nanobot.logging_config import set_session_context
+            set_session_context(session_key or msg.session_key)
+        except ImportError:
+            pass  # Fallback if logging_config not available
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id

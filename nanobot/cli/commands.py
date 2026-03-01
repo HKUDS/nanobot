@@ -258,8 +258,21 @@ def gateway(
     from nanobot.heartbeat.service import HeartbeatService
     
     if verbose:
-        import logging
-        logging.basicConfig(level=logging.DEBUG)
+        # Configure enhanced logging
+        from loguru import logger
+        from nanobot.logging_config import setup_agent_logging, get_log_level_from_env
+        
+        # Check if LOGURU_LEVEL is set, otherwise use DEBUG for verbose
+        log_level = get_log_level_from_env()
+        if log_level == "INFO" and verbose:
+            log_level = "DEBUG"
+        
+        setup_agent_logging(verbose=(log_level in ["DEBUG", "TRACE"]), log_file="nanobot.log")
+        logger.info(f"Enhanced logging enabled at level: {log_level}")
+    else:
+        # Basic logging configuration
+        from nanobot.logging_config import configure_logging
+        configure_logging(level="INFO")
     
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     
