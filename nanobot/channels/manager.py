@@ -23,7 +23,7 @@ _TTS_WORKSPACE = Path.home() / ".nanobot" / "workspace"
 _TTS_MAX_CHARS = 4000  # ElevenLabs soft limit per request
 
 
-async def _elevenlabs_tts(text: str, api_key: str, voice_id: str) -> Path | None:
+async def _elevenlabs_tts(text: str, api_key: str, voice_id: str, chat_id: str = "") -> Path | None:
     """Generate voice audio from text using ElevenLabs TTS. Returns file path or None on error."""
     if not text or not api_key or not voice_id:
         return None
@@ -41,7 +41,12 @@ async def _elevenlabs_tts(text: str, api_key: str, voice_id: str) -> Path | None
 
     try:
         url = _ELEVENLABS_TTS_URL.format(voice_id=voice_id)
-        _TTS_WORKSPACE.mkdir(parents=True, exist_ok=True)
+        # Save TTS to media/voicemessage/{receiverID}/
+        if chat_id:
+            tts_dir = Path.home() / ".nanobot" / "media" / "voicemessage" / str(chat_id)
+        else:
+            tts_dir = _TTS_WORKSPACE
+        tts_dir.mkdir(parents=True, exist_ok=True)
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 url,
@@ -60,7 +65,7 @@ async def _elevenlabs_tts(text: str, api_key: str, voice_id: str) -> Path | None
             resp.raise_for_status()
 
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        out_path = _TTS_WORKSPACE / f"tts_{ts}.mp3"
+        out_path = tts_dir / f"tts_{ts}.mp3"
         out_path.write_bytes(resp.content)
 
         # Tag with artist name
@@ -332,7 +337,8 @@ class ChannelManager:
                     # ElevenLabs TTS — generate voice for every final response
                     if msg.content and self._elevenlabs_api_key and self._elevenlabs_voice_id:
                         voice_path = await _elevenlabs_tts(
-                            msg.content, self._elevenlabs_api_key, self._elevenlabs_voice_id
+                            msg.content, self._elevenlabs_api_key, self._elevenlabs_voice_id,
+                            chat_id=msg.chat_id,
                         )
                         if voice_path:
                             existing_media = list(msg.media or [])

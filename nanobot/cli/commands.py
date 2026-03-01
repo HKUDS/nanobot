@@ -213,6 +213,14 @@ def _make_provider(config: Config):
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         return OpenAICodexProvider(default_model=model)
 
+    # Gemini: direct google-genai SDK, bypasses LiteLLM
+    if provider_name == "gemini" or model.startswith("gemini/"):
+        from nanobot.providers.gemini_provider import GeminiProvider
+        return GeminiProvider(
+            api_key=p.api_key if p else None,
+            default_model=model,
+        )
+
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     if provider_name == "custom":
         return CustomProvider(

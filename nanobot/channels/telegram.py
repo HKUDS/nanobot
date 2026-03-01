@@ -435,7 +435,11 @@ class TelegramChannel(BaseChannel):
                 file = await self._app.bot.get_file(media_file.file_id)
                 ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
 
-                media_dir = Path.home() / ".nanobot" / "media"
+                # Voice/audio → media/voicemessage/{senderID}/
+                if media_type in ("voice", "audio"):
+                    media_dir = Path.home() / ".nanobot" / "media" / "voicemessage" / str(user.id)
+                else:
+                    media_dir = Path.home() / ".nanobot" / "media"
                 media_dir.mkdir(parents=True, exist_ok=True)
 
                 ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
