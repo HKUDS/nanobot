@@ -60,7 +60,7 @@ ID_LENGTH = 12
 class A2ARequestHandler(RequestHandler):
     """A2A request handler that bridges to Nanobot's message bus."""
 
-    COMPLETED_TASK_TTL_SECONDS = 60
+    COMPLETED_TASK_TTL_SECONDS = 86400  # 24 hours
 
     def __init__(self, channel: "A2AChannel"):
         self._channel = channel
