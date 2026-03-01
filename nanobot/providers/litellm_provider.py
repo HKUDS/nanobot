@@ -1,8 +1,11 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import json
 import os
 import secrets
 import string
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import json_repair
@@ -169,6 +172,104 @@ class LiteLLMProvider(LLMProvider):
             sanitized.append(clean)
         return sanitized
 
+    def _debug_log_prompt(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+    ) -> None:
+        """Persist the latest full prompt for local debugging（仅保留最近一条调用）."""
+        try:
+            base = Path.home() / ".nanobot" / "debug"
+            base.mkdir(parents=True, exist_ok=True)
+            # 这里已经不是 JSONL，而是纯文本调试日志，所以用 .log 更直观，
+            # 也避免编辑器按 JSON 高亮导致因未闭合的 `"` 看起来「全文件乱掉」。
+            path = base / "prompts.log"
+
+            ts = datetime.now().isoformat()
+            lines: list[str] = []
+            sep = "=" * 80
+            lines.append(f"{sep}\n")
+            lines.append(f"{ts}  model={model}\n\n")
+            lines.append("=== MESSAGES ===\n\n")
+
+            for idx, msg in enumerate(messages, start=1):
+                role = msg.get("role", "?")
+                content = msg.get("content")
+                tool_calls = msg.get("tool_calls")
+                tc_hint = ""
+                if tool_calls:
+                    names = [tc.get("function", {}).get("name", "") for tc in tool_calls]
+                    names = [n for n in names if n]
+                    if names:
+                        tc_hint = f" (tool_calls: {', '.join(names)})"
+                lines.append(f"[{idx}] {role}{tc_hint}:\n")
+                # 内容按行缩进，避免整体视觉混在一起
+                if isinstance(content, str):
+                    for line in str(content).splitlines():
+                        lines.append(f"    {line}\n")
+                else:
+                    pretty = json.dumps(content, ensure_ascii=False, indent=2)
+                    for line in pretty.splitlines():
+                        lines.append(f"    {line}\n")
+                lines.append("\n")
+
+            # Tools summary（工具定义）
+            lines.append("=== TOOLS (definitions) ===\n")
+            for t in tools or []:
+                fn = t.get("function", {})
+                name = fn.get("name", "")
+                desc = fn.get("description", "")
+                lines.append(f"- {name}: {desc}\n")
+            lines.append("\n")
+
+            # 只保留最近一次调用：直接覆盖写入
+            text = "".join(lines)
+            with path.open("w", encoding="utf-8") as f:
+                f.write(text)
+        except Exception:
+            # Debug logging必须不能影响正常执行
+            return
+
+    def _debug_log_response(self, model: str, response: Any) -> None:
+        """Persist the latest raw LLM response for debugging（仅保留最近一条调用）."""
+        try:
+            base = Path.home() / ".nanobot" / "debug"
+            base.mkdir(parents=True, exist_ok=True)
+            path = base / "responses.log"
+
+            ts = datetime.now().isoformat()
+            sep = "=" * 80
+
+            # 尽量用可读的 JSON / dict 形式展示；LiteLLM 的响应对象一般是可序列化的。
+            try:
+                # 有些实现支持 .model_dump() / .dict()
+                if hasattr(response, "model_dump"):
+                    data = response.model_dump()
+                elif hasattr(response, "dict"):
+                    data = response.dict()  # type: ignore[call-arg]
+                else:
+                    # 退化为 json.dumps，必要时先用 vars() 包一层
+                    data = response
+                text_body = json.dumps(data, ensure_ascii=False, indent=2, default=str)
+            except Exception:
+                # 最兜底：直接用 str()
+                text_body = str(response)
+
+            lines = [
+                f"{sep}\n",
+                f"{ts}  model={model}\n\n",
+                "=== RAW RESPONSE ===\n\n",
+                text_body,
+                "\n",
+            ]
+
+            with path.open("w", encoding="utf-8") as f:
+                f.writelines(lines)
+        except Exception:
+            # Debug logging 必须是"最佳努力"，不能影响正常执行
+            return
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -193,6 +294,9 @@ class LiteLLMProvider(LLMProvider):
         """
         original_model = model or self.default_model
         model = self._resolve_model(original_model)
+
+        # Debug: record the full prompt (system + history + user + tools) for this call.
+        self._debug_log_prompt(original_model, messages, tools)
 
         if self._supports_cache_control(original_model):
             messages, tools = self._apply_cache_control(messages, tools)
@@ -233,6 +337,8 @@ class LiteLLMProvider(LLMProvider):
 
         try:
             response = await acompletion(**kwargs)
+            # 记录第一手原始响应，便于调试 / 复现
+            self._debug_log_response(original_model, response)
             return self._parse_response(response)
         except Exception as e:
             # Return error as content for graceful handling
