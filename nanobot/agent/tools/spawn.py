@@ -30,11 +30,10 @@ class SpawnTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Spawn a subagent to handle a task in the background. "
-            "Use this for complex or time-consuming tasks that can run independently. "
-            "The subagent will complete the task and report back when done."
+            "Spawn a background subagent to handle a task independently. Use for complex or long-running work "
+            "(e.g. research, multi-step runs); the subagent has exec, files, and web tools and reports back when done."
         )
-    
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -42,11 +41,11 @@ class SpawnTool(Tool):
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "The task for the subagent to complete",
+                    "description": "Clear description of the task for the subagent to complete",
                 },
                 "label": {
                     "type": "string",
-                    "description": "Optional short label for the task (for display)",
+                    "description": "Optional short label for the task (for display to user)",
                 },
             },
             "required": ["task"],

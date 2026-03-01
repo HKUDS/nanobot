@@ -1,6 +1,6 @@
 ---
 name: tmux
-description: Remote-control tmux sessions for interactive CLIs by sending keystrokes and scraping pane output.
+description: Run and control interactive TTY sessions (e.g. Python REPL, prompts) via tmux. Use only when the task needs an interactive CLI; prefer exec for non-interactive long runs.
 metadata: {"nanobot":{"emoji":"🧵","os":["darwin","linux"],"requires":{"bins":["tmux"]}}}
 ---
 
