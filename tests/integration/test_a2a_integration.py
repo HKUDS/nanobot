@@ -4,18 +4,18 @@ import pytest
 import uuid
 from unittest.mock import MagicMock
 
-from a2a.types import AgentSkill, Message, Part
+from a2a.types import Message, Part
 
 
 @pytest.fixture
 def mock_config():
-    """Create a mock A2A config."""
+    """Create a mock A2A config with skill dicts (as they would be in YAML config)."""
     config = MagicMock()
     config.agent_name = "Integration Test Agent"
     config.agent_url = "http://localhost:8000"
     config.agent_description = "Integration test agent"
     config.skills = [
-        AgentSkill(id="test", name="Test", description="Test skill", tags=[]),
+        {"id": "test", "name": "Test", "description": "Test skill", "tags": []},
     ]
     return config
 
