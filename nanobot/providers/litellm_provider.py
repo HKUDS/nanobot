@@ -59,6 +59,8 @@ class LiteLLMProvider(LLMProvider):
         litellm.suppress_debug_info = True
         # Drop unsupported parameters for providers (e.g., gpt-5 rejects some params)
         litellm.drop_params = True
+        # Let LiteLLM translate provider-specific params (e.g. Anthropic thinking)
+        litellm.modify_params = True
 
     def _setup_env(self, api_key: str, api_base: str | None, model: str) -> None:
         """Set environment variables based on detected provider."""
@@ -177,6 +179,7 @@ class LiteLLMProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        thinking: dict | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -223,10 +226,13 @@ class LiteLLMProvider(LLMProvider):
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
         
-        if reasoning_effort:
+        if thinking:
+            kwargs["thinking"] = thinking
+            kwargs["drop_params"] = True
+        elif reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
             kwargs["drop_params"] = True
-        
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
