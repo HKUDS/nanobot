@@ -204,6 +204,20 @@ def _make_provider(config: Config):
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.custom_provider import CustomProvider
+    from nanobot.providers.multi_model_provider import MultiModelProvider
+
+    # Check for multi-model configuration
+    if config.providers.multi_model.enabled and config.providers.multi_model.models:
+        models = config.providers.multi_model.models
+        default_model = config.providers.multi_model.default_model
+        console.print(f"[yellow]Using multi-model provider with {len(models)} fallback models:[/yellow]")
+        for i, model in enumerate(models, 1):
+            console.print(f"  {i}. {model}")
+        return MultiModelProvider(
+            config=config,
+            models=models,
+            default_model=default_model,
+        )
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)

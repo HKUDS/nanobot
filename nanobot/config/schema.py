@@ -243,6 +243,14 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
+class MultiModelConfig(Base):
+    """Multi-model provider configuration with fallback support."""
+
+    enabled: bool = False
+    models: list[str] = Field(default_factory=list)  # List of models to try in order
+    default_model: str = "anthropic/claude-opus-4-5"  # Fallback if no models configured
+
+
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
@@ -263,6 +271,7 @@ class ProvidersConfig(Base):
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎) API gateway
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+    multi_model: MultiModelConfig = Field(default_factory=MultiModelConfig)  # Multi-model fallback
 
 
 class HeartbeatConfig(Base):
