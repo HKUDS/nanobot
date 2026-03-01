@@ -32,7 +32,7 @@ async def get_state() -> dict[str, Any]:
 
         session_manager = SessionManager(config.workspace_path)
 
-        a2a_channel = A2AChannel(config.channels.a2a, bus, session_manager=session_manager)
+        a2a_channel = A2AChannel(config.channels.a2a, bus)
         await a2a_channel.start()
 
         provider = LiteLLMProvider(config)

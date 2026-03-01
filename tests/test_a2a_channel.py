@@ -1,6 +1,5 @@
 """Unit tests for A2AChannel."""
 
-import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
@@ -158,21 +157,26 @@ class TestDeliverResponse:
     """Tests for response delivery."""
 
     @pytest.mark.asyncio
-    async def test_deliver_response_resolves_future(self, a2a_channel):
-        """Test deliver_response resolves the pending task future."""
-        future = asyncio.Future()
-        a2a_channel._handler._pending_tasks["task-123"] = future
+    async def test_deliver_response_updates_task(self, a2a_channel):
+        """Test deliver_response updates task status and artifacts."""
+        from a2a.types import TaskQueryParams, TaskState
 
-        result = a2a_channel._handler.deliver_response("task-123", "Response text")
+        message = make_message("Test", context_id="deliver-test")
+        params = MessageSendParams(message=message)
+        task = await a2a_channel._handler.on_message_send(params)
+
+        result = await a2a_channel._handler.deliver_response(task.id, "Response text")
 
         assert result is True
-        assert future.done()
-        assert future.result() == "Response text"
+        query = TaskQueryParams(id=task.id)
+        updated_task = await a2a_channel._handler.on_get_task(query)
+        assert updated_task.status.state == TaskState.completed
+        assert len(updated_task.artifacts) == 1
 
     @pytest.mark.asyncio
     async def test_deliver_response_unknown_task(self, a2a_channel):
         """Test deliver_response returns False for unknown task."""
-        result = a2a_channel._handler.deliver_response("unknown-task", "Response")
+        result = await a2a_channel._handler.deliver_response("unknown-task", "Response")
         assert result is False
 
 
@@ -180,22 +184,26 @@ class TestSend:
     """Tests for send method."""
 
     @pytest.mark.asyncio
-    async def test_send_resolves_pending_future(self, a2a_channel):
-        """Test send() resolves the pending task future via metadata."""
-        future = asyncio.Future()
-        a2a_channel._handler._pending_tasks["task-123"] = future
+    async def test_send_updates_task(self, a2a_channel):
+        """Test send() updates task via deliver_response."""
+        from a2a.types import TaskQueryParams, TaskState
+
+        message = make_message("Test", context_id="send-test")
+        params = MessageSendParams(message=message)
+        task = await a2a_channel._handler.on_message_send(params)
 
         msg = OutboundMessage(
             channel="a2a",
-            chat_id="ctx-456",
+            chat_id="send-test",
             content="Response text",
-            metadata={"task_id": "task-123"},
+            metadata={"task_id": task.id},
         )
 
         await a2a_channel.send(msg)
 
-        assert future.done()
-        assert future.result() == "Response text"
+        query = TaskQueryParams(id=task.id)
+        updated_task = await a2a_channel._handler.on_get_task(query)
+        assert updated_task.status.state == TaskState.completed
 
 
 class TestLifecycle:
@@ -316,18 +324,12 @@ class TestTaskStatus:
         """Test task status updates to completed with artifacts."""
         from a2a.types import TaskQueryParams, TaskState
 
-        # Create task
         message = make_message("Test", context_id="artifact-test")
         params = MessageSendParams(message=message)
         task = await a2a_channel._handler.on_message_send(params)
 
-        # Deliver response
-        a2a_channel._handler.deliver_response(task.id, "Agent response")
+        await a2a_channel._handler.deliver_response(task.id, "Agent response")
 
-        # Wait for task processing
-        await asyncio.sleep(0.5)
-
-        # Check task status
         query = TaskQueryParams(id=task.id)
         updated_task = await a2a_channel._handler.on_get_task(query)
 
@@ -362,32 +364,12 @@ class TestGracefulShutdown:
     """Tests for graceful shutdown."""
 
     @pytest.mark.asyncio
-    async def test_stop_cancels_pending_tasks(self, a2a_channel):
-        """Test that stop() cancels all pending tasks."""
-        from a2a.types import TaskState
-
-        # Create pending task
-        message = make_message("Test", context_id="shutdown-test")
-        params = MessageSendParams(message=message)
-        task = await a2a_channel._handler.on_message_send(params)
-
-        # Verify task is in working state before stop
-        assert task.status.state == TaskState.working
-
-        # Start and stop channel
+    async def test_stop_clears_running_flag(self, a2a_channel):
+        """Test that stop() clears the running flag."""
         await a2a_channel.start()
+        assert a2a_channel._running is True
         await a2a_channel.stop()
-
-        # Allow cancellation to propagate
-        await asyncio.sleep(0.1)
-
-        # Check task was cancelled
-        from a2a.types import TaskQueryParams
-
-        query = TaskQueryParams(id=task.id)
-        updated_task = await a2a_channel._handler.on_get_task(query)
-
-        assert updated_task.status.state == TaskState.canceled
+        assert a2a_channel._running is False
 
 
 class TestStreamingCapability:
