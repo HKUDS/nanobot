@@ -863,6 +863,47 @@ Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
+### Mobile App Automation (Maestro)
+
+nanobot can use [Maestro](https://docs.maestro.dev/) for Android/iOS UI automation via MCP.
+
+**1) Bootstrap workspace + MCP config**
+
+```bash
+nanobot mobile setup
+```
+
+This command:
+- creates `mobile/flows`, `mobile/apps`, and `reports/mobile/*` under your workspace
+- creates a sample flow `mobile/flows/smoke.yaml`
+- configures `tools.mcpServers.maestro` as `maestro mcp`
+
+**2) Validate device + run flow**
+
+```bash
+maestro devices
+maestro test mobile/flows/smoke.yaml
+nanobot mobile run --suite smoke --platform android
+# force MCP mode (requires tools.mcpServers.maestro)
+nanobot mobile run --mode mcp --mcp-server maestro
+```
+
+`nanobot mobile run` stores:
+- per-flow stdout/stderr logs in `reports/mobile/runs/<run-id>/`
+- Maestro outputs (screenshots/debug artifacts) in `reports/mobile/artifacts/<run-id>/<flow-id>/`
+- latest structured summary in `reports/mobile/summary-latest.json`
+
+**3) Let nanobot drive Maestro tools**
+
+After starting `nanobot agent` or `nanobot gateway`, the agent can call Maestro MCP tools such as:
+- `maestro_list_devices`
+- `maestro_run_flow_files`
+- `maestro_take_screenshot`
+
+For Telegram/CLI natural-language commands, nanobot can detect supported mobile-test intents and generate/run Maestro flows automatically.
+
+> Install Maestro CLI first if missing: `curl -fsSL "https://get.maestro.mobile.dev" | bash`
+
 
 
 
@@ -892,6 +933,9 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `nanobot provider login openai-codex` | OAuth login for providers |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
+| `nanobot mobile setup` | Scaffold mobile testing workspace + Maestro MCP config |
+| `nanobot mobile run` | Run mobile flow files and persist run summary/log artifacts |
+| `nanobot mobile status` | Show mobile testing + Maestro MCP status |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
