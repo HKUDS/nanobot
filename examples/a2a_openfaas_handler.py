@@ -61,7 +61,7 @@ async def get_state() -> dict[str, Any]:
 
 
 async def handle(scope: dict, receive: callable, send: callable) -> None:
-    """OpenFaaS ASGI entrypoint."""
+    """OpenFaaS ASGI entrypoint - routes all requests to A2A app."""
     state = await get_state()
     channel = state["channel"]
     app = channel.get_asgi_app()
@@ -73,11 +73,22 @@ async def health(request: Any) -> JSONResponse:
     return JSONResponse({"status": "healthy"})
 
 
-app = Starlette(
-    routes=[
-        Route("/health", health),
-    ]
-)
+# OpenFaaS expects a 'handle' function at module level
+# This is the main ASGI entrypoint
+async def main_app(scope: dict, receive: callable, send: callable) -> None:
+    """Main ASGI app that routes to health or A2A handler."""
+    if scope["type"] == "http":
+        path = scope.get("path", "")
+        if path == "/health":
+            response = JSONResponse({"status": "healthy"})
+            await response(scope, receive, send)
+            return
+    # All other requests go to A2A handler
+    await handle(scope, receive, send)
+
+
+# For OpenFaaS, export 'handle' as the entrypoint
+handle = main_app
 
 
 if __name__ == "__main__":

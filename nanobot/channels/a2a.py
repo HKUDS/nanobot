@@ -20,8 +20,10 @@ if TYPE_CHECKING:
 try:
     from a2a.server.apps.jsonrpc.starlette_app import A2AStarletteApplication
     from a2a.server.request_handlers.request_handler import RequestHandler
+    from a2a.server.context import ServerCallContext
     from a2a.types import (
         AgentCard as AgentCardType,
+        AgentSkill,
         Message,
         MessageSendParams,
         Part,
@@ -42,6 +44,8 @@ except ImportError:
     A2AStarletteApplication = None
     RequestHandler = object
     AgentCardType = None
+    AgentSkill = None
+    ServerCallContext = None
 
 
 class A2ARequestHandler(RequestHandler):
@@ -55,14 +59,19 @@ class A2ARequestHandler(RequestHandler):
     async def on_message_send(
         self,
         params: MessageSendParams,
-        context: Any = None,
+        context: ServerCallContext | None = None,
     ) -> TaskType:
         """Handle message/send - create task and route to bus."""
         if not A2A_AVAILABLE:
             raise RuntimeError("a2a-sdk not installed")
 
         message = params.message
-        context_id = params.message.context_id if params.message and params.message.context_id else None or f"a2a:{uuid.uuid4().hex[:12]}"
+        # Get or generate context_id
+        if message and message.context_id:
+            context_id = message.context_id
+        else:
+            context_id = f"a2a:{uuid.uuid4().hex[:12]}"
+        
         content = self._extract_content(message)
         task_id = uuid.uuid4().hex[:12]
 
@@ -95,7 +104,7 @@ class A2ARequestHandler(RequestHandler):
     async def on_message_send_stream(
         self,
         params: MessageSendParams,
-        context: Any = None,
+        context: ServerCallContext | None = None,
     ) -> AsyncGenerator[Any, None]:
         """Handle message/send streaming (not implemented)."""
         # For now, just delegate to non-streaming
@@ -123,7 +132,7 @@ class A2ARequestHandler(RequestHandler):
     async def on_get_task(
         self,
         params: TaskQueryParams,
-        context: Any = None,
+        context: ServerCallContext | None = None,
     ) -> TaskType | None:
         """Handle tasks/get."""
         return None
@@ -131,7 +140,7 @@ class A2ARequestHandler(RequestHandler):
     async def on_cancel_task(
         self,
         params: TaskIdParams,
-        context: Any = None,
+        context: ServerCallContext | None = None,
     ) -> TaskType | None:
         """Handle tasks/cancel."""
         task_id = params.taskId
@@ -145,7 +154,7 @@ class A2ARequestHandler(RequestHandler):
     async def on_set_task_push_notification_config(
         self,
         params: TaskPushNotificationConfig,
-        context: Any = None,
+        context: ServerCallContext | None = None,
     ) -> TaskPushNotificationConfig:
         """Handle push notification config (not implemented)."""
         return params
@@ -153,7 +162,7 @@ class A2ARequestHandler(RequestHandler):
     async def on_get_task_push_notification_config(
         self,
         params: GetTaskPushNotificationConfigParams,
-        context: Any = None,
+        context: ServerCallContext | None = None,
     ) -> TaskPushNotificationConfig | None:
         """Handle get push notification config (not implemented)."""
         return None
@@ -161,7 +170,7 @@ class A2ARequestHandler(RequestHandler):
     async def on_list_task_push_notification_config(
         self,
         params: ListTaskPushNotificationConfigParams,
-        context: Any = None,
+        context: ServerCallContext | None = None,
     ) -> list[TaskPushNotificationConfig]:
         """Handle list push notification configs (not implemented)."""
         return []
@@ -169,7 +178,7 @@ class A2ARequestHandler(RequestHandler):
     async def on_delete_task_push_notification_config(
         self,
         params: DeleteTaskPushNotificationConfigParams,
-        context: Any = None,
+        context: ServerCallContext | None = None,
     ) -> None:
         """Handle delete push notification config (not implemented)."""
         pass
@@ -177,7 +186,7 @@ class A2ARequestHandler(RequestHandler):
     async def on_resubscribe_to_task(
         self,
         params: TaskIdParams,
-        context: Any = None,
+        context: ServerCallContext | None = None,
     ) -> AsyncGenerator[Any, None]:
         """Handle task resubscription (not implemented)."""
         yield None
@@ -235,13 +244,25 @@ class A2AChannel(BaseChannel):
             logger.warning("a2a-sdk not installed, A2A channel will not function")
             return
 
+        # Convert skill dicts to AgentSkill objects
+        skill_dicts = getattr(config, "skills", [])
+        skills = []
+        for skill_data in skill_dicts:
+            if isinstance(skill_data, dict):
+                skills.append(AgentSkill(
+                    id=skill_data.get("id", "skill"),
+                    name=skill_data.get("name", "Skill"),
+                    description=skill_data.get("description", ""),
+                    tags=skill_data.get("tags", []),
+                ))
+
         self._agent_card = AgentCardType(
             name=getattr(config, "agent_name", "Nanobot"),
             url=getattr(config, "agent_url", "http://localhost:8000"),
             description=getattr(config, "agent_description", "Nanobot AI Agent"),
             version="1.0.0",
             capabilities={"streaming": True, "pushNotifications": False},
-            skills=getattr(config, "skills", []),
+            skills=skills,
             defaultInputModes=["text/plain"],
             defaultOutputModes=["text/plain"],
             supportsAuthenticatedExtendedCard=False,

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from a2a.types import AgentSkill, Message, MessageSendParams, Part
+from a2a.types import Message, MessageSendParams, Part
 
 
 @pytest.fixture
@@ -21,14 +21,14 @@ def mock_bus():
 
 @pytest.fixture
 def mock_config():
-    """Create a mock A2A config with proper AgentSkill objects."""
+    """Create a mock A2A config with skill dicts (as they would be in YAML config)."""
     config = MagicMock()
     config.agent_name = "Test Agent"
     config.agent_url = "http://localhost:8000"
     config.agent_description = "Test description"
     config.skills = [
-        AgentSkill(id="chat", name="Chat", description="General chat", tags=[]),
-        AgentSkill(id="assist", name="Assist", description="Task assistance", tags=[]),
+        {"id": "chat", "name": "Chat", "description": "General chat", "tags": []},
+        {"id": "assist", "name": "Assist", "description": "Task assistance", "tags": []},
     ]
     return config
 
