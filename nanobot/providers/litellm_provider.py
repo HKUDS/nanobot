@@ -317,11 +317,21 @@ class LiteLLMProvider(LLMProvider):
 
         usage = {}
         if hasattr(response, "usage") and response.usage:
+            u = response.usage
             usage = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens,
+                "prompt_tokens": u.prompt_tokens,
+                "completion_tokens": u.completion_tokens,
+                "total_tokens": u.total_tokens,
             }
+            cache_creation = getattr(u, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(u, "cache_read_input_tokens", 0) or 0
+            if cache_creation or cache_read:
+                usage["cache_creation_input_tokens"] = cache_creation
+                usage["cache_read_input_tokens"] = cache_read
+                logger.debug(
+                    "Prompt cache: {} created, {} read (prompt={}, completion={})",
+                    cache_creation, cache_read, u.prompt_tokens, u.completion_tokens,
+                )
 
         reasoning_content = getattr(message, "reasoning_content", None) or None
         thinking_blocks = getattr(message, "thinking_blocks", None) or None
