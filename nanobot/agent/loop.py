@@ -101,6 +101,7 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
             default_max_iterations=subagent_max_iterations,
+            parent_tools=self.tools,
         )
 
         self._running = False
