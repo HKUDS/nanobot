@@ -12,9 +12,11 @@ from litellm import acompletion
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
 
-# Standard OpenAI chat-completion message keys plus reasoning_content for
-# thinking-enabled models (Kimi k2.5, DeepSeek-R1, etc.).
-_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"})
+# Standard OpenAI chat-completion message keys plus reasoning fields for
+# thinking-enabled models (Kimi k2.5, DeepSeek-R1, Gemini 3.1 Pro, etc.).
+# reasoning_details is the structured array required by OpenRouter for
+# multi-turn tool calling with reasoning models (Gemini, Claude, etc.).
+_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content", "reasoning_details", "thinking_blocks"})
 _ALNUM = string.ascii_letters + string.digits
 
 def _short_tool_id() -> str:
@@ -269,14 +271,16 @@ class LiteLLMProvider(LLMProvider):
             }
 
         reasoning_content = getattr(message, "reasoning_content", None) or None
+        reasoning_details = getattr(message, "reasoning_details", None) or None
         thinking_blocks = getattr(message, "thinking_blocks", None) or None
-        
+
         return LLMResponse(
             content=message.content,
             tool_calls=tool_calls,
             finish_reason=choice.finish_reason or "stop",
             usage=usage,
             reasoning_content=reasoning_content,
+            reasoning_details=reasoning_details,
             thinking_blocks=thinking_blocks,
         )
 
