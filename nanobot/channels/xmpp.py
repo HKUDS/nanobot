@@ -140,7 +140,7 @@ class XmppChannel(BaseChannel):
             try:
                 await self.client.connect()
                 # Keep the task alive until disconnected
-                while self.client.connected and self._running:
+                while self.client.is_connected() and self._running:
                     await asyncio.sleep(1)
             except Exception as e:
                 logger.warning("XMPP connection error: {}", e)
@@ -167,7 +167,7 @@ class XmppChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send an outbound message."""
-        if not self.client or not self.client.connected:
+        if not self.client or not self.client.is_connected():
             logger.warning("XMPP not connected, cannot send message")
             return
 
@@ -252,7 +252,7 @@ class XmppChannel(BaseChannel):
         """Start typing indicator with keepalive."""
         await self._stop_typing(jid)
 
-        if self.client and self.client.connected:
+        if self.client and self.client.is_connected():
             try:
                 self.client.send_typing(jid, typing=True)
             except Exception:
@@ -263,7 +263,7 @@ class XmppChannel(BaseChannel):
             try:
                 while self._running:
                     await asyncio.sleep(25)  # Refresh typing every 25s
-                    if self.client and self.client.connected:
+                    if self.client and self.client.is_connected():
                         try:
                             self.client.send_typing(jid, typing=True)
                         except Exception:
@@ -283,7 +283,7 @@ class XmppChannel(BaseChannel):
             except asyncio.CancelledError:
                 pass
 
-        if self.client and self.client.connected:
+        if self.client and self.client.is_connected():
             try:
                 self.client.send_typing(jid, typing=False)
             except Exception:
