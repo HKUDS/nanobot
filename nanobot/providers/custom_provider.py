@@ -48,6 +48,7 @@ class CustomProvider(LLMProvider):
             content=msg.content, tool_calls=tool_calls, finish_reason=choice.finish_reason or "stop",
             usage={"prompt_tokens": u.prompt_tokens, "completion_tokens": u.completion_tokens, "total_tokens": u.total_tokens} if u else {},
             reasoning_content=getattr(msg, "reasoning_content", None) or None,
+            reasoning_details=getattr(msg, "reasoning_details", None) or None,
         )
 
     def get_default_model(self) -> str:

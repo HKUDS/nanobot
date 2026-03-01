@@ -221,6 +221,7 @@ class AgentLoop:
                 messages = self.context.add_assistant_message(
                     messages, response.content, tool_call_dicts,
                     reasoning_content=response.reasoning_content,
+                    reasoning_details=response.reasoning_details,
                     thinking_blocks=response.thinking_blocks,
                 )
 
@@ -241,7 +242,9 @@ class AgentLoop:
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
                 messages = self.context.add_assistant_message(
-                    messages, clean, reasoning_content=response.reasoning_content,
+                    messages, clean,
+                    reasoning_content=response.reasoning_content,
+                    reasoning_details=response.reasoning_details,
                     thinking_blocks=response.thinking_blocks,
                 )
                 final_content = clean
