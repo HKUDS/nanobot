@@ -206,7 +206,26 @@ class HeartbeatService:
         return a, b
 
     def _context_window_tokens_for_model(self) -> int:
-        """Rough context-window estimate for adaptive heartbeat payload sizing."""
+        """Resolve model context-window dynamically when possible, fallback otherwise."""
+        # 1) optional provider metadata API (if available)
+        try:
+            if hasattr(self.provider, "get_model_context_window"):
+                val = self.provider.get_model_context_window(self.model)
+                if isinstance(val, int) and val > 0:
+                    return val
+        except Exception:
+            pass
+
+        # 2) optional runtime override via env (easy for power users)
+        try:
+            import os
+            ov = os.getenv("NANOBOT_HEARTBEAT_CONTEXT_WINDOW_TOKENS", "").strip()
+            if ov.isdigit() and int(ov) > 0:
+                return int(ov)
+        except Exception:
+            pass
+
+        # 3) heuristic fallback by model name
         m = (self.model or "").lower()
         if any(x in m for x in ("gpt-4o-mini", "gpt-4.1-mini", "claude-3-haiku", "gemini-1.5-flash")):
             return 8192

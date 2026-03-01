@@ -113,6 +113,18 @@ def test_selection_budget_is_per_model_adaptive(tmp_path) -> None:
     assert large.priority_max_matches >= small.priority_max_matches
 
 
+
+
+def test_context_window_allows_env_override(tmp_path, monkeypatch) -> None:
+    provider = DummyProvider([])
+    monkeypatch.setenv("NANOBOT_HEARTBEAT_CONTEXT_WINDOW_TOKENS", "64000")
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="custom/unknown-model",
+    )
+    assert service._context_window_tokens_for_model() == 64000
+
 def test_build_execution_payload_prioritizes_constraints_and_refs(tmp_path) -> None:
     provider = DummyProvider([])
     service = HeartbeatService(
