@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from nanobot.heartbeat.service import HeartbeatService
+from nanobot.heartbeat.service import HeartbeatDecision, HeartbeatService
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 
@@ -53,14 +53,104 @@ async def test_decide_returns_skip_when_no_tool_call(tmp_path) -> None:
         model="openai/gpt-4o-mini",
     )
 
-    action, tasks = await service._decide("heartbeat content")
-    assert action == "skip"
-    assert tasks == ""
+    decision = await service._decide("heartbeat content")
+    assert decision.action == "skip"
+    assert decision.task_intent == ""
+    assert decision.must_keep == []
 
 
 @pytest.mark.asyncio
-async def test_trigger_now_executes_when_decision_is_run(tmp_path) -> None:
-    (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
+async def test_decide_prefers_task_intent_and_preserves_structured_fields(tmp_path) -> None:
+    provider = DummyProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={
+                        "action": "run",
+                        "tasks": "legacy summary",
+                        "task_intent": "do full morning checks",
+                        "must_keep": ["must include links", "before 09:30"],
+                        "source_refs": ["L2-L4", "L8"],
+                    },
+                )
+            ],
+        )
+    ])
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+    )
+
+    decision = await service._decide("heartbeat content")
+    assert decision.action == "run"
+    assert decision.task_intent == "do full morning checks"
+    assert decision.must_keep == ["must include links", "before 09:30"]
+    assert decision.source_refs == ["L2-L4", "L8"]
+
+
+def test_build_execution_payload_prioritizes_constraints_and_refs(tmp_path) -> None:
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+    )
+
+    content = "\n".join(
+        [
+            "# HEARTBEAT",
+            "- [ ] check inbox",
+            "- [ ] check calendar",
+            "notes one",
+            "notes two",
+            "must include source links",
+            "noise a",
+            "Deadline: before 09:30",
+        ]
+        + [f"noise line {i}" for i in range(1, 120)]
+    )
+
+    payload = service._build_execution_payload(
+        HeartbeatDecision(
+            action="run",
+            task_intent="run heartbeat",
+            must_keep=["must include source links"],
+            source_refs=["L2-L3", "L8"],
+        ),
+        content,
+    )
+
+    assert payload.summary == "run heartbeat"
+    assert "- [ ] check inbox" in payload.selected_sections
+    assert "- [ ] check calendar" in payload.selected_sections
+    assert "must include source links" in payload.selected_sections
+    assert "Deadline: before 09:30" in payload.selected_sections
+    assert payload.dropped_non_empty_lines > 0
+
+    rendered = service._render_execution_input(payload)
+    assert "Use the following HEARTBEAT.md context" in rendered
+    assert "Context truncated:" in rendered
+
+
+@pytest.mark.asyncio
+async def test_trigger_now_executes_with_prioritized_context_payload(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text(
+        "\n".join(
+            [
+                "# HEARTBEAT",
+                "- [ ] do thing",
+                "must not message at night",
+                "Deadline: before 09:30",
+            ]
+            + [f"filler {i}" for i in range(80)]
+        ),
+        encoding="utf-8",
+    )
 
     provider = DummyProvider([
         LLMResponse(
@@ -69,7 +159,12 @@ async def test_trigger_now_executes_when_decision_is_run(tmp_path) -> None:
                 ToolCallRequest(
                     id="hb_1",
                     name="heartbeat",
-                    arguments={"action": "run", "tasks": "check open tasks"},
+                    arguments={
+                        "action": "run",
+                        "task_intent": "check open tasks",
+                        "must_keep": ["must not message at night"],
+                        "source_refs": ["L2-L4"],
+                    },
                 )
             ],
         )
@@ -90,7 +185,12 @@ async def test_trigger_now_executes_when_decision_is_run(tmp_path) -> None:
 
     result = await service.trigger_now()
     assert result == "done"
-    assert called_with == ["check open tasks"]
+    assert len(called_with) == 1
+    payload = called_with[0]
+    assert "check open tasks" in payload
+    assert "- [ ] do thing" in payload
+    assert "must not message at night" in payload
+    assert "Deadline: before 09:30" in payload
 
 
 @pytest.mark.asyncio
@@ -152,9 +252,9 @@ async def test_decide_retries_transient_error_then_succeeds(tmp_path, monkeypatc
         model="openai/gpt-4o-mini",
     )
 
-    action, tasks = await service._decide("heartbeat content")
+    decision = await service._decide("heartbeat content")
 
-    assert action == "run"
-    assert tasks == "check open tasks"
+    assert decision.action == "run"
+    assert decision.task_intent == "check open tasks"
     assert provider.calls == 2
     assert delays == [1]

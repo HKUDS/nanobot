@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
@@ -10,6 +12,8 @@ from loguru import logger
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
+
+_MAX_SELECTED_LINES = 60
 
 _HEARTBEAT_TOOL = [
     {
@@ -27,7 +31,21 @@ _HEARTBEAT_TOOL = [
                     },
                     "tasks": {
                         "type": "string",
-                        "description": "Natural-language summary of active tasks (required for run)",
+                        "description": "Natural-language summary of active tasks (legacy)",
+                    },
+                    "task_intent": {
+                        "type": "string",
+                        "description": "Concise execution intent for phase-2",
+                    },
+                    "must_keep": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Critical constraints/requirements that must survive compression",
+                    },
+                    "source_refs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional line refs into HEARTBEAT.md, e.g. L3-L7 or 12-15",
                     },
                 },
                 "required": ["action"],
@@ -37,17 +55,31 @@ _HEARTBEAT_TOOL = [
 ]
 
 
+@dataclass
+class HeartbeatDecision:
+    action: str
+    task_intent: str
+    must_keep: list[str]
+    source_refs: list[str]
+
+
+@dataclass
+class HeartbeatExecutionPayload:
+    summary: str
+    selected_sections: list[str]
+    dropped_non_empty_lines: int
+
+
 class HeartbeatService:
     """
     Periodic heartbeat service that wakes the agent to check for tasks.
 
     Phase 1 (decision): reads HEARTBEAT.md and asks the LLM — via a virtual
-    tool call — whether there are active tasks.  This avoids free-text parsing
-    and the unreliable HEARTBEAT_OK token.
+    tool call — whether there are active tasks.
 
-    Phase 2 (execution): only triggered when Phase 1 returns ``run``.  The
-    ``on_execute`` callback runs the task through the full agent loop and
-    returns the result to deliver.
+    Phase 2 (execution): only triggered when Phase 1 returns ``run``. It uses
+    a prioritized payload that keeps critical constraints from HEARTBEAT.md
+    instead of executing only a lossy summary string.
     """
 
     def __init__(
@@ -82,28 +114,40 @@ class HeartbeatService:
                 return None
         return None
 
-    async def _decide(self, content: str) -> tuple[str, str]:
-        """Phase 1: ask LLM to decide skip/run via virtual tool call.
-
-        Returns (action, tasks) where action is 'skip' or 'run'.
-        """
+    async def _decide(self, content: str) -> HeartbeatDecision:
+        """Phase 1: ask LLM to decide skip/run via virtual tool call."""
         response = await self.provider.chat_with_retry(
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
-                {"role": "user", "content": (
-                    "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
-                    f"{content}"
-                )},
+                {
+                    "role": "user",
+                    "content": (
+                        "Review HEARTBEAT.md and decide whether to run tasks. "
+                        "If action=run, include task_intent and keep critical constraints in must_keep/source_refs.\n\n"
+                        f"{content}"
+                    ),
+                },
             ],
             tools=_HEARTBEAT_TOOL,
             model=self.model,
         )
 
         if not response.has_tool_calls:
-            return "skip", ""
+            return HeartbeatDecision(action="skip", task_intent="", must_keep=[], source_refs=[])
 
         args = response.tool_calls[0].arguments
-        return args.get("action", "skip"), args.get("tasks", "")
+        legacy_tasks = str(args.get("tasks", "")).strip()
+        task_intent = str(args.get("task_intent", "")).strip() or legacy_tasks
+
+        must_keep = [str(x).strip() for x in (args.get("must_keep") or []) if str(x).strip()]
+        source_refs = [str(x).strip() for x in (args.get("source_refs") or []) if str(x).strip()]
+
+        return HeartbeatDecision(
+            action=str(args.get("action", "skip")),
+            task_intent=task_intent,
+            must_keep=must_keep,
+            source_refs=source_refs,
+        )
 
     async def start(self) -> None:
         """Start the heartbeat service."""
@@ -137,24 +181,105 @@ class HeartbeatService:
             except Exception as e:
                 logger.error("Heartbeat error: {}", e)
 
-    def _build_execution_input(self, tasks: str, content: str) -> str:
-        """Build phase-2 input while preserving full HEARTBEAT.md details."""
-        tasks = (tasks or "").strip()
-        content = (content or "").strip()
+    def _parse_ref_range(self, ref: str, max_line: int) -> tuple[int, int] | None:
+        m = re.search(r"L?(\d+)\s*(?:-|\.\.|to)\s*L?(\d+)", ref, re.IGNORECASE)
+        if m:
+            a, b = int(m.group(1)), int(m.group(2))
+        else:
+            m2 = re.search(r"L?(\d+)", ref, re.IGNORECASE)
+            if not m2:
+                return None
+            a = b = int(m2.group(1))
 
-        if not tasks:
-            return content
+        a = max(1, min(a, max_line))
+        b = max(1, min(b, max_line))
+        if a > b:
+            a, b = b, a
+        return a, b
 
-        if not content:
-            return tasks
+    def _build_execution_payload(self, decision: HeartbeatDecision, content: str) -> HeartbeatExecutionPayload:
+        """Build a prioritized payload that preserves critical heartbeat details."""
+        lines = content.splitlines()
+        max_line = len(lines)
+        selected: list[str] = []
 
-        return (
-            f"{tasks}\n\n"
-            "Reference details from HEARTBEAT.md below when executing:\n"
-            "---\n"
-            f"{content}\n"
-            "---"
+        def add_line(line: str) -> None:
+            line = line.rstrip()
+            if not line:
+                return
+            if line not in selected:
+                selected.append(line)
+
+        # 1) source_refs from phase-1 decision
+        for ref in decision.source_refs:
+            parsed = self._parse_ref_range(ref, max_line)
+            if not parsed:
+                continue
+            start, end = parsed
+            for idx in range(start - 1, end):
+                add_line(lines[idx])
+                if len(selected) >= _MAX_SELECTED_LINES:
+                    break
+            if len(selected) >= _MAX_SELECTED_LINES:
+                break
+
+        # 2) explicit must_keep phrases
+        if len(selected) < _MAX_SELECTED_LINES:
+            for key in decision.must_keep:
+                kl = key.lower()
+                for line in lines:
+                    if kl and kl in line.lower():
+                        add_line(line)
+                        if len(selected) >= _MAX_SELECTED_LINES:
+                            break
+                if len(selected) >= _MAX_SELECTED_LINES:
+                    break
+
+        # 3) always keep high-priority constraints/checklists/deadlines
+        priority_pat = re.compile(r"(^\s*[-*]\s*\[.?\]|\bmust\b|\bdeadline\b|\burgent\b|\bby\s+\d)", re.IGNORECASE)
+        if len(selected) < _MAX_SELECTED_LINES:
+            for line in lines:
+                if priority_pat.search(line):
+                    add_line(line)
+                    if len(selected) >= _MAX_SELECTED_LINES:
+                        break
+
+        # 4) headings and then remaining non-empty context
+        if len(selected) < _MAX_SELECTED_LINES:
+            for line in lines:
+                if line.startswith("#"):
+                    add_line(line)
+                    if len(selected) >= _MAX_SELECTED_LINES:
+                        break
+
+        if len(selected) < _MAX_SELECTED_LINES:
+            for line in lines:
+                add_line(line)
+                if len(selected) >= _MAX_SELECTED_LINES:
+                    break
+
+        non_empty = [ln for ln in lines if ln.strip()]
+        dropped = max(0, len(non_empty) - len(selected))
+
+        return HeartbeatExecutionPayload(
+            summary=(decision.task_intent or "").strip(),
+            selected_sections=selected,
+            dropped_non_empty_lines=dropped,
         )
+
+    def _render_execution_input(self, payload: HeartbeatExecutionPayload) -> str:
+        """Render backward-compatible phase-2 string for the current agent loop."""
+        parts: list[str] = []
+        if payload.summary:
+            parts.append(payload.summary)
+        parts.append("Use the following HEARTBEAT.md context (prioritized):")
+        parts.extend(payload.selected_sections)
+        if payload.dropped_non_empty_lines:
+            parts.append(
+                f"[Context truncated: omitted {payload.dropped_non_empty_lines} non-empty lines after prioritization. "
+                "Preserve listed constraints and checklist items.]"
+            )
+        return "\n".join(parts)
 
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
@@ -166,15 +291,21 @@ class HeartbeatService:
         logger.info("Heartbeat: checking for tasks...")
 
         try:
-            action, tasks = await self._decide(content)
+            decision = await self._decide(content)
 
-            if action != "run":
+            if decision.action != "run":
                 logger.info("Heartbeat: OK (nothing to report)")
                 return
 
             logger.info("Heartbeat: tasks found, executing...")
             if self.on_execute:
-                execution_input = self._build_execution_input(tasks, content)
+                payload = self._build_execution_payload(decision, content)
+                execution_input = self._render_execution_input(payload)
+                logger.debug(
+                    "Heartbeat payload: selected={} dropped={}",
+                    len(payload.selected_sections),
+                    payload.dropped_non_empty_lines,
+                )
                 response = await self.on_execute(execution_input)
                 if response and self.on_notify:
                     logger.info("Heartbeat: completed, delivering response")
@@ -187,8 +318,11 @@ class HeartbeatService:
         content = self._read_heartbeat_file()
         if not content:
             return None
-        action, tasks = await self._decide(content)
-        if action != "run" or not self.on_execute:
+
+        decision = await self._decide(content)
+        if decision.action != "run" or not self.on_execute:
             return None
-        execution_input = self._build_execution_input(tasks, content)
+
+        payload = self._build_execution_payload(decision, content)
+        execution_input = self._render_execution_input(payload)
         return await self.on_execute(execution_input)
