@@ -202,6 +202,10 @@ Connect nanobot to your favorite chat platform.
 nanobot gateway
 ```
 
+**Reactions**
+- nanobot now listens for Telegram message reactions and forwards them into the agent as normal inbound events.
+- In group and supergroup chats, Telegram typically only delivers reaction updates if the bot is an admin.
+
 </details>
 
 <details>

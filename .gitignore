@@ -20,3 +20,6 @@ poetry.lock
 .pytest_cache/
 botpy.log
 tests/
+!tests/
+tests/*
+!tests/test_telegram_channel.py

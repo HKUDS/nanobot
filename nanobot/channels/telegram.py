@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections import OrderedDict
+from typing import Any
+
 from loguru import logger
-from telegram import BotCommand, Update, ReplyParameters
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import BotCommand, ReplyParameters, Update
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, MessageReactionHandler, filters
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
@@ -113,6 +116,9 @@ class TelegramChannel(BaseChannel):
         BotCommand("new", "Start a new conversation"),
         BotCommand("help", "Show available commands"),
     ]
+
+    MESSAGE_CACHE_SIZE = 100
+    MESSAGE_PREVIEW_LEN = 80
     
     def __init__(
         self,
@@ -126,6 +132,7 @@ class TelegramChannel(BaseChannel):
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
+        self._message_cache: dict[str, OrderedDict[int, str]] = {}
     
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -156,6 +163,7 @@ class TelegramChannel(BaseChannel):
                 self._on_message
             )
         )
+        self._app.add_handler(MessageReactionHandler(self._on_reaction))
         
         logger.info("Starting Telegram bot (polling mode)...")
         
@@ -175,7 +183,7 @@ class TelegramChannel(BaseChannel):
         
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
-            allowed_updates=["message"],
+            allowed_updates=["message", "message_reaction"],
             drop_pending_updates=True  # Ignore old messages on startup
         )
         
@@ -244,39 +252,43 @@ class TelegramChannel(BaseChannel):
                 }.get(media_type, self._app.bot.send_document)
                 param = "photo" if media_type == "photo" else media_type if media_type in ("voice", "audio") else "document"
                 with open(media_path, 'rb') as f:
-                    await sender(
+                    sent = await sender(
                         chat_id=chat_id, 
                         **{param: f},
                         reply_parameters=reply_params
                     )
+                self._cache_message(chat_id, sent.message_id, f"[{media_type}: {media_path}]")
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
                 logger.error("Failed to send media {}: {}", media_path, e)
-                await self._app.bot.send_message(
+                sent = await self._app.bot.send_message(
                     chat_id=chat_id,
                     text=f"[Failed to send: {filename}]",
                     reply_parameters=reply_params
                 )
+                self._cache_message(chat_id, sent.message_id, f"[Failed to send: {filename}]")
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
             for chunk in _split_message(msg.content):
                 try:
                     html = _markdown_to_telegram_html(chunk)
-                    await self._app.bot.send_message(
+                    sent = await self._app.bot.send_message(
                         chat_id=chat_id, 
                         text=html, 
                         parse_mode="HTML",
                         reply_parameters=reply_params
                     )
+                    self._cache_message(chat_id, sent.message_id, chunk)
                 except Exception as e:
                     logger.warning("HTML parse failed, falling back to plain text: {}", e)
                     try:
-                        await self._app.bot.send_message(
+                        sent = await self._app.bot.send_message(
                             chat_id=chat_id, 
                             text=chunk,
                             reply_parameters=reply_params
                         )
+                        self._cache_message(chat_id, sent.message_id, chunk)
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
     
@@ -393,7 +405,8 @@ class TelegramChannel(BaseChannel):
                 content_parts.append(f"[{media_type}: download failed]")
         
         content = "\n".join(content_parts) if content_parts else "[empty message]"
-        
+        self._cache_message(chat_id, message.message_id, content)
+
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
         
         str_chat_id = str(chat_id)
@@ -414,6 +427,53 @@ class TelegramChannel(BaseChannel):
                 "first_name": user.first_name,
                 "is_group": message.chat.type != "private"
             }
+        )
+
+    async def _on_reaction(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Forward message reactions into the standard inbound message path."""
+        if not update.message_reaction:
+            return
+
+        reaction = update.message_reaction
+        chat_id = str(reaction.chat.id)
+        user = reaction.user
+        actor_chat = reaction.actor_chat
+
+        if user:
+            sender_id = self._sender_id(user)
+            self._chat_ids[sender_id] = reaction.chat.id
+        elif actor_chat:
+            sender_id = f"chat:{actor_chat.id}"
+        else:
+            sender_id = f"reaction:{chat_id}:{reaction.message_id}"
+
+        reaction_text = self._format_reaction_summary(reaction.new_reaction)
+        preview = self._get_cached_message(chat_id, reaction.message_id)
+
+        content = f"[reaction] {reaction_text} to message_id={reaction.message_id}"
+        if preview:
+            content = f"{content} on: {self._preview_text(preview)}"
+
+        metadata: dict[str, Any] = {
+            "event_type": "reaction",
+            "message_id": reaction.message_id,
+            "reacted_message_id": reaction.message_id,
+            "reactions": [self._serialize_reaction(item) for item in reaction.new_reaction],
+            "old_reactions": [self._serialize_reaction(item) for item in reaction.old_reaction],
+            "reacted_message_preview": self._preview_text(preview) if preview else None,
+            "tg_user_id": user.id if user else None,
+            "username": user.username if user else None,
+            "first_name": user.first_name if user else None,
+            "actor_chat_id": actor_chat.id if actor_chat else None,
+            "actor_chat_title": actor_chat.title if actor_chat else None,
+            "is_group": reaction.chat.type != "private",
+        }
+
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=chat_id,
+            content=content,
+            metadata=metadata,
         )
     
     def _start_typing(self, chat_id: str) -> None:
@@ -455,3 +515,56 @@ class TelegramChannel(BaseChannel):
         
         type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
         return type_map.get(media_type, "")
+
+    def _cache_message(self, chat_id: int | str, message_id: int, content: str) -> None:
+        """Keep a small per-chat LRU of message text for reaction context."""
+        if not content:
+            return
+        chat_key = str(chat_id)
+        cache = self._message_cache.setdefault(chat_key, OrderedDict())
+        cache[message_id] = content
+        cache.move_to_end(message_id)
+        while len(cache) > self.MESSAGE_CACHE_SIZE:
+            cache.popitem(last=False)
+
+    def _get_cached_message(self, chat_id: int | str, message_id: int) -> str | None:
+        cache = self._message_cache.get(str(chat_id))
+        if not cache:
+            return None
+        content = cache.get(message_id)
+        if content is None:
+            return None
+        cache.move_to_end(message_id)
+        return content
+
+    @classmethod
+    def _preview_text(cls, content: str | None) -> str:
+        if not content:
+            return ""
+        compact = re.sub(r"\s+", " ", content).strip()
+        if len(compact) <= cls.MESSAGE_PREVIEW_LEN:
+            return compact
+        return f"{compact[: cls.MESSAGE_PREVIEW_LEN - 3].rstrip()}..."
+
+    @staticmethod
+    def _serialize_reaction(reaction: Any) -> dict[str, Any]:
+        data: dict[str, Any] = {"type": getattr(reaction, "type", reaction.__class__.__name__)}
+        if hasattr(reaction, "emoji"):
+            data["emoji"] = reaction.emoji
+        if hasattr(reaction, "custom_emoji_id"):
+            data["custom_emoji_id"] = reaction.custom_emoji_id
+        return data
+
+    @classmethod
+    def _format_reaction_summary(cls, reactions: list[Any] | tuple[Any, ...]) -> str:
+        if not reactions:
+            return "reaction removed"
+        parts: list[str] = []
+        for reaction in reactions:
+            serialized = cls._serialize_reaction(reaction)
+            parts.append(
+                serialized.get("emoji")
+                or serialized.get("custom_emoji_id")
+                or serialized.get("type", "reaction")
+            )
+        return " ".join(parts)
