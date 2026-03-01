@@ -93,6 +93,26 @@ async def test_decide_prefers_task_intent_and_preserves_structured_fields(tmp_pa
     assert decision.source_refs == ["L2-L4", "L8"]
 
 
+def test_selection_budget_is_per_model_adaptive(tmp_path) -> None:
+    provider = DummyProvider([])
+
+    small = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+    )._selection_budget_for_model()
+
+    large = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-5",
+    )._selection_budget_for_model()
+
+    assert large.max_render_chars > small.max_render_chars
+    assert large.context_fallback_max_lines >= small.context_fallback_max_lines
+    assert large.priority_max_matches >= small.priority_max_matches
+
+
 def test_build_execution_payload_prioritizes_constraints_and_refs(tmp_path) -> None:
     provider = DummyProvider([])
     service = HeartbeatService(
@@ -135,6 +155,34 @@ def test_build_execution_payload_prioritizes_constraints_and_refs(tmp_path) -> N
     rendered = service._render_execution_input(payload)
     assert "Use the following HEARTBEAT.md context" in rendered
     assert "Context truncated:" in rendered
+
+
+def test_build_execution_payload_scales_with_model_budget(tmp_path) -> None:
+    provider = DummyProvider([])
+
+    small_service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+    )
+    large_service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-5",
+    )
+
+    content = "\n".join(["# HEARTBEAT", "- [ ] one task", "must include links", "Deadline: by 09:30"] + [f"noise {i}" for i in range(600)])
+    decision = HeartbeatDecision(
+        action="run",
+        task_intent="run",
+        must_keep=["must include links"],
+        source_refs=["L2-L4"],
+    )
+
+    small = small_service._build_execution_payload(decision, content)
+    large = large_service._build_execution_payload(decision, content)
+
+    assert len(large.selected_sections) >= len(small.selected_sections)
 
 
 @pytest.mark.asyncio

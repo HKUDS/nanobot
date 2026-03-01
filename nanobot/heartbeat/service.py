@@ -13,8 +13,6 @@ from loguru import logger
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
-_MAX_SELECTED_LINES = 60
-
 _HEARTBEAT_TOOL = [
     {
         "type": "function",
@@ -68,6 +66,16 @@ class HeartbeatExecutionPayload:
     summary: str
     selected_sections: list[str]
     dropped_non_empty_lines: int
+
+
+@dataclass
+class HeartbeatSelectionBudget:
+    refs_max_lines: int
+    must_keep_max_matches: int
+    priority_max_matches: int
+    heading_max_lines: int
+    context_fallback_max_lines: int
+    max_render_chars: int
 
 
 class HeartbeatService:
@@ -202,18 +210,63 @@ class HeartbeatService:
             a, b = b, a
         return a, b
 
+    def _context_window_tokens_for_model(self) -> int:
+        """Rough context-window estimate for adaptive heartbeat payload sizing."""
+        m = (self.model or "").lower()
+        if any(x in m for x in ("gpt-4o-mini", "gpt-4.1-mini", "claude-3-haiku", "gemini-1.5-flash")):
+            return 8192
+        if any(x in m for x in ("gpt-4o", "gpt-4.1", "claude-3-5-sonnet", "claude-3-7-sonnet", "gemini-1.5-pro")):
+            return 32768
+        if any(x in m for x in ("gpt-5", "o1", "o3", "claude-3-opus", "claude-4", "gemini-2")):
+            return 131072
+        return 32768
+
+    def _selection_budget_for_model(self) -> HeartbeatSelectionBudget:
+        """Per-model adaptive selection budget for heartbeat context."""
+        window = self._context_window_tokens_for_model()
+        heartbeat_tokens = int(window * 0.15)
+        heartbeat_tokens = max(800, min(heartbeat_tokens, 6000))
+        max_chars = heartbeat_tokens * 4
+
+        # Approximate line budget from char budget with sane floor/ceiling.
+        max_lines = max(40, min(max_chars // 80, 180))
+
+        refs_max = max(8, min(max_lines // 4, 40))
+        must_keep_max = max(8, min(max_lines // 4, 40))
+        priority_max = max(12, min(max_lines // 3, 70))
+        heading_max = max(6, min(max_lines // 6, 24))
+        context_max = max_lines
+
+        return HeartbeatSelectionBudget(
+            refs_max_lines=refs_max,
+            must_keep_max_matches=must_keep_max,
+            priority_max_matches=priority_max,
+            heading_max_lines=heading_max,
+            context_fallback_max_lines=context_max,
+            max_render_chars=max_chars,
+        )
+
     def _build_execution_payload(self, decision: HeartbeatDecision, content: str) -> HeartbeatExecutionPayload:
         """Build a prioritized payload that preserves critical heartbeat details."""
+        budget = self._selection_budget_for_model()
         lines = content.splitlines()
         max_line = len(lines)
         selected: list[str] = []
 
-        def add_line(line: str) -> None:
+        refs_count = 0
+        must_keep_count = 0
+        priority_count = 0
+        heading_count = 0
+        context_count = 0
+
+        def add_line(line: str) -> bool:
             line = line.rstrip()
             if not line:
-                return
-            if line not in selected:
-                selected.append(line)
+                return False
+            if line in selected:
+                return False
+            selected.append(line)
+            return True
 
         # 1) source_refs from phase-1 decision
         for ref in decision.source_refs:
@@ -222,53 +275,63 @@ class HeartbeatService:
                 continue
             start, end = parsed
             for idx in range(start - 1, end):
-                add_line(lines[idx])
-                if len(selected) >= _MAX_SELECTED_LINES:
+                if refs_count >= budget.refs_max_lines:
                     break
-            if len(selected) >= _MAX_SELECTED_LINES:
+                if add_line(lines[idx]):
+                    refs_count += 1
+            if refs_count >= budget.refs_max_lines:
                 break
 
         # 2) explicit must_keep phrases
-        if len(selected) < _MAX_SELECTED_LINES:
-            for key in decision.must_keep:
-                kl = key.lower()
-                for line in lines:
-                    if kl and kl in line.lower():
-                        add_line(line)
-                        if len(selected) >= _MAX_SELECTED_LINES:
-                            break
-                if len(selected) >= _MAX_SELECTED_LINES:
-                    break
+        for key in decision.must_keep:
+            if must_keep_count >= budget.must_keep_max_matches:
+                break
+            kl = key.lower().strip()
+            if not kl:
+                continue
+            for line in lines:
+                if kl and kl in line.lower() and add_line(line):
+                    must_keep_count += 1
+                    if must_keep_count >= budget.must_keep_max_matches:
+                        break
 
         # 3) always keep high-priority constraints/checklists/deadlines
         priority_pat = re.compile(r"(^\s*[-*]\s*\[.?\]|\bmust\b|\bdeadline\b|\burgent\b|\bby\s+\d)", re.IGNORECASE)
-        if len(selected) < _MAX_SELECTED_LINES:
-            for line in lines:
-                if priority_pat.search(line):
-                    add_line(line)
-                    if len(selected) >= _MAX_SELECTED_LINES:
-                        break
+        for line in lines:
+            if priority_count >= budget.priority_max_matches:
+                break
+            if priority_pat.search(line) and add_line(line):
+                priority_count += 1
 
         # 4) headings and then remaining non-empty context
-        if len(selected) < _MAX_SELECTED_LINES:
-            for line in lines:
-                if line.startswith("#"):
-                    add_line(line)
-                    if len(selected) >= _MAX_SELECTED_LINES:
-                        break
+        for line in lines:
+            if heading_count >= budget.heading_max_lines:
+                break
+            if line.startswith("#") and add_line(line):
+                heading_count += 1
 
-        if len(selected) < _MAX_SELECTED_LINES:
-            for line in lines:
-                add_line(line)
-                if len(selected) >= _MAX_SELECTED_LINES:
-                    break
+        for line in lines:
+            if context_count >= budget.context_fallback_max_lines:
+                break
+            if add_line(line):
+                context_count += 1
+
+        # 5) final render-size trim (per-model adaptive)
+        rendered_chars = 0
+        trimmed: list[str] = []
+        for line in selected:
+            ln = len(line) + 1
+            if rendered_chars + ln > budget.max_render_chars:
+                break
+            trimmed.append(line)
+            rendered_chars += ln
 
         non_empty = [ln for ln in lines if ln.strip()]
-        dropped = max(0, len(non_empty) - len(selected))
+        dropped = max(0, len(non_empty) - len(trimmed))
 
         return HeartbeatExecutionPayload(
             summary=(decision.task_intent or "").strip(),
-            selected_sections=selected,
+            selected_sections=trimmed,
             dropped_non_empty_lines=dropped,
         )
 
