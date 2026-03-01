@@ -44,7 +44,7 @@ State-of-the-art video generation with natively synchronized audio. Text-to-vide
 
 ## Nanobot Implementation
 
-**File:** `nanobot/agent/tools/creative.py` (lines 157-253)
+**File:** `scorpion/agent/tools/creative.py` (lines 157-253)
 
 ```python
 # Lines 221-249: Video generation with polling

@@ -44,7 +44,7 @@ Free in all regions where Gemini API is available.
 **Partial:** Video generation downloads use `client.files.download()`:
 
 ```python
-# nanobot/agent/tools/creative.py line 244
+# scorpion/agent/tools/creative.py line 244
 dl = await client.files.download(file=video.video, download_config=...)
 ```
 

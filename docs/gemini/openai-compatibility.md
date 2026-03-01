@@ -1,6 +1,6 @@
 # OpenAI Compatibility
 
-> **Status: Not applicable** — nanobot uses native google-genai SDK
+> **Status: Not applicable** — scorpion uses native google-genai SDK
 > **Gemini docs:** https://ai.google.dev/gemini-api/docs/openai
 
 ## What It Is
@@ -43,4 +43,4 @@ client = OpenAI(
 
 Not applicable. Nanobot uses the native `google-genai` SDK directly (`google.genai.Client`), not the OpenAI compatibility layer. This is the correct approach — native SDK has full feature access.
 
-**Note:** The OpenAI compatibility layer is useful for migrating existing OpenAI codebases. Since nanobot was built Gemini-native, there's no need for this.
+**Note:** The OpenAI compatibility layer is useful for migrating existing OpenAI codebases. Since scorpion was built Gemini-native, there's no need for this.

@@ -3,11 +3,11 @@ x-common-config: &common-config
     context: .
     dockerfile: Dockerfile
   volumes:
-    - ~/.nanobot:/root/.nanobot
+    - ~/.scorpion:/root/.scorpion
 
 services:
-  nanobot-gateway:
-    container_name: nanobot-gateway
+  scorpion-gateway:
+    container_name: scorpion-gateway
     <<: *common-config
     command: ["gateway"]
     restart: unless-stopped
@@ -22,7 +22,7 @@ services:
           cpus: '0.25'
           memory: 256M
   
-  nanobot-cli:
+  scorpion-cli:
     <<: *common-config
     profiles:
       - cli

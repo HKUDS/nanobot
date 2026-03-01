@@ -1,6 +1,6 @@
 # Google Search Grounding
 
-> **Status: Not implemented** — nanobot uses Brave Search API
+> **Status: Not implemented** — scorpion uses Brave Search API
 > **Gemini docs:** https://ai.google.dev/gemini-api/docs/google-search
 
 ## What It Is
@@ -45,7 +45,7 @@ Code Execution, URL Context
 
 ## Nanobot Implementation
 
-**Current web search:** Brave Search API (`nanobot/agent/tools/web.py`)
+**Current web search:** Brave Search API (`scorpion/agent/tools/web.py`)
 
 ```python
 # Agent tool: WebSearchTool using Brave Search

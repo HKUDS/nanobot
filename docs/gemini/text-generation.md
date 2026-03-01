@@ -19,7 +19,7 @@ Core text generation via `generateContent` API. Accepts text, images, video, and
 
 ## Nanobot Implementation
 
-**File:** `nanobot/providers/gemini_provider.py`
+**File:** `scorpion/providers/gemini_provider.py`
 
 ```python
 # Line 38-73: chat() method

@@ -34,7 +34,7 @@ Pipecat, LiveKit, Fishjam, Agent Development Kit, Vision Agents, Voximplant
 
 ## Nanobot Implementation
 
-**Music only:** `nanobot/agent/tools/creative.py` (line 332)
+**Music only:** `scorpion/agent/tools/creative.py` (line 332)
 
 ```python
 # Live API used exclusively for Lyria music streaming

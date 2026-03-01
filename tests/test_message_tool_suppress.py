@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.adk.tools import send_message, set_runtime_refs
+from scorpion.adk.tools import send_message, set_runtime_refs
 
 
 class TestSendMessageTool:
@@ -63,7 +63,7 @@ class TestSendMessageTool:
     @pytest.mark.asyncio
     async def test_send_message_no_callback_returns_error(self) -> None:
         """send_message without bus callback should return error."""
-        import nanobot.adk.tools as tools_mod
+        import scorpion.adk.tools as tools_mod
         tools_mod._bus_callback = None
 
         ctx = MagicMock()

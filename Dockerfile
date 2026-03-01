@@ -16,12 +16,12 @@ WORKDIR /app
 
 # Install Python dependencies first (cached layer)
 COPY pyproject.toml README.md LICENSE ./
-RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
+RUN mkdir -p scorpion bridge && touch scorpion/__init__.py && \
     uv pip install --system --no-cache . && \
-    rm -rf nanobot bridge
+    rm -rf scorpion bridge
 
 # Copy the full source and install
-COPY nanobot/ nanobot/
+COPY scorpion/ scorpion/
 COPY bridge/ bridge/
 RUN uv pip install --system --no-cache .
 
@@ -31,10 +31,10 @@ RUN npm install && npm run build
 WORKDIR /app
 
 # Create config directory
-RUN mkdir -p /root/.nanobot
+RUN mkdir -p /root/.scorpion
 
 # Gateway default port
 EXPOSE 18790
 
-ENTRYPOINT ["nanobot"]
+ENTRYPOINT ["scorpion"]
 CMD ["status"]

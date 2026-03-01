@@ -1,8 +1,8 @@
 # Gemini API Features
 
-Complete reference of all Google Gemini API capabilities and their implementation status in nanobot.
+Complete reference of all Google Gemini API capabilities and their implementation status in scorpion.
 
-**SDK:** `google-genai` (direct, no LiteLLM)
+**SDK:** `google-genai`
 **Default model:** `gemini-2.5-flash`
 **Docs:** https://ai.google.dev/gemini-api/docs
 

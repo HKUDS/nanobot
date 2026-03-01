@@ -1,6 +1,6 @@
 # URL Context
 
-> **Status: Not implemented** — nanobot has agent-side URL fetching
+> **Status: Not implemented** — scorpion has agent-side URL fetching
 > **Gemini docs:** https://ai.google.dev/gemini-api/docs/url-context
 
 ## What It Is
@@ -45,7 +45,7 @@ Gemini 3.1 Pro, 3 Flash, 2.5 Pro/Flash/Flash-Lite
 
 ## Nanobot Implementation
 
-**Current URL fetching:** Agent-side tool (`nanobot/agent/tools/web.py`)
+**Current URL fetching:** Agent-side tool (`scorpion/agent/tools/web.py`)
 
 ```python
 # WebFetchTool: fetches URLs via httpx, extracts with Readability

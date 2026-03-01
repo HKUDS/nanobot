@@ -48,7 +48,7 @@ Real-time streaming music generation via WebSocket. Instrumental only. Uses the 
 
 ## Nanobot Implementation
 
-**File:** `nanobot/agent/tools/creative.py` (lines 264-376)
+**File:** `scorpion/agent/tools/creative.py` (lines 264-376)
 
 ```python
 # Lines 332-358: Live music streaming

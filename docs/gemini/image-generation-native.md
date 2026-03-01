@@ -32,7 +32,7 @@ Gemini models with native image generation and editing capabilities. Conversatio
 
 ## Nanobot Implementation
 
-**File:** `nanobot/agent/tools/creative.py` (lines 96-151)
+**File:** `scorpion/agent/tools/creative.py` (lines 96-151)
 
 ```python
 # Line 133: Gemini native image generation

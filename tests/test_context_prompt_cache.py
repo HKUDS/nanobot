@@ -6,7 +6,7 @@ from datetime import datetime as real_datetime
 from pathlib import Path
 import datetime as datetime_module
 
-from nanobot.agent.context import ContextBuilder
+from scorpion.agent.context import ContextBuilder
 
 
 class _FakeDatetime(real_datetime):

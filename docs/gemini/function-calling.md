@@ -36,7 +36,7 @@ Enables the model to invoke external functions by generating structured function
 
 ## Nanobot Implementation
 
-**Provider:** `nanobot/providers/gemini_provider.py`
+**Provider:** `scorpion/providers/gemini_provider.py`
 
 **Tool conversion (lines 196-211):**
 ```python
@@ -89,5 +89,5 @@ parts = [types.Part(
 - ANY / NONE / VALIDATED modes
 - Parallel function execution (calls are sequential in agent loop)
 - Multimodal function responses
-- MCP integration via Gemini (nanobot has its own MCP client)
+- MCP integration via Gemini (scorpion has its own MCP client)
 - `allowed_function_names` filtering

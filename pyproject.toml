@@ -1,11 +1,11 @@
 [project]
-name = "nanobot-ai"
+name = "scorpion-ai"
 version = "0.1.4.post3"
 description = "A lightweight personal AI assistant framework"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "nanobot contributors"}
+    {name = "scorpion contributors"}
 ]
 keywords = ["ai", "agent", "chatbot"]
 classifiers = [
@@ -57,37 +57,37 @@ dev = [
 ]
 
 [project.scripts]
-nanobot = "nanobot.cli.commands:app"
+scorpion = "scorpion.cli.commands:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["nanobot"]
+packages = ["scorpion"]
 
 [tool.hatch.build.targets.wheel.sources]
-"nanobot" = "nanobot"
+"scorpion" = "scorpion"
 
 # Include non-Python files in skills and templates
 [tool.hatch.build]
 include = [
-    "nanobot/**/*.py",
-    "nanobot/templates/**/*.md",
-    "nanobot/skills/**/*.md",
-    "nanobot/skills/**/*.sh",
+    "scorpion/**/*.py",
+    "scorpion/templates/**/*.md",
+    "scorpion/skills/**/*.md",
+    "scorpion/skills/**/*.sh",
 ]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "nanobot/",
+    "scorpion/",
     "bridge/",
     "README.md",
     "LICENSE",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]
-"bridge" = "nanobot/bridge"
+"bridge" = "scorpion/bridge"
 
 [tool.ruff]
 line-length = 100

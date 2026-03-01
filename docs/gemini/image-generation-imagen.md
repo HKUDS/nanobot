@@ -28,7 +28,7 @@ Dedicated image generation model (separate from Gemini native). Generates realis
 
 ## Nanobot Implementation
 
-**File:** `nanobot/agent/tools/creative.py` (lines 32-130)
+**File:** `scorpion/agent/tools/creative.py` (lines 32-130)
 
 ```python
 # Line 106-115

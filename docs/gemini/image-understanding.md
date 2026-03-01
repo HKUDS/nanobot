@@ -19,7 +19,7 @@ Multimodal vision capabilities: image captioning, classification, visual Q&A, ob
 
 ## Nanobot Implementation
 
-**File:** `nanobot/providers/gemini_provider.py` (lines 162-189)
+**File:** `scorpion/providers/gemini_provider.py` (lines 162-189)
 
 ```python
 @staticmethod

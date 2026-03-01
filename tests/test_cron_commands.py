@@ -1,12 +1,12 @@
 from typer.testing import CliRunner
 
-from nanobot.cli.commands import app
+from scorpion.cli.commands import app
 
 runner = CliRunner()
 
 
 def test_cron_add_rejects_invalid_timezone(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("nanobot.config.loader.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("scorpion.config.loader.get_data_dir", lambda: tmp_path)
 
     result = runner.invoke(
         app,

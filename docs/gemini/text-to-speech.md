@@ -1,6 +1,6 @@
 # Text-to-Speech (TTS)
 
-> **Status: Not implemented** — nanobot uses ElevenLabs for TTS
+> **Status: Not implemented** — scorpion uses ElevenLabs for TTS
 > **Gemini docs:** https://ai.google.dev/gemini-api/docs/speech-generation
 
 ## What It Is
@@ -31,7 +31,7 @@ Zephyr, Puck (Upbeat), Charon, Kore, Fenrir, Leda, Orus, Aoede, Callirrhoe, Auto
 
 ## Nanobot Implementation
 
-**Current TTS:** ElevenLabs (`nanobot/channels/manager.py`)
+**Current TTS:** ElevenLabs (`scorpion/channels/manager.py`)
 
 ```python
 # Line 43-60: ElevenLabs TTS

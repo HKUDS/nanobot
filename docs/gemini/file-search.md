@@ -55,7 +55,7 @@ Gemini 3.1 Pro, 3 Flash, 2.5 Pro, 2.5 Flash-Lite
 
 ## Nanobot Implementation
 
-Not implemented. Memory is session-based (`nanobot/session/manager.py`) using text history, not vector embeddings.
+Not implemented. Memory is session-based (`scorpion/session/manager.py`) using text history, not vector embeddings.
 
 **What File Search would enable:**
 - Upload knowledge base documents for the bot to reference

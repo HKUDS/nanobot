@@ -21,7 +21,7 @@ Forces the model to respond in a specific JSON schema. Guarantees type-safe, pre
 
 Not implemented. The `GenerateContentConfig` in `gemini_provider.py` does not set `response_mime_type` or `response_schema`.
 
-Tool argument schemas are validated agent-side in `nanobot/agent/tools/base.py`, not via Gemini's native structured output.
+Tool argument schemas are validated agent-side in `scorpion/agent/tools/base.py`, not via Gemini's native structured output.
 
 **What's needed:**
 ```python

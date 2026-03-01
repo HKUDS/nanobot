@@ -1,6 +1,6 @@
 # Audio Understanding
 
-> **Status: Not implemented** — nanobot uses ElevenLabs Scribe for STT
+> **Status: Not implemented** — scorpion uses ElevenLabs Scribe for STT
 > **Gemini docs:** https://ai.google.dev/gemini-api/docs/audio
 
 ## What It Is
@@ -21,7 +21,7 @@ Gemini can natively analyze audio: transcription, translation, speaker diarizati
 
 ## Nanobot Implementation
 
-**Current STT:** ElevenLabs Scribe (`nanobot/providers/transcription.py`)
+**Current STT:** ElevenLabs Scribe (`scorpion/providers/transcription.py`)
 ```python
 # Line 18: ElevenLabs endpoint
 _ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"

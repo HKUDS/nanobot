@@ -1,6 +1,6 @@
 # Code Execution
 
-> **Status: Not implemented** — nanobot has agent-side shell execution
+> **Status: Not implemented** — scorpion has agent-side shell execution
 > **Gemini docs:** https://ai.google.dev/gemini-api/docs/code-execution
 
 ## What It Is
@@ -42,7 +42,7 @@ tools = [types.Tool(code_execution=types.ToolCodeExecution())]
 
 ## Nanobot Implementation
 
-**Current code execution:** Agent-side shell tool (`nanobot/agent/tools/shell.py`)
+**Current code execution:** Agent-side shell tool (`scorpion/agent/tools/shell.py`)
 
 ```python
 # ExecTool: runs shell commands via subprocess

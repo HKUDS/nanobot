@@ -45,7 +45,7 @@ Available via `models.get()`: `input_token_limit`, `output_token_limit`
 
 ## Nanobot Implementation
 
-**Response metadata captured:** `nanobot/providers/gemini_provider.py` (lines 241-248)
+**Response metadata captured:** `scorpion/providers/gemini_provider.py` (lines 241-248)
 
 ```python
 usage: dict[str, int] = {}

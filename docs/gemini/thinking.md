@@ -32,13 +32,13 @@ Configurable reasoning depth that lets models "think" before responding. Improve
 
 ## Nanobot Implementation
 
-**Config:** `nanobot/config/schema.py`
+**Config:** `scorpion/config/schema.py`
 ```python
 # Line 229
 reasoning_effort: str | None = None  # low / medium / high
 ```
 
-**Provider:** `nanobot/providers/gemini_provider.py`
+**Provider:** `scorpion/providers/gemini_provider.py`
 ```python
 # Line 45: parameter accepted
 async def chat(self, ..., reasoning_effort: str | None = None) -> LLMResponse:
