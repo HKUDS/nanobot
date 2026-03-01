@@ -35,7 +35,7 @@ class ElevenLabsTranscriptionProvider:
                         self.api_url,
                         headers={"xi-api-key": self.api_key},
                         files={
-                            "audio": (path.name, f, "audio/ogg"),
+                            "file": (path.name, f, "audio/ogg"),
                             "model_id": (None, "scribe_v1"),
                         },
                         timeout=60.0,
