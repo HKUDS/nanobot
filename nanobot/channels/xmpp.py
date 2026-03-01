@@ -48,8 +48,11 @@ class XmppClient(ClientXMPP):
 
     async def _on_session_start(self, event: Any) -> None:
         """Handle session start - send presence and join rooms."""
+        logger.info("XMPP session started for {}", self.boundjid)
         self.send_presence()
+        logger.debug("Presence sent")
         await self.get_roster()
+        logger.debug("Roster retrieved: {} contacts", len(self.client_roster))
 
         # Join configured MUC rooms
         for room in self._rooms:
@@ -62,24 +65,39 @@ class XmppClient(ClientXMPP):
 
     def _on_message(self, msg: Any) -> None:
         """Handle incoming messages."""
+        msg_type = msg.get("type", "unknown")
+        msg_from = str(msg["from"])
+        msg_body = str(msg["body"]) if msg["body"] else ""
+
+        logger.debug("Message received: type={} from={} body={!r}", msg_type, msg_from, msg_body[:50] if msg_body else "")
+
         # Ignore messages from ourselves to prevent loops
         if str(msg["from"].bare) == self.boundjid.bare:
+            logger.debug("Ignoring message from self")
             return
 
-        if msg["type"] in ("chat", "normal"):
+        if not msg_body.strip():
+            logger.debug("Ignoring message with empty body")
+            return
+
+        if msg_type in ("chat", "normal"):
             # Direct message
+            logger.info("Direct message from {}: {}", msg_from, msg_body[:100] if msg_body else "")
             asyncio.create_task(self._channel._handle_dm(
                 sender_jid=str(msg["from"]),
-                body=str(msg["body"]) if msg["body"] else "",
+                body=msg_body,
             ))
-        elif msg["type"] == "groupchat":
+        elif msg_type == "groupchat":
             # MUC message
+            logger.info("MUC message from {} in {}: {}", msg["from"].resource, msg["from"].bare, msg_body[:100] if msg_body else "")
             asyncio.create_task(self._channel._handle_muc_message(
                 room_jid=str(msg["from"].bare),
                 sender_nick=str(msg["from"].resource),
                 sender_jid=str(msg["from"]),
-                body=str(msg["body"]) if msg["body"] else "",
+                body=msg_body,
             ))
+        else:
+            logger.debug("Ignoring message with type: {}", msg_type)
 
     def _on_disconnected(self, event: Any) -> None:
         """Handle disconnection."""
