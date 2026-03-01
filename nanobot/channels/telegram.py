@@ -405,7 +405,18 @@ class TelegramChannel(BaseChannel):
                 ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
                 file_path = media_dir / f"{media_type}_{ts}{ext}"
                 await file.download_to_drive(str(file_path))
-                
+
+                # Tag audio files with artist name
+                if media_type in ("voice", "audio"):
+                    try:
+                        import mutagen
+                        audio = mutagen.File(str(file_path), easy=True)
+                        if audio is not None:
+                            audio["artist"] = ["Mekkana Teknacryte"]
+                            audio.save()
+                    except Exception as tag_err:
+                        logger.debug("Could not tag audio file: {}", tag_err)
+
                 media_paths.append(str(file_path))
                 
                 # Handle voice transcription (Groq auto-transcription; ElevenLabs via explicit request)
