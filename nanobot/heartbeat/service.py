@@ -225,14 +225,7 @@ class HeartbeatService:
         except Exception:
             pass
 
-        # 3) heuristic fallback by model name
-        m = (self.model or "").lower()
-        if any(x in m for x in ("gpt-4o-mini", "gpt-4.1-mini", "claude-3-haiku", "gemini-1.5-flash")):
-            return 8192
-        if any(x in m for x in ("gpt-4o", "gpt-4.1", "claude-3-5-sonnet", "claude-3-7-sonnet", "gemini-1.5-pro")):
-            return 32768
-        if any(x in m for x in ("gpt-5", "o1", "o3", "claude-3-opus", "claude-4", "gemini-2")):
-            return 131072
+        # 3) neutral fallback (no model-name hardcoding)
         return 32768
 
     def _selection_budget_for_model(self) -> HeartbeatSelectionBudget:
