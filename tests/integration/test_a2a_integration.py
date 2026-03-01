@@ -17,6 +17,8 @@ def mock_config():
     config.skills = [
         {"id": "test", "name": "Test", "description": "Test skill", "tags": []},
     ]
+    config.allow_from = []  # Allow all senders
+    config.task_timeout_seconds = 300.0
     return config
 
 
@@ -72,8 +74,8 @@ class TestAgentCardEndpoint:
         card = response.json()
 
         assert "capabilities" in card
-        # Streaming should be enabled
-        assert card["capabilities"].get("streaming") is True
+        # Streaming is not fully implemented yet
+        assert card["capabilities"].get("streaming") is False
 
 
 class TestMessageSend:
@@ -96,14 +98,17 @@ class TestMessageSend:
         client = TestClient(app)
 
         message = self._make_message("Hello", contextId="test-ctx-1")
-        response = client.post("/", json={
-            "jsonrpc": "2.0",
-            "method": "message/send",
-            "params": {
-                "message": message.model_dump(mode='json', exclude_none=True),
+        response = client.post(
+            "/",
+            json={
+                "jsonrpc": "2.0",
+                "method": "message/send",
+                "params": {
+                    "message": message.model_dump(mode="json", exclude_none=True),
+                },
+                "id": 1,
             },
-            "id": 1
-        })
+        )
 
         assert response.status_code == 200
         result = response.json()
@@ -123,14 +128,17 @@ class TestMessageSend:
         client = TestClient(app)
 
         message = self._make_message("Hello", contextId="my-context-123")
-        response = client.post("/", json={
-            "jsonrpc": "2.0",
-            "method": "message/send",
-            "params": {
-                "message": message.model_dump(mode='json', exclude_none=True),
+        response = client.post(
+            "/",
+            json={
+                "jsonrpc": "2.0",
+                "method": "message/send",
+                "params": {
+                    "message": message.model_dump(mode="json", exclude_none=True),
+                },
+                "id": 2,
             },
-            "id": 2
-        })
+        )
 
         assert response.status_code == 200
         result = response.json()
@@ -144,14 +152,17 @@ class TestMessageSend:
         client = TestClient(app)
 
         message = self._make_message("No context provided")
-        response = client.post("/", json={
-            "jsonrpc": "2.0",
-            "method": "message/send",
-            "params": {
-                "message": message.model_dump(mode='json', exclude_none=True),
+        response = client.post(
+            "/",
+            json={
+                "jsonrpc": "2.0",
+                "method": "message/send",
+                "params": {
+                    "message": message.model_dump(mode="json", exclude_none=True),
+                },
+                "id": 3,
             },
-            "id": 3
-        })
+        )
 
         assert response.status_code == 200
         result = response.json()
@@ -171,14 +182,17 @@ class TestJSONRPCFormat:
         client = TestClient(app)
 
         message = self._make_message("Test")
-        response = client.post("/", json={
-            "jsonrpc": "2.0",
-            "method": "message/send",
-            "params": {
-                "message": message.model_dump(mode='json', exclude_none=True),
+        response = client.post(
+            "/",
+            json={
+                "jsonrpc": "2.0",
+                "method": "message/send",
+                "params": {
+                    "message": message.model_dump(mode="json", exclude_none=True),
+                },
+                "id": 100,
             },
-            "id": 100
-        })
+        )
 
         result = response.json()
         # Should have matching id
@@ -193,12 +207,9 @@ class TestJSONRPCFormat:
         app, channel = a2a_app
         client = TestClient(app)
 
-        response = client.post("/", json={
-            "jsonrpc": "2.0",
-            "method": "unknown/method",
-            "params": {},
-            "id": 1
-        })
+        response = client.post(
+            "/", json={"jsonrpc": "2.0", "method": "unknown/method", "params": {}, "id": 1}
+        )
 
         result = response.json()
         assert "error" in result

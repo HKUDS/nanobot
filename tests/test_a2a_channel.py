@@ -30,6 +30,8 @@ def mock_config():
         {"id": "chat", "name": "Chat", "description": "General chat", "tags": []},
         {"id": "assist", "name": "Assist", "description": "Task assistance", "tags": []},
     ]
+    config.allow_from = []  # Allow all senders
+    config.task_timeout_seconds = 300.0
     return config
 
 
@@ -43,6 +45,7 @@ def mock_session_manager():
 def a2a_channel(mock_config, mock_bus, mock_session_manager):
     """Create an A2A channel instance."""
     from nanobot.channels.a2a import A2AChannel, A2A_AVAILABLE
+
     if not A2A_AVAILABLE:
         pytest.skip("a2a-sdk not installed")
     return A2AChannel(mock_config, mock_bus, mock_session_manager)
@@ -129,9 +132,9 @@ class TestMessageSend:
         """Test on_message_send creates InboundMessage and publishes to bus."""
         message = make_message("Hello", context_id="test-ctx-1")
         params = MessageSendParams(message=message)
-        
+
         task = await a2a_channel._handler.on_message_send(params)
-        
+
         mock_bus.publish_inbound.assert_called_once()
         call_args = mock_bus.publish_inbound.call_args[0][0]
         assert isinstance(call_args, InboundMessage)
@@ -146,7 +149,7 @@ class TestMessageSend:
         """Test on_message_send generates context_id if not provided."""
         message = make_message("Hello", context_id=None)
         params = MessageSendParams(message=message)
-        
+
         task = await a2a_channel._handler.on_message_send(params)
         assert task.context_id.startswith("a2a:")
 
@@ -221,4 +224,177 @@ class TestGetASGIApp:
         """Test get_asgi_app() returns a Starlette app."""
         app = a2a_channel.get_asgi_app()
         assert app is not None
-        assert hasattr(app, 'routes')
+        assert hasattr(app, "routes")
+
+
+class TestAuthorization:
+    """Tests for authorization enforcement."""
+
+    @pytest.mark.asyncio
+    async def test_unauthorized_sender_rejected(self, mock_bus):
+        """Test that unauthorized senders are rejected."""
+        from nanobot.channels.a2a import A2AChannel, A2A_AVAILABLE
+        from a2a.types import Message, MessageSendParams, Part
+
+        if not A2A_AVAILABLE:
+            pytest.skip("a2a-sdk not installed")
+
+        # Config with allow_from restriction
+        config = MagicMock()
+        config.agent_name = "Secure Agent"
+        config.agent_url = "http://localhost:8000"
+        config.agent_description = "Secure agent"
+        config.skills = []
+        config.allow_from = ["agent"]  # Only 'agent' role allowed
+        config.task_timeout_seconds = 300.0
+
+        channel = A2AChannel(config, mock_bus)
+
+        # Message from 'user' role (not in allow_from)
+        message = Message(
+            message_id=f"msg-{uuid.uuid4().hex[:8]}",
+            role="user",
+            parts=[Part(type="text", text="Hello")],
+        )
+        params = MessageSendParams(message=message)
+
+        with pytest.raises(PermissionError, match="not authorized"):
+            await channel._handler.on_message_send(params)
+
+    @pytest.mark.asyncio
+    async def test_authorized_sender_accepted(self, mock_bus):
+        """Test that authorized senders are accepted."""
+        from nanobot.channels.a2a import A2AChannel, A2A_AVAILABLE
+        from a2a.types import Message, MessageSendParams, Part
+
+        if not A2A_AVAILABLE:
+            pytest.skip("a2a-sdk not installed")
+
+        config = MagicMock()
+        config.agent_name = "Secure Agent"
+        config.agent_url = "http://localhost:8000"
+        config.agent_description = "Secure agent"
+        config.skills = []
+        config.allow_from = ["user"]
+        config.task_timeout_seconds = 300.0
+
+        channel = A2AChannel(config, mock_bus)
+
+        # Message from 'user' role (in allow_from)
+        message = Message(
+            message_id=f"msg-{uuid.uuid4().hex[:8]}",
+            role="user",
+            parts=[Part(type="text", text="Hello")],
+        )
+        params = MessageSendParams(message=message)
+
+        task = await channel._handler.on_message_send(params)
+        assert task is not None
+
+
+class TestTaskStatus:
+    """Tests for task status tracking."""
+
+    @pytest.mark.asyncio
+    async def test_get_task_returns_stored_task(self, a2a_channel):
+        """Test on_get_task returns the stored task."""
+        from a2a.types import TaskQueryParams
+
+        # Create a task
+        message = make_message("Test", context_id="status-test")
+        params = MessageSendParams(message=message)
+        created_task = await a2a_channel._handler.on_message_send(params)
+
+        # Retrieve task
+        query = TaskQueryParams(id=created_task.id)
+        retrieved_task = await a2a_channel._handler.on_get_task(query)
+
+        assert retrieved_task is not None
+        assert retrieved_task.id == created_task.id
+
+    @pytest.mark.asyncio
+    async def test_task_completes_with_artifacts(self, a2a_channel):
+        """Test task status updates to completed with artifacts."""
+        from a2a.types import TaskQueryParams, TaskState
+
+        # Create task
+        message = make_message("Test", context_id="artifact-test")
+        params = MessageSendParams(message=message)
+        task = await a2a_channel._handler.on_message_send(params)
+
+        # Deliver response
+        a2a_channel._handler.deliver_response(task.id, "Agent response")
+
+        # Wait for task processing
+        await asyncio.sleep(0.5)
+
+        # Check task status
+        query = TaskQueryParams(id=task.id)
+        updated_task = await a2a_channel._handler.on_get_task(query)
+
+        assert updated_task.status.state == TaskState.completed
+        assert updated_task.artifacts is not None
+        assert len(updated_task.artifacts) == 1
+
+    @pytest.mark.asyncio
+    async def test_cancel_task_updates_status(self, a2a_channel):
+        """Test cancelling a task updates its status."""
+        from a2a.types import TaskIdParams, TaskState
+
+        # Create task
+        message = make_message("Test", context_id="cancel-test")
+        params = MessageSendParams(message=message)
+        task = await a2a_channel._handler.on_message_send(params)
+
+        # Cancel task
+        cancel_params = TaskIdParams(id=task.id)
+        await a2a_channel._handler.on_cancel_task(cancel_params)
+
+        # Check task status
+        from a2a.types import TaskQueryParams
+
+        query = TaskQueryParams(id=task.id)
+        updated_task = await a2a_channel._handler.on_get_task(query)
+
+        assert updated_task.status.state == TaskState.canceled
+
+
+class TestGracefulShutdown:
+    """Tests for graceful shutdown."""
+
+    @pytest.mark.asyncio
+    async def test_stop_cancels_pending_tasks(self, a2a_channel):
+        """Test that stop() cancels all pending tasks."""
+        from a2a.types import TaskState
+
+        # Create pending task
+        message = make_message("Test", context_id="shutdown-test")
+        params = MessageSendParams(message=message)
+        task = await a2a_channel._handler.on_message_send(params)
+
+        # Verify task is in working state before stop
+        assert task.status.state == TaskState.working
+
+        # Start and stop channel
+        await a2a_channel.start()
+        await a2a_channel.stop()
+
+        # Allow cancellation to propagate
+        await asyncio.sleep(0.1)
+
+        # Check task was cancelled
+        from a2a.types import TaskQueryParams
+
+        query = TaskQueryParams(id=task.id)
+        updated_task = await a2a_channel._handler.on_get_task(query)
+
+        assert updated_task.status.state == TaskState.canceled
+
+
+class TestStreamingCapability:
+    """Tests for streaming capability."""
+
+    def test_streaming_disabled_by_default(self, a2a_channel):
+        """Test that streaming is disabled in agent card."""
+        card = a2a_channel.agent_card
+        assert card.capabilities.streaming is False
