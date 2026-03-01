@@ -42,13 +42,13 @@ def mock_session_manager():
 
 
 @pytest.fixture
-def a2a_channel(mock_config, mock_bus, mock_session_manager):
+def a2a_channel(mock_config, mock_bus):
     """Create an A2A channel instance."""
     from nanobot.channels.a2a import A2AChannel, A2A_AVAILABLE
 
     if not A2A_AVAILABLE:
         pytest.skip("a2a-sdk not installed")
-    return A2AChannel(mock_config, mock_bus, mock_session_manager)
+    return A2AChannel(mock_config, mock_bus)
 
 
 def make_message(text: str, role: str = "user", context_id: str | None = None):
@@ -202,16 +202,15 @@ class TestLifecycle:
     """Tests for start/stop lifecycle."""
 
     @pytest.mark.asyncio
-    async def test_start_creates_dispatch_task(self, a2a_channel):
-        """Test start() creates the dispatch task."""
+    async def test_start_sets_running_flag(self, a2a_channel):
+        """Test start() sets the running flag."""
         await a2a_channel.start()
-        assert a2a_channel._dispatch_task is not None
         assert a2a_channel._running is True
         await a2a_channel.stop()
 
     @pytest.mark.asyncio
-    async def test_stop_cancels_dispatch_task(self, a2a_channel):
-        """Test stop() cancels the dispatch task."""
+    async def test_stop_clears_running_flag(self, a2a_channel):
+        """Test stop() clears the running flag."""
         await a2a_channel.start()
         await a2a_channel.stop()
         assert a2a_channel._running is False
