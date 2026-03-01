@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import uuid
+import weakref
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -38,6 +39,8 @@ class AgentLoop:
     _SILENT_TRAILING_RE = re.compile(r"\[SILENT\][\s\.,!?;:，。！？；：、…~]*$")
     _EMPTY_RESPONSE_SENTINELS = {"(empty)", "[empty message]"}
     _EMPTY_RESPONSE_FALLBACK_PREFIX = "I could not produce a final response because the model returned empty/blank content "
+
+    _TOOL_RESULT_MAX_CHARS = 500
 
     def __init__(
         self,
@@ -103,10 +106,11 @@ class AgentLoop:
         )
 
         self._running = False
+        self._consolidating: set[str] = set()
+        self._consolidation_tasks: set[asyncio.Task] = set()
+        self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}
         self._processing_lock = asyncio.Lock()
-        self._consolidation_running_keys: set[str] = set()
-        self._consolidation_pending_keys: set[str] = set()
         self._mcp_manager = None
         self._mcp_started = False
         if mcp_servers:
@@ -313,6 +317,7 @@ class AgentLoop:
         if isinstance(cron_tool, CronTool):
             cron_tool.set_context(channel, chat_id)
 
+
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
         """Remove <think>…</think> blocks that some models embed in content."""
@@ -324,7 +329,8 @@ class AgentLoop:
     def _tool_hint(tool_calls: list) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
         def _fmt(tc):
-            val = next(iter(tc.arguments.values()), None) if tc.arguments else None
+            args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
+            val = next(iter(args.values()), None) if isinstance(args, dict) else None
             if not isinstance(val, str):
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
@@ -458,53 +464,6 @@ class AgentLoop:
         except ValueError:
             return None
 
-    def _should_schedule_consolidation(self, session: Session) -> bool:
-        """Return True when consolidation should run for this session."""
-        # TODO: consolidation disabled — LLM-based compression to be redesigned
-        return False
-        keep_count = self._compression_keep_count()
-        total_messages = len(session.messages)
-        if total_messages <= keep_count:
-            return False
-
-        compress_end = total_messages - keep_count
-        delta = compress_end - session.last_consolidated
-        if delta <= 0:
-            return False
-
-        if delta >= self._CONSOLIDATION_HARD_LIMIT:
-            return True
-        if delta >= self.compression_window_size:
-            return True
-
-        last_at = self._parse_iso_datetime(session.last_consolidated_at)
-        if not last_at:
-            return False
-        return (datetime.now() - last_at).total_seconds() >= self._CONSOLIDATION_COOLDOWN_S
-
-    def _schedule_consolidation(self, session: Session, reason: str) -> None:
-        """Schedule consolidation with per-session de-duplication."""
-        key = session.key
-        if key in self._consolidation_running_keys:
-            self._consolidation_pending_keys.add(key)
-            logger.debug("Memory consolidation already running for {} (reason={})", key, reason)
-            return
-
-        self._consolidation_running_keys.add(key)
-        logger.debug("Memory consolidation scheduled for {} (reason={})", key, reason)
-
-        async def _run_for_session() -> None:
-            try:
-                await self._consolidate_memory(session)
-            finally:
-                self._consolidation_running_keys.discard(key)
-                if key in self._consolidation_pending_keys:
-                    self._consolidation_pending_keys.discard(key)
-                    if self._should_schedule_consolidation(session):
-                        self._schedule_consolidation(session, reason="pending")
-
-        asyncio.create_task(_run_for_session())
-
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -580,6 +539,14 @@ class AgentLoop:
                     )
                 continue
 
+            # Don't persist error responses to session history — they can
+            # poison the context and cause permanent 400 loops (#1303).
+            if response.finish_reason == "error":
+                clean = self._strip_think(response.content)
+                logger.error("LLM returned error: {}", (clean or "")[:200])
+                final_content = clean or "Sorry, I encountered an error calling the AI model."
+                break
+
             stripped_content = self._strip_think(response.content)
             if (
                 response.content is None
@@ -635,6 +602,7 @@ class AgentLoop:
 
         return final_content, last_finish_reason, tool_use_log
 
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -657,20 +625,31 @@ class AgentLoop:
 
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            messages_to_archive = session.messages.copy()
+            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
+            self._consolidating.add(session.key)
+            try:
+                async with lock:
+                    snapshot = session.messages[session.last_consolidated:]
+                    if snapshot:
+                        temp = Session(key=session.key)
+                        temp.messages = list(snapshot)
+                        if not await self._consolidate_memory(temp, archive_all=True):
+                            return OutboundMessage(
+                                channel=msg.channel, chat_id=msg.chat_id,
+                                content="Memory archival failed, session not cleared. Please try again.",
+                            )
+            except Exception:
+                logger.exception("/new archival failed for {}", session.key)
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="Memory archival failed, session not cleared. Please try again.",
+                )
+            finally:
+                self._consolidating.discard(session.key)
+
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
-
-            async def _consolidate_and_cleanup() -> None:
-                temp_session = Session(key=session.key)
-                temp_session.messages = messages_to_archive
-                await self._consolidate_memory(
-                    temp_session,
-                    archive_all=True,
-                    persist_session=False,
-                )
-            asyncio.create_task(_consolidate_and_cleanup())
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
@@ -683,6 +662,24 @@ class AgentLoop:
                 chat_id=msg.chat_id,
                 content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands",
             )
+
+        unconsolidated = len(session.messages) - session.last_consolidated
+        if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
+            self._consolidating.add(session.key)
+            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
+
+            async def _consolidate_and_unlock():
+                try:
+                    async with lock:
+                        await self._consolidate_memory(session)
+                finally:
+                    self._consolidating.discard(session.key)
+                    _task = asyncio.current_task()
+                    if _task is not None:
+                        self._consolidation_tasks.discard(_task)
+
+            _task = asyncio.create_task(_consolidate_and_unlock())
+            self._consolidation_tasks.add(_task)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata)
         if message_tool := self.tools.get("message"):
@@ -746,8 +743,6 @@ class AgentLoop:
             user_timestamp=msg.timestamp,
         )
         self.sessions.save(session)
-        if self._should_schedule_consolidation(session):
-            self._schedule_consolidation(session, reason="post_message")
 
         if silent_requested:
             logger.info(
@@ -783,6 +778,7 @@ class AgentLoop:
         if len(final_content) > self._LOG_PREVIEW_LIMIT:
             preview += "...(truncated)"
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+
 
         return OutboundMessage(
             channel=msg.channel,
@@ -841,8 +837,6 @@ class AgentLoop:
             user_timestamp=msg.timestamp,
         )
         self.sessions.save(session)
-        if self._should_schedule_consolidation(session):
-            self._schedule_consolidation(session, reason="post_system_message")
 
         if silent_requested:
             logger.info("Suppress outbound system message for {} due to [SILENT] marker", msg.sender_id)
@@ -875,7 +869,7 @@ class AgentLoop:
         session: Session,
         archive_all: bool = False,
         persist_session: bool = True,
-    ) -> None:
+    ) -> bool:
         """Consolidate old messages into MEMORY.md + HISTORY.md."""
         memory = MemoryStore(self.workspace)
         total_messages = len(session.messages)
@@ -897,7 +891,7 @@ class AgentLoop:
                     total_messages,
                     keep_count,
                 )
-                return
+                return True
 
             compress_end = total_messages - keep_count
             delta = compress_end - session.last_consolidated
@@ -908,11 +902,11 @@ class AgentLoop:
                     session.last_consolidated,
                     total_messages,
                 )
-                return
+                return True
 
             old_messages = session.messages[session.last_consolidated:compress_end]
             if not old_messages:
-                return
+                return True
             next_last_consolidated = compress_end
             logger.info(
                 "Memory consolidation started: {} total, {} new to consolidate, {} keep, threshold={}",
@@ -937,6 +931,8 @@ class AgentLoop:
 
 2. "memory_update": The updated long-term memory content. Add any new facts: user location, preferences, personal info, habits, project context, technical decisions, tools/services used. If nothing new, return the existing content unchanged.
 
+Language requirement: "history_entry" must always be written in Simplified Chinese (简体中文).
+
 ## Current Long-term Memory
 {current_memory or "(empty)"}
 
@@ -952,7 +948,7 @@ Respond with ONLY valid JSON, no markdown fences."""
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a memory consolidation agent. Respond only with valid JSON.",
+                        "content": "You are a memory consolidation agent. Respond only with valid JSON. The history_entry must be in Simplified Chinese (zh-CN).",
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -963,7 +959,7 @@ Respond with ONLY valid JSON, no markdown fences."""
             text = (response.content or "").strip()
             if not text:
                 logger.warning("Memory consolidation: LLM returned empty response, skipping")
-                return
+                return False
             if text.startswith("```"):
                 text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
 
@@ -973,7 +969,7 @@ Respond with ONLY valid JSON, no markdown fences."""
                     "Memory consolidation: unexpected response type, skipping. Response: {}",
                     text[:200],
                 )
-                return
+                return False
 
             if entry := result.get("history_entry"):
                 memory.append_history(entry)
@@ -992,8 +988,10 @@ Respond with ONLY valid JSON, no markdown fences."""
                 session.last_consolidated,
                 session.last_consolidated_at,
             )
+            return True
         except Exception as e:
             logger.error(f"Memory consolidation failed: {e}")
+            return False
 
     async def process_direct(
         self,

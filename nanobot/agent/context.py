@@ -74,7 +74,7 @@ You can read and edit file, exec command, search web, send message and spawn sub
 Your workspace is at: {workspace_path}
 - Memory files: {workspace_path}/memory/MEMORY.md
 - Daily notes: {daily_path}/YYYY-MM-DD.md
-- History log: {workspace_path}/memory/HISTORY.md (grep-searchable)
+- History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 - Logs(用于排查自身问题、token 用量等)
     - 通用日志: {data_dir}/logs/nanobot_YYYY-MM-DD.log

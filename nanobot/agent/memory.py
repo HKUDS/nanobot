@@ -171,6 +171,8 @@ class MemoryStore:
         current_memory = self.read_long_term()
         prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
 
+Language requirement: the "history_entry" argument must always be written in Simplified Chinese (简体中文).
+
 ## Current Long-term Memory
 {current_memory or "(empty)"}
 
@@ -180,7 +182,7 @@ class MemoryStore:
         try:
             response = await provider.chat(
                 messages=[
-                    {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+                    {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation. Ensure history_entry is in Simplified Chinese (zh-CN)."},
                     {"role": "user", "content": prompt},
                 ],
                 tools=_SAVE_MEMORY_TOOL,

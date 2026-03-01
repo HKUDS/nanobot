@@ -187,7 +187,8 @@ class MessageTool(Tool):
 
         try:
             await self._send_callback(msg)
-            self._sent_in_turn = True
+            if channel == self._default_channel and chat_id == self._default_chat_id:
+                self._sent_in_turn = True
             parts = [f"Message delivered to {channel}:{chat_id}"]
             if reaction:
                 parts.append(f" with reaction {reaction} on message {reaction_target_id}")
