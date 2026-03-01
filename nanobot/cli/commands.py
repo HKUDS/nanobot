@@ -231,6 +231,8 @@ def _make_provider(config: Config):
         api_key=p.api_key if p else None,
         api_base=config.get_api_base(model),
         default_model=model,
+        fallback_model=config.agents.defaults.fallback_model,
+        llm_policy=config.agents.defaults.llm_policy,
         extra_headers=p.extra_headers if p else None,
         provider_name=provider_name,
     )

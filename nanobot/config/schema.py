@@ -216,17 +216,44 @@ class ChannelsConfig(Base):
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
+class RetryPolicyConfig(Base):
+    """Retry behavior for LLM calls."""
+
+    max_retries: int = 4
+    base_delay_sec: float = 0.75
+    max_delay_sec: float = 8.0
+    retryable_status_codes: list[int] = Field(
+        default_factory=lambda: [408, 409, 429, 500, 502, 503, 504]
+    )
+
+
+class FallbackPolicyConfig(Base):
+    """Fallback model behavior when primary call fails."""
+
+    enabled: bool = True
+    retryable_errors_only: bool = True
+
+
+class LLMCallPolicyConfig(Base):
+    """Top-level LLM calling policy."""
+
+    retry: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
+    fallback: FallbackPolicyConfig = Field(default_factory=FallbackPolicyConfig)
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.nanobot/workspace"
     model: str = "anthropic/claude-opus-4-5"
+    fallback_model: str | None = None
     provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     max_tokens: int = 8192
     temperature: float = 0.1
     max_tool_iterations: int = 40
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    llm_policy: LLMCallPolicyConfig = Field(default_factory=LLMCallPolicyConfig)
 
 
 class AgentsConfig(Base):
