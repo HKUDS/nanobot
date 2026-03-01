@@ -69,19 +69,13 @@ class CronService:
         on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None
     ):
         self.store_path = store_path
-        self.on_job = on_job
+        self.on_job = on_job  # Callback to execute job, returns response text
         self._store: CronStore | None = None
-        self._last_mtime: float = 0.0
         self._timer_task: asyncio.Task | None = None
         self._running = False
 
     def _load_store(self) -> CronStore:
-        """Load jobs from disk. Reloads automatically if file was modified externally."""
-        if self._store and self.store_path.exists():
-            mtime = self.store_path.stat().st_mtime
-            if mtime != self._last_mtime:
-                logger.info("Cron: jobs.json modified externally, reloading")
-                self._store = None
+        """Load jobs from disk."""
         if self._store:
             return self._store
 
@@ -170,7 +164,6 @@ class CronService:
         }
 
         self.store_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        self._last_mtime = self.store_path.stat().st_mtime
     
     async def start(self) -> None:
         """Start the cron service."""
