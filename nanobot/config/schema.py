@@ -201,6 +201,18 @@ class QQConfig(Base):
 
 
 
+class A2AChannelConfig(Base):
+    """A2A protocol channel configuration."""
+
+    enabled: bool = False
+    agent_name: str = "Nanobot"
+    agent_url: str = "http://localhost:8000"
+    agent_description: str = "Nanobot AI Agent"
+    skills: list[str] = Field(default_factory=list)
+    allow_from: list[str] = Field(default_factory=list)
+
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -216,6 +228,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    a2a: A2AChannelConfig = Field(default_factory=A2AChannelConfig)
 
 
 class AgentDefaults(Base):
