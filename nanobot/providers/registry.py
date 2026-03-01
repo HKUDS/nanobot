@@ -147,7 +147,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("volcengine", "volces", "ark"),
         env_key="OPENAI_API_KEY",
         display_name="VolcEngine",
-        litellm_prefix="openai",
+        litellm_prefix="volcengine",
         skip_prefixes=(),
         env_extras=(),
         is_gateway=True,
@@ -201,7 +201,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     # OpenAI Codex: uses OAuth, not API key.
     ProviderSpec(
         name="openai_codex",
-        keywords=("openai-codex", "codex"),
+        keywords=("openai-codex",),
         env_key="",                         # OAuth-based, no API key
         display_name="OpenAI Codex",
         litellm_prefix="",                  # Not routed through LiteLLM
