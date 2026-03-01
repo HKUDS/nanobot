@@ -14,7 +14,13 @@ from nanobot.providers.registry import find_by_model, find_gateway
 
 # Standard OpenAI chat-completion message keys plus reasoning_content for
 # thinking-enabled models (Kimi k2.5, DeepSeek-R1, etc.).
-_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"})
+_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
+
+# Additional keys only valid for Anthropic extended-thinking models.
+# Passing thinking_blocks to non-Anthropic providers (e.g. Dashscope/Qwen) can
+# cause LiteLLM to mangle the content field, resulting in provider errors like
+# "Invalid type for 'messages.[0].content': got an object instead of a string".
+_ANTHROPIC_EXTRA_KEYS = frozenset({"thinking_blocks"})
 _ALNUM = string.ascii_letters + string.digits
 
 def _short_tool_id() -> str:
@@ -158,11 +164,21 @@ class LiteLLMProvider(LLMProvider):
                     return
 
     @staticmethod
-    def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Strip non-standard keys and ensure assistant messages have a content key."""
+    def _sanitize_messages(
+        messages: list[dict[str, Any]],
+        extra_keys: frozenset[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Strip non-standard keys and ensure assistant messages have a content key.
+
+        Args:
+            messages: Raw message list to sanitize.
+            extra_keys: Additional provider-specific keys to preserve (e.g.
+                ``_ANTHROPIC_EXTRA_KEYS`` for models that support thinking_blocks).
+        """
+        allowed = _ALLOWED_MSG_KEYS | (extra_keys or frozenset())
         sanitized = []
         for msg in messages:
-            clean = {k: v for k, v in msg.items() if k in _ALLOWED_MSG_KEYS}
+            clean = {k: v for k, v in msg.items() if k in allowed}
             # Strict providers require "content" even when assistant only has tool_calls
             if clean.get("role") == "assistant" and "content" not in clean:
                 clean["content"] = None
@@ -197,13 +213,20 @@ class LiteLLMProvider(LLMProvider):
         if self._supports_cache_control(original_model):
             messages, tools = self._apply_cache_control(messages, tools)
 
+        # Determine provider-specific extra message keys.
+        # thinking_blocks is an Anthropic-only field: passing it to other providers
+        # (e.g. Dashscope/Qwen) can corrupt the content field and trigger API errors.
+        extra_msg_keys = _ANTHROPIC_EXTRA_KEYS if model.startswith("anthropic/") else None
+
         # Clamp max_tokens to at least 1 — negative or zero values cause
         # LiteLLM to reject the request with "max_tokens must be at least 1".
         max_tokens = max(1, max_tokens)
 
         kwargs: dict[str, Any] = {
             "model": model,
-            "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
+            "messages": self._sanitize_messages(
+                self._sanitize_empty_content(messages), extra_keys=extra_msg_keys
+            ),
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
