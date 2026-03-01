@@ -30,6 +30,7 @@ def mock_config():
         {"id": "assist", "name": "Assist", "description": "Task assistance", "tags": []},
     ]
     config.allow_from = []  # Allow all senders
+    config.task_retention_days = 14.0
     return config
 
 
@@ -252,6 +253,7 @@ class TestAuthorization:
         config.agent_description = "Secure agent"
         config.skills = []
         config.allow_from = ["agent"]  # Only 'agent' role allowed
+        config.task_retention_days = 14.0
 
         channel = A2AChannel(config, mock_bus)
 
@@ -281,6 +283,7 @@ class TestAuthorization:
         config.agent_description = "Secure agent"
         config.skills = []
         config.allow_from = ["user"]
+        config.task_retention_days = 14.0
 
         channel = A2AChannel(config, mock_bus)
 

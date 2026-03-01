@@ -60,14 +60,15 @@ ID_LENGTH = 12
 class A2ARequestHandler(RequestHandler):
     """A2A request handler that bridges to Nanobot's message bus."""
 
-    COMPLETED_TASK_TTL_SECONDS = 86400  # 24 hours
+    DEFAULT_TASK_TTL_SECONDS = 1209600  # 14 days
 
-    def __init__(self, channel: "A2AChannel"):
+    def __init__(self, channel: "A2AChannel", task_retention_seconds: float = DEFAULT_TASK_TTL_SECONDS):
         self._channel = channel
         self._task_store = InMemoryTaskStore()
         self._context_to_task: dict[str, str] = {}
         self._completed_tasks: dict[str, float] = {}
         self._context_lock = asyncio.Lock()
+        self._task_ttl = task_retention_seconds
 
     async def on_message_send(
         self,
@@ -224,7 +225,7 @@ class A2ARequestHandler(RequestHandler):
         expired = [
             task_id
             for task_id, completed_at in self._completed_tasks.items()
-            if now - completed_at > self.COMPLETED_TASK_TTL_SECONDS
+            if now - completed_at > self._task_ttl
         ]
         for task_id in expired:
             del self._completed_tasks[task_id]
@@ -305,7 +306,10 @@ class A2AChannel(BaseChannel):
             supportsAuthenticatedExtendedCard=False,
         )
 
-        self._handler = A2ARequestHandler(self)
+        # Get task retention from config (days → seconds)
+        retention_days = getattr(config, "task_retention_days", 14.0)
+        retention_seconds = retention_days * 86400
+        self._handler = A2ARequestHandler(self, task_retention_seconds=retention_seconds)
         self._app = A2AStarletteApplication(
             agent_card=self._agent_card,
             http_handler=self._handler,
