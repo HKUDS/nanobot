@@ -276,6 +276,8 @@ class TelegramChannel(BaseChannel):
             return "voice"
         if ext in ("mp3", "m4a", "wav", "aac"):
             return "audio"
+        if ext in ("mp4", "mov", "webm"):
+            return "video"
         return "document"
 
     async def send(self, msg: OutboundMessage) -> None:
@@ -309,8 +311,9 @@ class TelegramChannel(BaseChannel):
                     "photo": self._app.bot.send_photo,
                     "voice": self._app.bot.send_voice,
                     "audio": self._app.bot.send_audio,
+                    "video": self._app.bot.send_video,
                 }.get(media_type, self._app.bot.send_document)
-                param = "photo" if media_type == "photo" else media_type if media_type in ("voice", "audio") else "document"
+                param = "photo" if media_type == "photo" else media_type if media_type in ("voice", "audio", "video") else "document"
                 with open(media_path, 'rb') as f:
                     await sender(
                         chat_id=chat_id, 

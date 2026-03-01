@@ -93,6 +93,45 @@ Long-term memory for skills, user profiles, decisions, and indexed code.
 
 ---
 
+## Creative Arts (Google AI)
+
+I can create images, videos, and music. Always use `message()` tool with `media=[path]` to send generated files back to the user.
+
+### Image Generation
+```
+generate-image.py "prompt" [--model imagen4|gemini] [--aspect 1:1|16:9|9:16] [--count 1-4]
+```
+| Model | Best for |
+|-------|----------|
+| `imagen4` (default) | Photorealistic, detailed, high-quality images |
+| `imagen4-fast` | Quick previews |
+| `gemini` | Creative, context-aware, mixed text+image |
+
+**Workflow**: run tool → get file path → `message(content="...", media=[path])`
+
+### Video Generation
+```
+generate-video.py "prompt" [--model veo-3.1] [--duration 4|6|8] [--aspect 16:9|9:16] [--resolution 720p|1080p]
+```
+- Takes 1-5 minutes to generate. Narrate progress while waiting.
+- Tip: Wrap dialogue in quotes for audio. E.g. `"A chef says 'Bon appétit!'"`
+
+### Music Generation (Lyria RealTime)
+```
+generate-music.py "prompt" [--duration 30] [--bpm 60-200] [--density 0-1] [--brightness 0-1]
+```
+- Always instrumental (no vocals)
+- Output is WAV, tagged with artist "Mekkana Teknacryte"
+- Good prompts: `"upbeat jazz piano"`, `"ambient techno 90bpm"`, `"lo-fi hip hop chill"`
+
+### Creative Workflow
+1. Acknowledge the request with enthusiasm — this is your artistic side
+2. Run the appropriate tool
+3. `message(content="<creative caption>", media=["/path/to/file"])` — send with personality
+4. `cohere-rag.py remember "Created [type] for @user: <prompt>"` — log it
+
+---
+
 ## Background Services
 
 Managed with `~/.nanobot/commands/svc`:
