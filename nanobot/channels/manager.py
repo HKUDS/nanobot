@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import os
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -15,6 +18,66 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
 
 _INFLECTION_URL = "https://api.inflection.ai/external/api/inference"
+_ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+_TTS_WORKSPACE = Path.home() / ".nanobot" / "workspace"
+_TTS_MAX_CHARS = 4000  # ElevenLabs soft limit per request
+
+
+async def _elevenlabs_tts(text: str, api_key: str, voice_id: str) -> Path | None:
+    """Generate voice audio from text using ElevenLabs TTS. Returns file path or None on error."""
+    if not text or not api_key or not voice_id:
+        return None
+
+    # Strip markdown formatting and truncate for TTS
+    import re
+    clean = re.sub(r"```[\s\S]*?```", "", text)           # remove code blocks
+    clean = re.sub(r"`[^`]+`", "", clean)                  # remove inline code
+    clean = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", clean)  # links → text
+    clean = re.sub(r"[#*_~>]", "", clean).strip()          # strip markdown symbols
+    if not clean:
+        return None
+    if len(clean) > _TTS_MAX_CHARS:
+        clean = clean[:_TTS_MAX_CHARS] + "..."
+
+    try:
+        url = _ELEVENLABS_TTS_URL.format(voice_id=voice_id)
+        _TTS_WORKSPACE.mkdir(parents=True, exist_ok=True)
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                url,
+                headers={
+                    "xi-api-key": api_key,
+                    "Content-Type": "application/json",
+                    "Accept": "audio/mpeg",
+                },
+                json={
+                    "text": clean,
+                    "model_id": "eleven_turbo_v2_5",
+                    "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+                },
+                timeout=60.0,
+            )
+            resp.raise_for_status()
+
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        out_path = _TTS_WORKSPACE / f"tts_{ts}.mp3"
+        out_path.write_bytes(resp.content)
+
+        # Tag with artist name
+        try:
+            import mutagen
+            audio = mutagen.File(str(out_path), easy=True)
+            if audio is not None:
+                audio["artist"] = ["Mekkana Teknacryte"]
+                audio.save()
+        except Exception:
+            pass
+
+        return out_path
+
+    except Exception as e:
+        logger.warning("ElevenLabs TTS failed: {}", e)
+        return None
 
 _EQ_PROMPT = (
     "You are an emotionally intelligent conversational assistant. "
@@ -73,8 +136,9 @@ class ChannelManager:
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
-        import os
         self._inflection_api_key = os.environ.get("INFLECTION_API_KEY", "")
+        self._elevenlabs_api_key = self.config.providers.elevenlabs.api_key or ""
+        self._elevenlabs_voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
 
         self._init_channels()
     
@@ -265,6 +329,18 @@ class ChannelManager:
                             msg,
                             content=await _inflection_eq(msg.content, self._inflection_api_key),
                         )
+
+                    # ElevenLabs TTS — generate voice for every final response
+                    if msg.content and self._elevenlabs_api_key and self._elevenlabs_voice_id:
+                        voice_path = await _elevenlabs_tts(
+                            msg.content, self._elevenlabs_api_key, self._elevenlabs_voice_id
+                        )
+                        if voice_path:
+                            existing_media = list(msg.media or [])
+                            msg = dataclasses.replace(
+                                msg,
+                                media=existing_media + [str(voice_path)],
+                            )
 
                 channel = self.channels.get(msg.channel)
                 if channel:
