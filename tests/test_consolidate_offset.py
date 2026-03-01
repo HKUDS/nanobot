@@ -486,20 +486,19 @@ class TestConsolidationDeduplicationGuard:
     @pytest.mark.asyncio
     async def test_consolidation_guard_prevents_duplicate_tasks(self, tmp_path: Path) -> None:
         """Concurrent messages above memory_window spawn only one consolidation task."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.adk.loop import AdkAgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
+        pass  # LLMResponse no longer needed (ADK handles LLM internally)
 
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        loop = AgentLoop(
+        loop = AdkAgentLoop(
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
 
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
-        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop._run_agent_adk = AsyncMock(return_value=("ok", []))
 
         session = loop.sessions.get_or_create("cli:test")
         for i in range(15):
@@ -530,20 +529,19 @@ class TestConsolidationDeduplicationGuard:
         self, tmp_path: Path
     ) -> None:
         """/new command does not run consolidation concurrently with in-flight consolidation."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.adk.loop import AdkAgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
+        pass  # LLMResponse no longer needed (ADK handles LLM internally)
 
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        loop = AgentLoop(
+        loop = AdkAgentLoop(
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
 
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
-        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop._run_agent_adk = AsyncMock(return_value=("ok", []))
 
         session = loop.sessions.get_or_create("cli:test")
         for i in range(15):
@@ -582,20 +580,19 @@ class TestConsolidationDeduplicationGuard:
     @pytest.mark.asyncio
     async def test_consolidation_tasks_are_referenced(self, tmp_path: Path) -> None:
         """create_task results are tracked in _consolidation_tasks while in flight."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.adk.loop import AdkAgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
+        pass  # LLMResponse no longer needed (ADK handles LLM internally)
 
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        loop = AgentLoop(
+        loop = AdkAgentLoop(
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
 
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
-        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop._run_agent_adk = AsyncMock(return_value=("ok", []))
 
         session = loop.sessions.get_or_create("cli:test")
         for i in range(15):
@@ -627,20 +624,19 @@ class TestConsolidationDeduplicationGuard:
         self, tmp_path: Path
     ) -> None:
         """/new waits for in-flight consolidation and archives before clear."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.adk.loop import AdkAgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
+        pass  # LLMResponse no longer needed (ADK handles LLM internally)
 
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        loop = AgentLoop(
+        loop = AdkAgentLoop(
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
 
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
-        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop._run_agent_adk = AsyncMock(return_value=("ok", []))
 
         session = loop.sessions.get_or_create("cli:test")
         for i in range(15):
@@ -685,20 +681,19 @@ class TestConsolidationDeduplicationGuard:
     @pytest.mark.asyncio
     async def test_new_does_not_clear_session_when_archive_fails(self, tmp_path: Path) -> None:
         """/new must keep session data if archive step reports failure."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.adk.loop import AdkAgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
+        pass  # LLMResponse no longer needed (ADK handles LLM internally)
 
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        loop = AgentLoop(
+        loop = AdkAgentLoop(
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
 
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
-        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop._run_agent_adk = AsyncMock(return_value=("ok", []))
 
         session = loop.sessions.get_or_create("cli:test")
         for i in range(5):
@@ -729,20 +724,19 @@ class TestConsolidationDeduplicationGuard:
         self, tmp_path: Path
     ) -> None:
         """/new should archive only messages not yet consolidated by prior task."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.adk.loop import AdkAgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
+        pass  # LLMResponse no longer needed (ADK handles LLM internally)
 
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        loop = AgentLoop(
+        loop = AdkAgentLoop(
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
 
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
-        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop._run_agent_adk = AsyncMock(return_value=("ok", []))
 
         session = loop.sessions.get_or_create("cli:test")
         for i in range(15):
@@ -788,19 +782,18 @@ class TestConsolidationDeduplicationGuard:
     @pytest.mark.asyncio
     async def test_new_clears_session_and_responds(self, tmp_path: Path) -> None:
         """/new clears session and returns confirmation."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.adk.loop import AdkAgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
+        pass  # LLMResponse no longer needed (ADK handles LLM internally)
 
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        loop = AgentLoop(
+        loop = AdkAgentLoop(
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
-        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
-        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop._run_agent_adk = AsyncMock(return_value=("ok", []))
 
         session = loop.sessions.get_or_create("cli:test")
         for i in range(3):

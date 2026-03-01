@@ -190,8 +190,8 @@ def onboard():
     
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
-    console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
-    console.print("     Get one at: https://openrouter.ai/keys")
+    console.print("  1. Add your Gemini API key to [cyan]~/.nanobot/config.json[/cyan]")
+    console.print("     Get one at: https://aistudio.google.com/apikey")
     console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
 
@@ -230,31 +230,31 @@ def gateway(
     """Start the nanobot gateway."""
     from nanobot.config.loader import load_config, get_data_dir
     from nanobot.bus.queue import MessageBus
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.adk.loop import AdkAgentLoop
     from nanobot.channels.manager import ChannelManager
     from nanobot.session.manager import SessionManager
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
-    
+
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
-    
+
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    
+
     config = load_config()
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
-    
+
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
-    
-    # Create agent with cron service
-    agent = AgentLoop(
+
+    # Create agent with cron service (ADK-based)
+    agent = AdkAgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
@@ -394,13 +394,13 @@ def agent(
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config, get_data_dir
     from nanobot.bus.queue import MessageBus
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.adk.loop import AdkAgentLoop
     from nanobot.cron.service import CronService
     from loguru import logger
-    
+
     config = load_config()
     sync_workspace_templates(config.workspace_path)
-    
+
     bus = MessageBus()
     provider = _make_provider(config)
 
@@ -412,8 +412,8 @@ def agent(
         logger.enable("nanobot")
     else:
         logger.disable("nanobot")
-    
-    agent_loop = AgentLoop(
+
+    agent_loop = AdkAgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
@@ -899,13 +899,13 @@ def cron_run(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.bus.queue import MessageBus
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.adk.loop import AdkAgentLoop
     logger.disable("nanobot")
 
     config = load_config()
     provider = _make_provider(config)
     bus = MessageBus()
-    agent_loop = AgentLoop(
+    agent_loop = AdkAgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,

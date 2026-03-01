@@ -9,8 +9,8 @@ import pytest
 
 
 def _make_loop():
-    """Create a minimal AgentLoop with mocked dependencies."""
-    from nanobot.agent.loop import AgentLoop
+    """Create a minimal AdkAgentLoop with mocked dependencies."""
+    from nanobot.adk.loop import AdkAgentLoop
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
@@ -19,11 +19,11 @@ def _make_loop():
     workspace = MagicMock()
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
+    with patch("nanobot.adk.loop.ContextBuilder"), \
+         patch("nanobot.adk.loop.SessionManager"), \
+         patch("nanobot.adk.loop.SubagentManager") as MockSubMgr:
         MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
-        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
+        loop = AdkAgentLoop(bus=bus, provider=provider, workspace=workspace)
     return loop, bus
 
 

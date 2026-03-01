@@ -39,28 +39,11 @@ def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) ->
     assert prompt1 == prompt2
 
 
-def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
-    """Runtime metadata should be a separate user message before the actual user message."""
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    messages = builder.build_messages(
-        history=[],
-        current_message="Return exactly: OK",
-        channel="cli",
-        chat_id="direct",
-    )
-
-    assert messages[0]["role"] == "system"
-    assert "## Current Session" not in messages[0]["content"]
-
-    assert messages[-2]["role"] == "user"
-    runtime_content = messages[-2]["content"]
-    assert isinstance(runtime_content, str)
-    assert ContextBuilder._RUNTIME_CONTEXT_TAG in runtime_content
-    assert "Current Time:" in runtime_content
-    assert "Channel: cli" in runtime_content
-    assert "Chat ID: direct" in runtime_content
-
-    assert messages[-1]["role"] == "user"
-    assert messages[-1]["content"] == "Return exactly: OK"
+def test_runtime_context_contains_metadata(tmp_path) -> None:
+    """Runtime context string contains time and channel metadata."""
+    runtime = ContextBuilder._build_runtime_context("cli", "direct")
+    assert isinstance(runtime, str)
+    assert ContextBuilder._RUNTIME_CONTEXT_TAG in runtime
+    assert "Current Time:" in runtime
+    assert "Channel: cli" in runtime
+    assert "Chat ID: direct" in runtime

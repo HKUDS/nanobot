@@ -1,4 +1,4 @@
-"""Subagent manager for background task execution."""
+"""Subagent manager for background task execution (ADK-based)."""
 
 import asyncio
 import json
@@ -6,20 +6,21 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from google.adk.agents import LlmAgent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types
 from loguru import logger
 
+from nanobot.adk.tools import SUBAGENT_TOOLS, set_runtime_refs
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
-from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
 
 
 class SubagentManager:
-    """Manages background subagent execution."""
-    
+    """Manages background subagent execution using ADK."""
+
     def __init__(
         self,
         provider: LLMProvider,
@@ -34,10 +35,11 @@ class SubagentManager:
         restrict_to_workspace: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig
+
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
-        self.model = model or provider.get_default_model()
+        self.model = model or "gemini-2.5-flash"
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.reasoning_effort = reasoning_effort
@@ -46,7 +48,8 @@ class SubagentManager:
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
-    
+        self._session_service = InMemorySessionService()
+
     async def spawn(
         self,
         task: str,
@@ -75,10 +78,10 @@ class SubagentManager:
                     del self._session_tasks[session_key]
 
         bg_task.add_done_callback(_cleanup)
-        
+
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
-    
+
     async def _run_subagent(
         self,
         task_id: str,
@@ -86,94 +89,80 @@ class SubagentManager:
         label: str,
         origin: dict[str, str],
     ) -> None:
-        """Execute the subagent task and announce the result."""
+        """Execute the subagent task using ADK and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
-        
+
         try:
-            # Build subagent tools (no message tool, no spawn tool)
-            tools = ToolRegistry()
-            allowed_dir = self.workspace if self.restrict_to_workspace else None
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-                path_append=self.exec_config.path_append,
-            ))
-            tools.register(WebSearchTool(api_key=self.brave_api_key))
-            tools.register(WebFetchTool())
-            
-            system_prompt = self._build_subagent_prompt()
-            messages: list[dict[str, Any]] = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": task},
-            ]
-            
-            # Run agent loop (limited iterations)
-            max_iterations = 15
-            iteration = 0
-            final_result: str | None = None
-            
-            while iteration < max_iterations:
-                iteration += 1
-                
-                response = await self.provider.chat(
-                    messages=messages,
-                    tools=tools.get_definitions(),
-                    model=self.model,
+            instruction = self._build_subagent_prompt()
+
+            agent = LlmAgent(
+                name=f"subagent_{task_id}",
+                model=self.model,
+                instruction=instruction,
+                tools=list(SUBAGENT_TOOLS),
+                generate_content_config=types.GenerateContentConfig(
                     temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    reasoning_effort=self.reasoning_effort,
-                )
-                
-                if response.has_tool_calls:
-                    # Add assistant message with tool calls
-                    tool_call_dicts = [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.name,
-                                "arguments": json.dumps(tc.arguments, ensure_ascii=False),
-                            },
-                        }
-                        for tc in response.tool_calls
-                    ]
-                    messages.append({
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": tool_call_dicts,
-                    })
-                    
-                    # Execute tools
-                    for tool_call in response.tool_calls:
-                        args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                        logger.debug("Subagent [{}] executing: {} with arguments: {}", task_id, tool_call.name, args_str)
-                        result = await tools.execute(tool_call.name, tool_call.arguments)
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": tool_call.name,
-                            "content": result,
-                        })
-                else:
-                    final_result = response.content
-                    break
-            
+                    max_output_tokens=self.max_tokens,
+                ),
+            )
+
+            runner = Runner(
+                app_name="nanobot_subagent",
+                agent=agent,
+                session_service=self._session_service,
+            )
+
+            # Build state for subagent tools
+            allowed_dir = str(self.workspace) if self.restrict_to_workspace else ""
+            state = {
+                "app:workspace": str(self.workspace),
+                "app:brave_api_key": self.brave_api_key or "",
+                "app:exec_timeout": str(self.exec_config.timeout),
+                "app:exec_deny": json.dumps(self.exec_config.deny_patterns) if self.exec_config.deny_patterns else "",
+                "app:exec_allow": json.dumps(self.exec_config.allow_patterns) if self.exec_config.allow_patterns else "",
+                "app:exec_restrict": "true" if self.restrict_to_workspace else "",
+                "app:exec_path": self.exec_config.path_append or "",
+                "app:allowed_dir": allowed_dir,
+                "app:max_iterations": "15",
+            }
+
+            session = await self._session_service.create_session(
+                app_name="nanobot_subagent",
+                user_id=f"subagent:{task_id}",
+                state=state,
+            )
+
+            user_content = types.Content(
+                role="user",
+                parts=[types.Part(text=task)],
+            )
+
+            final_result = None
+            async for event in runner.run_async(
+                user_id=session.user_id,
+                session_id=session.id,
+                new_message=user_content,
+            ):
+                if event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if part.text:
+                            final_result = part.text
+
+                if event.error_message:
+                    logger.error("Subagent [{}] ADK error: {}", task_id, event.error_message)
+                    final_result = final_result or f"Error: {event.error_message}"
+
             if final_result is None:
                 final_result = "Task completed but no final response was generated."
-            
+
             logger.info("Subagent [{}] completed successfully", task_id)
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
-            
+
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
-    
+
     async def _announce_result(
         self,
         task_id: str,
@@ -185,7 +174,7 @@ class SubagentManager:
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = "completed successfully" if status == "ok" else "failed"
-        
+
         announce_content = f"""[Subagent '{label}' {status_text}]
 
 Task: {task}
@@ -194,25 +183,30 @@ Result:
 {result}
 
 Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not mention technical details like "subagent" or task IDs."""
-        
-        # Inject as system message to trigger main agent
+
         msg = InboundMessage(
             channel="system",
             sender_id="subagent",
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
         )
-        
+
         await self.bus.publish_inbound(msg)
-        logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
-    
+        logger.debug(
+            "Subagent [{}] announced result to {}:{}",
+            task_id,
+            origin["channel"],
+            origin["chat_id"],
+        )
+
     def _build_subagent_prompt(self) -> str:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.context import ContextBuilder
         from nanobot.agent.skills import SkillsLoader
 
         time_ctx = ContextBuilder._build_runtime_context(None, None)
-        parts = [f"""# Subagent
+        parts = [
+            f"""# Subagent
 
 {time_ctx}
 
@@ -220,18 +214,24 @@ You are a subagent spawned by the main agent to complete a specific task.
 Stay focused on the assigned task. Your final response will be reported back to the main agent.
 
 ## Workspace
-{self.workspace}"""]
+{self.workspace}"""
+        ]
 
         skills_summary = SkillsLoader(self.workspace).build_skills_summary()
         if skills_summary:
-            parts.append(f"## Skills\n\nRead SKILL.md with read_file to use a skill.\n\n{skills_summary}")
+            parts.append(
+                f"## Skills\n\nRead SKILL.md with read_file to use a skill.\n\n{skills_summary}"
+            )
 
         return "\n\n".join(parts)
-    
+
     async def cancel_by_session(self, session_key: str) -> int:
         """Cancel all subagents for the given session. Returns count cancelled."""
-        tasks = [self._running_tasks[tid] for tid in self._session_tasks.get(session_key, [])
-                 if tid in self._running_tasks and not self._running_tasks[tid].done()]
+        tasks = [
+            self._running_tasks[tid]
+            for tid in self._session_tasks.get(session_key, [])
+            if tid in self._running_tasks and not self._running_tasks[tid].done()
+        ]
         for t in tasks:
             t.cancel()
         if tasks:
