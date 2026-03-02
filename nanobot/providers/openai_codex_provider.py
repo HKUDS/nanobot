@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Awaitable, Callable
 
 import httpx
 from loguru import logger
@@ -35,8 +35,10 @@ class OpenAICodexProvider(LLMProvider):
         thinking: str | None = None,
         thinking_budget: int = 10000,
         effort: str | None = None,
+        stream: bool | None = None,
+        on_stream_chunk: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        _ = (max_tokens, temperature, reasoning_effort, thinking, thinking_budget, effort)
+        _ = (max_tokens, temperature, reasoning_effort, thinking, thinking_budget, effort, stream, on_stream_chunk)
         model = model or self.default_model
         system_prompt, input_items = _convert_messages(messages)
 
@@ -232,7 +234,7 @@ async def _iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], 
     async for line in response.aiter_lines():
         if line == "":
             if buffer:
-                data_lines = [l[5:].strip() for l in buffer if l.startswith("data:")]
+                data_lines = [line_part[5:].strip() for line_part in buffer if line_part.startswith("data:")]
                 buffer = []
                 if not data_lines:
                     continue

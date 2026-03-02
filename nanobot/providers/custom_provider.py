@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import json_repair
 from openai import AsyncOpenAI
@@ -17,19 +17,27 @@ class CustomProvider(LLMProvider):
         self.default_model = default_model
         self._client = AsyncOpenAI(api_key=api_key, base_url=api_base)
 
-    async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
-                   model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
-                   reasoning_effort: str | None = None,
-                   thinking: str | None = None,
-                   thinking_budget: int = 10000,
-                   effort: str | None = None) -> LLMResponse:
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+        thinking: str | None = None,
+        thinking_budget: int = 10000,
+        effort: str | None = None,
+        stream: bool | None = None,
+        on_stream_chunk: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
             "messages": self._sanitize_empty_content(messages),
             "max_tokens": max(1, max_tokens),
             "temperature": temperature,
         }
-        _ = (thinking, thinking_budget, effort)
+        _ = (thinking, thinking_budget, effort, stream, on_stream_chunk)
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
         if tools:
@@ -43,14 +51,27 @@ class CustomProvider(LLMProvider):
         choice = response.choices[0]
         msg = choice.message
         tool_calls = [
-            ToolCallRequest(id=tc.id, name=tc.function.name,
-                            arguments=json_repair.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments)
+            ToolCallRequest(
+                id=tc.id,
+                name=tc.function.name,
+                arguments=json_repair.loads(tc.function.arguments)
+                if isinstance(tc.function.arguments, str)
+                else tc.function.arguments,
+            )
             for tc in (msg.tool_calls or [])
         ]
         u = response.usage
         return LLMResponse(
-            content=msg.content, tool_calls=tool_calls, finish_reason=choice.finish_reason or "stop",
-            usage={"prompt_tokens": u.prompt_tokens, "completion_tokens": u.completion_tokens, "total_tokens": u.total_tokens} if u else {},
+            content=msg.content,
+            tool_calls=tool_calls,
+            finish_reason=choice.finish_reason or "stop",
+            usage={
+                "prompt_tokens": u.prompt_tokens,
+                "completion_tokens": u.completion_tokens,
+                "total_tokens": u.total_tokens,
+            }
+            if u
+            else {},
             reasoning_content=getattr(msg, "reasoning_content", None) or None,
         )
 

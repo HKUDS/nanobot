@@ -1,12 +1,12 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import codecs
 import json
 import os
-import codecs
 import re
 import secrets
 import string
-from typing import Any
+from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
 import json_repair
@@ -305,6 +305,8 @@ class LiteLLMProvider(LLMProvider):
         thinking: str | None = None,
         thinking_budget: int = 10000,
         effort: str | None = None,
+        stream: bool | None = None,
+        on_stream_chunk: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -369,14 +371,16 @@ class LiteLLMProvider(LLMProvider):
         if effort is not None:
             kwargs["output_config"] = {"effort": effort}
 
+        use_stream = self.default_stream if stream is None else stream
+
         try:
             logger.debug(
                 f"LLM Request: model={kwargs.get('model')}, api_base={kwargs.get('api_base')}, "
-                f"default_stream={self.default_stream}"
+                f"default_stream={self.default_stream}, use_stream={use_stream}"
             )
-            if self.default_stream:
+            if use_stream:
                 stream_kwargs = self._prepare_stream_kwargs(kwargs)
-                return await self._stream_chat(stream_kwargs)
+                return await self._stream_chat(stream_kwargs, on_stream_chunk=on_stream_chunk)
 
             non_stream_kwargs = self._prepare_non_stream_kwargs(kwargs)
             response = await acompletion(**non_stream_kwargs)
@@ -384,8 +388,8 @@ class LiteLLMProvider(LLMProvider):
             self._log_response_summary(parsed)
             return parsed
         except Exception as e:
-            # 根据默认模式互相兜底
-            if self.default_stream:
+            # 根据当前模式进行兜底
+            if use_stream:
                 logger.warning(
                     "Stream call failed, falling back to non-stream: "
                     f"{self._format_exception(e)}"
@@ -396,7 +400,7 @@ class LiteLLMProvider(LLMProvider):
                     f"{self._format_exception(e)}"
                 )
             try:
-                if self.default_stream:
+                if use_stream:
                     non_stream_kwargs = self._prepare_non_stream_kwargs(kwargs)
                     response = await acompletion(**non_stream_kwargs)
                     parsed = self._parse_response(response)
@@ -413,7 +417,11 @@ class LiteLLMProvider(LLMProvider):
                     finish_reason="error",
                 )
 
-    async def _stream_chat(self, kwargs: dict[str, Any]) -> LLMResponse:
+    async def _stream_chat(
+        self,
+        kwargs: dict[str, Any],
+        on_stream_chunk: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
         """Stream 调用并拼装完整响应"""
         kwargs["stream"] = True
 
@@ -433,6 +441,12 @@ class LiteLLMProvider(LLMProvider):
             # 收集 content
             if delta.content:
                 content_parts.append(delta.content)
+                if on_stream_chunk:
+                    try:
+                        await on_stream_chunk(delta.content)
+                    except Exception as cb_err:
+                        logger.warning("Stream chunk callback failed: {}", self._format_exception(cb_err))
+                        on_stream_chunk = None
 
             # 收集 reasoning_content（如果有）
             if hasattr(delta, "reasoning_content") and delta.reasoning_content:

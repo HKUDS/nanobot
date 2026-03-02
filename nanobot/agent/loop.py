@@ -433,6 +433,23 @@ class AgentLoop:
         return content.strip().lower() in cls._EMPTY_RESPONSE_SENTINELS
 
     @staticmethod
+    def _should_stream_private_telegram(msg: InboundMessage) -> bool:
+        """Enable response streaming only for Telegram private chats."""
+        if msg.channel != "telegram":
+            return False
+        metadata = msg.metadata or {}
+        return not bool(metadata.get("is_group"))
+
+    @staticmethod
+    def _build_stream_chunk_metadata(metadata: dict[str, Any] | None, stream_id: str) -> dict[str, Any]:
+        """Build outbound metadata for Telegram stream chunks."""
+        merged = dict(metadata or {})
+        merged["message_type"] = "stream_chunk"
+        merged["stream_chunk"] = True
+        merged["stream_id"] = stream_id
+        return merged
+
+    @staticmethod
     def _log_token_usage(usage: dict[str, int] | None) -> None:
         """Log token/caching usage consistently across loops."""
         if not usage:
@@ -479,6 +496,8 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_stream_chunk: Callable[[str], Awaitable[None]] | None = None,
+        stream: bool = False,
         model_override: str | None = None,
         provider_override: LLMProvider | None = None,
     ) -> tuple[str, str, list[tuple[str, str, str]]]:
@@ -494,6 +513,7 @@ class AgentLoop:
 
         while iteration < self.max_iterations:
             iteration += 1
+            stream_this_turn = stream and iteration == 1
             response = await provider_to_use.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
@@ -504,6 +524,8 @@ class AgentLoop:
                 thinking=self.thinking,
                 thinking_budget=self.thinking_budget,
                 effort=self.effort,
+                stream=stream_this_turn,
+                on_stream_chunk=on_stream_chunk if stream_this_turn else None,
             )
             last_finish_reason = response.finish_reason or "unknown"
             self._log_token_usage(response.usage)
@@ -708,6 +730,9 @@ class AgentLoop:
             current_metadata=msg.metadata if msg.metadata else None,
         )
 
+        stream_enabled = self._should_stream_private_telegram(msg)
+        stream_id = uuid.uuid4().hex[:12]
+
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             progress_metadata = dict(msg.metadata or {})
             progress_metadata["_progress"] = True
@@ -723,9 +748,23 @@ class AgentLoop:
                 )
             )
 
+        async def _bus_stream_chunk(chunk: str) -> None:
+            if not stream_enabled or not chunk:
+                return
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=chunk,
+                    metadata=self._build_stream_chunk_metadata(msg.metadata, stream_id),
+                )
+            )
+
         final_content, _, tool_use_log = await self._run_agent_loop(
             messages,
             on_progress=on_progress or _bus_progress,
+            on_stream_chunk=_bus_stream_chunk,
+            stream=stream_enabled,
             model_override=model_override,
             provider_override=provider_override,
         )
@@ -793,11 +832,15 @@ class AgentLoop:
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
 
+        final_metadata = dict(msg.metadata or {})
+        if stream_enabled:
+            final_metadata["stream_id"] = stream_id
+
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
-            metadata=msg.metadata or {},
+            metadata=final_metadata,
         )
 
     async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
