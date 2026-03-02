@@ -45,6 +45,7 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 500
+    _EMPTY_ASSISTANT_CONTENT = "(empty)"
 
     def __init__(
         self,
@@ -177,6 +178,36 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    @staticmethod
+    def _stringify_message_content(content: Any) -> str:
+        """Convert non-string message content into a safe string payload."""
+        try:
+            return json.dumps(content, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return str(content)
+
+    def _normalize_messages_for_provider(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Normalize message content shape before sending to any provider."""
+        normalized: list[dict[str, Any]] = []
+        for msg in messages:
+            clean = dict(msg)
+            role = clean.get("role")
+            content = clean.get("content")
+
+            if role == "assistant":
+                if content is None:
+                    clean["content"] = self._EMPTY_ASSISTANT_CONTENT
+                elif not isinstance(content, str):
+                    clean["content"] = self._stringify_message_content(content)
+            elif role == "tool":
+                if not isinstance(content, str):
+                    clean["content"] = self._stringify_message_content(content)
+            elif content is None and role in {"system", "user"}:
+                clean["content"] = ""
+
+            normalized.append(clean)
+        return normalized
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -191,6 +222,7 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
+            messages = self._normalize_messages_for_provider(messages)
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
@@ -455,7 +487,7 @@ class AgentLoop:
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
-        for m in messages[skip:]:
+        for m in self._normalize_messages_for_provider(messages[skip:]):
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
             if role == "assistant" and not content and not entry.get("tool_calls"):
