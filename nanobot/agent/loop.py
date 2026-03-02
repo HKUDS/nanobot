@@ -45,7 +45,7 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 500
-    _EMPTY_ASSISTANT_CONTENT = "(empty)"
+    _EMPTY_PROVIDER_CONTENT = " "
 
     def __init__(
         self,
@@ -195,15 +195,27 @@ class AgentLoop:
             content = clean.get("content")
 
             if role == "assistant":
+                has_tool_calls = bool(clean.get("tool_calls"))
                 if content is None:
-                    clean["content"] = self._EMPTY_ASSISTANT_CONTENT
+                    if has_tool_calls:
+                        clean["content"] = self._EMPTY_PROVIDER_CONTENT
+                    else:
+                        continue
+                elif isinstance(content, str):
+                    if not content:
+                        if has_tool_calls:
+                            clean["content"] = self._EMPTY_PROVIDER_CONTENT
+                        else:
+                            continue
                 elif not isinstance(content, str):
                     clean["content"] = self._stringify_message_content(content)
             elif role == "tool":
-                if not isinstance(content, str):
+                if content is None or content == "":
+                    clean["content"] = self._EMPTY_PROVIDER_CONTENT
+                elif not isinstance(content, str):
                     clean["content"] = self._stringify_message_content(content)
             elif content is None and role in {"system", "user"}:
-                clean["content"] = ""
+                clean["content"] = self._EMPTY_PROVIDER_CONTENT
 
             normalized.append(clean)
         return normalized
@@ -487,13 +499,23 @@ class AgentLoop:
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
-        for m in self._normalize_messages_for_provider(messages[skip:]):
+        for m in messages[skip:]:
+            # Filter empty assistant messages BEFORE normalization so they don't
+            # get converted into placeholder text and pollute session history.
+            if m.get("role") == "assistant" and not m.get("content") and not m.get("tool_calls"):
+                continue
+
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
-            if role == "assistant" and not content and not entry.get("tool_calls"):
-                continue  # skip empty assistant messages — they poison session context
-            if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
-                entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+            if role == "assistant" and content is not None and not isinstance(content, str):
+                entry["content"] = self._stringify_message_content(content)
+                content = entry["content"]
+            if role == "tool":
+                if not isinstance(content, str):
+                    entry["content"] = self._stringify_message_content(content)
+                    content = entry["content"]
+                if len(content) > self._TOOL_RESULT_MAX_CHARS:
+                    entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
             elif role == "user":
                 if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
                     continue
