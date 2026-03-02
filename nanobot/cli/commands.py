@@ -272,12 +272,28 @@ def gateway(
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
+    # Create vision provider if vision model is configured
+    vision_provider = None
+    vision_model = getattr(config.agents.defaults, "vision_model", None)
+    if vision_model and hasattr(config.providers, "vision") and config.providers.vision.api_key:
+        from nanobot.providers.litellm_provider import LiteLLMProvider
+
+        vision_cfg = config.providers.vision
+        vision_provider = LiteLLMProvider(
+            api_key=vision_cfg.api_key,
+            api_base=vision_cfg.api_base,
+            default_model=vision_model,
+            provider_name=None,
+        )
+
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
+        vision_model=vision_model,
+        vision_provider=vision_provider,
         temperature=config.agents.defaults.temperature,
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
