@@ -3,6 +3,7 @@
   <h1>nanobot: Ultra-Lightweight Personal AI Assistant</h1>
   <p>
     <a href="https://pypi.org/project/nanobot-ai/"><img src="https://img.shields.io/pypi/v/nanobot-ai" alt="PyPI"></a>
+    <a href="https://github.com/HKUDS/nanobot/actions/workflows/ci.yml"><img src="https://github.com/HKUDS/nanobot/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://pepy.tech/project/nanobot-ai"><img src="https://static.pepy.tech/badge/nanobot-ai" alt="Downloads"></a>
     <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
