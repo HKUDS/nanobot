@@ -233,11 +233,15 @@ class LiteLLMProvider(LLMProvider):
         
         # WORKAROUND: The Zhipu `coding/paas/v4` endpoint explicitly blocks requests with 'OpenAI' or 'Python'
         # in the User-Agent, returning a fake Rate Limit Error. Spoof it as curl.
-        if original_model.startswith("zhipu/") and self.api_base and "coding/paas/v4" in self.api_base:
+        if "coding/paas/v4" in (self.api_base or ""):
             headers["User-Agent"] = "curl/8.7.1"
             
         if headers:
+            # For OpenAI client specifically, we need to inject into `extra_headers`
             kwargs["extra_headers"] = headers
+            # Also globally set litellm headers override just in case the backend client rebuilds
+            import litellm
+            litellm.headers = headers
         
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
