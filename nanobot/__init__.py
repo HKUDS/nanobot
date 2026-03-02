@@ -9,8 +9,3 @@ __logo__ = "🐈"
 def get_version() -> str:
     """Return the nanobot version string."""
     return __version__
-
-
-def get_version() -> str:
-    """Return the nanobot version string."""
-    return __version__
