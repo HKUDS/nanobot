@@ -23,6 +23,7 @@ class CronPayload:
     """What to do when the job runs."""
     kind: Literal["system_event", "agent_turn"] = "agent_turn"
     message: str = ""
+    message_file: str | None = None  # path relative to workspace; overrides message when set
     # Deliver response to channel
     deliver: bool = False
     channel: str | None = None  # e.g. "whatsapp"

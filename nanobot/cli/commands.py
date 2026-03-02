@@ -297,10 +297,18 @@ def gateway(
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
         from nanobot.agent.tools.message import MessageTool
+        if job.payload.message_file:
+            file_path = config.workspace_path / job.payload.message_file
+            try:
+                instruction = file_path.read_text(encoding="utf-8")
+            except OSError as e:
+                instruction = f"Error reading message file '{job.payload.message_file}': {e}"
+        else:
+            instruction = job.payload.message
         reminder_note = (
             "[Scheduled Task] Timer finished.\n\n"
             f"Task '{job.name}' has been triggered.\n"
-            f"Scheduled instruction: {job.payload.message}"
+            f"Scheduled instruction: {instruction}"
         )
 
         response = await agent.process_direct(
@@ -836,7 +844,8 @@ def cron_list(
 @cron_app.command("add")
 def cron_add(
     name: str = typer.Option(..., "--name", "-n", help="Job name"),
-    message: str = typer.Option(..., "--message", "-m", help="Message for agent"),
+    message: str = typer.Option(None, "--message", "-m", help="Message for agent"),
+    message_file: str = typer.Option(None, "--message-file", "-f", help="Path to a file (relative to workspace) whose contents are used as the message"),
     every: int = typer.Option(None, "--every", "-e", help="Run every N seconds"),
     cron_expr: str = typer.Option(None, "--cron", "-c", help="Cron expression (e.g. '0 9 * * *')"),
     tz: str | None = typer.Option(None, "--tz", help="IANA timezone for cron (e.g. 'America/Vancouver')"),
@@ -850,6 +859,12 @@ def cron_add(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronSchedule
 
+    if not message and not message_file:
+        console.print("[red]Error: Must specify --message or --message-file[/red]")
+        raise typer.Exit(1)
+    if message and message_file:
+        console.print("[red]Error: --message and --message-file are mutually exclusive[/red]")
+        raise typer.Exit(1)
     if tz and not cron_expr:
         console.print("[red]Error: --tz can only be used with --cron[/red]")
         raise typer.Exit(1)
@@ -874,7 +889,8 @@ def cron_add(
         job = service.add_job(
             name=name,
             schedule=schedule,
-            message=message,
+            message=message or "",  # None → "" when message_file is used; service validates
+            message_file=message_file,
             deliver=deliver,
             to=to,
             channel=channel,
@@ -965,8 +981,16 @@ def cron_run(
     result_holder = []
 
     async def on_job(job: CronJob) -> str | None:
+        if job.payload.message_file:
+            file_path = config.workspace_path / job.payload.message_file
+            try:
+                instruction = file_path.read_text(encoding="utf-8")
+            except OSError as e:
+                instruction = f"Error reading message file '{job.payload.message_file}': {e}"
+        else:
+            instruction = job.payload.message
         response = await agent_loop.process_direct(
-            job.payload.message,
+            instruction,
             session_key=f"cron:{job.id}",
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
