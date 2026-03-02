@@ -225,26 +225,44 @@ class GenerateVideoTool(Tool):
         resolution: str = "720p",
         **kwargs: Any,
     ) -> str:
-        # Delegate to the shared implementation in adk/tools.py
-        from scorpion.adk.tools import generate_video
-        from google.adk.tools import ToolContext
-        
-        # Create a minimal tool context for the function
-        tool_context = ToolContext(
-            state={
-                "app:is_subagent": "false",
-                "app:bus_active": "false",
-                "temp:channel": self._origin_channel,
-                "temp:chat_id": self._origin_chat_id,
-            }
-        )
-        
-        return await generate_video(
+        # ToolContext cannot be constructed outside the ADK runner (it requires
+        # an InvocationContext).  Call the generation logic directly instead.
+        api_key = _get_gemini_key()
+        if not api_key:
+            return "Error: GEMINI_API_KEY not configured"
+
+        # Non-blocking path: use background worker when the bus is active
+        from scorpion.adk import tools as _adk_tools
+        if _adk_tools._pending_results is not None:
+            from scorpion.adk.workers import worker_generate_video
+            import asyncio as _asyncio
+
+            result_id = _adk_tools._pending_results.add(
+                f"{self._origin_channel}:{self._origin_chat_id}",
+                "video", prompt,
+                {"duration": duration, "aspect": aspect, "resolution": resolution},
+            )
+            task = _asyncio.create_task(worker_generate_video(
+                result_id, prompt, duration, aspect, resolution,
+                api_key, _adk_tools._pending_results,
+            ))
+            _adk_tools._pending_results.register_task(result_id, task)
+            logger.info(
+                "[VideoGen] Spawned background worker {} for prompt={!r}",
+                result_id, prompt[:60],
+            )
+            return (
+                f"🎬 Video generation started in the background (id: {result_id}). "
+                f"This takes 1–5 minutes. I'll deliver it when it's ready."
+            )
+
+        # Blocking fallback (CLI / no bus)
+        return await _adk_tools.generate_video(
             prompt=prompt,
             duration=duration,
             aspect=aspect,
             resolution=resolution,
-            tool_context=tool_context,
+            tool_context=None,
         )
 
 
