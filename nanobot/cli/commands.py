@@ -303,11 +303,15 @@ def gateway(
             f"Scheduled instruction: {job.payload.message}"
         )
 
+        async def _silent(*_args, **_kwargs):
+            pass
+
         response = await agent.process_direct(
             reminder_note,
             session_key=f"cron:{job.id}",
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
+            on_progress=_silent,  # suppress: cron should not push progress to external channels
         )
 
         message_tool = agent.tools.get("message")
