@@ -1,9 +1,9 @@
-"""File system tools: read, write, edit."""
+"""File system tools: read, write, edit, and PDF support."""
 
 import difflib
 from pathlib import Path
 from typing import Any
-
+from pypdf import PdfReader
 from nanobot.agent.tools.base import Tool
 
 
@@ -54,12 +54,40 @@ class ReadFileTool(Tool):
             if not file_path.is_file():
                 return f"Error: Not a file: {path}"
 
+            # PDF handling
+            if file_path.suffix.lower() == ".pdf":
+                return self._read_pdf(file_path)
+
+            # Default: text file
             content = file_path.read_text(encoding="utf-8")
             return content
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
             return f"Error reading file: {str(e)}"
+
+    def _read_pdf(self, file_path: Path) -> str:
+        """Extract text from PDF file."""
+        if PdfReader is None:
+            return "Error: pypdf is not installed. Run `pip install pypdf` to enable PDF reading."
+
+        try:
+            reader = PdfReader(str(file_path))
+            text_chunks = []
+
+            for page_number, page in enumerate(reader.pages, start=1):
+                page_text = page.extract_text()
+                if page_text:
+                    text_chunks.append(f"\n\n--- Page {page_number} ---\n")
+                    text_chunks.append(page_text)
+
+            if not text_chunks:
+                return "Warning: PDF contains no extractable text (possibly scanned image PDF)."
+
+            return "".join(text_chunks)
+
+        except Exception as e:
+            return f"Error reading PDF: {str(e)}"
 
 
 class WriteFileTool(Tool):
