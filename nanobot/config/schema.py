@@ -1,9 +1,10 @@
 """Configuration schema using Pydantic."""
 
+import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -322,6 +323,61 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class EmbeddingConfig(Base):
+    """Embedding provider for semantic memory retrieval (e.g. NVIDIA NIM)."""
+
+    enabled: bool = False
+    api_key: str = ""
+    api_base: str = ""
+    model: str = ""
+    dimensions: int = 1024
+    rpm_limit: int = 40
+
+    @model_validator(mode="after")
+    def _fill_from_nim_env(self):
+        """Fill empty fields from NIM_* env vars and auto-enable when key is available."""
+        if not self.api_key and os.environ.get("NIM_API_KEY"):
+            self.api_key = os.environ.get("NIM_API_KEY", "")
+        if not self.api_base and os.environ.get("NIM_BASE_URL"):
+            self.api_base = os.environ.get("NIM_BASE_URL", "")
+        if not self.model and os.environ.get("NIM_MODEL"):
+            self.model = os.environ.get("NIM_MODEL", "")
+        if self.dimensions == 1024 and os.environ.get("NIM_EMBEDDING_DIM"):
+            try:
+                self.dimensions = int(os.environ.get("NIM_EMBEDDING_DIM", "1024"))
+            except ValueError:
+                pass
+        if self.rpm_limit == 40 and os.environ.get("NIM_RPM_LIMIT"):
+            try:
+                self.rpm_limit = int(os.environ.get("NIM_RPM_LIMIT", "40"))
+            except ValueError:
+                pass
+        if not self.enabled and self.api_key and self.api_base and self.model:
+            self.enabled = True
+        return self
+
+
+class TokenBudgetConfig(Base):
+    """Per-section token budget allocation."""
+
+    identity: int = 500
+    memory: int = 800
+    history_summary: int = 500
+    conversation: int = 0  # 0 = fill remaining budget
+    bootstrap: int = 3000
+    tools: int = 500
+
+
+class MemoryConfig(Base):
+    """Memory system configuration."""
+
+    embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+    retrieval_top_k: int = 10
+    max_facts: int = 1000
+    token_budget: TokenBudgetConfig = Field(default_factory=TokenBudgetConfig)
+    summarization_model: str = ""  # cheap model for compression; empty = use default model
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -330,6 +386,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    memory: MemoryConfig | None = None
 
     @property
     def workspace_path(self) -> Path:

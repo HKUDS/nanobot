@@ -28,7 +28,9 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig
+    from nanobot.agent.embedding import EmbeddingClient
+    from nanobot.agent.memory_store import FactStore
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, MemoryConfig
     from nanobot.cron.service import CronService
 
 
@@ -44,7 +46,7 @@ class AgentLoop:
     5. Sends responses back
     """
 
-    _TOOL_RESULT_MAX_CHARS = 500
+    _TOOL_RESULT_MAX_CHARS = 2000  # persistence cap; LLM sees budget-sized truncation
 
     def __init__(
         self,
@@ -65,9 +67,11 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        memory_config: MemoryConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
+        self.memory_config = memory_config
         self.channels_config = channels_config
         self.provider = provider
         self.workspace = workspace
@@ -110,6 +114,36 @@ class AgentLoop:
         self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
+        self._fact_store: FactStore | None = None
+        self._embedding_client: EmbeddingClient | None = None
+        if memory_config:
+            try:
+                from nanobot.agent.memory_store import fact_store_available, FactStore
+                if fact_store_available():
+                    self._fact_store = FactStore(
+                        self.workspace,
+                        memory_config=memory_config,
+                        embedding_client=None,
+                    )
+                    emb_cfg = getattr(memory_config, "embedding", None)
+                    if emb_cfg and getattr(emb_cfg, "enabled", False) and getattr(emb_cfg, "api_key", ""):
+                        from nanobot.agent.embedding import EmbeddingClient
+                        self._embedding_client = EmbeddingClient(emb_cfg)
+                        self._fact_store.embedding_client = self._embedding_client
+                        self._fact_store._dimensions = getattr(emb_cfg, "dimensions", 1024) or 1024
+                        logger.info(
+                            "Memory: FactStore + EmbeddingClient enabled (model={})",
+                            getattr(emb_cfg, "model", ""),
+                        )
+                    else:
+                        logger.info("Memory: FactStore enabled (BM25S only, no embedding)")
+                else:
+                    logger.warning(
+                        "Memory: [memory] extra not installed (bm25s/sqlite-vec missing). "
+                        "Using flat MEMORY.md fallback. Install with: pip install nanobot-ai[memory]"
+                    )
+            except Exception as e:
+                logger.warning("Memory: FactStore init failed: {}", e)
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -165,6 +199,43 @@ class AgentLoop:
         if not text:
             return None
         return re.sub(r"<think>[\s\S]*?</think>", "", text).strip() or None
+
+    def _truncate_tool_result(self, messages: list[dict], result: str) -> str:
+        """Truncate tool result to fit within remaining context budget (dynamic sizing)."""
+        if not isinstance(result, str):
+            return result
+        try:
+            from nanobot.agent.budget import get_context_window, count_tokens, truncate_to_budget
+            ctx = get_context_window(self.model)
+            used = 0
+            for m in messages:
+                c = m.get("content")
+                if isinstance(c, str):
+                    used += count_tokens(c)
+                elif isinstance(c, list):
+                    for part in c:
+                        if isinstance(part, dict) and "text" in part:
+                            used += count_tokens(part.get("text", ""))
+            remaining = ctx - self.max_tokens - used - 600
+            if remaining <= 0:
+                remaining = 1000
+            budget_tokens = min(int(remaining * 0.3), 4000)
+            if count_tokens(result) <= budget_tokens or budget_tokens <= 0:
+                return result
+            truncated = truncate_to_budget(result, budget_tokens)
+            if truncated != result:
+                logger.debug(
+                    "Tool result truncated to {} tokens (was ~{}), budget_tokens={}",
+                    budget_tokens,
+                    count_tokens(result),
+                    budget_tokens,
+                )
+            return truncated
+        except Exception as e:
+            logger.debug("TokenBudget truncation failed, using char cap: {}", e)
+            if len(result) > self._TOOL_RESULT_MAX_CHARS:
+                return result[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+            return result
 
     @staticmethod
     def _tool_hint(tool_calls: list) -> str:
@@ -229,6 +300,7 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    result = self._truncate_tool_result(messages, result)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -345,7 +417,14 @@ class AgentLoop:
             history = session.get_history(max_messages=self.memory_window)
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=msg.content,
+                channel=channel,
+                chat_id=chat_id,
+                model=self.model,
+                max_tokens=self.max_tokens,
+                memory_config=self.memory_config,
+                fact_store=self._fact_store,
+                query_embedding=None,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
@@ -416,12 +495,53 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=self.memory_window)
+        if self.memory_config:
+            from nanobot.agent.memory import ensure_rolling_summary
+            logger.debug("Memory: ensure_rolling_summary for session {}", key)
+            await ensure_rolling_summary(
+                session,
+                self.provider,
+                self.model,
+                self.memory_config,
+                self.sessions,
+            )
+
+        _budget_obj = None
+        conversation_token_budget = None
+        if self.memory_config and getattr(self.memory_config, "token_budget", None):
+            from nanobot.agent.budget import TokenBudget
+            _budget_obj = TokenBudget(
+                self.model,
+                self.max_tokens,
+                self.memory_config.token_budget,
+            )
+            conversation_token_budget = _budget_obj.get_budget("conversation") or 0
+            logger.debug("Memory: conversation token_budget={} for history", conversation_token_budget)
+        history = session.get_history(
+            max_messages=self.memory_window,
+            token_budget=conversation_token_budget if conversation_token_budget and conversation_token_budget > 0 else None,
+        )
+
+        query_embedding = None
+        if self._embedding_client and self._fact_store:
+            try:
+                query_embedding = await self._embedding_client.embed(msg.content)
+                logger.debug("Memory: query embedding obtained for KNN retrieval")
+            except Exception as e:
+                logger.debug("Memory: query embedding failed, using BM25S/recent: {}", e)
+
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            model=self.model,
+            max_tokens=self.max_tokens,
+            memory_config=self.memory_config,
+            fact_store=self._fact_store,
+            query_embedding=query_embedding,
+            token_budget=_budget_obj,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -461,7 +581,9 @@ class AgentLoop:
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
-                entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+                entry["content"] = (
+                    content[: self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+                )
             elif role == "user":
                 if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
                     continue
@@ -477,10 +599,15 @@ class AgentLoop:
         session.updated_at = datetime.now()
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
-        """Delegate to MemoryStore.consolidate(). Returns True on success."""
-        return await MemoryStore(self.workspace).consolidate(
-            session, self.provider, self.model,
-            archive_all=archive_all, memory_window=self.memory_window,
+        """Delegate to MemoryStore.consolidate(); use FactStore when available."""
+        store = MemoryStore(self.workspace)
+        return await store.consolidate(
+            session,
+            self.provider,
+            self.model,
+            archive_all=archive_all,
+            memory_window=self.memory_window,
+            fact_store=self._fact_store,
         )
 
     async def process_direct(

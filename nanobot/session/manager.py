@@ -11,6 +11,27 @@ from loguru import logger
 
 from nanobot.utils.helpers import ensure_dir, safe_filename
 
+_LOG_SESSION = "Session"
+
+
+def _count_tokens(text: str) -> int:
+    """Token count; uses tiktoken if available else estimate."""
+    try:
+        from nanobot.agent.budget import count_tokens
+        return count_tokens(text)
+    except Exception:
+        return max(1, len(text) // 4)
+
+
+def _message_tokens(m: dict[str, Any]) -> int:
+    """Approximate tokens for one message."""
+    content = m.get("content")
+    if isinstance(content, str):
+        return _count_tokens(content)
+    if isinstance(content, list):
+        return sum(_count_tokens(c.get("text", "")) for c in content if isinstance(c, dict))
+    return 0
+
 
 @dataclass
 class Session:
@@ -22,6 +43,9 @@ class Session:
     Important: Messages are append-only for LLM cache efficiency.
     The consolidation process writes summaries to MEMORY.md/HISTORY.md
     but does NOT modify the messages list or get_history() output.
+
+    Progressive compression: metadata may contain "rolling_summary" and
+    "summary_anchor" for token-budgeted history (Zone B + Zone A).
     """
 
     key: str  # channel:chat_id
@@ -42,19 +66,63 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
-    def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input, aligned to a user turn."""
+    def get_history(
+        self,
+        max_messages: int = 500,
+        token_budget: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Return unconsolidated messages for LLM input, aligned to a user turn.
+        When token_budget is set, prepends rolling summary (Zone B) and fills
+        remaining with recent messages (Zone A) within the budget.
+        """
         unconsolidated = self.messages[self.last_consolidated:]
-        sliced = unconsolidated[-max_messages:]
+        if not unconsolidated:
+            return []
 
-        # Drop leading non-user messages to avoid orphaned tool_result blocks
+        if token_budget is not None and token_budget > 0:
+            summary = (self.metadata or {}).get("rolling_summary", "")
+            summary_anchor = (self.metadata or {}).get("summary_anchor", 0)
+            summary_anchor = min(summary_anchor, len(unconsolidated))
+            recent = unconsolidated[summary_anchor:]
+            summary_tokens = _count_tokens(summary) if summary else 0
+            remaining = token_budget - summary_tokens
+            logger.debug(
+                "{}: get_history token_budget={} summary_tokens={} remaining={} recent_count={}",
+                _LOG_SESSION,
+                token_budget,
+                summary_tokens,
+                remaining,
+                len(recent),
+            )
+            if remaining <= 0:
+                out = []
+            else:
+                out = []
+                used = 0
+                for m in reversed(recent):
+                    t = _message_tokens(m)
+                    if used + t > remaining:
+                        break
+                    out.insert(0, m)
+                    used += t
+                out = self._to_history_entries(out)
+            if summary:
+                logger.debug("{}: get_history including rolling summary ({} chars)", _LOG_SESSION, len(summary))
+                return [{"role": "system", "content": "[Earlier conversation summary]\n\n" + summary}] + out
+            return out
+
+        sliced = unconsolidated[-max_messages:]
         for i, m in enumerate(sliced):
             if m.get("role") == "user":
                 sliced = sliced[i:]
                 break
+        return self._to_history_entries(sliced)
 
+    @staticmethod
+    def _to_history_entries(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
-        for m in sliced:
+        for m in messages:
             entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
             for k in ("tool_calls", "tool_call_id", "name"):
                 if k in m:
@@ -67,6 +135,9 @@ class Session:
         self.messages = []
         self.last_consolidated = 0
         self.updated_at = datetime.now()
+        if self.metadata:
+            self.metadata.pop("rolling_summary", None)
+            self.metadata.pop("summary_anchor", None)
 
 
 class SessionManager:
@@ -142,7 +213,7 @@ class SessionManager:
                     data = json.loads(line)
 
                     if data.get("_type") == "metadata":
-                        metadata = data.get("metadata", {})
+                        metadata = data.get("metadata", {}) or {}
                         created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
                         last_consolidated = data.get("last_consolidated", 0)
                     else:
