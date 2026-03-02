@@ -1,81 +1,67 @@
-"""Profile management for multiple AI accounts."""
+"""Account profile management — backed by the existing config.json.
 
-import json
-from pathlib import Path
-from pydantic import BaseModel, ConfigDict
-from loguru import logger
-from nanobot.config.loader import get_data_dir
+Named accounts are stored under ``agents.accounts`` in config.json so there
+is no separate profiles.json file to maintain.  This module is a thin
+adapter that converts between the ``AccountEntry`` schema type and the
+``Profile`` data-class expected by the rest of the code.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from nanobot.config.loader import load_config, save_config
 
 
-class Profile(BaseModel):
-    """A definition for a user's AI account profile."""
+@dataclass
+class Profile:
+    """A resolved named AI account."""
+
     name: str
     model: str
     api_key: str
     api_base: str | None = None
-    
-    model_config = ConfigDict(extra="ignore")
 
 
 class ProfileManager:
-    """Manages reading and writing profiles to a JSON file."""
-    
-    def __init__(self, store_path: Path | None = None):
-        self.store_path = store_path or get_data_dir() / "profiles.json"
-        
-    def _read_profiles(self) -> dict[str, dict]:
-        """Read raw dictionary of profiles from disk."""
-        if not self.store_path.exists():
-            return {}
-        try:
-            with open(self.store_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error("Failed to read profiles from {}: {}", self.store_path, e)
-            return {}
-            
-    def _write_profiles(self, profiles: dict[str, dict]) -> None:
-        """Write raw dictionary of profiles to disk."""
-        self.store_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with open(self.store_path, "w", encoding="utf-8") as f:
-                json.dump(profiles, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            logger.error("Failed to write profiles to {}: {}", self.store_path, e)
-            
-    def get_profile(self, name: str) -> Profile | None:
-        """Get a specific profile by name."""
-        data = self._read_profiles()
-        if name not in data:
-            return None
-        try:
-            return Profile(**data[name])
-        except Exception as e:
-            logger.error("Failed to parse profile '{}': {}", name, e)
-            return None
-            
+    """Read/write named accounts from config.json's ``agents.accounts`` dict."""
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def list_profiles(self) -> list[Profile]:
-        """List all available profiles."""
-        data = self._read_profiles()
-        profiles = []
-        for name, profile_data in data.items():
-            try:
-                profiles.append(Profile(**profile_data))
-            except Exception as e:
-                logger.warning("Skipping invalid profile '{}': {}", name, e)
-        return profiles
-        
+        """Return all saved accounts."""
+        config = load_config()
+        return [
+            Profile(name=name, model=entry.model, api_key=entry.api_key, api_base=entry.api_base)
+            for name, entry in config.agents.accounts.items()
+        ]
+
+    def get_profile(self, name: str) -> Profile | None:
+        """Return a single account by name, or *None* if not found."""
+        config = load_config()
+        entry = config.agents.accounts.get(name)
+        if entry is None:
+            return None
+        return Profile(name=name, model=entry.model, api_key=entry.api_key, api_base=entry.api_base)
+
     def add_profile(self, profile: Profile) -> None:
-        """Add or update a profile."""
-        data = self._read_profiles()
-        data[profile.name] = profile.model_dump()
-        self._write_profiles(data)
-        
+        """Persist an account (insert or overwrite)."""
+        from nanobot.config.schema import AccountEntry
+        config = load_config()
+        config.agents.accounts[profile.name] = AccountEntry(
+            model=profile.model,
+            api_key=profile.api_key,
+            api_base=profile.api_base,
+        )
+        save_config(config)
+
     def remove_profile(self, name: str) -> bool:
-        """Remove a profile by name. Returns True if removed, False if not found."""
-        data = self._read_profiles()
-        if name in data:
-            del data[name]
-            self._write_profiles(data)
-            return True
-        return False
+        """Remove an account. Returns *True* if it existed, *False* otherwise."""
+        config = load_config()
+        if name not in config.agents.accounts:
+            return False
+        del config.agents.accounts[name]
+        save_config(config)
+        return True
