@@ -47,21 +47,25 @@ from loguru import logger
 _bus_callback = None
 _subagent_manager = None
 _cron_service = None
+_pending_results = None  # PendingResults heap for non-blocking generation
 
 
 def set_runtime_refs(
     bus_publish=None,
     subagent_manager=None,
     cron_service=None,
+    pending_results=None,
 ):
     """Set module-level references that tools need but can't be stored in state."""
-    global _bus_callback, _subagent_manager, _cron_service
+    global _bus_callback, _subagent_manager, _cron_service, _pending_results
     if bus_publish is not None:
         _bus_callback = bus_publish
     if subagent_manager is not None:
         _subagent_manager = subagent_manager
     if cron_service is not None:
         _cron_service = cron_service
+    if pending_results is not None:
+        _pending_results = pending_results
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -85,6 +89,15 @@ _MEDIA_ROOT = Path.home() / ".scorpion" / "media"
 
 def _ts() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+
+def _get_session_key(tool_context: ToolContext | None) -> str:
+    """Derive session key from tool context (channel:chat_id)."""
+    if not tool_context:
+        return "cli:direct"
+    ch = tool_context.state.get("temp:channel", "cli")
+    cid = tool_context.state.get("temp:chat_id", "direct")
+    return f"{ch}:{cid}"
 
 
 # ── File System Tools ────────────────────────────────────────────────────────
@@ -637,7 +650,7 @@ async def generate_image(
     count: int = 1,
     tool_context: ToolContext = None,
 ) -> str:
-    """Generate images using Google Imagen 4 or Gemini. Returns file path(s). Use send_message with media=[path] to send.
+    """Generate images using Google Imagen 4 or Gemini. Non-blocking when running in gateway mode — results delivered on next turn.
 
     Args:
         prompt: Description of the image to generate.
@@ -649,6 +662,26 @@ async def generate_image(
     if not api_key:
         return "Error: GEMINI_API_KEY not configured"
 
+    # ── Non-blocking path: spawn background worker ────────────────────
+    bus_active = (
+        tool_context.state.get("app:bus_active", "") == "true"
+        if tool_context else False
+    )
+    if _pending_results is not None and bus_active:
+        from scorpion.adk.workers import worker_generate_image
+
+        session_key = _get_session_key(tool_context)
+        result_id = _pending_results.add(session_key, "image", prompt, {
+            "model": model, "aspect": aspect, "count": count,
+        })
+        task = asyncio.create_task(worker_generate_image(
+            result_id, prompt, model, aspect, count, api_key, _pending_results,
+        ))
+        _pending_results.register_task(result_id, task)
+        logger.info("[ImageGen] Spawned worker {} — prompt={!r}", result_id, prompt[:60])
+        return f"Image generation started in the background (id: {result_id}). The result will be available on the next turn."
+
+    # ── Blocking fallback (CLI / process_direct) ──────────────────────
     out_dir = _MEDIA_ROOT / "images"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -718,7 +751,7 @@ async def generate_video(
     resolution: str = "720p",
     tool_context: ToolContext = None,
 ) -> str:
-    """Generate videos using Google Veo 3.1. Takes 1-5 minutes. Wrap dialogue in quotes for AI audio.
+    """Generate videos using Google Veo 3.1. Takes 1-5 minutes. Non-blocking in gateway mode — result delivered on next turn.
 
     Args:
         prompt: Description of the video to generate.
@@ -730,6 +763,32 @@ async def generate_video(
     if not api_key:
         return "Error: GEMINI_API_KEY not configured"
 
+    # ── Non-blocking path: spawn lightweight background worker ────────
+    bus_active = (
+        tool_context.state.get("app:bus_active", "") == "true"
+        if tool_context else False
+    )
+    if _pending_results is not None and bus_active:
+        from scorpion.adk.workers import worker_generate_video
+
+        session_key = _get_session_key(tool_context)
+        result_id = _pending_results.add(session_key, "video", prompt, {
+            "duration": duration, "aspect": aspect, "resolution": resolution,
+        })
+        task = asyncio.create_task(worker_generate_video(
+            result_id, prompt, duration, aspect, resolution, api_key, _pending_results,
+        ))
+        _pending_results.register_task(result_id, task)
+        logger.info(
+            "[VideoGen] Spawned worker {} — prompt={!r} duration={}s aspect={} res={}",
+            result_id, prompt[:60], duration, aspect, resolution,
+        )
+        return (
+            f"Video generation started in the background (id: {result_id}). "
+            f"This takes 1-5 minutes. The result will be available on the next turn."
+        )
+
+    # ── Blocking fallback (CLI / process_direct) ──────────────────────
     out_dir = _MEDIA_ROOT / "videos"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -738,38 +797,61 @@ async def generate_video(
         from google.genai import types
 
         client = genai.Client(api_key=api_key)
-        logger.info("Starting video generation: {}", prompt[:80])
+        logger.info(
+            "[VideoGen] Starting Veo 3.1 generation — prompt={!r} duration={}s aspect={} res={}",
+            prompt[:80], duration, aspect, resolution,
+        )
 
         operation = client.models.generate_videos(
             model="veo-3.1-generate-preview",
             prompt=prompt,
             config=types.GenerateVideosConfig(
                 aspect_ratio=aspect,
+                duration_seconds=duration,
                 resolution=resolution,
                 number_of_videos=1,
             ),
         )
+        logger.info("[VideoGen] Veo operation submitted, beginning poll loop...")
 
         def _poll():
+            poll_count = 0
             while not operation.done:
+                poll_count += 1
+                logger.info(
+                    "[VideoGen] Poll #{} (~{}s elapsed) — waiting for Veo...",
+                    poll_count, poll_count * 10,
+                )
                 time.sleep(10)
                 client.operations.get(operation)
+            logger.info(
+                "[VideoGen] Veo finished after {} polls (~{}s)",
+                poll_count, poll_count * 10,
+            )
             return operation
 
         op = await asyncio.get_event_loop().run_in_executor(None, _poll)
 
         if not op.response or not op.response.generated_videos:
+            logger.warning("[VideoGen] Veo returned no videos")
             return "Error: No videos generated"
 
         video = op.response.generated_videos[0]
+        logger.info("[VideoGen] Downloading generated video from Veo...")
         client.files.download(file=video.video)
 
         out_path = out_dir / f"video_{_ts()}.mp4"
         video.video.save(str(out_path))
-        logger.info("Generated video: {}", out_path)
+        logger.info("[VideoGen] Video saved: {}", out_path)
         return str(out_path)
     except Exception as e:
-        logger.error("Video generation failed: {}", e)
+        error_msg = str(e)
+        logger.error("[VideoGen] Generation failed: {}", e)
+        if "503" in error_msg or "Service Unavailable" in error_msg:
+            return (
+                "The video generation service is temporarily unavailable (503). "
+                "Please try again in a few minutes."
+            )
         return f"Error: {e}"
 
 
@@ -779,7 +861,7 @@ async def generate_music(
     bpm: int = 0,
     tool_context: ToolContext = None,
 ) -> str:
-    """Generate instrumental music using Google Lyria RealTime. Returns WAV file path.
+    """Generate instrumental music using Google Lyria RealTime. Non-blocking in gateway mode — result delivered on next turn.
 
     Args:
         prompt: Music style/mood description (e.g. 'upbeat jazz piano', 'ambient techno').
@@ -790,6 +872,26 @@ async def generate_music(
     if not api_key:
         return "Error: GEMINI_API_KEY not configured"
 
+    # ── Non-blocking path: spawn background worker ────────────────────
+    bus_active = (
+        tool_context.state.get("app:bus_active", "") == "true"
+        if tool_context else False
+    )
+    if _pending_results is not None and bus_active:
+        from scorpion.adk.workers import worker_generate_music
+
+        session_key = _get_session_key(tool_context)
+        result_id = _pending_results.add(session_key, "music", prompt, {
+            "duration": duration, "bpm": bpm,
+        })
+        task = asyncio.create_task(worker_generate_music(
+            result_id, prompt, duration, bpm, api_key, _pending_results,
+        ))
+        _pending_results.register_task(result_id, task)
+        logger.info("[MusicGen] Spawned worker {} — prompt={!r}", result_id, prompt[:60])
+        return f"Music generation started in the background (id: {result_id}). The result will be available on the next turn."
+
+    # ── Blocking fallback (CLI / process_direct) ──────────────────────
     out_dir = _MEDIA_ROOT / "music"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -867,7 +969,7 @@ async def generate_speech(
     voice: str = "Kore",
     tool_context: ToolContext = None,
 ) -> str:
-    """Generate a voice message from text using Gemini TTS. Returns file path. Use send_message with media=[path] to deliver.
+    """Generate a voice message from text using Gemini TTS. Non-blocking in gateway mode — result delivered on next turn.
 
     Args:
         text: The text to speak aloud.
@@ -879,6 +981,26 @@ async def generate_speech(
     if not api_key:
         return "Error: GEMINI_API_KEY not configured"
 
+    # ── Non-blocking path: spawn background worker ────────────────────
+    bus_active = (
+        tool_context.state.get("app:bus_active", "") == "true"
+        if tool_context else False
+    )
+    if _pending_results is not None and bus_active:
+        from scorpion.adk.workers import worker_generate_speech
+
+        session_key = _get_session_key(tool_context)
+        result_id = _pending_results.add(session_key, "speech", text[:80], {
+            "voice": voice,
+        })
+        task = asyncio.create_task(worker_generate_speech(
+            result_id, text, voice, api_key, _pending_results,
+        ))
+        _pending_results.register_task(result_id, task)
+        logger.info("[SpeechGen] Spawned worker {} — voice={}", result_id, voice)
+        return f"Speech generation started in the background (id: {result_id}). The result will be available on the next turn."
+
+    # ── Blocking fallback (CLI / process_direct) ──────────────────────
     out_dir = _MEDIA_ROOT / "voicemessage"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -943,7 +1065,9 @@ ALL_TOOLS = [
     generate_speech,
 ]
 
-# Subset for subagents (no message, spawn, cron, or creative tools)
+# Subset for subagents — general-purpose background tasks.
+# Creative tools (video, image, music, speech) now use lightweight workers
+# instead of full LLM subagents, so they're not included here.
 SUBAGENT_TOOLS = [
     read_file,
     write_file,
@@ -952,4 +1076,5 @@ SUBAGENT_TOOLS = [
     exec_command,
     web_search,
     web_fetch,
+    send_message,
 ]

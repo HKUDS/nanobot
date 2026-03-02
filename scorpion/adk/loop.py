@@ -30,6 +30,7 @@ from scorpion.adk.callbacks import (
     make_before_agent_callback,
     make_before_tool_callback,
 )
+from scorpion.adk.pending import PendingResults
 from scorpion.adk.tools import ALL_TOOLS, set_runtime_refs
 from scorpion.agent.context import ContextBuilder
 from scorpion.agent.memory import MemoryStore
@@ -116,12 +117,14 @@ class AdkAgentLoop:
         )
         self._active_tasks: dict[str, list[asyncio.Task]] = {}
         self._processing_lock = asyncio.Lock()
+        self._pending_results = PendingResults()
 
         # Wire module-level tool references
         set_runtime_refs(
             bus_publish=self.bus.publish_outbound,
             subagent_manager=self.subagents,
             cron_service=self.cron_service,
+            pending_results=self._pending_results,
         )
 
         # ADK session service (in-memory — scorpion JSONL is the persistence layer)
@@ -152,6 +155,9 @@ class AdkAgentLoop:
             "temp:iteration_count": "0",
             "temp:tools_used": "",
             "temp:voice_reply": "true" if (metadata or {}).get("voice_reply") else "",
+            # Flag for tools to know the bus loop is active and subagents
+            # can safely deliver via send_message.  False in process_direct.
+            "app:bus_active": "true" if self._running else "",
         }
         return state
 
@@ -268,9 +274,13 @@ class AdkAgentLoop:
             # Append directly to session history
             session.events = getattr(session, 'events', [])
 
-        # Build the user message with optional runtime context
+        # Build the user message with optional runtime context + pending generation status
         runtime_ctx = ContextBuilder._build_runtime_context(channel, chat_id)
-        user_text = f"{runtime_ctx}\n\n{current_message}" if runtime_ctx else current_message
+        session_key = f"{channel}:{chat_id}"
+        pending_ctx = self._pending_results.build_context_block(session_key)
+        context_parts = [p for p in (runtime_ctx, pending_ctx) if p]
+        prefix = "\n\n".join(context_parts)
+        user_text = f"{prefix}\n\n{current_message}" if prefix else current_message
 
         # Handle media (images and audio) by uploading to Gemini and referencing
         parts: list[types.Part] = []
@@ -374,7 +384,7 @@ class AdkAgentLoop:
                 )
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
-        """Cancel all active tasks and subagents for the session."""
+        """Cancel all active tasks, subagents, and pending workers for the session."""
         tasks = self._active_tasks.pop(msg.session_key, [])
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
         for t in tasks:
@@ -383,7 +393,8 @@ class AdkAgentLoop:
             except (asyncio.CancelledError, Exception):
                 pass
         sub_cancelled = await self.subagents.cancel_by_session(msg.session_key)
-        total = cancelled + sub_cancelled
+        worker_cancelled = await self._pending_results.cancel_by_session(msg.session_key)
+        total = cancelled + sub_cancelled + worker_cancelled
         content = f"\u23f9 Stopped {total} task(s)." if total else "No active task to stop."
         await self.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
@@ -539,6 +550,8 @@ class AdkAgentLoop:
 
     async def _handle_new_session(self, msg: InboundMessage, session: Session) -> OutboundMessage:
         """Handle the /new command with memory archival."""
+        # Cancel any pending generation workers for this session
+        await self._pending_results.cancel_by_session(msg.session_key)
         lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
         self._consolidating.add(session.key)
         try:
@@ -631,7 +644,12 @@ class AdkAgentLoop:
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
-        """Process a message directly (for CLI or cron usage)."""
+        """Process a message directly (for CLI or cron usage).
+
+        In direct mode, generation tools run blocking (bus_active is false).
+        After the main response, we also await any running workers and drain
+        their results so the CLI gets file paths in a single response.
+        """
         await self._connect_mcp()
         msg = InboundMessage(
             channel=channel, sender_id="user", chat_id=chat_id, content=content
@@ -639,4 +657,20 @@ class AdkAgentLoop:
         response = await self._process_message(
             msg, session_key=session_key, on_progress=on_progress
         )
-        return response.content if response else ""
+        result_text = response.content if response else ""
+
+        # In CLI mode workers shouldn't be spawned (bus_active is false),
+        # but if any were (e.g. tests), wait for them and append results.
+        await self._pending_results.wait_running(session_key, timeout=300)
+        finished = self._pending_results.drain(session_key)
+        if finished:
+            extras = []
+            for r in finished:
+                if r.status == "completed":
+                    extras.extend(r.file_paths)
+                else:
+                    extras.append(f"[{r.kind} failed: {r.error}]")
+            if extras:
+                result_text = result_text + "\n" + "\n".join(extras) if result_text else "\n".join(extras)
+
+        return result_text
