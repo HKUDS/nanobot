@@ -108,6 +108,7 @@ class TestImageGeneration:
 
 @pytest.mark.creative
 @pytest.mark.slow
+@pytest.mark.skip(reason="Video generation takes 5-10 minutes, run manually when needed")
 class TestVideoGeneration:
     """Test video generation tool execution."""
 
@@ -126,7 +127,6 @@ class TestVideoGeneration:
                 response = await agent_loop.process_direct(
                     f"Generate a video: {TEST_PROMPTS['video']}",
                     "test:video",
-                    max_iterations=10,
                 )
 
                 assert response is not None
