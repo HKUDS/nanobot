@@ -142,14 +142,20 @@ Your workspace is at: {workspace_path}
 
     @staticmethod
     def _format_message_time(timestamp: datetime | str | None) -> str:
-        """Normalize timestamp to date-time text for prompt."""
+        """Normalize timestamp to local-time text for prompt."""
         if not timestamp:
             return ""
         if isinstance(timestamp, datetime):
+            # Convert UTC-aware or naive datetime to local time
+            if timestamp.tzinfo is not None:
+                timestamp = timestamp.astimezone().replace(tzinfo=None)
             return timestamp.strftime("%Y-%m-%d %H:%M:%S")
         if isinstance(timestamp, str):
             try:
-                return datetime.fromisoformat(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+                dt = datetime.fromisoformat(timestamp)
+                if dt.tzinfo is not None:
+                    dt = dt.astimezone().replace(tzinfo=None)
+                return dt.strftime("%Y-%m-%d %H:%M:%S")
             except ValueError:
                 return timestamp
         return str(timestamp)
@@ -178,11 +184,10 @@ Your workspace is at: {workspace_path}
             if grouped_blocks:
                 return grouped_blocks
 
-        text_with_time = self._append_message_time(text, timestamp)
         images = self._build_image_blocks(media)
         if not images:
-            return text_with_time
-        return images + [{"type": "text", "text": text_with_time}]
+            return text
+        return images + [{"type": "text", "text": text}]
 
     def _build_collected_user_content(self, collected: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Build interleaved blocks for buffered messages to preserve text-image association."""
@@ -194,7 +199,7 @@ Your workspace is at: {workspace_path}
             content = str(item.get("content", ""))
             timestamp = item.get("timestamp")
             text = f"[{sender}] {content}" if use_sender_prefix else content
-            blocks.append({"type": "text", "text": self._append_message_time(text, timestamp)})
+            blocks.append({"type": "text", "text": text})
             blocks.extend(self._build_image_blocks(item.get("media")))
 
         return blocks
