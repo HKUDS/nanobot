@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import re
 from loguru import logger
-from telegram import BotCommand, Update, ReplyParameters
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import BotCommand, Update, ReplyParameters, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
@@ -113,6 +113,9 @@ class TelegramChannel(BaseChannel):
         BotCommand("new", "Start a new conversation"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("help", "Show available commands"),
+        BotCommand("account", "Switch AI profile (e.g. /account gemini)"),
+        BotCommand("model", "Change default model (e.g. /model glm-4)"),
+        BotCommand("rmaccount", "Remove AI profile (e.g. /rmaccount zhipu3)"),
     ]
     
     def __init__(
@@ -149,7 +152,11 @@ class TelegramChannel(BaseChannel):
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
+        self._app.add_handler(CommandHandler("stop", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
+        self._app.add_handler(CommandHandler("account", self._forward_command))
+        self._app.add_handler(CommandHandler("model", self._forward_command))
+        self._app.add_handler(CommandHandler("rmaccount", self._forward_command))
         
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
@@ -159,6 +166,9 @@ class TelegramChannel(BaseChannel):
                 self._on_message
             )
         )
+        
+        # Add callback query handler for inline button clicks
+        self._app.add_handler(CallbackQueryHandler(self._on_callback_query))
         
         logger.info("Starting Telegram bot (polling mode)...")
         
@@ -172,13 +182,14 @@ class TelegramChannel(BaseChannel):
         
         try:
             await self._app.bot.set_my_commands(self.BOT_COMMANDS)
+            await self._app.bot.set_my_commands(self.BOT_COMMANDS, language_code="")
             logger.debug("Telegram bot commands registered")
         except Exception as e:
             logger.warning("Failed to register bot commands: {}", e)
         
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
-            allowed_updates=["message"],
+            allowed_updates=["message", "callback_query"],
             drop_pending_updates=True  # Ignore old messages on startup
         )
         
@@ -240,6 +251,19 @@ class TelegramChannel(BaseChannel):
                     message_id=reply_to_message_id,
                     allow_sending_without_reply=True
                 )
+                
+        # Handle inline keyboard markup
+        reply_markup = None
+        inline_keyboard_data = msg.metadata.get("inline_keyboard")
+        if inline_keyboard_data:
+            # Reconstruct the InlineKeyboardMarkup from the metadata list of lists of dicts
+            keyboard = []
+            for row in inline_keyboard_data:
+                button_row = []
+                for btn in row:
+                    button_row.append(InlineKeyboardButton(text=btn["text"], callback_data=btn["callback_data"]))
+                keyboard.append(button_row)
+            reply_markup = InlineKeyboardMarkup(keyboard)
 
         # Send media files
         for media_path in (msg.media or []):
@@ -275,7 +299,8 @@ class TelegramChannel(BaseChannel):
                         chat_id=chat_id, 
                         text=html, 
                         parse_mode="HTML",
-                        reply_parameters=reply_params
+                        reply_parameters=reply_params,
+                        reply_markup=reply_markup
                     )
                 except Exception as e:
                     logger.warning("HTML parse failed, falling back to plain text: {}", e)
@@ -283,7 +308,8 @@ class TelegramChannel(BaseChannel):
                         await self._app.bot.send_message(
                             chat_id=chat_id, 
                             text=chunk,
-                            reply_parameters=reply_params
+                            reply_parameters=reply_params,
+                            reply_markup=reply_markup
                         )
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
@@ -294,6 +320,13 @@ class TelegramChannel(BaseChannel):
             return
 
         user = update.effective_user
+        
+        # Force a command menu refresh for the user when they /start the bot
+        try:
+            await context.bot.set_my_commands(self.BOT_COMMANDS)
+        except Exception as e:
+            logger.warning("Failed to refresh bot commands on /start: {}", e)
+            
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
             "Send me a message and I'll respond!\n"
@@ -326,7 +359,24 @@ class TelegramChannel(BaseChannel):
             chat_id=str(update.message.chat_id),
             content=update.message.text,
         )
-    
+    async def _on_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle inline button callback queries."""
+        query = update.callback_query
+        if not query or not query.data:
+            return
+            
+        logger.info(f"Received callback query: {query.data}")
+            
+        # Acknowledge the callback to remove the loading state on the button
+        await query.answer()
+        
+        # Treat the callback data like a normal user command sent to the chat
+        await self._handle_message(
+            sender_id=self._sender_id(update.effective_user),
+            chat_id=str(query.message.chat_id) if query.message else str(update.effective_user.id),
+            content=query.data,
+        )
+
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:

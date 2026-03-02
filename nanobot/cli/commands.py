@@ -28,6 +28,9 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+profile_app = typer.Typer(name="account", help="Manage multi-account profiles")
+app.add_typer(profile_app)
+
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 
@@ -755,6 +758,60 @@ def channels_login():
         console.print(f"[red]Bridge failed: {e}[/red]")
     except FileNotFoundError:
         console.print("[red]npm not found. Please install Node.js.[/red]")
+
+
+# ============================================================================
+# Profiles / Multi-Account Management
+# ============================================================================
+
+@profile_app.command("add")
+def profile_add(
+    name: str = typer.Argument(..., help="Alias for the AI account/profile"),
+    model: str = typer.Option(..., "--model", "-m", help="Target model (e.g., zhipu/glm-4, gemini-3-flash)"),
+    api_key: str = typer.Option(..., "--api-key", "-k", help="API Key for this account"),
+    api_base: str = typer.Option(None, "--api-base", "-b", help="Optional API Base URL"),
+):
+    """Add or update an AI account profile."""
+    from nanobot.config.profiles import ProfileManager, Profile
+    manager = ProfileManager()
+    
+    p = Profile(name=name, model=model, api_key=api_key, api_base=api_base)
+    manager.add_profile(p)
+    console.print(f"[green]✓[/green] Saved profile [cyan]{name}[/cyan] with model {model}")
+
+
+@profile_app.command("list")
+def profile_list():
+    """List all available AI account profiles."""
+    from nanobot.config.profiles import ProfileManager
+    manager = ProfileManager()
+    profiles = manager.list_profiles()
+    
+    if not profiles:
+        console.print("[yellow]No profiles found.[/yellow] Use `nanobot account add` to create one.")
+        return
+        
+    table = Table(title="AI Account Profiles")
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Model", style="green")
+    table.add_column("API Base", style="dim")
+    
+    for p in profiles:
+        table.add_row(p.name, p.model, p.api_base or "default")
+    console.print(table)
+
+
+@profile_app.command("remove")
+def profile_remove(
+    name: str = typer.Argument(..., help="Name of the profile to remove"),
+):
+    """Remove an AI account profile."""
+    from nanobot.config.profiles import ProfileManager
+    manager = ProfileManager()
+    if manager.remove_profile(name):
+        console.print(f"[green]✓[/green] Removed profile [cyan]{name}[/cyan]")
+    else:
+        console.print(f"[red]✗[/red] Profile [cyan]{name}[/cyan] not found")
 
 
 # ============================================================================
