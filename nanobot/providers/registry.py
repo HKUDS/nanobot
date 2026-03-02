@@ -352,7 +352,13 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="",
         default_api_base="https://api.minimax.io/v1",
         strip_model_prefix=False,
-        model_overrides=(),
+        model_overrides=(
+            # MiniMax M2.x reasoning models require reasoning_split=True to
+            # return interleaved chain-of-thought as reasoning_details.
+            ("minimax-m2.5", {"reasoning_split": True}),
+            ("minimax-m2.1", {"reasoning_split": True}),
+            ("minimax-m2",   {"reasoning_split": True}),
+        ),
     ),
 
     # === Local deployment (matched by config key, NOT by api_base) =========
