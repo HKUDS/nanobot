@@ -125,8 +125,9 @@ class AgentLoop:
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
-        for cls in (GenerateImageTool, GenerateVideoTool, GenerateMusicTool):
+        for cls in (GenerateImageTool, GenerateMusicTool):
             self.tools.register(cls())
+        self.tools.register(GenerateVideoTool(subagent_manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
@@ -154,7 +155,7 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
+        for name in ("message", "spawn", "cron", "generate_video"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))

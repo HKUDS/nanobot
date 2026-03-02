@@ -48,6 +48,9 @@ class GeminiProvider(LLMProvider):
         model_name = self._resolve_model(model or self.default_model)
         messages = self._sanitize_empty_content(messages)
 
+        # Upload video files before conversion
+        await self._upload_video_files(messages)
+
         system_instruction, contents = self._convert_messages(messages)
         gemini_tools = self._convert_tools(tools) if tools else None
 
@@ -72,6 +75,65 @@ class GeminiProvider(LLMProvider):
         except Exception as e:
             logger.error("Gemini API error: {}", e)
             return LLMResponse(content=f"Error calling Gemini: {e}", finish_reason="error")
+
+    async def _upload_video_files(self, messages: list[dict[str, Any]]) -> None:
+        """Upload video files to Gemini Files API and replace file paths with URIs."""
+        for msg in messages:
+            content = msg.get("content")
+            if not content:
+                continue
+            
+            # Handle string video file paths
+            if isinstance(content, str):
+                if content.endswith((".mp4", ".mov", ".avi", ".mkv", ".webm")):
+                    import os
+                    if os.path.exists(content):
+                        try:
+                            uploaded = await self._upload_file(content)
+                            msg["content"] = f"gemini-file://{uploaded.name}"
+                            logger.info("Uploaded video file: {} -> {}", content, uploaded.name)
+                        except Exception as e:
+                            logger.error("Failed to upload video {}: {}", content, e)
+                continue
+            
+            # Handle list content with video blocks
+            if isinstance(content, list):
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "video_file":
+                        file_path = block.get("file_path", "")
+                        if file_path and os.path.exists(file_path):
+                            try:
+                                uploaded = await self._upload_file(file_path)
+                                block["file_uri"] = uploaded.name
+                                logger.info("Uploaded video file: {} -> {}", file_path, uploaded.name)
+                            except Exception as e:
+                                logger.error("Failed to upload video {}: {}", file_path, e)
+                    elif block.get("type") == "video_url":
+                        url = block.get("video_url", {}).get("url", "")
+                        if url and os.path.exists(url):
+                            try:
+                                uploaded = await self._upload_file(url)
+                                block["video_url"]["url"] = f"gemini-file://{uploaded.name}"
+                                logger.info("Uploaded video file: {} -> {}", url, uploaded.name)
+                            except Exception as e:
+                                logger.error("Failed to upload video {}: {}", url, e)
+
+    async def _upload_file(self, file_path: str):
+        """Upload a file to Gemini Files API."""
+        import asyncio
+        from pathlib import Path
+        
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+        
+        # Run sync upload in executor
+        def _upload_sync():
+            return self._client.files.upload(file=path)
+        
+        return await asyncio.get_event_loop().run_in_executor(None, _upload_sync)
 
     # ------------------------------------------------------------------
     # Model name resolution
@@ -162,12 +224,40 @@ class GeminiProvider(LLMProvider):
 
     @staticmethod
     def _user_content_to_parts(content: Any) -> list[types.Part]:
-        """Convert user message content (str or list) to Gemini Parts."""
+        """Convert user message content (str or list) to Gemini Parts.
+        
+        Supports text, images (base64/URL), and videos (file path/URL).
+        """
         if isinstance(content, str):
+            # Handle uploaded Gemini file URI
+            if content.startswith("gemini-file://"):
+                file_name = content.replace("gemini-file://", "")
+                return [types.Part(file_data=types.FileData(file_uri=file_name))]
+            # Check if it's a video file path
+            if content.endswith((".mp4", ".mov", ".avi", ".mkv", ".webm")):
+                import os
+                if os.path.exists(content):
+                    # Upload video file via Files API and reference it
+                    return [types.Part(file_data=types.FileData(file_uri=f"file://{content}"))]
+            # Check if it's a YouTube URL
+            if "youtube.com" in content or "youtu.be" in content:
+                return [types.Part(file_data=types.FileData(file_uri=content))]
             return [types.Part(text=content)] if content else []
 
         if not isinstance(content, list):
-            return [types.Part(text=str(content))] if content else []
+            content_str = str(content)
+            # Handle uploaded Gemini file URI
+            if content_str.startswith("gemini-file://"):
+                file_name = content_str.replace("gemini-file://", "")
+                return [types.Part(file_data=types.FileData(file_uri=file_name))]
+            # Check if it's a video file path
+            if content_str.endswith((".mp4", ".mov", ".avi", ".mkv", ".webm")):
+                import os
+                if os.path.exists(content_str):
+                    return [types.Part(file_data=types.FileData(file_uri=f"file://{content_str}"))]
+            if "youtube.com" in content_str or "youtu.be" in content_str:
+                return [types.Part(file_data=types.FileData(file_uri=content_str))]
+            return [types.Part(text=content_str)] if content_str else []
 
         parts: list[types.Part] = []
         for block in content:
@@ -186,6 +276,51 @@ class GeminiProvider(LLMProvider):
                     mime = header.split(";")[0].split(":")[1] if ":" in header else "image/png"
                     parts.append(types.Part(
                         inline_data=types.Blob(mime_type=mime, data=base64.b64decode(b64)),
+                    ))
+                elif url_data.startswith("gemini-file://"):
+                    # Uploaded Gemini file
+                    file_name = url_data.replace("gemini-file://", "")
+                    parts.append(types.Part(
+                        file_data=types.FileData(file_uri=file_name),
+                    ))
+                else:
+                    # Image URL
+                    parts.append(types.Part(
+                        file_data=types.FileData(file_uri=url_data),
+                    ))
+            elif btype == "video_url":
+                url_data = block.get("video_url", {}).get("url", "")
+                if url_data.startswith("gemini-file://"):
+                    # Uploaded Gemini file
+                    file_name = url_data.replace("gemini-file://", "")
+                    parts.append(types.Part(
+                        file_data=types.FileData(file_uri=file_name),
+                    ))
+                elif url_data.startswith("data:"):
+                    # Base64 inline video (rare but possible)
+                    header, _, b64 = url_data.partition(",")
+                    mime = header.split(";")[0].split(":")[1] if ":" in header else "video/mp4"
+                    parts.append(types.Part(
+                        inline_data=types.Blob(mime_type=mime, data=base64.b64decode(b64)),
+                    ))
+                else:
+                    # Video URL or file path
+                    parts.append(types.Part(
+                        file_data=types.FileData(file_uri=url_data),
+                    ))
+            elif btype == "video_file":
+                # Direct video file path or uploaded file URI
+                file_path = block.get("file_path", "")
+                file_uri = block.get("file_uri", "")
+                
+                if file_uri:
+                    # Use uploaded file URI
+                    parts.append(types.Part(
+                        file_data=types.FileData(file_uri=file_uri),
+                    ))
+                elif file_path:
+                    parts.append(types.Part(
+                        file_data=types.FileData(file_uri=f"file://{file_path}"),
                     ))
         return parts
 

@@ -245,6 +245,12 @@ def gateway(
 
     config = load_config()
     sync_workspace_templates(config.workspace_path)
+
+    # Export Gemini API key to env so creative tools (video/image/music/speech) can find it
+    import os as _os
+    if config.providers.gemini.api_key and not _os.environ.get("GEMINI_API_KEY"):
+        _os.environ["GEMINI_API_KEY"] = config.providers.gemini.api_key
+
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
@@ -356,7 +362,7 @@ def gateway(
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
     
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
-    
+
     async def run():
         try:
             await cron.start()

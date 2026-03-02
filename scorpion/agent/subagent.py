@@ -80,7 +80,10 @@ class SubagentManager:
 
         bg_task.add_done_callback(_cleanup)
 
-        logger.info("Spawned subagent [{}]: {}", task_id, display_label)
+        logger.info(
+            "[Subagent {}] Spawned — label={!r} session={}",
+            task_id, display_label, session_key or "none",
+        )
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
 
     async def _run_subagent(
@@ -91,7 +94,10 @@ class SubagentManager:
         origin: dict[str, str],
     ) -> None:
         """Execute the subagent task using ADK and announce the result."""
-        logger.info("Subagent [{}] starting task: {}", task_id, label)
+        logger.info(
+            "[Subagent {}] Starting — label={!r} origin={}:{} task={!r}",
+            task_id, label, origin["channel"], origin["chat_id"], task[:100],
+        )
 
         try:
             instruction = self._build_subagent_prompt()
@@ -106,12 +112,16 @@ class SubagentManager:
                     max_output_tokens=self.max_tokens,
                 ),
             )
+            logger.debug("[Subagent {}] ADK agent created with {} tools", task_id, len(SUBAGENT_TOOLS))
 
             runner = Runner(
                 app_name="scorpion_subagent",
                 agent=agent,
                 session_service=self._session_service,
             )
+
+            # Ensure subagent tools can reach the message bus for send_message
+            set_runtime_refs(bus_publish=self.bus.publish_outbound)
 
             # Build state for subagent tools
             allowed_dir = str(self.workspace) if self.restrict_to_workspace else ""
@@ -125,6 +135,12 @@ class SubagentManager:
                 "app:exec_path": self.exec_config.path_append or "",
                 "app:allowed_dir": allowed_dir,
                 "app:max_iterations": "15",
+                # Flag so tools (e.g. generate_video) know they're inside a
+                # subagent and should do blocking work instead of re-spawning.
+                "app:is_subagent": "true",
+                # Pass origin channel so subagent tools (send_message) know where to deliver
+                "temp:channel": origin["channel"],
+                "temp:chat_id": origin["chat_id"],
             }
 
             session = await self._session_service.create_session(
@@ -132,6 +148,7 @@ class SubagentManager:
                 user_id=f"subagent:{task_id}",
                 state=state,
             )
+            logger.debug("[Subagent {}] ADK session created, running task...", task_id)
 
             user_content = types.Content(
                 role="user",
@@ -139,29 +156,38 @@ class SubagentManager:
             )
 
             final_result = None
+            event_count = 0
             async for event in runner.run_async(
                 user_id=session.user_id,
                 session_id=session.id,
                 new_message=user_content,
             ):
+                event_count += 1
                 if event.content and event.content.parts:
                     for part in event.content.parts:
                         if part.text:
                             final_result = part.text
+                            logger.debug(
+                                "[Subagent {}] Event #{} text: {!r}",
+                                task_id, event_count, part.text[:120],
+                            )
 
                 if event.error_message:
-                    logger.error("Subagent [{}] ADK error: {}", task_id, event.error_message)
+                    logger.error("[Subagent {}] ADK error: {}", task_id, event.error_message)
                     final_result = final_result or f"Error: {event.error_message}"
 
             if final_result is None:
                 final_result = "Task completed but no final response was generated."
 
-            logger.info("Subagent [{}] completed successfully", task_id)
+            logger.info(
+                "[Subagent {}] Completed successfully after {} events",
+                task_id, event_count,
+            )
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
 
         except Exception as e:
             error_msg = f"Error: {str(e)}"
-            logger.error("Subagent [{}] failed: {}", task_id, e)
+            logger.error("[Subagent {}] Failed with exception: {}", task_id, e, exc_info=True)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
 
     async def _announce_result(
@@ -193,11 +219,10 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         )
 
         await self.bus.publish_inbound(msg)
-        logger.debug(
-            "Subagent [{}] announced result to {}:{}",
-            task_id,
-            origin["channel"],
-            origin["chat_id"],
+        logger.info(
+            "[Subagent {}] Announced {} result to {}:{}",
+            task_id, status_text,
+            origin["channel"], origin["chat_id"],
         )
 
     def _build_subagent_prompt(self) -> str:
@@ -215,7 +240,12 @@ You are a subagent spawned by the main agent to complete a specific task.
 Stay focused on the assigned task. Your final response will be reported back to the main agent.
 
 ## Workspace
-{self.workspace}"""
+{self.workspace}
+
+## Media Generation
+You can generate videos using the generate_video tool (Google Veo 3.1, takes 1-5 minutes).
+After generating media, use send_message with media=[file_path] to deliver it directly to the user.
+Always include a brief description of what was generated in the message content."""
         ]
 
         skills_summary = SkillsLoader(self.workspace).build_skills_summary()

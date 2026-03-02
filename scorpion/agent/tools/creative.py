@@ -155,6 +155,23 @@ class GenerateImageTool(Tool):
 
 
 class GenerateVideoTool(Tool):
+    """Non-blocking video generation tool.
+
+    When a SubagentManager is provided, video generation is automatically
+    offloaded to a background subagent so the main agent loop stays responsive.
+    The subagent generates the video via Veo 3.1 and delivers it to the user
+    via send_message with media attachment.
+    """
+
+    def __init__(self, subagent_manager=None):
+        self._manager = subagent_manager
+        self._origin_channel = "cli"
+        self._origin_chat_id = "direct"
+
+    def set_context(self, channel: str, chat_id: str) -> None:
+        """Update the routing context so the subagent knows where to deliver."""
+        self._origin_channel = channel
+        self._origin_chat_id = chat_id
 
     @property
     def name(self) -> str:
@@ -164,7 +181,8 @@ class GenerateVideoTool(Tool):
     def description(self) -> str:
         return (
             "Generate videos using Google Veo 3.1. Takes 1-5 minutes. "
-            "Returns the file path of the generated video. "
+            "The video is generated in the background by a subagent and "
+            "delivered to the user automatically when ready. "
             "Tip: wrap dialogue in quotes for AI-generated audio."
         )
 
@@ -204,57 +222,27 @@ class GenerateVideoTool(Tool):
         resolution: str = "720p",
         **kwargs: Any,
     ) -> str:
-        api_key = _get_gemini_key()
-        if not api_key:
-            return "Error: GEMINI_API_KEY not configured"
-
-        out_dir = _MEDIA_ROOT / "videos"
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        try:
-            from google import genai
-            from google.genai import types
-
-            client = genai.Client(api_key=api_key)
-            logger.info("Starting video generation: {}", prompt[:80])
-
-            operation = client.models.generate_videos(
-                model="veo-3.1-generate-preview",
-                prompt=prompt,
-                config=types.GenerateVideosConfig(
-                    aspect_ratio=aspect,
-                    resolution=resolution,
-                    number_of_videos=1,
-                ),
-            )
-
-            # Poll in a thread to avoid blocking the event loop
-            def _poll():
-                while not operation.done:
-                    time.sleep(10)
-                    client.operations.get(operation)
-                return operation
-
-            op = await asyncio.get_event_loop().run_in_executor(None, _poll)
-
-            if not op.response or not op.response.generated_videos:
-                return "Error: No videos generated"
-
-            video = op.response.generated_videos[0]
-            client.files.download(file=video.video)
-
-            out_path = out_dir / f"video_{_ts()}.mp4"
-            video.video.save(str(out_path))
-            logger.info("Generated video: {}", out_path)
-            return str(out_path)
-
-        except Exception as e:
-            error_msg = str(e)
-            logger.error("Video generation failed: {}", e)
-            # Check for 503 Service Unavailable
-            if "503" in error_msg or "Service Unavailable" in error_msg:
-                return "It seems like the video generation service is having a moment, mi vida. It's giving me a 503 error, which means it's unavailable right now. I can try again in a bit, or would you like to try a different creative request? Let me know what you're feeling."
-            return f"Error: {e}"
+        # Delegate to the shared implementation in adk/tools.py
+        from scorpion.adk.tools import generate_video
+        from google.adk.tools import ToolContext
+        
+        # Create a minimal tool context for the function
+        tool_context = ToolContext(
+            state={
+                "app:is_subagent": "false",
+                "app:bus_active": "false",
+                "temp:channel": self._origin_channel,
+                "temp:chat_id": self._origin_chat_id,
+            }
+        )
+        
+        return await generate_video(
+            prompt=prompt,
+            duration=duration,
+            aspect=aspect,
+            resolution=resolution,
+            tool_context=tool_context,
+        )
 
 
 # ── Music Generation ──────────────────────────────────────────────────────────
