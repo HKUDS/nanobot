@@ -228,9 +228,16 @@ class LiteLLMProvider(LLMProvider):
         if self.api_base:
             kwargs["api_base"] = self.api_base
         
-        # Pass extra headers (e.g. APP-Code for AiHubMix)
-        if self.extra_headers:
-            kwargs["extra_headers"] = self.extra_headers
+        # Use provided extra headers or start empty
+        headers = dict(self.extra_headers) if self.extra_headers else {}
+        
+        # WORKAROUND: The Zhipu `coding/paas/v4` endpoint explicitly blocks requests with 'OpenAI' or 'Python'
+        # in the User-Agent, returning a fake Rate Limit Error. Spoof it as curl.
+        if original_model.startswith("zhipu/") and self.api_base and "coding/paas/v4" in self.api_base:
+            headers["User-Agent"] = "curl/8.7.1"
+            
+        if headers:
+            kwargs["extra_headers"] = headers
         
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
