@@ -359,6 +359,18 @@ class AgentLoop:
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
 
+        if msg.metadata.get("_context_only"):
+            from datetime import datetime
+            session.messages.append({
+                "role": "user",
+                "content": f"[{msg.sender_id}]: {msg.content}",
+                "timestamp": datetime.now().isoformat(),
+            })
+            session.updated_at = datetime.now()
+            self.sessions.save(session)
+            logger.debug("Stored context-only message from {} in session {}", msg.sender_id, key)
+            return None
+
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
