@@ -353,9 +353,9 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.minimax.io/v1",
         strip_model_prefix=False,
         model_overrides=(
-            ("minimax-m2.5", {"reasoning_split": True}),
-            ("minimax-m2.1", {"reasoning_split": True}),
-            ("minimax-m2", {"reasoning_split": True}),
+            ("minimax-m2.5", {"extra_body": {"reasoning_split": True}}),
+            ("minimax-m2.1", {"extra_body": {"reasoning_split": True}}),
+            ("minimax-m2", {"extra_body": {"reasoning_split": True}}),
         ),
     ),
 

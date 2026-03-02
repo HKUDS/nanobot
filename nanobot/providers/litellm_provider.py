@@ -156,7 +156,13 @@ class LiteLLMProvider(LLMProvider):
         if spec:
             for pattern, overrides in spec.model_overrides:
                 if pattern in model_lower:
-                    kwargs.update(overrides)
+                    merged = dict(overrides)
+                    if "extra_body" in merged and isinstance(merged["extra_body"], dict):
+                        base_extra = kwargs.get("extra_body")
+                        extra_body = dict(base_extra) if isinstance(base_extra, dict) else {}
+                        extra_body.update(merged["extra_body"])
+                        merged["extra_body"] = extra_body
+                    kwargs.update(merged)
                     return
 
     @staticmethod
