@@ -149,6 +149,18 @@ class SubagentManager:
                         "role": "assistant",
                         "content": response.content or "",
                         "tool_calls": tool_call_dicts,
+                        **(
+                            {"reasoning_content": response.reasoning_content}
+                            if response.reasoning_content is not None else {}
+                        ),
+                        **(
+                            {"thinking_blocks": response.thinking_blocks}
+                            if response.thinking_blocks else {}
+                        ),
+                        **(
+                            {"reasoning_details": response.reasoning_details}
+                            if response.reasoning_details is not None else {}
+                        ),
                     })
 
                     # Execute tools

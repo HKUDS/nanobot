@@ -13,7 +13,9 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
 
 # Standard chat-completion message keys.
-_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
+_ALLOWED_MSG_KEYS = frozenset(
+    {"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content", "reasoning_details"}
+)
 _ANTHROPIC_EXTRA_KEYS = frozenset({"thinking_blocks"})
 _ALNUM = string.ascii_letters + string.digits
 
@@ -280,6 +282,11 @@ class LiteLLMProvider(LLMProvider):
 
         reasoning_content = getattr(message, "reasoning_content", None) or None
         thinking_blocks = getattr(message, "thinking_blocks", None) or None
+        reasoning_details = getattr(message, "reasoning_details", None) or None
+        if reasoning_details is None:
+            psf = getattr(message, "provider_specific_fields", None) or {}
+            if isinstance(psf, dict):
+                reasoning_details = psf.get("reasoning_details")
         
         return LLMResponse(
             content=message.content,
@@ -288,6 +295,7 @@ class LiteLLMProvider(LLMProvider):
             usage=usage,
             reasoning_content=reasoning_content,
             thinking_blocks=thinking_blocks,
+            reasoning_details=reasoning_details,
         )
 
     def get_default_model(self) -> str:
