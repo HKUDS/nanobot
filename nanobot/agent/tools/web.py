@@ -4,7 +4,7 @@ import html
 import json
 import os
 import re
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlparse
 
 import httpx
@@ -15,6 +15,16 @@ from nanobot.agent.tools.base import Tool
 # Shared constants
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
 MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
+
+# Unified search result type
+SearchResult = dict[str, str]
+
+
+class SearchBackend(Protocol):
+    """Protocol for web search backends (Brave, Serper, etc.)."""
+
+    async def search(self, query: str, count: int) -> list[SearchResult]:
+        ...
 
 
 def _strip_tags(text: str) -> str:
@@ -44,8 +54,77 @@ def _validate_url(url: str) -> tuple[bool, str]:
         return False, str(e)
 
 
+def _format_search_results(query: str, results: list[SearchResult]) -> str:
+    """Format unified search results for agent consumption."""
+    if not results:
+        return f"No results for: {query}"
+
+    lines = [f"Results for: {query}\n"]
+    for i, item in enumerate(results, 1):
+        lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
+        if snippet := item.get("snippet"):
+            lines.append(f"   {snippet}")
+    return "\n".join(lines)
+
+
+class BraveSearchBackend(SearchBackend):
+    """Brave Search API backend."""
+
+    def __init__(self, api_key: str, proxy: str | None = None):
+        self._api_key = api_key
+        self._proxy = proxy
+
+    async def search(self, query: str, count: int) -> list[SearchResult]:
+        logger.debug("WebSearch (Brave): {}", "proxy enabled" if self._proxy else "direct connection")
+        async with httpx.AsyncClient(proxy=self._proxy) as client:
+            r = await client.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                params={"q": query, "count": count},
+                headers={"Accept": "application/json", "X-Subscription-Token": self._api_key},
+                timeout=10.0,
+            )
+            r.raise_for_status()
+        items = r.json().get("web", {}).get("results", [])[:count]
+        return [
+            {
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "snippet": item.get("description", ""),
+            }
+            for item in items
+        ]
+
+
+class SerperSearchBackend(SearchBackend):
+    """Serper (Google Search) API backend."""
+
+    def __init__(self, api_key: str, proxy: str | None = None):
+        self._api_key = api_key
+        self._proxy = proxy
+
+    async def search(self, query: str, count: int) -> list[SearchResult]:
+        logger.debug("WebSearch (Serper): {}", "proxy enabled" if self._proxy else "direct connection")
+        async with httpx.AsyncClient(proxy=self._proxy) as client:
+            r = await client.post(
+                "https://google.serper.dev/search",
+                json={"q": query, "num": count},
+                headers={"Content-Type": "application/json", "X-API-KEY": self._api_key},
+                timeout=10.0,
+            )
+            r.raise_for_status()
+        items = r.json().get("organic", [])[:count]
+        return [
+            {
+                "title": item.get("title", ""),
+                "url": item.get("link", ""),
+                "snippet": item.get("snippet", ""),
+            }
+            for item in items
+        ]
+
+
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
+    """Search the web using a configurable backend (Brave or Serper)."""
 
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
@@ -53,51 +132,49 @@ class WebSearchTool(Tool):
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "Search query"},
-            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10}
+            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10},
         },
-        "required": ["query"]
+        "required": ["query"],
     }
 
-    def __init__(self, api_key: str | None = None, max_results: int = 5, proxy: str | None = None):
-        self._init_api_key = api_key
+    def __init__(
+        self,
+        provider: str = "brave",
+        api_key: str | None = None,
+        max_results: int = 5,
+        proxy: str | None = None,
+    ):
+        self._provider = (provider or "brave").lower()
+        env_key = "SERPER_API_KEY" if self._provider == "serper" else "BRAVE_API_KEY"
+        self._api_key = (api_key or os.environ.get(env_key, "")).strip()
         self.max_results = max_results
         self.proxy = proxy
+        self._backend: SearchBackend | None = self._make_backend()
 
-    @property
-    def api_key(self) -> str:
-        """Resolve API key at call time so env/config changes are picked up."""
-        return self._init_api_key or os.environ.get("BRAVE_API_KEY", "")
+    def _make_backend(self) -> SearchBackend | None:
+        if not self._api_key:
+            return None
+        if self._provider == "serper":
+            return SerperSearchBackend(self._api_key, self.proxy)
+        if self._provider == "brave":
+            return BraveSearchBackend(self._api_key, self.proxy)
+        return None
+
+    def _missing_key_message(self) -> str:
+        return (
+            "Error: Web search API key not configured. Set it in "
+            "~/.nanobot/config.json under tools.web.search.apiKey "
+            "(or export BRAVE_API_KEY / SERPER_API_KEY), then restart the gateway."
+        )
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        if not self.api_key:
-            return (
-                "Error: Brave Search API key not configured. Set it in "
-                "~/.nanobot/config.json under tools.web.search.apiKey "
-                "(or export BRAVE_API_KEY), then restart the gateway."
-            )
+        if not self._backend:
+            return self._missing_key_message()
 
         try:
             n = min(max(count or self.max_results, 1), 10)
-            logger.debug("WebSearch: {}", "proxy enabled" if self.proxy else "direct connection")
-            async with httpx.AsyncClient(proxy=self.proxy) as client:
-                r = await client.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
-                    timeout=10.0
-                )
-                r.raise_for_status()
-
-            results = r.json().get("web", {}).get("results", [])[:n]
-            if not results:
-                return f"No results for: {query}"
-
-            lines = [f"Results for: {query}\n"]
-            for i, item in enumerate(results, 1):
-                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
-                if desc := item.get("description"):
-                    lines.append(f"   {desc}")
-            return "\n".join(lines)
+            results = await self._backend.search(query, n)
+            return _format_search_results(query, results)
         except httpx.ProxyError as e:
             logger.error("WebSearch proxy error: {}", e)
             return f"Proxy error: {e}"
