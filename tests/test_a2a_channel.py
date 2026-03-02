@@ -29,7 +29,8 @@ def mock_config():
         {"id": "chat", "name": "Chat", "description": "General chat", "tags": []},
         {"id": "assist", "name": "Assist", "description": "Task assistance", "tags": []},
     ]
-    config.allow_from = []  # Allow all senders
+    config.running_user = "test_user"  # For auth
+    config.allow_from = ["user"]  # Allow 'user' role for tests
     config.task_retention_days = 14.0
     return config
 
@@ -252,6 +253,7 @@ class TestAuthorization:
         config.agent_url = "http://localhost:8000"
         config.agent_description = "Secure agent"
         config.skills = []
+        config.running_user = "test_user"
         config.allow_from = ["agent"]  # Only 'agent' role allowed
         config.task_retention_days = 14.0
 
@@ -282,6 +284,7 @@ class TestAuthorization:
         config.agent_url = "http://localhost:8000"
         config.agent_description = "Secure agent"
         config.skills = []
+        config.running_user = "test_user"
         config.allow_from = ["user"]
         config.task_retention_days = 14.0
 

@@ -132,7 +132,12 @@ class A2ARequestHandler(RequestHandler):
         params: MessageSendParams,
         context: ServerCallContext | None = None,
     ) -> AsyncGenerator[Any, None]:
-        """Handle message/send streaming - delegates to non-streaming for now."""
+        """Handle message/send streaming.
+        
+        NOTE: This is a stub implementation that delegates to non-streaming.
+        SSE streaming is not fully implemented. Callers expecting SSE will
+        receive a single event with the task, not incremental updates.
+        """
         task = await self.on_message_send(params, context)
         yield task
 
@@ -215,7 +220,7 @@ class A2ARequestHandler(RequestHandler):
 
         return "\n".join(texts)
 
-    def _cleanup_completed_tasks(self) -> None:
+    async def _cleanup_completed_tasks(self) -> None:
         """Remove completed tasks tracking that have exceeded TTL.
 
         Note: This cleans up our tracking dicts but relies on InMemoryTaskStore
@@ -232,7 +237,11 @@ class A2ARequestHandler(RequestHandler):
             delete_fn = getattr(self._task_store, "delete", None)
             if delete_fn:
                 try:
-                    delete_fn(task_id)
+                    # Guard against future async delete implementations
+                    if asyncio.iscoroutinefunction(delete_fn):
+                        await delete_fn(task_id)
+                    else:
+                        delete_fn(task_id)
                 except Exception:
                     pass
 
@@ -251,7 +260,7 @@ class A2ARequestHandler(RequestHandler):
             if task.context_id and task.context_id in self._context_to_task:
                 del self._context_to_task[task.context_id]
             self._completed_tasks[task_id] = time.time()
-            self._cleanup_completed_tasks()
+            await self._cleanup_completed_tasks()
             logger.debug("A2A response delivered to task {}", task_id)
             return True
         return False
@@ -262,6 +271,9 @@ class A2AChannel(BaseChannel):
     A2A Protocol channel using the official a2a-sdk.
 
     Bridges A2A Tasks to Nanobot's message bus.
+
+    Security note: By default, only the running_user is allowed to access the A2A endpoint.
+    For production, deploy behind an authenticating proxy and configure allow_from appropriately.
     """
 
     name = "a2a"
@@ -273,6 +285,11 @@ class A2AChannel(BaseChannel):
     ):
         super().__init__(config, bus)
         self.config = config
+        
+        # Get running user (default to current OS user)
+        import getpass
+        self._running_user = getattr(config, "running_user", "") or getpass.getuser()
+        
         self._app: A2AStarletteApplication | None = None
         self._agent_card: AgentCardType | None = None
         self._handler: A2ARequestHandler | None = None
@@ -314,6 +331,29 @@ class A2AChannel(BaseChannel):
             agent_card=self._agent_card,
             http_handler=self._handler,
         )
+
+    def is_allowed(self, sender_id: str) -> bool:
+        """
+        Check if a sender is allowed to use this A2A endpoint.
+        
+        Authorization logic:
+        - If allow_from is non-empty, check against that list
+        - If allow_from is empty, only allow the running_user
+        
+        Args:
+            sender_id: The sender's identifier (from message.role.value).
+        
+        Returns:
+            True if allowed, False otherwise.
+        """
+        allow_list = getattr(self.config, "allow_from", [])
+        
+        # If allow_from is configured, use it
+        if allow_list:
+            return sender_id in allow_list
+        
+        # Default: only allow running_user
+        return sender_id == self._running_user
 
     async def start(self) -> None:
         self._running = True

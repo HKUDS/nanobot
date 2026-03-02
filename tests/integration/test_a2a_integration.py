@@ -17,7 +17,8 @@ def mock_config():
     config.skills = [
         {"id": "test", "name": "Test", "description": "Test skill", "tags": []},
     ]
-    config.allow_from = []  # Allow all senders
+    config.running_user = "test_user"  # For auth
+    config.allow_from = ["user"]  # Allow 'user' role for tests
     config.task_retention_days = 14.0
     return config
 
