@@ -27,6 +27,7 @@ try:
         CreateMessageReactionRequestBody,
         CreateMessageRequest,
         CreateMessageRequestBody,
+        DeleteMessageReactionRequest,
         Emoji,
         GetMessageResourceRequest,
         P2ImMessageReceiveV1,
@@ -268,6 +269,7 @@ class FeishuChannel(BaseChannel):
         self._ws_client: Any = None
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
+        self._bot_reactions: OrderedDict[str, str] = OrderedDict()  # message_id -> reaction_id
         self._loop: asyncio.AbstractEventLoop | None = None
 
     async def start(self) -> None:
@@ -338,7 +340,7 @@ class FeishuChannel(BaseChannel):
         self._running = False
         logger.info("Feishu bot stopped")
 
-    def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
+    def _add_reaction_sync(self, message_id: str, emoji_type: str) -> str | None:
         """Sync helper for adding reaction (runs in thread pool)."""
         try:
             request = CreateMessageReactionRequest.builder() \
@@ -353,10 +355,17 @@ class FeishuChannel(BaseChannel):
 
             if not response.success():
                 logger.warning("Failed to add reaction: code={}, msg={}", response.code, response.msg)
+                return None
             else:
                 logger.debug("Added {} reaction to message {}", emoji_type, message_id)
+                if getattr(response, "data", None) and getattr(response.data, "reaction_id", None):
+                    return response.data.reaction_id
+                elif getattr(response, "reaction_id", None):
+                    return getattr(response, "reaction_id")
+                return None
         except Exception as e:
             logger.warning("Error adding reaction: {}", e)
+            return None
 
     async def _add_reaction(self, message_id: str, emoji_type: str = "THUMBSUP") -> None:
         """
@@ -368,7 +377,28 @@ class FeishuChannel(BaseChannel):
             return
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
+        reaction_id = await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
+        if reaction_id:
+            self._bot_reactions[message_id] = reaction_id
+            while len(self._bot_reactions) > 1000:
+                self._bot_reactions.popitem(last=False)
+
+    def _remove_reaction_sync(self, message_id: str, reaction_id: str) -> None:
+        """Sync helper for removing reaction (runs in thread pool)."""
+        try:
+            request = DeleteMessageReactionRequest.builder() \
+                .message_id(message_id) \
+                .reaction_id(reaction_id) \
+                .build()
+
+            response = self._client.im.v1.message_reaction.delete(request)
+
+            if not response.success():
+                logger.warning("Failed to remove reaction: code={}, msg={}", response.code, response.msg)
+            else:
+                logger.debug("Removed reaction {} from message {}", reaction_id, message_id)
+        except Exception as e:
+            logger.warning("Error removing reaction: {}", e)
 
     # Regex to match markdown tables (header + separator + data rows)
     _TABLE_RE = re.compile(
@@ -658,6 +688,12 @@ class FeishuChannel(BaseChannel):
                     None, self._send_message_sync,
                     receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
                 )
+            
+            # Remove reaction after replying
+            reply_to_msg_id = msg.metadata.get("message_id")
+            if reply_to_msg_id and reply_to_msg_id in self._bot_reactions:
+                reaction_id = self._bot_reactions.pop(reply_to_msg_id)
+                await loop.run_in_executor(None, self._remove_reaction_sync, reply_to_msg_id, reaction_id)
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
