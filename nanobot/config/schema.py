@@ -11,6 +11,7 @@ class WhatsAppConfig(BaseModel):
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""  # Shared token for bridge auth (optional, recommended)
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
+    self_chat: bool = False  # Process own messages (for testing with your own number)
 
 
 class TelegramConfig(BaseModel):
@@ -142,6 +143,14 @@ class QQConfig(BaseModel):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
 
 
+class iMessageConfig(BaseModel):
+    """iMessage channel configuration using imsg CLI."""
+    enabled: bool = False
+    imsg_path: str = ""  # Path to imsg binary (auto-detected if empty)
+    self_chat: bool = False  # Process own messages (for testing with your own number)
+    allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
+
+
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
@@ -153,6 +162,7 @@ class ChannelsConfig(BaseModel):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    i_message: iMessageConfig = Field(default_factory=iMessageConfig)
 
 
 class AgentDefaults(BaseModel):

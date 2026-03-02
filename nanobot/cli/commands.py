@@ -602,6 +602,15 @@ def channels_status():
         slack_config
     )
 
+    # iMessage
+    im = config.channels.i_message
+    im_config = im.imsg_path if im.imsg_path else "[dim]auto-detect[/dim]"
+    table.add_row(
+        "iMessage",
+        "✓" if im.enabled else "✗",
+        im_config
+    )
+
     console.print(table)
 
 

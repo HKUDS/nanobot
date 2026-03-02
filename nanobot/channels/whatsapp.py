@@ -45,6 +45,9 @@ class WhatsAppChannel(BaseChannel):
                     # Send auth token if configured
                     if self.config.bridge_token:
                         await ws.send(json.dumps({"type": "auth", "token": self.config.bridge_token}))
+                    # Send self_chat config to bridge
+                    if self.config.self_chat:
+                        await ws.send(json.dumps({"type": "config", "self_chat": True}))
                     self._connected = True
                     logger.info("Connected to WhatsApp bridge")
                     

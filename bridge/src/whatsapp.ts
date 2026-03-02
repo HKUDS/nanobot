@@ -37,6 +37,10 @@ export class WhatsAppClient {
   private sock: any = null;
   private options: WhatsAppClientOptions;
   private reconnecting = false;
+  // Track IDs of messages sent by the bot to avoid processing them as inbound
+  private sentMessageIds: Set<string> = new Set();
+  // When true, allow fromMe messages through (except bot replies tracked in sentMessageIds)
+  selfChat = false;
 
   constructor(options: WhatsAppClientOptions) {
     this.options = options;
@@ -110,8 +114,21 @@ export class WhatsAppClient {
       if (type !== 'notify') return;
 
       for (const msg of messages) {
-        // Skip own messages
-        if (msg.key.fromMe) continue;
+        // Skip bot's own replies (tracked by sent message ID)
+        const msgId = msg.key.id || '';
+        if (this.sentMessageIds.has(msgId)) {
+          this.sentMessageIds.delete(msgId);
+          continue;
+        }
+
+        // Handle fromMe messages based on selfChat setting
+        if (msg.key.fromMe) {
+          if (!this.selfChat) {
+            // Default: skip all own messages
+            continue;
+          }
+          // selfChat enabled: allow through (bot replies already filtered above)
+        }
 
         // Skip status updates
         if (msg.key.remoteJid === 'status@broadcast') continue;
@@ -175,7 +192,13 @@ export class WhatsAppClient {
       throw new Error('Not connected');
     }
 
-    await this.sock.sendMessage(to, { text });
+    const sent = await this.sock.sendMessage(to, { text });
+    // Track the sent message ID so we skip it in the upsert handler
+    if (sent?.key?.id) {
+      this.sentMessageIds.add(sent.key.id);
+      // Auto-cleanup after 30s to prevent memory leaks
+      setTimeout(() => this.sentMessageIds.delete(sent.key.id), 30000);
+    }
   }
 
   async disconnect(): Promise<void> {

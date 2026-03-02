@@ -12,6 +12,13 @@ interface SendCommand {
   text: string;
 }
 
+interface ConfigCommand {
+  type: 'config';
+  self_chat?: boolean;
+}
+
+type BridgeCommand = SendCommand | ConfigCommand;
+
 interface BridgeMessage {
   type: 'message' | 'status' | 'qr' | 'error';
   [key: string]: unknown;
@@ -72,9 +79,13 @@ export class BridgeServer {
 
     ws.on('message', async (data) => {
       try {
-        const cmd = JSON.parse(data.toString()) as SendCommand;
-        await this.handleCommand(cmd);
-        ws.send(JSON.stringify({ type: 'sent', to: cmd.to }));
+        const cmd = JSON.parse(data.toString()) as BridgeCommand;
+        if (cmd.type === 'config') {
+          this.handleConfig(cmd);
+          return;
+        }
+        await this.handleCommand(cmd as SendCommand);
+        ws.send(JSON.stringify({ type: 'sent', to: (cmd as SendCommand).to }));
       } catch (error) {
         console.error('Error handling command:', error);
         ws.send(JSON.stringify({ type: 'error', error: String(error) }));
@@ -90,6 +101,15 @@ export class BridgeServer {
       console.error('WebSocket error:', error);
       this.clients.delete(ws);
     });
+  }
+
+  private handleConfig(cmd: ConfigCommand): void {
+    if (this.wa) {
+      if (cmd.self_chat !== undefined) {
+        this.wa.selfChat = cmd.self_chat;
+        console.log(`⚙️ self_chat set to ${cmd.self_chat}`);
+      }
+    }
   }
 
   private async handleCommand(cmd: SendCommand): Promise<void> {

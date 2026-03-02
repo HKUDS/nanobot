@@ -20,3 +20,8 @@ poetry.lock
 .pytest_cache/
 botpy.log
 tests/
+bridge/dist*
+bridge/node_modules*
+**/package-lock.json
+package.json
+node_modules/**
