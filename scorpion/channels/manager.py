@@ -192,28 +192,6 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Telegram channel not available: {}", e)
 
-        # Feishu channel
-        if self.config.channels.feishu.enabled:
-            try:
-                from scorpion.channels.feishu import FeishuChannel
-                self.channels["feishu"] = FeishuChannel(
-                    self.config.channels.feishu, self.bus
-                )
-                logger.info("Feishu channel enabled")
-            except ImportError as e:
-                logger.warning("Feishu channel not available: {}", e)
-
-        # Mochat channel
-        if self.config.channels.mochat.enabled:
-            try:
-                from scorpion.channels.mochat import MochatChannel
-
-                self.channels["mochat"] = MochatChannel(
-                    self.config.channels.mochat, self.bus
-                )
-                logger.info("Mochat channel enabled")
-            except ImportError as e:
-                logger.warning("Mochat channel not available: {}", e)
 
         # Email channel
         if self.config.channels.email.enabled:
