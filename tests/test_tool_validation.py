@@ -1,8 +1,15 @@
+import asyncio
+import json
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.bus.backends import InMemoryBusBackend
+from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.transport.contracts import InboundTransportMessage, OutboundTransportEvent
+from nanobot.transport.ws_gateway import WebSocketGateway
 
 
 class SampleTool(Tool):
@@ -106,3 +113,188 @@ def test_exec_extract_absolute_paths_captures_posix_absolute_paths() -> None:
     paths = ExecTool._extract_absolute_paths(cmd)
     assert "/tmp/data.txt" in paths
     assert "/tmp/out.txt" in paths
+
+
+async def test_message_bus_uses_default_inmemory_backend() -> None:
+    bus = MessageBus()
+
+    inbound = InboundMessage(channel="cli", sender_id="u1", chat_id="c1", content="hello")
+    await bus.publish_inbound(inbound)
+    received_in = await bus.consume_inbound()
+    assert received_in.content == "hello"
+
+    outbound = OutboundMessage(channel="cli", chat_id="c1", content="world")
+    await bus.publish_outbound(outbound)
+    received_out = await bus.consume_outbound()
+    assert received_out.content == "world"
+
+
+async def test_message_bus_accepts_explicit_backend() -> None:
+    backend = InMemoryBusBackend()
+    bus = MessageBus(backend=backend)
+
+    msg = InboundMessage(channel="telegram", sender_id="u2", chat_id="c2", content="x")
+    await bus.publish_inbound(msg)
+    consumed = await backend.consume_inbound()
+    assert consumed.channel == "telegram"
+
+
+def test_inbound_contract_converts_to_bus_message() -> None:
+    inbound = InboundTransportMessage.model_validate(
+        {
+            "message_id": "msg-1",
+            "session_key": "telegram:chat-1:thread-2",
+            "channel": "telegram",
+            "chat_id": "chat-1",
+            "sender_id": "user-1",
+            "content": "hello",
+            "media": ["/tmp/a.png"],
+            "attachments": [
+                {"type": "image", "url": "https://example.com/x.png"},
+                {"type": "file", "local_path": "/tmp/doc.pdf"},
+            ],
+            "metadata": {"thread_id": "2"},
+        }
+    )
+
+    msg = inbound.to_bus_message()
+    assert msg.channel == "telegram"
+    assert msg.session_key == "telegram:chat-1:thread-2"
+    assert msg.metadata["message_id"] == "msg-1"
+    assert msg.metadata["thread_id"] == "2"
+    assert len(msg.media) == 3
+
+
+def test_outbound_event_maps_progress_to_delta() -> None:
+    outbound = OutboundMessage(
+        channel="telegram",
+        chat_id="chat-1",
+        content="thinking...",
+        metadata={"_progress": True},
+    )
+
+    event = OutboundTransportEvent.from_bus_message(outbound)
+    assert event.event_type == "message.delta"
+    assert event.message.channel == "telegram"
+
+
+def test_outbound_event_maps_final_to_completed() -> None:
+    outbound = OutboundMessage(
+        channel="telegram",
+        chat_id="chat-1",
+        content="done",
+    )
+
+    event = OutboundTransportEvent.from_bus_message(outbound)
+    assert event.event_type == "message.completed"
+
+
+class _FakeWebSocket:
+    def __init__(self):
+        self.sent: list[dict[str, Any]] = []
+
+    async def send(self, payload: str) -> None:
+        self.sent.append(json.loads(payload))
+
+
+def test_ws_gateway_normalize_channels() -> None:
+    bus = MessageBus()
+    gateway = WebSocketGateway(bus=bus)
+
+    assert gateway._normalize_channels("telegram") == set()
+    assert gateway._normalize_channels(None) == set()
+    assert gateway._normalize_channels([" telegram ", "telegram", "", 1, "cli"]) == {"telegram", "cli"}
+
+
+async def test_ws_gateway_handle_frame_ping() -> None:
+    bus = MessageBus()
+    gateway = WebSocketGateway(bus=bus)
+    ws = _FakeWebSocket()
+
+    await gateway._handle_frame(ws, json.dumps({"type": "ping"}))
+    assert ws.sent[-1] == {"type": "pong"}
+
+
+async def test_ws_gateway_handle_frame_subscribe_and_invalid_json() -> None:
+    bus = MessageBus()
+    gateway = WebSocketGateway(bus=bus)
+    ws = _FakeWebSocket()
+    gateway._subscriptions[ws] = set()
+
+    await gateway._handle_frame(ws, "not-json")
+    assert ws.sent[-1]["type"] == "error"
+    assert ws.sent[-1]["error"] == "invalid_json"
+
+    await gateway._handle_frame(
+        ws,
+        json.dumps({"type": "subscribe", "channels": ["telegram", " cli ", "telegram"]}),
+    )
+    assert gateway._subscriptions[ws] == {"telegram", "cli"}
+    assert ws.sent[-1] == {"type": "subscribed", "channels": ["cli", "telegram"]}
+
+
+async def test_ws_gateway_handle_frame_inbound_and_invalid_inbound() -> None:
+    bus = MessageBus()
+    gateway = WebSocketGateway(bus=bus)
+    ws = _FakeWebSocket()
+
+    await gateway._handle_frame(
+        ws,
+        json.dumps({"type": "inbound", "message": {"channel": "web"}}),
+    )
+    assert ws.sent[-1]["type"] == "error"
+    assert ws.sent[-1]["error"] == "invalid_inbound"
+
+    payload = {
+        "type": "inbound",
+        "message": {
+            "message_id": "m-1",
+            "session_key": "web:user-1",
+            "channel": "web",
+            "chat_id": "user-1",
+            "sender_id": "user-1",
+            "content": "hello",
+        },
+    }
+    await gateway._handle_frame(ws, json.dumps(payload))
+    inbound = await bus.consume_inbound()
+    assert inbound.session_key == "web:user-1"
+    assert inbound.content == "hello"
+    assert ws.sent[-1] == {"type": "ack", "message_id": "m-1"}
+
+
+async def test_ws_gateway_dispatch_outbound_respects_subscriptions() -> None:
+    bus = MessageBus()
+    gateway = WebSocketGateway(bus=bus)
+    ws_all = _FakeWebSocket()
+    ws_telegram = _FakeWebSocket()
+
+    gateway._clients = {ws_all, ws_telegram}
+    gateway._subscriptions = {
+        ws_all: set(),
+        ws_telegram: {"telegram"},
+    }
+    gateway._running = True
+
+    task = asyncio.create_task(gateway._dispatch_outbound())
+    try:
+        await bus.publish_outbound(
+            OutboundMessage(channel="web", chat_id="user-1", content="hello")
+        )
+
+        for _ in range(20):
+            if ws_all.sent:
+                break
+            await asyncio.sleep(0.01)
+
+        assert len(ws_all.sent) == 1
+        assert ws_all.sent[0]["type"] == "outbound"
+        assert ws_all.sent[0]["event"]["message"]["channel"] == "web"
+        assert ws_telegram.sent == []
+    finally:
+        gateway._running = False
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
