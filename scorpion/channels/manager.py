@@ -237,17 +237,6 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Slack channel not available: {}", e)
 
-        # QQ channel
-        if self.config.channels.qq.enabled:
-            try:
-                from scorpion.channels.qq import QQChannel
-                self.channels["qq"] = QQChannel(
-                    self.config.channels.qq,
-                    self.bus,
-                )
-                logger.info("QQ channel enabled")
-            except ImportError as e:
-                logger.warning("QQ channel not available: {}", e)
 
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:

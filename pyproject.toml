@@ -36,7 +36,6 @@ dependencies = [
     "msgpack>=1.1.0,<2.0.0",
     "slack-sdk>=3.39.0,<4.0.0",
     "slackify-markdown>=0.2.0,<1.0.0",
-    "qq-botpy>=1.2.0,<2.0.0",
     "python-socks[asyncio]>=2.8.0,<3.0.0",
     "prompt-toolkit>=3.0.50,<4.0.0",
     "mcp>=1.26.0,<2.0.0",
