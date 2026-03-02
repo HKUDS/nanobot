@@ -15,6 +15,7 @@ build/
 *.pyzz
 .venv/
 venv/
+scorpion-env/
 __pycache__/
 poetry.lock
 .pytest_cache/
