@@ -476,13 +476,19 @@ class AgentLoop:
                 entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
             elif role == "user":
                 if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                    continue
+                    sep = content.find("\n\n")
+                    if sep >= 0:
+                        entry["content"] = content[sep + 2:]
+                    else:
+                        continue
                 if isinstance(content, list):
                     entry["content"] = [
                         {"type": "text", "text": "[image]"} if (
                             c.get("type") == "image_url"
                             and c.get("image_url", {}).get("url", "").startswith("data:image/")
                         ) else c for c in content
+                        if not (c.get("type") == "text" and isinstance(c.get("text", ""), str)
+                                and c["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG))
                     ]
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
