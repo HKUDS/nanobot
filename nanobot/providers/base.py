@@ -36,7 +36,7 @@ class LLMProvider(ABC):
     Implementations should handle the specifics of each provider's API
     while maintaining a consistent interface.
     """
-    
+
     def __init__(self, api_key: str | None = None, api_base: str | None = None):
         self.api_key = api_key
         self.api_base = api_base
@@ -80,7 +80,7 @@ class LLMProvider(ABC):
 
             result.append(msg)
         return result
-    
+
     @abstractmethod
     async def chat(
         self,
@@ -105,7 +105,7 @@ class LLMProvider(ABC):
             LLMResponse with content and/or tool calls.
         """
         pass
-    
+
     @abstractmethod
     def get_default_model(self) -> str:
         """Get the default model for this provider."""
