@@ -425,10 +425,14 @@ class DingTalkChannel(BaseChannel):
         """
         try:
             logger.info("DingTalk inbound: {} from {}", content, sender_name)
+
+            # Prepend sender context so the agent knows who is speaking
+            content_with_context = f"[from: {sender_name}]\n{content}"
+
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=sender_id,  # For private chat, chat_id == sender_id
-                content=str(content),
+                content=content_with_context,
                 metadata={
                     "sender_name": sender_name,
                     "platform": "dingtalk",
