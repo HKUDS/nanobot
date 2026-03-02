@@ -58,9 +58,11 @@
 
 🪶 **Ultra-Lightweight**: Just ~4,000 lines of core agent code — 99% smaller than Clawdbot.
 
+🧠 **Smart Memory**: Token-budgeted, tiered memory with semantic fact retrieval (NVIDIA NIM / BM25S), progressive conversation compression, and history search — reduces token usage by ~74%.
+
 🔬 **Research-Ready**: Clean, readable code that's easy to understand, modify, and extend for research.
 
-⚡️ **Lightning Fast**: Minimal footprint means faster startup, lower resource usage, and quicker iterations.
+⚡️ **Lightning Fast**: Minimal footprint means faster startup, lower resource usage, and quicker iterations. Runs on Raspberry Pi 4 (1GB RAM).
 
 💎 **Easy-to-Use**: One-click to deploy and you're ready to go.
 
@@ -114,6 +116,14 @@ uv tool install nanobot-ai
 ```bash
 pip install nanobot-ai
 ```
+
+**Optional: enhanced memory** (semantic retrieval via sqlite-vec + BM25S)
+
+```bash
+pip install nanobot-ai[memory]
+```
+
+> Without the `[memory]` extra, the memory system still works using the flat `MEMORY.md` approach. The extra enables the structured fact store with SQLite, BM25S keyword search, and optional NVIDIA NIM vector search.
 
 ## 🚀 Quick Start
 
@@ -651,6 +661,109 @@ Simply send the command above to your nanobot (via CLI or any chat channel), and
 
 Config file: `~/.nanobot/config.json`
 
+### Memory
+
+nanobot uses a **tiered memory architecture** designed for low token usage and efficient recall:
+
+| Layer | What it does | Storage |
+|-------|-------------|---------|
+| **Structured Fact Store** | Extracts discrete facts from conversations and stores them in SQLite | `~/.nanobot/workspace/memory.db` |
+| **Token Budgeting** | Allocates per-section token limits so the context window is never wasted | In-memory (per request) |
+| **Progressive Compression** | Summarizes older conversation turns into a rolling summary, keeping recent turns verbatim | Session metadata |
+| **Dual-mode Retrieval** | Retrieves relevant facts using vector search (NIM) or keyword search (BM25S) | SQLite + BM25S index |
+
+The memory system activates automatically when the `[memory]` optional dependencies are installed (`pip install nanobot-ai[memory]`). Without them, nanobot falls back to the flat `MEMORY.md` approach.
+
+<details>
+<summary><b>How it works</b></summary>
+
+1. **Fact extraction** — After every conversation, nanobot asks the LLM to extract structured facts (key-value pairs with categories and importance scores). These are stored in a SQLite database and auto-exported to `MEMORY.md` for transparency.
+
+2. **Retrieval** — When building context for a new message, the system retrieves the most relevant facts using:
+   - **NVIDIA NIM** (or any OpenAI-compatible embedding API) for semantic vector search when configured, or
+   - **BM25S** (local keyword search) as the zero-cost default — no API calls, no GPU required.
+
+3. **Token budgeting** — Each section of the system prompt (identity, memory, history summary, bootstrap files, tools, conversation) gets a fixed token budget. The conversation section fills whatever remains. This prevents context window overflow and keeps costs predictable.
+
+4. **Progressive compression** — Older conversation turns are summarized into a rolling summary by a lightweight LLM call. The system maintains three zones:
+   - **Recent**: Last N messages kept verbatim
+   - **Summary**: Compressed representation of older turns
+   - **Archived**: Stored in `HISTORY.md` and the history database for search
+
+</details>
+
+<details>
+<summary><b>Configuration</b></summary>
+
+Add a `memory` block to `~/.nanobot/config.json`:
+
+```json
+{
+  "memory": {
+    "embedding": {
+      "enabled": true,
+      "apiKey": "nvapi-your-key",
+      "apiBase": "https://integrate.api.nvidia.com/v1",
+      "model": "nvidia/nv-embedqa-e5-v5",
+      "dimensions": 1024,
+      "rpmLimit": 40
+    },
+    "retrievalTopK": 10,
+    "maxFacts": 1000,
+    "tokenBudget": {
+      "identity": 500,
+      "memory": 800,
+      "historySummary": 500,
+      "conversation": 0,
+      "bootstrap": 1500,
+      "tools": 500
+    },
+    "summarizationModel": ""
+  }
+}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `embedding.enabled` | `false` | Enable vector-based semantic retrieval |
+| `embedding.apiKey` | `""` | API key for embedding provider |
+| `embedding.apiBase` | `""` | Base URL for embedding API |
+| `embedding.model` | `""` | Embedding model name |
+| `embedding.dimensions` | `1024` | Vector dimensions |
+| `embedding.rpmLimit` | `40` | Rate limit (requests per minute) |
+| `retrievalTopK` | `10` | Number of facts to retrieve per query |
+| `maxFacts` | `1000` | Maximum facts stored in the database |
+| `tokenBudget.identity` | `500` | Tokens for identity/persona section |
+| `tokenBudget.memory` | `800` | Tokens for retrieved facts |
+| `tokenBudget.historySummary` | `500` | Tokens for rolling conversation summary |
+| `tokenBudget.conversation` | `0` | Tokens for recent messages (0 = fill remaining) |
+| `tokenBudget.bootstrap` | `1500` | Tokens for bootstrap files (SOUL.md, AGENTS.md, etc.) |
+| `tokenBudget.tools` | `500` | Tokens for tool descriptions |
+| `summarizationModel` | `""` | Model for compression (empty = use default model) |
+
+</details>
+
+<details>
+<summary><b>NVIDIA NIM embedding setup</b></summary>
+
+You can configure NIM embeddings in two ways:
+
+**Option A: Config file** — set the fields in the `memory.embedding` block as shown above.
+
+**Option B: Environment variables** — if embedding fields are empty in config, nanobot auto-fills them from these env vars:
+
+| Env var | Purpose |
+|--------|---------|
+| `NIM_API_KEY` | API key |
+| `NIM_BASE_URL` | Base URL (e.g. `https://integrate.api.nvidia.com/v1`) |
+| `NIM_MODEL` | Model (e.g. `nvidia/nv-embedqa-e5-v5`) |
+| `NIM_EMBEDDING_DIM` | Vector size (default 1024) |
+| `NIM_RPM_LIMIT` | Requests per minute (default 40) |
+
+Set `memory.embedding.enabled` to `true` in config (or ensure `apiKey` is set via config or `NIM_API_KEY`) to enable vector retrieval. When `enabled` is `false` or no key is set, nanobot uses **BM25S** (local keyword search) with no API calls.
+
+</details>
+
 ### Providers
 
 > [!TIP]
@@ -942,6 +1055,7 @@ The agent can also manage this file itself — ask it to "add a periodic task" a
 
 > [!TIP]
 > The `-v ~/.nanobot:/root/.nanobot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
+> To enable the enhanced memory system inside Docker, build with `pip install .[memory]` in your Dockerfile or run `pip install nanobot-ai[memory]` inside the container.
 
 ### Docker Compose
 
@@ -1034,22 +1148,25 @@ If you edit the `.service` file itself, run `systemctl --user daemon-reload` bef
 
 ```
 nanobot/
-├── agent/          # 🧠 Core agent logic
-│   ├── loop.py     #    Agent loop (LLM ↔ tool execution)
-│   ├── context.py  #    Prompt builder
-│   ├── memory.py   #    Persistent memory
-│   ├── skills.py   #    Skills loader
-│   ├── subagent.py #    Background task execution
-│   └── tools/      #    Built-in tools (incl. spawn)
-├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
-├── channels/       # 📱 Chat channel integrations
-├── bus/            # 🚌 Message routing
-├── cron/           # ⏰ Scheduled tasks
-├── heartbeat/      # 💓 Proactive wake-up
-├── providers/      # 🤖 LLM providers (OpenRouter, etc.)
-├── session/        # 💬 Conversation sessions
-├── config/         # ⚙️ Configuration
-└── cli/            # 🖥️ Commands
+├── agent/               # 🧠 Core agent logic
+│   ├── loop.py          #    Agent loop (LLM ↔ tool execution)
+│   ├── context.py       #    Prompt builder (token-budgeted)
+│   ├── memory.py        #    Memory consolidation & fact extraction
+│   ├── memory_store.py  #    Structured fact store (SQLite + BM25S/KNN)
+│   ├── embedding.py     #    Async embedding client (NIM / OpenAI-compatible)
+│   ├── budget.py        #    Token budget allocator
+│   ├── skills.py        #    Skills loader
+│   ├── subagent.py      #    Background task execution
+│   └── tools/           #    Built-in tools (incl. spawn)
+├── skills/              # 🎯 Bundled skills (github, weather, tmux...)
+├── channels/            # 📱 Chat channel integrations
+├── bus/                 # 🚌 Message routing
+├── cron/                # ⏰ Scheduled tasks
+├── heartbeat/           # 💓 Proactive wake-up
+├── providers/           # 🤖 LLM providers (OpenRouter, etc.)
+├── session/             # 💬 Conversation sessions (rolling summary)
+├── config/              # ⚙️ Configuration (incl. memory schema)
+└── cli/                 # 🖥️ Commands
 ```
 
 ## 🤝 Contribute & Roadmap
@@ -1059,7 +1176,7 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 
 - [ ] **Multi-modal** — See and hear (images, voice, video)
-- [ ] **Long-term memory** — Never forget important context
+- [x] **Long-term memory** — Structured fact store, token budgeting, progressive compression, dual-mode retrieval (NIM / BM25S)
 - [ ] **Better reasoning** — Multi-step planning and reflection
 - [ ] **More integrations** — Calendar and more
 - [ ] **Self-improvement** — Learn from feedback and mistakes

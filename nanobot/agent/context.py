@@ -1,21 +1,31 @@
 """Context builder for assembling agent prompts."""
 
+from __future__ import annotations
+
 import base64
 import mimetypes
 import platform
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+
+if TYPE_CHECKING:
+    from nanobot.agent.budget import TokenBudget
+    from nanobot.agent.memory_store import FactStore
+    from nanobot.config.schema import MemoryConfig
 
 
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
-    BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
+    # Priority order: high first; truncation cuts from end (TOOLS/IDENTITY first).
+    BOOTSTRAP_FILES = ["SOUL.md", "AGENTS.md", "USER.md", "IDENTITY.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
     def __init__(self, workspace: Path):
@@ -23,8 +33,88 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        memory_config: MemoryConfig | None = None,
+        fact_store: FactStore | None = None,
+        current_message: str = "",
+        query_embedding: list[float] | None = None,
+        token_budget: TokenBudget | None = None,
+    ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
+        if memory_config is None:
+            logger.debug("Context: build_system_prompt unbudgeted (no memory_config)")
+            return self._build_system_prompt_unbudgeted(skill_names)
+
+        from nanobot.agent.budget import TokenBudget
+
+        logger.debug("Context: build_system_prompt budgeted model={} fact_store={}", model, fact_store is not None)
+        budget = token_budget or TokenBudget(
+            model=model,
+            max_tokens=max_tokens,
+            token_budget_config=memory_config.token_budget,
+        )
+        parts = [budget.truncate(self._get_identity(), "identity")]
+
+        bootstrap = self._load_bootstrap_files()
+        skills_section = self._load_skills_section(skill_names)
+        bootstrap_and_skills = "\n\n".join(
+            filter(None, [bootstrap, skills_section])
+        )
+        if bootstrap_and_skills:
+            parts.append(budget.truncate(bootstrap_and_skills, "bootstrap"))
+
+        memory_budget = budget.get_budget("memory")
+        if fact_store is not None:
+            logger.debug("Context: memory from FactStore (query_embedding={})", query_embedding is not None)
+            memory = fact_store.get_memory_context(
+                current_message or "general",
+                token_budget=memory_budget or 800,
+                query_embedding=query_embedding,
+            )
+            if memory:
+                parts.append(budget.truncate(memory, "memory"))
+            history_ctx = fact_store.get_relevant_history(
+                current_message or "",
+                top_k=3,
+                token_budget=min(200, (memory_budget or 800) // 4),
+            )
+            if history_ctx:
+                parts.append(history_ctx)
+        else:
+            logger.debug("Context: memory from flat MemoryStore (MEMORY.md)")
+            memory = self.memory.get_memory_context()
+            if memory:
+                parts.append(
+                    "# Memory\n\n"
+                    + budget.truncate(memory, "memory")
+                )
+
+        return "\n\n---\n\n".join(parts)
+
+    def _load_skills_section(self, skill_names: list[str] | None) -> str:
+        """Build the skills section (always skills + summary)."""
+        parts = []
+        always_skills = self.skills.get_always_skills()
+        if always_skills:
+            always_content = self.skills.load_skills_for_context(always_skills)
+            if always_content:
+                parts.append(f"# Active Skills\n\n{always_content}")
+        skills_summary = self.skills.build_skills_summary()
+        if skills_summary:
+            parts.append(f"""# Skills
+
+The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
+Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
+
+{skills_summary}""")
+        return "\n\n".join(parts) if parts else ""
+
+    def _build_system_prompt_unbudgeted(self, skill_names: list[str] | None = None) -> str:
+        """Original unbudgeted system prompt (when memory_config is not set)."""
         parts = [self._get_identity()]
 
         bootstrap = self._load_bootstrap_files()
@@ -35,20 +125,9 @@ class ContextBuilder:
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
-        always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
-
-        skills_summary = self.skills.build_skills_summary()
-        if skills_summary:
-            parts.append(f"""# Skills
-
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
-
-{skills_summary}""")
+        skills_section = self._load_skills_section(skill_names)
+        if skills_section:
+            parts.append(skills_section)
 
         return "\n\n---\n\n".join(parts)
 
@@ -67,7 +146,7 @@ You are nanobot, a helpful AI assistant.
 
 ## Workspace
 Your workspace is at: {workspace_path}
-- Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
+- Memory: managed by FactStore (SQLite) with auto-retrieval — see the memory skill for details.
 - History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
@@ -110,10 +189,26 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        memory_config: MemoryConfig | None = None,
+        fact_store: FactStore | None = None,
+        query_embedding: list[float] | None = None,
+        token_budget: TokenBudget | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
+        system_content = self.build_system_prompt(
+            skill_names,
+            model=model,
+            max_tokens=max_tokens,
+            memory_config=memory_config,
+            fact_store=fact_store,
+            current_message=current_message,
+            query_embedding=query_embedding,
+            token_budget=token_budget,
+        )
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": system_content},
             *history,
             {"role": "user", "content": self._build_runtime_context(channel, chat_id)},
             {"role": "user", "content": self._build_user_content(current_message, media)},

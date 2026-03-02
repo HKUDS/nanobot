@@ -42,9 +42,14 @@ dependencies = [
     "prompt-toolkit>=3.0.50,<4.0.0",
     "mcp>=1.26.0,<2.0.0",
     "json-repair>=0.57.0,<1.0.0",
+    "tiktoken>=0.8.0,<1.0.0",
 ]
 
 [project.optional-dependencies]
+memory = [
+    "sqlite-vec>=0.1.0",
+    "bm25s>=0.3.0",
+]
 matrix = [
     "matrix-nio[e2e]>=0.25.2",
     "mistune>=3.0.0,<4.0.0",
