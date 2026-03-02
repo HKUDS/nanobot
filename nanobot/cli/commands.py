@@ -244,6 +244,8 @@ def _make_provider(config: Config):
 @app.command()
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory (default: ~/.nanobot/workspace)"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the nanobot gateway."""
@@ -260,6 +262,14 @@ def gateway(
         import logging
         logging.basicConfig(level=logging.DEBUG)
 
+    # Load config from custom path if provided, otherwise use default
+    config_path = Path(config) if config else None
+    config = load_config(config_path)
+
+    # Override workspace if specified via command line
+    if workspace:
+        config.agents.defaults.workspace = workspace
+
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
 
     config = load_config()
@@ -269,7 +279,8 @@ def gateway(
     session_manager = SessionManager(config.workspace_path)
 
     # Create cron service first (callback set after agent creation)
-    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    # Use workspace path for per-instance cron store
+    cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
