@@ -1,6 +1,5 @@
 """Voice transcription via ElevenLabs Scribe."""
 
-import os
 from pathlib import Path
 
 import httpx
@@ -14,7 +13,14 @@ class ElevenLabsTranscriptionProvider:
     """
 
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or os.environ.get("ELEVENLABS_API_KEY")
+        if api_key:
+            self.api_key = api_key
+        else:
+            from scorpion.config.loader import load_config
+            try:
+                self.api_key = load_config().providers.elevenlabs.api_key or ""
+            except Exception:
+                self.api_key = ""
         self.api_url = "https://api.elevenlabs.io/v1/speech-to-text"
 
     async def transcribe(self, file_path: str | Path) -> str:

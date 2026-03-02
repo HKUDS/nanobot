@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 import wave
 from datetime import datetime, timezone
@@ -18,8 +17,12 @@ _MEDIA_ROOT = Path.home() / ".scorpion" / "media"
 
 
 def _get_gemini_key() -> str:
-    """Resolve Gemini API key from environment."""
-    return os.environ.get("GEMINI_API_KEY", "")
+    """Resolve Gemini API key from config."""
+    from scorpion.config.loader import load_config
+    try:
+        return load_config().providers.gemini.api_key or ""
+    except Exception:
+        return ""
 
 
 def _ts() -> str:

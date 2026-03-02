@@ -2,7 +2,6 @@
 
 import html
 import json
-import os
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -63,8 +62,14 @@ class WebSearchTool(Tool):
 
     @property
     def api_key(self) -> str:
-        """Resolve API key at call time so env/config changes are picked up."""
-        return self._init_api_key or os.environ.get("BRAVE_API_KEY", "")
+        """Resolve API key from config."""
+        if self._init_api_key:
+            return self._init_api_key
+        from scorpion.config.loader import load_config
+        try:
+            return load_config().tools.web.search.api_key or ""
+        except Exception:
+            return ""
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         if not self.api_key:

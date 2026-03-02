@@ -170,11 +170,8 @@ class ChannelManager:
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
         self._elevenlabs_api_key = self.config.providers.elevenlabs.api_key or ""
-        self._elevenlabs_voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
-        self._gemini_api_key = (
-            self.config.providers.gemini.api_key
-            or os.environ.get("GEMINI_API_KEY", "")
-        )
+        self._elevenlabs_voice_id = self.config.providers.elevenlabs.voice_id or ""
+        self._gemini_api_key = self.config.providers.gemini.api_key or ""
 
         self._init_channels()
 
@@ -189,6 +186,7 @@ class ChannelManager:
                     self.config.channels.telegram,
                     self.bus,
                     elevenlabs_api_key=self.config.providers.elevenlabs.api_key,
+                    gemini_api_key=self.config.providers.gemini.api_key,
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:

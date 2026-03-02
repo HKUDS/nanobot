@@ -384,12 +384,15 @@ async def web_search(query: str, count: int = 5, tool_context: ToolContext = Non
     if tool_context:
         api_key = tool_context.state.get("app:brave_api_key", "")
     if not api_key:
-        api_key = os.environ.get("BRAVE_API_KEY", "")
+        from scorpion.config.loader import load_config
+        try:
+            api_key = load_config().tools.web.search.api_key or ""
+        except Exception:
+            pass
     if not api_key:
         return (
             "Error: Brave Search API key not configured. "
-            "Set it in ~/.scorpion/config.json under tools.web.search.apiKey "
-            "(or export BRAVE_API_KEY), then restart the gateway."
+            "Set it in ~/.scorpion/config.json under tools.web.search.apiKey."
         )
 
     try:

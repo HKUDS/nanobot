@@ -148,10 +148,12 @@ class TelegramChannel(BaseChannel):
         config: TelegramConfig,
         bus: MessageBus,
         elevenlabs_api_key: str = "",
+        gemini_api_key: str = "",
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.elevenlabs_api_key = elevenlabs_api_key
+        self.gemini_api_key = gemini_api_key
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -268,16 +270,13 @@ class TelegramChannel(BaseChannel):
         from google.genai import types
         import time
         
-        # Get Gemini API key from config
-        api_key = ""
-        if hasattr(self.config, 'providers') and self.config.providers:
-            api_key = getattr(self.config.providers, 'gemini', None)
-            if api_key:
-                api_key = getattr(api_key, 'api_key', '')
-        
+        api_key = self.gemini_api_key
         if not api_key:
-            import os
-            api_key = os.environ.get('GEMINI_API_KEY', 'AIzaSyAVpqXFF9LDo5Hs3GfK0q8_AR9ptxIvL3w')
+            from scorpion.config.loader import load_config
+            try:
+                api_key = load_config().providers.gemini.api_key or ""
+            except Exception:
+                api_key = ""
         
         try:
             client = genai.Client(api_key=api_key)
