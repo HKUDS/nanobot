@@ -246,6 +246,7 @@ def _make_provider(config: Config):
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    api_key: str | None = typer.Option(None, "--api-key", envvar="NANOBOT_API_KEY", help="API key for HTTP endpoint authentication"),
 ):
     """Start the nanobot gateway."""
     from nanobot.config.loader import load_config, get_data_dir
@@ -390,7 +391,37 @@ def gateway(
     
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
     
+    runner = None
+
     async def run():
+        nonlocal runner
+
+        if api_key:
+            from aiohttp import web
+
+            @web.middleware
+            async def auth_middleware(request, handler):
+                if request.headers.get("Authorization") != f"Bearer {api_key}":
+                    raise web.HTTPUnauthorized()
+                return await handler(request)
+
+            async def handle_agent_run(request):
+                body = await request.json()
+                response = await agent.process_direct(
+                    body["message"],
+                    session_key=body.get("session_key", "http:direct"),
+                    channel=body.get("channel", "http"),
+                    chat_id=body.get("chat_id", "direct"),
+                )
+                return web.json_response({"response": response})
+
+            web_app = web.Application(middlewares=[auth_middleware])
+            web_app.router.add_post("/agent/run", handle_agent_run)
+            runner = web.AppRunner(web_app)
+            await runner.setup()
+            await web.TCPSite(runner, "0.0.0.0", port).start()
+            logger.info("Gateway HTTP API listening on port {}", port)
+
         try:
             await cron.start()
             await heartbeat.start()
@@ -406,7 +437,9 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
-    
+            if runner:
+                await runner.cleanup()
+
     asyncio.run(run())
 
 
