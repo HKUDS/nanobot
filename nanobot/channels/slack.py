@@ -136,9 +136,16 @@ class SlackChannel(BaseChannel):
             return
 
         # Avoid double-processing: Slack sends both `message` and `app_mention`
-        # for mentions in channels. Prefer `app_mention`.
+        # for mentions in channels/groups. Prefer `app_mention` there.
+        # In DMs and group DMs (mpim), only `message` events are sent — no `app_mention`.
         text = event.get("text") or ""
-        if event_type == "message" and self._bot_user_id and f"<@{self._bot_user_id}>" in text:
+        channel_type = event.get("channel_type") or ""
+        if (
+            event_type == "message"
+            and self._bot_user_id
+            and f"<@{self._bot_user_id}>" in text
+            and channel_type not in ("im", "mpim")
+        ):
             return
 
         # Debug: log basic event shape
@@ -154,45 +161,51 @@ class SlackChannel(BaseChannel):
         if not sender_id or not chat_id:
             return
 
-        channel_type = event.get("channel_type") or ""
-
         if not self._is_allowed(sender_id, chat_id, channel_type):
             return
 
-        if channel_type != "im" and not self._should_respond_in_channel(event_type, text, chat_id):
-            return
+        should_respond = channel_type == "im" or self._should_respond_in_channel(event_type, text, chat_id)
+        context_only = not should_respond
 
         text = self._strip_bot_mention(text)
 
         thread_ts = event.get("thread_ts")
         if self.config.reply_in_thread and not thread_ts:
             thread_ts = event.get("ts")
-        # Add :eyes: reaction to the triggering message (best-effort)
-        try:
-            if self._web_client and event.get("ts"):
-                await self._web_client.reactions_add(
-                    channel=chat_id,
-                    name=self.config.react_emoji,
-                    timestamp=event.get("ts"),
-                )
-        except Exception as e:
-            logger.debug("Slack reactions_add failed: {}", e)
 
-        # Thread-scoped session key for channel/group messages
-        session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts and channel_type != "im" else None
+        if should_respond:
+            try:
+                if self._web_client and event.get("ts"):
+                    await self._web_client.reactions_add(
+                        channel=chat_id,
+                        name=self.config.react_emoji,
+                        timestamp=event.get("ts"),
+                    )
+            except Exception as e:
+                logger.debug("Slack reactions_add failed: {}", e)
+
+        # mpim uses channel-scoped session (like DMs) — all messages share one session
+        if channel_type in ("im", "mpim"):
+            session_key = None
+        else:
+            session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts else None
+
+        metadata: dict[str, Any] = {
+            "slack": {
+                "event": event,
+                "thread_ts": thread_ts,
+                "channel_type": channel_type,
+            },
+        }
+        if context_only:
+            metadata["_context_only"] = True
 
         try:
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=text,
-                metadata={
-                    "slack": {
-                        "event": event,
-                        "thread_ts": thread_ts,
-                        "channel_type": channel_type,
-                    },
-                },
+                metadata=metadata,
                 session_key=session_key,
             )
         except Exception:
