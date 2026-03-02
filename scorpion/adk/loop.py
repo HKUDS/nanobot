@@ -71,6 +71,7 @@ class AdkAgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: "ChannelsConfig | None" = None,
+        gemini_api_key: str | None = None,
     ):
         from scorpion.config.schema import ExecToolConfig
 
@@ -125,6 +126,7 @@ class AdkAgentLoop:
             subagent_manager=self.subagents,
             cron_service=self.cron_service,
             pending_results=self._pending_results,
+            gemini_api_key=gemini_api_key,
         )
 
         # ADK session service (in-memory — scorpion JSONL is the persistence layer)

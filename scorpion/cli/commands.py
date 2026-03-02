@@ -245,12 +245,6 @@ def gateway(
 
     config = load_config()
     sync_workspace_templates(config.workspace_path)
-
-    # Export Gemini API key to env so creative tools (video/image/music/speech) can find it
-    import os as _os
-    if config.providers.gemini.api_key and not _os.environ.get("GEMINI_API_KEY"):
-        _os.environ["GEMINI_API_KEY"] = config.providers.gemini.api_key
-
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
@@ -277,6 +271,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        gemini_api_key=config.providers.gemini.api_key or None,
     )
     
     # Set cron callback (needs agent)
@@ -435,8 +430,9 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        gemini_api_key=config.providers.gemini.api_key or None,
     )
-    
+
     # Show spinner when logs are off (no output to miss); skip when logs are on
     def _thinking_ctx():
         if logs:
@@ -926,6 +922,7 @@ def cron_run(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        gemini_api_key=config.providers.gemini.api_key or None,
     )
 
     store_path = get_data_dir() / "cron" / "jobs.json"

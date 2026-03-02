@@ -48,6 +48,7 @@ _bus_callback = None
 _subagent_manager = None
 _cron_service = None
 _pending_results = None  # PendingResults heap for non-blocking generation
+_gemini_api_key = None   # Set from config at startup; avoids env-var dependency
 
 
 def set_runtime_refs(
@@ -55,9 +56,10 @@ def set_runtime_refs(
     subagent_manager=None,
     cron_service=None,
     pending_results=None,
+    gemini_api_key=None,
 ):
     """Set module-level references that tools need but can't be stored in state."""
-    global _bus_callback, _subagent_manager, _cron_service, _pending_results
+    global _bus_callback, _subagent_manager, _cron_service, _pending_results, _gemini_api_key
     if bus_publish is not None:
         _bus_callback = bus_publish
     if subagent_manager is not None:
@@ -66,6 +68,8 @@ def set_runtime_refs(
         _cron_service = cron_service
     if pending_results is not None:
         _pending_results = pending_results
+    if gemini_api_key is not None:
+        _gemini_api_key = gemini_api_key
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -640,7 +644,13 @@ _SAMPLE_WIDTH = 2
 
 
 def _get_gemini_key() -> str:
-    return os.environ.get("GEMINI_API_KEY", "")
+    if _gemini_api_key:
+        return _gemini_api_key
+    from scorpion.config.loader import load_config
+    try:
+        return load_config().providers.gemini.api_key or ""
+    except Exception:
+        return ""
 
 
 async def generate_image(
