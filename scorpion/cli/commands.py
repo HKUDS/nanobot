@@ -98,13 +98,16 @@ def _init_prompt_session() -> None:
     )
 
 
-def _print_agent_response(response: str, render_markdown: bool) -> None:
+def _print_agent_response(response: str, render_markdown: bool, media: list[str] | None = None) -> None:
     """Render assistant response with consistent terminal styling."""
     content = response or ""
     body = Markdown(content) if render_markdown else Text(content)
     console.print()
     console.print(f"[cyan]{__logo__} scorpion[/cyan]")
     console.print(body)
+    if media:
+        for path in media:
+            console.print(f"  [green]📎 Media:[/green] {path}")
     console.print()
 
 
@@ -498,10 +501,14 @@ def agent(
                         elif not turn_done.is_set():
                             if msg.content:
                                 turn_response.append(msg.content)
+                            if msg.media:
+                                # Print media paths immediately — don't buffer them
+                                for path in msg.media:
+                                    console.print(f"  [green]📎 Media:[/green] {path}")
                             turn_done.set()
-                        elif msg.content:
+                        elif msg.content or msg.media:
                             console.print()
-                            _print_agent_response(msg.content, render_markdown=markdown)
+                            _print_agent_response(msg.content or "", render_markdown=markdown, media=msg.media or [])
                     except asyncio.TimeoutError:
                         continue
                     except asyncio.CancelledError:
