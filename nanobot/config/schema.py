@@ -262,6 +262,7 @@ class ProvidersConfig(Base):
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动) API gateway
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎) API gateway
+    bedrock: ProviderConfig = Field(default_factory=ProviderConfig)  # AWS Bedrock (api_key=profile, api_base=region)
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
 
@@ -370,8 +371,9 @@ class Config(BaseSettings):
 
         # Fallback: gateways first, then others (follows registry order)
         # OAuth providers are NOT valid fallbacks — they require explicit model selection
+        # Env-auth providers (e.g. Bedrock) are NOT valid fallbacks — they need explicit config
         for spec in PROVIDERS:
-            if spec.is_oauth:
+            if spec.is_oauth or spec.uses_env_auth:
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:

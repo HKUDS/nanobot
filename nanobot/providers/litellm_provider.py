@@ -48,11 +48,15 @@ class LiteLLMProvider(LLMProvider):
         # api_key / api_base are fallback for auto-detection.
         self._gateway = find_gateway(provider_name, api_key, api_base)
 
+        # Detect env-auth providers (e.g. Bedrock) — api_key/api_base set env vars, not litellm params
+        spec = self._gateway or find_by_model(default_model)
+        self._uses_env_auth = spec.uses_env_auth if spec else False
+
         # Configure environment variables
         if api_key:
             self._setup_env(api_key, api_base, default_model)
 
-        if api_base:
+        if api_base and not self._uses_env_auth:
             litellm.api_base = api_base
 
         # Disable LiteLLM logging noise
@@ -74,6 +78,11 @@ class LiteLLMProvider(LLMProvider):
             os.environ[spec.env_key] = api_key
         else:
             os.environ.setdefault(spec.env_key, api_key)
+
+        if spec.uses_env_auth:
+            _ENV_VARS_CLEARED_BY_PROFILE = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
+            for var in _ENV_VARS_CLEARED_BY_PROFILE:
+                os.environ.pop(var, None)
 
         # Resolve env_extras placeholders:
         #   {api_key}  → user's API key
@@ -222,11 +231,11 @@ class LiteLLMProvider(LLMProvider):
         self._apply_model_overrides(model, kwargs)
 
         # Pass api_key directly — more reliable than env vars alone
-        if self.api_key:
+        if self.api_key and not self._uses_env_auth:
             kwargs["api_key"] = self.api_key
 
         # Pass api_base for custom endpoints
-        if self.api_base:
+        if self.api_base and not self._uses_env_auth:
             kwargs["api_base"] = self.api_base
 
         # Pass extra headers (e.g. APP-Code for AiHubMix)

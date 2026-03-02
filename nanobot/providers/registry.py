@@ -57,6 +57,9 @@ class ProviderSpec:
     # Direct providers bypass LiteLLM entirely (e.g., CustomProvider)
     is_direct: bool = False
 
+    # Auth via env vars, not API keys (e.g. Bedrock). api_key/api_base populate env vars only.
+    uses_env_auth: bool = False
+
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
 
@@ -377,6 +380,29 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     ),
 
     # === Auxiliary (not a primary LLM provider) ============================
+
+    # AWS Bedrock: auth via AWS profile/credentials, not API keys.
+    # api_key → AWS_PROFILE, api_base → AWS_REGION_NAME (via env_extras).
+    ProviderSpec(
+        name="bedrock",
+        keywords=("bedrock",),
+        env_key="AWS_PROFILE",
+        display_name="AWS Bedrock",
+        litellm_prefix="bedrock",
+        skip_prefixes=("bedrock/",),
+        env_extras=(
+            ("AWS_REGION_NAME", "{api_base}"),
+        ),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="us-east-1",
+        strip_model_prefix=False,
+        model_overrides=(),
+        uses_env_auth=True,
+        supports_prompt_caching=True,
+    ),
 
     # Groq: mainly used for Whisper voice transcription, also usable for LLM.
     # Needs "groq/" prefix for LiteLLM routing. Placed last — it rarely wins fallback.
