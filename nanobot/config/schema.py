@@ -229,10 +229,19 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
 
 
+class AccountEntry(Base):
+    """A named AI account entry stored in config.json."""
+
+    model: str
+    api_key: str = ""
+    api_base: str | None = None
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    accounts: dict[str, AccountEntry] = Field(default_factory=dict)
 
 
 class ProviderConfig(Base):
