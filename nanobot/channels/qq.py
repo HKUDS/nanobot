@@ -31,7 +31,8 @@ def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
 
     class _Bot(botpy.Client):
         def __init__(self):
-            super().__init__(intents=intents)
+            # Disable botpy's file log — nanobot uses loguru; default "botpy.log" fails on read-only fs
+            super().__init__(intents=intents, ext_handlers=False)
 
         async def on_ready(self):
             logger.info("QQ bot ready: {}", self.robot.name)
@@ -100,10 +101,12 @@ class QQChannel(BaseChannel):
             logger.warning("QQ client not initialized")
             return
         try:
+            msg_id = msg.metadata.get("message_id")
             await self._client.api.post_c2c_message(
                 openid=msg.chat_id,
                 msg_type=0,
                 content=msg.content,
+                msg_id=msg_id,
             )
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
