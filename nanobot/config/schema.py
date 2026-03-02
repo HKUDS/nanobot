@@ -323,6 +323,14 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # Seconds before a tool call is cancelled
 
 
+class OpenVikingConfig(Base):
+    """OpenViking persistent memory configuration."""
+
+    enabled: bool = False
+    data_path: str = "~/.nanobot/ov_data"
+    auto_commit: bool = True
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
@@ -330,6 +338,7 @@ class ToolsConfig(Base):
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
+    openviking: OpenVikingConfig = Field(default_factory=OpenVikingConfig)
 
 
 class BindingConfig(Base):

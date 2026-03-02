@@ -116,6 +116,7 @@ class AgentPool:
             session_manager=SessionManager(workspace),
             mcp_servers=self.config.tools.mcp_servers,
             channels_config=self.config.channels,
+            openviking_config=self.config.tools.openviking,
         )
 
     def _init_bindings(self) -> None:

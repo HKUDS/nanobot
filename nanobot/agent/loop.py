@@ -28,7 +28,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, OpenVikingConfig
     from nanobot.cron.service import CronService
 
 
@@ -65,6 +65,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        openviking_config: OpenVikingConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -82,6 +83,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.openviking_config = openviking_config
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -129,6 +131,10 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        if self.openviking_config and self.openviking_config.enabled:
+            from nanobot.agent.tools.openviking import OV_TOOLS
+            for cls in OV_TOOLS:
+                self.tools.register(cls(data_path=self.openviking_config.data_path))
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -161,6 +167,11 @@ class AgentLoop:
                         tool.set_context(channel, chat_id, message_id, metadata=metadata)
                     else:
                         tool.set_context(channel, chat_id)
+        for name in ("openviking_read", "openviking_list", "openviking_search",
+                     "openviking_grep", "openviking_glob", "user_memory_search"):
+            if tool := self.tools.get(name):
+                if hasattr(tool, "set_context"):
+                    tool.set_context(channel, chat_id)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -445,6 +456,13 @@ class AgentLoop:
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
 
+        if self.openviking_config and self.openviking_config.auto_commit:
+            _task = asyncio.create_task(
+                self._commit_to_ov(msg.channel, msg.chat_id, msg.content, final_content)
+            )
+            self._consolidation_tasks.add(_task)
+            _task.add_done_callback(self._consolidation_tasks.discard)
+
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
 
@@ -454,6 +472,21 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},
         )
+
+    async def _commit_to_ov(self, channel: str, chat_id: str, user_content: str, assistant_content: str) -> None:
+        """Add the current turn to OpenViking and commit the session."""
+        if not self.openviking_config:
+            return
+        try:
+            from nanobot.agent.tools.openviking_client import get_client
+            client = await get_client(self.openviking_config.data_path)
+            session_id = f"{channel}:{chat_id}"
+            await client.add_message(session_id=session_id, role="user", content=user_content)
+            await client.add_message(session_id=session_id, role="assistant", content=assistant_content)
+            await client.commit_session(session_id)
+            logger.debug("OpenViking session committed: {}", session_id)
+        except Exception as e:
+            logger.warning("OpenViking commit failed: {}", e)
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
