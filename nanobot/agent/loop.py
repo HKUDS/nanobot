@@ -391,7 +391,151 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands\n/account <name> — Switch to an AI profile\n/model <name> — Switch default model")
+                                  
+        if cmd == "/account":
+            keyboard = [
+                [{"text": "🔄 Switch Account", "callback_data": "/account_menu_switch"}],
+                [{"text": "➕ Add Account", "callback_data": "/account_menu_add"}],
+                [{"text": "🗑️ Delete Account", "callback_data": "/account_menu_delete"}]
+            ]
+            return OutboundMessage(
+                channel=msg.channel, 
+                chat_id=msg.chat_id, 
+                content="⚙️ **Account Management**\nChoose an action below:",
+                metadata={"inline_keyboard": keyboard}
+            )
+            
+        if cmd == "/account_menu_switch":
+            try:
+                from nanobot.config.profiles import ProfileManager
+                profiles = ProfileManager().list_profiles()
+                if not profiles:
+                    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="No AI account profiles found. Add one via terminal.")
+                
+                keyboard = []
+                for p in profiles:
+                    keyboard.append([{"text": f"{p.name} ({p.model})", "callback_data": f"/account {p.name}"}])
+                
+                return OutboundMessage(
+                    channel=msg.channel, 
+                    chat_id=msg.chat_id, 
+                    content="🔄 **Select an account to switch to:**",
+                    metadata={"inline_keyboard": keyboard}
+                )
+            except Exception as e:
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Error fetching profiles.")
+
+        if cmd == "/account_menu_delete":
+            try:
+                from nanobot.config.profiles import ProfileManager
+                profiles = ProfileManager().list_profiles()
+                if not profiles:
+                    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="No AI account profiles found.")
+                
+                keyboard = []
+                for p in profiles:
+                    keyboard.append([{"text": f"❌ {p.name}", "callback_data": f"/rmaccount {p.name}"}])
+                
+                return OutboundMessage(
+                    channel=msg.channel, 
+                    chat_id=msg.chat_id, 
+                    content="🗑️ **Select an account to remove:**",
+                    metadata={"inline_keyboard": keyboard}
+                )
+            except Exception as e:
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Error fetching profiles.")
+
+        if cmd == "/account_menu_add":
+            return OutboundMessage(
+                channel=msg.channel, 
+                chat_id=msg.chat_id, 
+                content="➕ **Add a New Account**\n\nTo add an account, open your computer terminal and type:\n\n`nanobot account add <Name> --model <Model> --api-key <Key> --api-base <URL>`\n\nExample:\n`nanobot account add zhipu4 --model zhipu/glm-5 --api-key sk-abc`"
+            )
+
+        if cmd.startswith("/account "):
+            profile_name = cmd.split(" ", 1)[1].strip()
+            try:
+                from nanobot.config.profiles import ProfileManager
+                profile = ProfileManager().get_profile(profile_name)
+                if not profile:
+                    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"❌ Profile '{profile_name}' not found.")
+                
+                from nanobot.config.loader import load_config, save_config
+                from nanobot.cli.commands import _make_provider
+                config = load_config()
+                
+                # Setup provider block (if missing) and inject key/baseUrl
+                provider_name = config.get_provider_name(profile.model)
+                p = getattr(config.providers, provider_name, None)
+                if p is None:
+                    setattr(config.providers, provider_name, type("ProviderConfig", (), {"api_key": profile.api_key, "api_base": profile.api_base})())
+                else:
+                    p.api_key = profile.api_key
+                    p.api_base = profile.api_base
+                
+                # Update default model
+                config.agents.defaults.model = profile.model
+                save_config(config)
+                
+                # Hot swap runtime properties
+                self.model = profile.model
+                self.provider = _make_provider(config)
+                self.subagents.provider = self.provider
+                self.subagents.model = self.model
+                
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"✅ Switched to profile **{profile.name}** using model `{profile.model}`.")
+            except Exception as e:
+                logger.error("Error switching account: {}", e)
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"❌ Error switching account: {e}")
+
+        if cmd.startswith("/model"):
+            parts = cmd.split(" ", 1)
+            if len(parts) < 2 or not parts[1].strip():
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Please provide a model name. Usage: `/model <name>`\nExample: `/model zhipu/glm-5`")
+            new_model = parts[1].strip()
+            try:
+                from nanobot.config.loader import load_config, save_config
+                from nanobot.cli.commands import _make_provider
+                config = load_config()
+                config.agents.defaults.model = new_model
+                save_config(config)
+                
+                self.model = new_model
+                self.provider = _make_provider(config)
+                self.subagents.provider = self.provider
+                self.subagents.model = self.model
+                
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"✅ Switched default model to `{new_model}`.")
+            except Exception as e:
+                logger.error("Error switching model: {}", e)
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"❌ Error switching model: {e}")
+
+        if cmd.startswith("/rmaccount"):
+            parts = cmd.split(" ", 1)
+            if len(parts) < 2 or not parts[1].strip():
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Please provide a profile name to remove. Usage: `/rmaccount <name>`\nExample: `/rmaccount gemini`")
+            profile_name = parts[1].strip()
+            try:
+                from nanobot.config.profiles import ProfileManager
+                mgr = ProfileManager()
+                if not mgr.get_profile(profile_name):
+                    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"❌ Profile '{profile_name}' not found.")
+                mgr.remove_profile(profile_name)
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"🗑️ Successfully removed profile `{profile_name}`.")
+            except Exception as e:
+                logger.error("Error removing account: {}", e)
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"❌ Error removing account: {e}")
+                
+                self.model = new_model
+                self.provider = _make_provider(config)
+                self.subagents.provider = self.provider
+                self.subagents.model = self.model
+                
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"✅ Switched default model to `{new_model}`.")
+            except Exception as e:
+                logger.error("Error switching model: {}", e)
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"❌ Error switching model: {e}")
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
