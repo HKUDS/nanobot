@@ -22,14 +22,6 @@ class Base(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
-class WhatsAppConfig(Base):
-    """WhatsApp channel configuration."""
-
-    enabled: bool = False
-    bridge_url: str = "ws://localhost:3001"
-    bridge_token: str = ""  # Shared token for bridge auth (optional, recommended)
-    allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
-
 
 class VoiceConfig(Base):
     """Voice / TTS configuration for channels."""
@@ -63,15 +55,6 @@ class FeishuConfig(Base):
     react_emoji: str = "THUMBSUP"  # Emoji type for message reactions (e.g. THUMBSUP, OK, DONE, SMILE)
 
 
-
-class DiscordConfig(Base):
-    """Discord channel configuration."""
-
-    enabled: bool = False
-    token: str = ""  # Bot token from Discord Developer Portal
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
-    gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
-    intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
 
 
 class MatrixConfig(Base):
@@ -214,9 +197,7 @@ class ChannelsConfig(Base):
 
     send_progress: bool = True    # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
-    whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
-    discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
     mochat: MochatConfig = Field(default_factory=MochatConfig)
     email: EmailConfig = Field(default_factory=EmailConfig)
