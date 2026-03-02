@@ -65,6 +65,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        subagent_max_iterations: int = 15,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -98,6 +99,7 @@ class AgentLoop:
             web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            default_max_iterations=subagent_max_iterations,
         )
 
         self._running = False
