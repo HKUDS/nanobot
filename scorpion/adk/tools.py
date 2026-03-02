@@ -31,7 +31,7 @@ import time
 import wave
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 from urllib.parse import urlparse
 
 import httpx
@@ -457,9 +457,9 @@ async def web_fetch(url: str, extract_mode: str = "markdown", max_chars: int = 5
 
 async def send_message(
     content: str,
-    channel: str = "",
-    chat_id: str = "",
-    media: list[str] | None = None,
+    channel: str,
+    chat_id: str,
+    media: List[str],
     tool_context: ToolContext = None,
 ) -> str:
     """Send a message to the user. Use this when you want to communicate something.
@@ -482,12 +482,17 @@ async def send_message(
     if _bus_callback is None:
         return "Error: Message sending not configured"
 
+    meta = {"message_id": mid} if mid else {}
+    # Propagate voice_reply flag so outbound TTS kicks in
+    if tool_context and tool_context.state.get("temp:voice_reply") == "true":
+        meta["voice_reply"] = True
+
     msg = OutboundMessage(
         channel=ch,
         chat_id=cid,
         content=content,
         media=media or [],
-        metadata={"message_id": mid} if mid else {},
+        metadata=meta,
     )
 
     try:
@@ -850,6 +855,75 @@ async def generate_music(
         return f"Error: {e}"
 
 
+# ── Speech / TTS Tool ─────────────────────────────────────────────────────────
+
+_TTS_SAMPLE_RATE = 24000
+_TTS_CHANNELS = 1
+_TTS_SAMPLE_WIDTH = 2
+
+
+async def generate_speech(
+    text: str,
+    voice: str = "Kore",
+    tool_context: ToolContext = None,
+) -> str:
+    """Generate a voice message from text using Gemini TTS. Returns file path. Use send_message with media=[path] to deliver.
+
+    Args:
+        text: The text to speak aloud.
+        voice: Voice name: Kore, Charon, Fenrir, Aoede, Puck, Leda, Orus, Zephyr.
+    """
+    from scorpion.config.schema import TTS_MODEL
+
+    api_key = _get_gemini_key()
+    if not api_key:
+        return "Error: GEMINI_API_KEY not configured"
+
+    out_dir = _MEDIA_ROOT / "voicemessage"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=api_key)
+
+        response = client.models.generate_content(
+            model=TTS_MODEL,
+            contents=f"Say naturally: {text}",
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice)
+                    )
+                ),
+            ),
+        )
+
+        audio_data = None
+        for part in response.candidates[0].content.parts:
+            if part.inline_data and part.inline_data.mime_type.startswith("audio/"):
+                audio_data = part.inline_data.data
+                break
+
+        if not audio_data:
+            return "Error: No audio generated"
+
+        out_path = out_dir / f"speech_{_ts()}.wav"
+        with wave.open(str(out_path), "wb") as wf:
+            wf.setnchannels(_TTS_CHANNELS)
+            wf.setsampwidth(_TTS_SAMPLE_WIDTH)
+            wf.setframerate(_TTS_SAMPLE_RATE)
+            wf.writeframes(audio_data)
+
+        logger.info("Generated speech: {} ({} bytes)", out_path, len(audio_data))
+        return str(out_path)
+    except Exception as e:
+        logger.error("Speech generation failed: {}", e)
+        return f"Error: {e}"
+
+
 # ── Tool list for agent construction ─────────────────────────────────────────
 
 ALL_TOOLS = [
@@ -866,6 +940,7 @@ ALL_TOOLS = [
     generate_image,
     generate_video,
     generate_music,
+    generate_speech,
 ]
 
 # Subset for subagents (no message, spawn, cron, or creative tools)

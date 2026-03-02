@@ -11,6 +11,7 @@ from google import genai
 from google.genai import types
 from loguru import logger
 
+from scorpion.config.schema import FLASH_MODEL
 from scorpion.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 _ALNUM = string.ascii_letters + string.digits
@@ -23,7 +24,7 @@ def _short_id() -> str:
 class GeminiProvider(LLMProvider):
     """LLM provider using the google-genai SDK directly."""
 
-    def __init__(self, api_key: str | None = None, default_model: str = "gemini-2.5-flash"):
+    def __init__(self, api_key: str | None = None, default_model: str = FLASH_MODEL):
         super().__init__(api_key)
         self.default_model = default_model
         self._client = genai.Client(api_key=api_key)

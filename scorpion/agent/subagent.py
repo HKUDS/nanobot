@@ -15,6 +15,7 @@ from loguru import logger
 from scorpion.adk.tools import SUBAGENT_TOOLS, set_runtime_refs
 from scorpion.bus.events import InboundMessage
 from scorpion.bus.queue import MessageBus
+from scorpion.config.schema import FLASH_MODEL
 from scorpion.providers.base import LLMProvider
 
 
@@ -39,7 +40,7 @@ class SubagentManager:
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
-        self.model = model or "gemini-2.5-flash"
+        self.model = model or FLASH_MODEL
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.reasoning_effort = reasoning_effort

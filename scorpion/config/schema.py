@@ -7,6 +7,14 @@ from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
+# ── Gemini Model Configuration ───────────────────────────────────────────────
+# Centralized model name - change here to update everywhere
+FLASH_MODEL = "gemini-2.5-flash"  # Primary model for chat, audio, images
+TTS_MODEL = "gemini-2.5-flash-preview-tts"  # Text-to-speech
+IMAGEN_MODEL = "imagen-4.0-generate-001"  # Image generation
+LYRIA_MODEL = "models/lyria-realtime-exp"  # Music generation
+VEO_MODEL = "veo-3.1"  # Video generation
+
 
 class Base(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
@@ -23,6 +31,14 @@ class WhatsAppConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
 
 
+class VoiceConfig(Base):
+    """Voice / TTS configuration for channels."""
+
+    enabled: bool = True  # Auto-reply with voice when user sends voice message
+    voice: str = "Kore"  # Gemini TTS voice: Kore, Charon, Fenrir, Aoede, Puck, Leda, Orus, Zephyr
+    always: bool = False  # If true, every response gets a voice attachment (not just voice replies)
+
+
 class TelegramConfig(Base):
     """Telegram channel configuration."""
 
@@ -31,6 +47,8 @@ class TelegramConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     reply_to_message: bool = False  # If true, bot replies quote the original message
+    react_emoji: str = "👍"  # Emoji reaction to add to user messages (empty to disable)
+    voice: VoiceConfig = Field(default_factory=VoiceConfig)  # Voice message / TTS settings
 
 
 class FeishuConfig(Base):
@@ -220,7 +238,7 @@ class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.scorpion/workspace"
-    model: str = "gemini-2.5-flash"
+    model: str = FLASH_MODEL  # Centralized model config
     provider: str = "gemini"  # Gemini-only core
     max_tokens: int = 8192
     temperature: float = 0.1
@@ -285,6 +303,8 @@ class ExecToolConfig(Base):
 
     timeout: int = 60
     path_append: str = ""
+    deny_patterns: list[str] = Field(default_factory=list)
+    allow_patterns: list[str] = Field(default_factory=list)
 
 
 class MCPServerConfig(Base):

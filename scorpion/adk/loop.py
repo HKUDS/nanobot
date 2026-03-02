@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import weakref
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
+
+# Suppress Google ADK "default value not supported" warnings from function declaration schemas
+logging.getLogger(
+    "google_adk.google.adk.tools._function_parameter_parse_util"
+).setLevel(logging.ERROR)
 
 from google.adk.agents import LlmAgent
 from google.adk.runners import Runner
@@ -17,6 +23,8 @@ from google.genai import types
 from loguru import logger
 
 from scorpion.adk.callbacks import (
+    clear_turn_tools,
+    get_turn_tools,
     make_after_model_callback,
     make_after_tool_callback,
     make_before_agent_callback,
@@ -29,6 +37,7 @@ from scorpion.agent.subagent import SubagentManager
 from scorpion.bus.events import InboundMessage, OutboundMessage
 from scorpion.bus.queue import MessageBus
 from scorpion.session.manager import Session, SessionManager
+from scorpion.config.schema import FLASH_MODEL
 
 if TYPE_CHECKING:
     from scorpion.config.schema import ChannelsConfig, ExecToolConfig
@@ -68,7 +77,7 @@ class AdkAgentLoop:
         self.channels_config = channels_config
         self.provider = provider  # for memory consolidation
         self.workspace = workspace
-        self.model = model or "gemini-2.5-flash"
+        self.model = model or FLASH_MODEL
         self.max_iterations = max_iterations
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -120,7 +129,10 @@ class AdkAgentLoop:
 
     # ── State helpers ────────────────────────────────────────────────────────
 
-    def _build_state(self, channel: str = "", chat_id: str = "", message_id: str = "") -> dict[str, Any]:
+    def _build_state(
+        self, channel: str = "", chat_id: str = "", message_id: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Build the ADK session state dict with runtime context."""
         allowed_dir = str(self.workspace) if self.restrict_to_workspace else ""
         state: dict[str, Any] = {
@@ -139,6 +151,7 @@ class AdkAgentLoop:
             "temp:sent_in_turn": "false",
             "temp:iteration_count": "0",
             "temp:tools_used": "",
+            "temp:voice_reply": "true" if (metadata or {}).get("voice_reply") else "",
         }
         return state
 
@@ -216,6 +229,7 @@ class AdkAgentLoop:
         message_id: str = "",
         media: list[str] | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> tuple[str | None, list[str]]:
         """Run the ADK agent. Returns (final_content, tools_used)."""
         agent = self._make_agent(on_progress)
@@ -226,7 +240,7 @@ class AdkAgentLoop:
         )
 
         # Create a fresh ADK session with pre-populated state
-        state = self._build_state(channel, chat_id, message_id)
+        state = self._build_state(channel, chat_id, message_id, metadata=metadata)
         session = await self._session_service.create_session(
             app_name="scorpion",
             user_id=f"{channel}:{chat_id}",
@@ -258,25 +272,50 @@ class AdkAgentLoop:
         runtime_ctx = ContextBuilder._build_runtime_context(channel, chat_id)
         user_text = f"{runtime_ctx}\n\n{current_message}" if runtime_ctx else current_message
 
-        # Handle media (images) by encoding as inline data
+        # Handle media (images and audio) by uploading to Gemini and referencing
         parts: list[types.Part] = []
         if media:
-            import base64
             import mimetypes
+            from google import genai as google_genai
+            
+            # Create Gemini client for file upload
+            api_key = getattr(self.provider, "api_key", "") or ""
+            if not api_key:
+                logger.error("Gemini API key not configured for media upload")
+            else:
+                media_client = google_genai.Client(api_key=api_key)
+                
+                for path in media:
+                    p = Path(path)
+                    mime, _ = mimetypes.guess_type(path)
+                    if p.is_file() and mime:
+                        try:
+                            if mime.startswith("image/") or mime.startswith("audio/"):
+                                logger.debug("Uploading media: {} ({})", path, mime)
+                                # Upload file to Gemini
+                                uploaded_file = media_client.files.upload(file=str(p))
+                                # Wait for processing
+                                while uploaded_file.state.name == "PROCESSING":
+                                    await asyncio.sleep(2)
+                                    uploaded_file = media_client.files.get(name=uploaded_file.name)
+                                if uploaded_file.state.name == "FAILED":
+                                    logger.error("File upload failed: {}", uploaded_file.state.name)
+                                    continue
+                                # Add as file data to the message
+                                parts.append(types.Part.from_uri(
+                                    file_uri=uploaded_file.uri,
+                                    mime_type=mime
+                                ))
+                                logger.debug("Uploaded media: {} -> {}", path, uploaded_file.uri)
+                        except Exception as upload_err:
+                            logger.error("Failed to upload media {}: {}", path, upload_err)
 
-            for path in media:
-                p = Path(path)
-                mime, _ = mimetypes.guess_type(path)
-                if p.is_file() and mime and mime.startswith("image/"):
-                    b64 = base64.b64encode(p.read_bytes()).decode()
-                    parts.append(types.Part(
-                        inline_data=types.Blob(mime_type=mime, data=base64.b64decode(b64))
-                    ))
         parts.append(types.Part(text=user_text))
 
         user_content = types.Content(role="user", parts=parts)
 
         # Run the agent
+        clear_turn_tools()
         final_content = None
         try:
             async for event in runner.run_async(
@@ -301,16 +340,8 @@ class AdkAgentLoop:
             logger.exception("ADK agent run failed: {}", e)
             final_content = "Sorry, I encountered an error calling the AI model."
 
-        # Extract tools used from session state
-        updated_session = await self._session_service.get_session(
-            app_name="scorpion",
-            user_id=session.user_id,
-            session_id=session.id,
-        )
-        tools_used_str = ""
-        if updated_session:
-            tools_used_str = updated_session.state.get("temp:tools_used", "")
-        tools_used = tools_used_str.split(",") if tools_used_str else []
+        # Get tools used from reliable module-level tracker
+        tools_used = get_turn_tools()
 
         return final_content, tools_used
 
@@ -474,6 +505,7 @@ class AdkAgentLoop:
             message_id=msg.metadata.get("message_id", "") if msg.metadata else "",
             media=msg.media if msg.media else None,
             on_progress=on_progress or _bus_progress,
+            metadata=msg.metadata,
         )
 
         if final_content is None:

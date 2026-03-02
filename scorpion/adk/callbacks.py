@@ -50,11 +50,11 @@ def _tool_hint_str(name: str, args: dict) -> str:
 def make_before_agent_callback():
     """before_agent_callback: runs before the agent starts each invocation."""
 
-    async def before_agent(ctx: CallbackContext) -> types.Content | None:
+    async def before_agent(*, callback_context: CallbackContext, **kwargs) -> types.Content | None:
         # Initialize per-turn state
-        ctx.state["temp:sent_in_turn"] = "false"
-        iteration = int(ctx.state.get("temp:iteration_count", "0"))
-        ctx.state["temp:iteration_count"] = str(iteration)
+        callback_context.state["temp:sent_in_turn"] = "false"
+        iteration = int(callback_context.state.get("temp:iteration_count", "0"))
+        callback_context.state["temp:iteration_count"] = str(iteration)
         return None
 
     return before_agent
@@ -66,12 +66,12 @@ def make_after_model_callback(on_progress=None):
     Streams intermediate text and enforces max iterations.
     """
 
-    async def after_model(ctx: CallbackContext, response: LlmResponse) -> LlmResponse | None:
+    async def after_model(*, callback_context: CallbackContext, llm_response: LlmResponse, **kwargs) -> LlmResponse | None:
         # Increment iteration count
-        iteration = int(ctx.state.get("temp:iteration_count", "0")) + 1
-        ctx.state["temp:iteration_count"] = str(iteration)
+        iteration = int(callback_context.state.get("temp:iteration_count", "0")) + 1
+        callback_context.state["temp:iteration_count"] = str(iteration)
 
-        max_iter = int(ctx.state.get("app:max_iterations", "40"))
+        max_iter = int(callback_context.state.get("app:max_iterations", "40"))
         if iteration > max_iter:
             logger.warning("Max iterations ({}) reached", max_iter)
             stop_text = (
@@ -87,13 +87,13 @@ def make_after_model_callback(on_progress=None):
             )
 
         # Stream intermediate text as progress
-        if on_progress and response.content:
-            text = _extract_text(response.content)
+        if on_progress and llm_response.content:
+            text = _extract_text(llm_response.content)
             clean = _strip_think(text)
 
             # Check if model is requesting tool calls (function_call parts)
             has_tool_calls = any(
-                p.function_call for p in (response.content.parts or [])
+                p.function_call for p in (llm_response.content.parts or [])
                 if p.function_call
             )
 
@@ -109,7 +109,7 @@ def make_before_tool_callback(on_progress=None):
     """before_tool_callback: emit tool hints before tool execution."""
 
     async def before_tool(
-        tool: BaseTool, args: dict[str, Any], ctx: ToolContext
+        tool: BaseTool, args: dict[str, Any], tool_context: ToolContext, **kwargs
     ) -> dict | None:
         tool_name = getattr(tool, "name", str(tool))
         logger.info("Tool call: {}({})", tool_name, str(args)[:200])
@@ -123,19 +123,34 @@ def make_before_tool_callback(on_progress=None):
     return before_tool
 
 
+# Module-level set for reliable tool tracking (ADK state can be flaky)
+_turn_tools_used: set[str] = set()
+
+
+def clear_turn_tools() -> None:
+    """Clear the per-turn tool tracker. Called before each agent run."""
+    _turn_tools_used.clear()
+
+
+def get_turn_tools() -> list[str]:
+    """Get the list of tools used this turn."""
+    return list(_turn_tools_used)
+
+
 def make_after_tool_callback():
     """after_tool_callback: track tools used."""
 
     async def after_tool(
-        tool: BaseTool, args: dict[str, Any], ctx: ToolContext, result: dict
+        tool: BaseTool, args: dict[str, Any], tool_context: ToolContext, tool_response: dict, **kwargs
     ) -> dict | None:
-        # Track tools used in state for session persistence
         tool_name = getattr(tool, "name", str(tool))
-        used = ctx.state.get("temp:tools_used", "")
+        # Track in both ADK state and module-level set
+        used = tool_context.state.get("temp:tools_used", "")
         if used:
-            ctx.state["temp:tools_used"] = f"{used},{tool_name}"
+            tool_context.state["temp:tools_used"] = f"{used},{tool_name}"
         else:
-            ctx.state["temp:tools_used"] = tool_name
+            tool_context.state["temp:tools_used"] = tool_name
+        _turn_tools_used.add(tool_name)
         return None
 
     return after_tool

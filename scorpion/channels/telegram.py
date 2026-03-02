@@ -8,18 +8,17 @@ import re
 from datetime import datetime
 from pathlib import Path
 from loguru import logger
-from telegram import BotCommand, Update, ReplyParameters
+from telegram import BotCommand, Update, ReplyParameters, ReactionTypeEmoji
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
 from scorpion.bus.events import OutboundMessage
 from scorpion.bus.queue import MessageBus
 from scorpion.channels.base import BaseChannel
-from scorpion.config.schema import TelegramConfig
+from scorpion.config.schema import TelegramConfig, FLASH_MODEL
 
 
 _USERS_FILE = Path.home() / ".scorpion" / "users.json"
-_COHERE_RAG_TOOL = str(Path.home() / ".scorpion" / "tools" / "cohere-rag.py")
 
 
 def _track_user(user) -> dict:
@@ -42,35 +41,6 @@ def _track_user(user) -> dict:
         logger.warning("Failed to track user: {}", e)
         return {"is_new": False, "record": {}}
 
-
-async def _rag_track(user, content: str, is_new: bool) -> None:
-    """Fire-and-forget: store user profile + message snippet in cohere-rag."""
-    try:
-        name = f"{user.first_name or ''} {getattr(user, 'last_name', '') or ''}".strip()
-        handle = f"@{user.username}" if user.username else f"id:{user.id}"
-
-        if is_new:
-            # First contact — store full profile
-            memory = (
-                f"[user-profile] {handle} (id={user.id}) name={name!r} "
-                f"first_seen={datetime.utcnow().date()}"
-            )
-            proc = await asyncio.create_subprocess_exec(
-                _COHERE_RAG_TOOL, "remember", memory, "--tag", "user-profile",
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-            )
-            await proc.wait()
-
-        # Store a snippet of this message for skill/interest tracking
-        snippet = content[:200].replace("\n", " ")
-        skill_memory = f"[skill-trace] {handle}: {snippet}"
-        proc = await asyncio.create_subprocess_exec(
-            _COHERE_RAG_TOOL, "remember", skill_memory, "--tag", "skill-trace",
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
-    except Exception as e:
-        logger.debug("RAG skill tracking failed: {}", e)
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -272,11 +242,96 @@ class TelegramChannel(BaseChannel):
             return "photo"
         if ext == "ogg":
             return "voice"
-        if ext in ("mp3", "m4a", "wav", "aac"):
-            return "audio"
+        if ext in ("mp3", "m4a", "aac", "wav"):
+            return "audio"  # Telegram accepts WAV as audio
         if ext in ("mp4", "mov", "webm"):
             return "video"
         return "document"
+
+    async def _add_reaction(self, chat_id: int, message_id: int) -> None:
+        """Add an emoji reaction to a message."""
+        if not self._app or not self.config.react_emoji:
+            return
+        try:
+            await self._app.bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=message_id,
+                reaction=[ReactionTypeEmoji(emoji=self.config.react_emoji)],
+                is_big=False,
+            )
+        except Exception as e:
+            logger.debug("Failed to add reaction: {}", e)
+
+    async def _analyze_audio_with_gemini(self, text_content: str, media_paths: list[str]) -> str:
+        """Call Gemini API directly to analyze audio files and return analysis."""
+        from google import genai
+        from google.genai import types
+        import time
+        
+        # Get Gemini API key from config
+        api_key = ""
+        if hasattr(self.config, 'providers') and self.config.providers:
+            api_key = getattr(self.config.providers, 'gemini', None)
+            if api_key:
+                api_key = getattr(api_key, 'api_key', '')
+        
+        if not api_key:
+            import os
+            api_key = os.environ.get('GEMINI_API_KEY', 'AIzaSyAVpqXFF9LDo5Hs3GfK0q8_AR9ptxIvL3w')
+        
+        try:
+            client = genai.Client(api_key=api_key)
+            
+            # Upload audio file to Gemini
+            audio_path = next((p for p in media_paths if p.endswith(('.mp3', '.wav', '.ogg', '.m4a'))), None)
+            if not audio_path:
+                return text_content
+                
+            logger.info("Uploading audio to Gemini: {}", audio_path)
+            uploaded_file = client.files.upload(file=audio_path)
+            
+            # Wait for processing
+            while uploaded_file.state.name == "PROCESSING":
+                time.sleep(2)
+                uploaded_file = client.files.get(name=uploaded_file.name)
+            
+            if uploaded_file.state.name == "FAILED":
+                logger.error("Audio upload failed: {}", uploaded_file.state.name)
+                return text_content
+            
+            logger.info("Audio uploaded: {} -> {}", audio_path, uploaded_file.uri)
+            
+            # Detect correct mime type
+            import mimetypes
+            mime_type, _ = mimetypes.guess_type(audio_path)
+            if not mime_type or not mime_type.startswith('audio/'):
+                mime_type = "audio/mp3" if audio_path.endswith('.mp3') else "audio/ogg"
+            
+            # Send to Gemini for analysis
+            prompt = text_content or "Analyze this audio. What is being said? What is the emotional tone?"
+            response = client.models.generate_content(
+                model=FLASH_MODEL,
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part.from_uri(file_uri=uploaded_file.uri, mime_type=mime_type),
+                            types.Part(text=prompt),
+                        ]
+                    )
+                ]
+            )
+            
+            analysis = response.text if response.text else "[Audio received but no analysis available]"
+            logger.info("Gemini audio analysis: {}", analysis[:200])
+            
+            # Combine original text with audio analysis
+            enhanced_content = f"{text_content}\n\n[AUDIO ANALYSIS: {analysis}]"
+            return enhanced_content
+            
+        except Exception as e:
+            logger.error("Gemini audio analysis failed: {}", e)
+            return f"{text_content}\n\n[Audio file attached: {media_paths[0] if media_paths else 'unknown'}]"
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
@@ -312,12 +367,19 @@ class TelegramChannel(BaseChannel):
                     "video": self._app.bot.send_video,
                 }.get(media_type, self._app.bot.send_document)
                 param = "photo" if media_type == "photo" else media_type if media_type in ("voice", "audio", "video") else "document"
+                logger.debug("Sending {} as {} via {}", media_path, param, media_type)
                 with open(media_path, 'rb') as f:
+                    kwargs = {param: f}
+                    # Add metadata for audio files
+                    if media_type == "audio":
+                        kwargs["performer"] = "Mekkana Teknacryte"
+                        kwargs["title"] = media_path.rsplit("/", 1)[-1]
                     await sender(
-                        chat_id=chat_id, 
-                        **{param: f},
+                        chat_id=chat_id,
+                        **kwargs,
                         reply_parameters=reply_params
                     )
+                logger.info("Sent media {} successfully", media_path)
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
                 logger.error("Failed to send media {}: {}", media_path, e)
@@ -446,32 +508,11 @@ class TelegramChannel(BaseChannel):
                 file_path = media_dir / f"{media_type}_{ts}{ext}"
                 await file.download_to_drive(str(file_path))
 
-                # Tag audio files with artist name
-                if media_type in ("voice", "audio"):
-                    try:
-                        import mutagen
-                        audio = mutagen.File(str(file_path), easy=True)
-                        if audio is not None:
-                            audio["artist"] = ["Mekkana Teknacryte"]
-                            audio.save()
-                    except Exception as tag_err:
-                        logger.debug("Could not tag audio file: {}", tag_err)
-
                 media_paths.append(str(file_path))
-                
-                # Handle voice transcription via ElevenLabs Scribe
-                if media_type == "voice" or media_type == "audio":
-                    from scorpion.providers.transcription import ElevenLabsTranscriptionProvider
-                    transcriber = ElevenLabsTranscriptionProvider(api_key=self.elevenlabs_api_key)
-                    transcription = await transcriber.transcribe(file_path)
-                    if transcription:
-                        logger.info("Transcribed {}: {}...", media_type, transcription[:50])
-                        content_parts.append(f"[transcription: {transcription}]")
-                    else:
-                        content_parts.append(f"[{media_type}: {file_path}]")
-                else:
-                    content_parts.append(f"[{media_type}: {file_path}]")
-                    
+
+                # Gemini can process audio directly - no transcription needed
+                content_parts.append(f"[{media_type}: {file_path}]")
+
                 logger.debug("Downloaded {} to {}", media_type, file_path)
             except Exception as e:
                 logger.error("Failed to download media: {}", e)
@@ -479,11 +520,16 @@ class TelegramChannel(BaseChannel):
         
         content = "\n".join(content_parts) if content_parts else "[empty message]"
 
-        # Background: skill-trace user message in cohere-rag (non-blocking)
-        asyncio.create_task(_rag_track(user, content, tracked.get("is_new", False)))
-
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
-        
+
+        # Add reaction to user message (if configured)
+        if self.config.react_emoji and message.message_id:
+            asyncio.create_task(self._add_reaction(chat_id, message.message_id))
+
+        # Process audio files with Gemini API directly BEFORE sending to ADK
+        if media_paths and any(p.endswith(('.mp3', '.wav', '.ogg', '.m4a')) for p in media_paths):
+            content = await self._analyze_audio_with_gemini(content, media_paths)
+
         str_chat_id = str(chat_id)
 
         # Telegram media groups: buffer briefly, forward as one aggregated turn.
@@ -512,18 +558,23 @@ class TelegramChannel(BaseChannel):
         self._start_typing(str_chat_id)
         
         # Forward to the message bus
+        msg_metadata = {
+            "message_id": message.message_id,
+            "user_id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "is_group": message.chat.type != "private",
+        }
+        # Flag voice replies so outbound dispatch generates TTS
+        if media_type in ("voice", "audio"):
+            msg_metadata["voice_reply"] = True
+
         await self._handle_message(
             sender_id=sender_id,
             chat_id=str_chat_id,
             content=content,
             media=media_paths,
-            metadata={
-                "message_id": message.message_id,
-                "user_id": user.id,
-                "username": user.username,
-                "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
-            }
+            metadata=msg_metadata,
         )
     
     async def _flush_media_group(self, key: str) -> None:
