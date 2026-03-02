@@ -78,6 +78,15 @@ class LLMProvider(ABC):
                     result.append(clean)
                     continue
 
+            # Defensive: a bare dict as content (e.g. a single content block) is
+            # not valid for any provider — wrap it in a list so the API receives
+            # an array of objects rather than a plain object.
+            if isinstance(content, dict):
+                clean = dict(msg)
+                clean["content"] = [content]
+                result.append(clean)
+                continue
+
             result.append(msg)
         return result
 
