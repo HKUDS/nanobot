@@ -99,6 +99,13 @@ class LiteLLMProvider(LLMProvider):
         
         # Standard mode: auto-prefix for known providers
         spec = find_by_model(model)
+        
+        # WORKAROUND: If using Zhipu's new paas/v4 coding API endpoint, LiteLLM's native `zhipu/` 
+        # provider will fail and ignore the custom base URL. Route it via `openai/` API.
+        if spec and spec.name == "zhipu" and self.api_base and "coding/paas/v4" in self.api_base:
+            model_name = model.split("/")[-1] if "/" in model else model
+            return f"openai/{model_name}"
+            
         if spec and spec.litellm_prefix:
             model = self._canonicalize_explicit_prefix(model, spec.name, spec.litellm_prefix)
             if not any(model.startswith(s) for s in spec.skip_prefixes):
