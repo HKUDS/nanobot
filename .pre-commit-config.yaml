@@ -1,0 +1,22 @@
+# Pre-commit hooks configuration for nanobot
+#
+# Installation:
+#   uv run pre-commit install
+#
+# Manual usage:
+#   uv run pre-commit run --all-files
+#
+# Skip for one commit:
+#   git commit --no-verify -m "message"
+
+default_language_version:
+  python: python3.11
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff formatter
+        entry: uv run ruff format
+        language: system
+        types: [python]
