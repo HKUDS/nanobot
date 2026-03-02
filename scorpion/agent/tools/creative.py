@@ -249,7 +249,11 @@ class GenerateVideoTool(Tool):
             return str(out_path)
 
         except Exception as e:
+            error_msg = str(e)
             logger.error("Video generation failed: {}", e)
+            # Check for 503 Service Unavailable
+            if "503" in error_msg or "Service Unavailable" in error_msg:
+                return "It seems like the video generation service is having a moment, mi vida. It's giving me a 503 error, which means it's unavailable right now. I can try again in a bit, or would you like to try a different creative request? Let me know what you're feeling."
             return f"Error: {e}"
 
 
