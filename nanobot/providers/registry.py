@@ -123,6 +123,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # OpenCode Zen: OpenAI-compatible gateway with model namespace.
+    # strip_model_prefix=True: opencode/qwen3-coder → qwen3-coder → openai/qwen3-coder.
+    ProviderSpec(
+        name="opencode",
+        keywords=("opencode",),
+        env_key="OPENAI_API_KEY",
+        display_name="OpenCode Zen",
+        litellm_prefix="openai",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="opencode.ai/zen",
+        default_api_base="https://opencode.ai/zen/v1",
+        strip_model_prefix=True,
+        model_overrides=(),
+    ),
+
     # SiliconFlow (硅基流动): OpenAI-compatible gateway, model names keep org prefix
     ProviderSpec(
         name="siliconflow",

@@ -9,7 +9,7 @@ from nanobot.cli.commands import app
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
-from nanobot.providers.registry import find_by_model
+from nanobot.providers.registry import find_by_model, find_gateway
 
 runner = CliRunner()
 
@@ -128,3 +128,38 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_config_matches_opencode_with_explicit_prefix():
+    config = Config()
+    config.agents.defaults.model = "opencode/qwen3-coder"
+    config.providers.opencode.api_key = "test-key"
+
+    assert config.get_provider_name() == "opencode"
+
+
+def test_find_gateway_matches_opencode_by_provider_name():
+    spec = find_gateway(provider_name="opencode")
+
+    assert spec is not None
+    assert spec.name == "opencode"
+
+
+def test_litellm_provider_resolves_opencode_gateway_to_openai_prefix():
+    provider = LiteLLMProvider(
+        api_key="test-key",
+        default_model="opencode/qwen3-coder",
+        provider_name="opencode",
+    )
+
+    resolved = provider._resolve_model("opencode/qwen3-coder")
+
+    assert resolved == "openai/qwen3-coder"
+
+
+def test_config_get_api_base_defaults_to_opencode_gateway_base():
+    config = Config()
+    config.agents.defaults.model = "opencode/qwen3-coder"
+    config.providers.opencode.api_key = "test-key"
+
+    assert config.get_api_base() == "https://opencode.ai/zen/v1"
