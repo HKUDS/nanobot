@@ -202,7 +202,11 @@ class QQConfig(Base):
 
 
 class A2AChannelConfig(Base):
-    """A2A protocol channel configuration."""
+    """A2A protocol channel configuration.
+    
+    Security note: By default, only the running_user is allowed to access the A2A endpoint.
+    For production, deploy behind an authenticating proxy and configure allow_from appropriately.
+    """
 
     enabled: bool = False
     agent_name: str = "Nanobot"
@@ -211,7 +215,8 @@ class A2AChannelConfig(Base):
     skills: list[dict] = Field(
         default_factory=list
     )  # [{"id": "chat", "name": "Chat", "description": "..."}]
-    allow_from: list[str] = Field(default_factory=list)
+    running_user: str = ""  # Username of the running user (default: current OS user)
+    allow_from: list[str] = Field(default_factory=list)  # Empty = running_user only
     task_retention_days: float = 14.0  # How long to keep completed tasks in memory
 
 
