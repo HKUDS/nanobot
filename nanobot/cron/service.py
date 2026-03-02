@@ -104,6 +104,7 @@ class CronService:
                         payload=CronPayload(
                             kind=j["payload"].get("kind", "agent_turn"),
                             message=j["payload"].get("message", ""),
+                            message_file=j["payload"].get("messageFile"),
                             deliver=j["payload"].get("deliver", False),
                             channel=j["payload"].get("channel"),
                             to=j["payload"].get("to"),
@@ -150,7 +151,7 @@ class CronService:
                     },
                     "payload": {
                         "kind": j.payload.kind,
-                        "message": j.payload.message,
+                        **({"messageFile": j.payload.message_file} if j.payload.message_file else {"message": j.payload.message}),
                         "deliver": j.payload.deliver,
                         "channel": j.payload.channel,
                         "to": j.payload.to,
