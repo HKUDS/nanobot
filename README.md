@@ -347,7 +347,7 @@ pip install nanobot-ai[matrix]
       "accessToken": "syt_xxx",
       "deviceId": "NANOBOT01",
       "e2eeEnabled": true,
-      "allowFrom": [],
+      "allowFrom": ["@your_user:matrix.org"],
       "groupPolicy": "open",
       "groupAllowFrom": [],
       "allowRoomMentions": false,
@@ -441,14 +441,14 @@ Uses **WebSocket** long connection — no public IP required.
       "appSecret": "xxx",
       "encryptKey": "",
       "verificationToken": "",
-      "allowFrom": []
+      "allowFrom": ["ou_YOUR_OPEN_ID"]
     }
   }
 }
 ```
 
 > `encryptKey` and `verificationToken` are optional for Long Connection mode.
-> `allowFrom`: Leave empty to allow all users, or add `["ou_xxx"]` to restrict access.
+> `allowFrom`: Add your open_id (find it in nanobot logs when you message the bot). Use `["*"]` to allow all users.
 
 **3. Run**
 
@@ -478,7 +478,7 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
 
 **3. Configure**
 
-> - `allowFrom`: Leave empty for public access, or add user openids to restrict. You can find openids in the nanobot logs when a user messages the bot.
+> - `allowFrom`: Add your openid (find it in nanobot logs when you message the bot). Use `["*"]` for public access.
 > - For production: submit a review in the bot console and publish. See [QQ Bot Docs](https://bot.q.qq.com/wiki/) for the full publishing flow.
 
 ```json
@@ -488,7 +488,7 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
       "enabled": true,
       "appId": "YOUR_APP_ID",
       "secret": "YOUR_APP_SECRET",
-      "allowFrom": []
+      "allowFrom": ["YOUR_OPENID"]
     }
   }
 }
@@ -527,13 +527,13 @@ Uses **Stream Mode** — no public IP required.
       "enabled": true,
       "clientId": "YOUR_APP_KEY",
       "clientSecret": "YOUR_APP_SECRET",
-      "allowFrom": []
+      "allowFrom": ["YOUR_STAFF_ID"]
     }
   }
 }
 ```
 
-> `allowFrom`: Leave empty to allow all users, or add `["staffId"]` to restrict access.
+> `allowFrom`: Add your staff ID. Use `["*"]` to allow all users.
 
 **3. Run**
 
@@ -568,6 +568,7 @@ Uses **Socket Mode** — no public URL required.
       "enabled": true,
       "botToken": "xoxb-...",
       "appToken": "xapp-...",
+      "allowFrom": ["YOUR_SLACK_USER_ID"],
       "groupPolicy": "mention"
     }
   }
@@ -601,7 +602,7 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 **2. Configure**
 
 > - `consentGranted` must be `true` to allow mailbox access. This is a safety gate — set `false` to fully disable.
-> - `allowFrom`: Leave empty to accept emails from anyone, or restrict to specific senders.
+> - `allowFrom`: Add your email address. Use `["*"]` to accept emails from anyone.
 > - `smtpUseTls` and `smtpUseSsl` default to `true` / `false` respectively, which is correct for Gmail (port 587 + STARTTLS). No need to set them explicitly.
 > - Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
 
@@ -874,6 +875,7 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 > [!TIP]
 > For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
+> **Change in source / post-`v0.1.4.post3`:** In `v0.1.4.post3` and earlier, an empty `allowFrom` means "allow all senders". In newer versions (including building from source), **empty `allowFrom` denies all access by default**. To allow all senders, set `"allowFrom": ["*"]`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
