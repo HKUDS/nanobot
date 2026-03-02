@@ -339,9 +339,11 @@ def gateway(
         async def _silent(*_args, **_kwargs):
             pass
 
+        session_key = f"{channel}:{chat_id}" if hb_cfg.shared_session else "heartbeat"
+
         return await agent.process_direct(
             tasks,
-            session_key="heartbeat",
+            session_key=session_key,
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
