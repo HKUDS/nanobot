@@ -1,7 +1,11 @@
-"""Discord channel implementation using Discord Gateway websocket."""
+"""Discord channel implementation using Discord Gateway websocket.
+
+Supports streaming output via message editing.
+"""
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +21,7 @@ from nanobot.config.schema import DiscordConfig
 DISCORD_API_BASE = "https://discord.com/api/v10"
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
+STREAM_UPDATE_INTERVAL = 0.3  # 300ms between stream updates to avoid rate limits
 
 
 def _split_message(content: str, max_len: int = MAX_MESSAGE_LEN) -> list[str]:
@@ -42,7 +47,13 @@ def _split_message(content: str, max_len: int = MAX_MESSAGE_LEN) -> list[str]:
 
 
 class DiscordChannel(BaseChannel):
-    """Discord channel using Gateway websocket."""
+    """Discord channel using Gateway websocket.
+
+    Supports streaming output via message editing:
+    - First chunk: send new message, store message_id
+    - Subsequent chunks: edit the message
+    - Final message: edit with complete content
+    """
 
     name = "discord"
 
@@ -54,6 +65,11 @@ class DiscordChannel(BaseChannel):
         self._heartbeat_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
+        # Streaming state
+        self._streaming_message_ids: dict[str, str] = {}  # channel_id -> message_id
+        self._streaming_contents: dict[str, str] = {}  # channel_id -> accumulated content
+        self._last_stream_time: dict[str, float] = {}  # channel_id -> last update timestamp
+        self._stream_locks: dict[str, asyncio.Lock] = {}  # channel_id -> lock for stream operations
 
     async def start(self) -> None:
         """Start the Discord gateway connection."""
@@ -95,11 +111,171 @@ class DiscordChannel(BaseChannel):
             self._http = None
 
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Discord REST API."""
+        """Send a message through Discord REST API.
+
+        Supports streaming via _progress metadata:
+        - _progress=True: streaming chunk, will edit existing message or create new one
+        - _progress=False/absent: final message, will edit or send normally
+        """
         if not self._http:
             logger.warning("Discord HTTP client not initialized")
             return
 
+        is_progress = msg.metadata.get("_progress", False)
+
+        # Handle streaming messages
+        if is_progress:
+            await self._send_streaming(msg)
+            return
+
+        # Final message - check if we need to finalize a streaming message
+        channel_id = msg.chat_id
+        streaming_msg_id = self._streaming_message_ids.get(channel_id)
+
+        if streaming_msg_id:
+            # We had a streaming message, finalize it
+            await self._finalize_streaming(msg)
+            return
+
+        # Normal message send (no streaming involved)
+        await self._stop_typing(channel_id)
+        await self._send_normal(msg)
+
+    async def _send_streaming(self, msg: OutboundMessage) -> None:
+        """Send or update a streaming message.
+
+        Uses message editing to create a "typing" effect.
+        Rate limited to avoid Discord API limits.
+        Falls back to typing indicator if stream_messages is disabled.
+        """
+        channel_id = msg.chat_id
+
+        # Check if streaming is enabled
+        if not self.config.stream_messages:
+            # Fall back to typing indicator only
+            await self._start_typing(channel_id)
+            return
+
+        # Get or create lock for this channel
+        if channel_id not in self._stream_locks:
+            self._stream_locks[channel_id] = asyncio.Lock()
+
+        async with self._stream_locks[channel_id]:
+            # Skip empty content
+            if not msg.content or not msg.content.strip():
+                return
+
+            # Accumulate content (msg.content is already accumulated from LLM streaming)
+            accumulated = msg.content
+            self._streaming_contents[channel_id] = accumulated
+
+            # Rate limiting check
+            now = time.time()
+            last_time = self._last_stream_time.get(channel_id, 0)
+            if now - last_time < STREAM_UPDATE_INTERVAL:
+                # Too soon, skip this update (content is already accumulated)
+                return
+
+            streaming_msg_id = self._streaming_message_ids.get(channel_id)
+
+            if streaming_msg_id:
+                # Edit existing message
+                await self._edit_message(channel_id, streaming_msg_id, accumulated)
+            else:
+                # Send new message
+                message_id = await self._send_new_message(channel_id, accumulated)
+                if message_id:
+                    self._streaming_message_ids[channel_id] = message_id
+
+            self._last_stream_time[channel_id] = now
+
+    async def _finalize_streaming(self, msg: OutboundMessage) -> None:
+        """Finalize streaming by editing the message with final content."""
+        channel_id = msg.chat_id
+        streaming_msg_id = self._streaming_message_ids.get(channel_id)
+
+        if not streaming_msg_id:
+            # No streaming message to finalize, send normally
+            await self._send_normal(msg)
+            return
+
+        # Stop typing indicator
+        await self._stop_typing(channel_id)
+
+        # Edit the streaming message with final content
+        if msg.content and msg.content.strip():
+            await self._edit_message(channel_id, streaming_msg_id, msg.content)
+
+        # Clear streaming state
+        self._streaming_message_ids.pop(channel_id, None)
+        self._streaming_contents.pop(channel_id, None)
+        self._last_stream_time.pop(channel_id, None)
+
+        logger.debug("[DISCORD] Finalized streaming message for channel {}", channel_id)
+
+    async def _send_new_message(self, channel_id: str, content: str) -> str | None:
+        """Send a new message and return its ID."""
+        if not self._http:
+            return None
+
+        url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
+        headers = {"Authorization": f"Bot {self.config.token}"}
+
+        # Truncate to Discord limit
+        truncated = content[:MAX_MESSAGE_LEN] if len(content) > MAX_MESSAGE_LEN else content
+
+        payload = {"content": truncated}
+
+        try:
+            response = await self._http.post(url, headers=headers, json=payload)
+            if response.status_code == 429:
+                data = response.json()
+                retry_after = float(data.get("retry_after", 1.0))
+                logger.warning("Discord rate limited, retrying in {}s", retry_after)
+                await asyncio.sleep(retry_after)
+                # Retry once
+                response = await self._http.post(url, headers=headers, json=payload)
+
+            response.raise_for_status()
+            data = response.json()
+            message_id = data.get("id")
+            logger.debug("[DISCORD] Sent new streaming message: {}", message_id)
+            return message_id
+        except Exception as e:
+            logger.error("[DISCORD] Failed to send streaming message: {}", e)
+            return None
+
+    async def _edit_message(self, channel_id: str, message_id: str, content: str) -> bool:
+        """Edit an existing message. Returns True on success."""
+        if not self._http:
+            return False
+
+        url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}"
+        headers = {"Authorization": f"Bot {self.config.token}"}
+
+        # Truncate to Discord limit
+        truncated = content[:MAX_MESSAGE_LEN] if len(content) > MAX_MESSAGE_LEN else content
+
+        payload = {"content": truncated}
+
+        try:
+            response = await self._http.patch(url, headers=headers, json=payload)
+            if response.status_code == 429:
+                data = response.json()
+                retry_after = float(data.get("retry_after", 1.0))
+                logger.warning("Discord rate limited on edit, retrying in {}s", retry_after)
+                await asyncio.sleep(retry_after)
+                response = await self._http.patch(url, headers=headers, json=payload)
+
+            response.raise_for_status()
+            logger.debug("[DISCORD] Edited streaming message: {}", message_id)
+            return True
+        except Exception as e:
+            logger.warning("[DISCORD] Failed to edit streaming message: {}", e)
+            return False
+
+    async def _send_normal(self, msg: OutboundMessage) -> None:
+        """Send a normal (non-streaming) message."""
         url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
         headers = {"Authorization": f"Bot {self.config.token}"}
 
@@ -232,6 +408,12 @@ class DiscordChannel(BaseChannel):
 
         if not self.is_allowed(sender_id):
             return
+
+        # Clear streaming state for this channel when receiving new message
+        # This prevents editing old messages from previous conversations
+        self._streaming_message_ids.pop(channel_id, None)
+        self._streaming_contents.pop(channel_id, None)
+        self._last_stream_time.pop(channel_id, None)
 
         content_parts = [content] if content else []
         media_paths: list[str] = []

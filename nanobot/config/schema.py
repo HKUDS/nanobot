@@ -63,6 +63,7 @@ class DiscordConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
+    stream_messages: bool = True  # Use message editing for streaming output
 
 
 class MatrixConfig(Base):
