@@ -20,3 +20,4 @@ poetry.lock
 .pytest_cache/
 botpy.log
 tests/
+uv.lock

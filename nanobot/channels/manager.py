@@ -149,6 +149,18 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
 
+        # A2A channel
+        if self.config.channels.a2a.enabled:
+            try:
+                from nanobot.channels.a2a import A2AChannel
+                self.channels["a2a"] = A2AChannel(
+                    self.config.channels.a2a,
+                    self.bus,
+                )
+                logger.info("A2A channel enabled")
+            except ImportError as e:
+                logger.warning("A2A channel not available: {}", e)
+
         self._validate_allow_from()
 
     def _validate_allow_from(self) -> None:
