@@ -32,6 +32,7 @@ def resolve_runtime_policy(
     target_platform = platform_name or platform.system()
     rollout_stage = ROLLOUT_BY_PLATFORM.get(target_platform, "off")
 
+    # 1) Explicit CLI flags always win.
     normalized_cli_mode = _normalize_mode(cli_mode)
     if normalized_cli_mode is not None:
         return _policy_from_mode(
@@ -42,6 +43,7 @@ def resolve_runtime_policy(
             reason_for_background="cli_override_background",
         )
 
+    # 2) Kill switch is a hard safety override for emergency rollback.
     if _is_kill_switch_enabled(env_map.get(KILL_SWITCH_ENV_KEY)):
         return RuntimePolicy(
             mode=RuntimeMode.FOREGROUND_LEGACY,
@@ -50,6 +52,7 @@ def resolve_runtime_policy(
             rollout_stage=rollout_stage,
         )
 
+    # 3) Environment variable acts as a deployment-time hint.
     normalized_env_mode = _normalize_mode(env_map.get(MODE_ENV_KEY))
     if normalized_env_mode is not None:
         return _policy_from_mode(
@@ -60,6 +63,7 @@ def resolve_runtime_policy(
             reason_for_background="env_override_background",
         )
 
+    # 4) Finally, fall back to rollout defaults for current platform.
     if rollout_stage == "default_on":
         return RuntimePolicy(
             mode=RuntimeMode.BACKGROUND_MANAGED,
@@ -84,6 +88,7 @@ def _policy_from_mode(
     reason_for_foreground: str,
     reason_for_background: str,
 ) -> RuntimePolicy:
+    """Translate a requested mode into an effective mode for this rollout stage."""
     if requested_mode is RuntimeMode.FOREGROUND_LEGACY:
         return RuntimePolicy(
             mode=RuntimeMode.FOREGROUND_LEGACY,
@@ -92,6 +97,7 @@ def _policy_from_mode(
             rollout_stage=rollout_stage,
         )
 
+    # Background is only effective for enabled rollout stages.
     if rollout_stage in {"opt_in", "default_on"}:
         return RuntimePolicy(
             mode=RuntimeMode.BACKGROUND_MANAGED,
@@ -109,6 +115,7 @@ def _policy_from_mode(
 
 
 def _normalize_mode(raw_mode: str | None) -> RuntimeMode | None:
+    """Map raw CLI/env values to RuntimeMode, ignoring unknown values."""
     if raw_mode is None:
         return None
     normalized = raw_mode.strip().lower()
@@ -120,6 +127,7 @@ def _normalize_mode(raw_mode: str | None) -> RuntimeMode | None:
 
 
 def _is_kill_switch_enabled(raw_value: str | None) -> bool:
+    """Interpret common truthy values for kill switch env var."""
     if raw_value is None:
         return False
     return raw_value.strip().lower() in _TRUTHY_VALUES

@@ -247,7 +247,12 @@ def run_gateway_foreground_loop(
     port: int = 18790,
     verbose: bool = False,
 ):
-    """Run gateway using the legacy foreground execution path."""
+    """Run gateway using the legacy foreground execution path.
+
+    This function remains the single source of truth for gateway business
+    execution. Runtime adapters should delegate here instead of duplicating
+    agent/channel/cron setup logic.
+    """
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
@@ -429,6 +434,10 @@ app.add_typer(gateway_app, name="gateway")
 
 
 def _resolve_gateway_cli_mode(*, foreground: bool, background: bool) -> str | None:
+    """Normalize CLI mode flags into policy input.
+
+    The policy layer expects a single hint string; CLI keeps ergonomic flags.
+    """
     if foreground and background:
         console.print("[red]Error: --foreground and --background cannot be used together.[/red]")
         raise typer.Exit(1)
@@ -444,6 +453,7 @@ def _build_gateway_runtime_facade(
     cli_mode: str | None,
     run_foreground_loop: Callable[[int, bool], None] | None = None,
 ):
+    """Create runtime facade and resolved policy for current invocation."""
     from nanobot.gateway_runtime.facade import GatewayRuntimeFacade
     from nanobot.gateway_runtime.policy import resolve_runtime_policy
 
@@ -467,6 +477,7 @@ def gateway(
     background: bool = typer.Option(False, "--background", help="Request background managed mode"),
 ):
     """Start the nanobot gateway."""
+    # If a subcommand was specified (restart/status/logs), do not run start().
     if ctx.invoked_subcommand is not None:
         return
 

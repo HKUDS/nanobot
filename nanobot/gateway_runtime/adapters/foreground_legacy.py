@@ -33,6 +33,7 @@ class ForegroundLegacyAdapter:
         self._state_store = state_store or GatewayStateStore()
 
     def start(self, options: GatewayStartOptions) -> StartResult:
+        # Adapter can be created for read-only commands where a runner is not needed.
         if self._run_foreground_loop is None:
             return StartResult(
                 started=False,
@@ -40,6 +41,7 @@ class ForegroundLegacyAdapter:
                 mode=RuntimeMode.FOREGROUND_LEGACY,
             )
 
+        # Persist lightweight runtime metadata for status/debug observability.
         self._state_store.write_state(
             {
                 "mode": RuntimeMode.FOREGROUND_LEGACY.value,
@@ -56,6 +58,7 @@ class ForegroundLegacyAdapter:
         )
 
     def stop(self, timeout_s: int = 20) -> StopResult:
+        # Legacy mode has no managed background process to signal.
         return StopResult(
             stopped=False,
             message="legacy_foreground_has_no_managed_process_to_stop",
@@ -63,6 +66,7 @@ class ForegroundLegacyAdapter:
         )
 
     def restart(self, options: GatewayStartOptions, timeout_s: int = 20) -> RestartResult:
+        # Framework phase keeps restart non-destructive for legacy compatibility.
         return RestartResult(
             restarted=False,
             message="legacy_foreground_requires_manual_restart",
@@ -82,6 +86,7 @@ class ForegroundLegacyAdapter:
         )
 
     def logs(self, follow: bool = True, tail: int = 200) -> int:
+        # Keep logs command available even when no daemon log stream exists.
         typer.echo(
             "Gateway is in foreground mode; no managed background log stream is available."
         )

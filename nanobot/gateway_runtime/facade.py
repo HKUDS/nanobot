@@ -35,18 +35,23 @@ class GatewayRuntimeFacade:
         self._adapter = adapter or self._build_adapter()
 
     def start(self, options: GatewayStartOptions) -> StartResult:
+        """Start gateway using the selected adapter."""
         return self._adapter.start(options)
 
     def restart(self, options: GatewayStartOptions, timeout_s: int = 20) -> RestartResult:
+        """Restart gateway using adapter semantics for current runtime mode."""
         return self._adapter.restart(options, timeout_s=timeout_s)
 
     def status(self) -> GatewayStatus:
+        """Return runtime status in a mode-agnostic shape."""
         return self._adapter.status()
 
     def logs(self, follow: bool = True, tail: int = 200) -> int:
+        """Show logs through adapter-specific behavior."""
         return self._adapter.logs(follow=follow, tail=tail)
 
     def _build_adapter(self) -> RuntimeAdapter:
+        """Select adapter by policy, with legacy fallback in framework phase."""
         if self._policy.mode is RuntimeMode.FOREGROUND_LEGACY:
             return ForegroundLegacyAdapter(
                 run_foreground_loop=self._run_foreground_loop,
