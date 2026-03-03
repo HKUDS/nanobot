@@ -186,6 +186,7 @@ class LiteLLMProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        stream: bool = False,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -243,6 +244,11 @@ class LiteLLMProvider(LLMProvider):
 
         try:
             response = await acompletion(**kwargs)
+            
+            # If streaming, return the async generator directly
+            if stream:
+                return response  # type: ignore
+            
             return self._parse_response(response)
         except Exception as e:
             # Return error as content for graceful handling
