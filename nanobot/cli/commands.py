@@ -740,12 +740,19 @@ def _get_bridge_dir() -> Path:
     shutil.copytree(source, user_bridge, ignore=shutil.ignore_patterns("node_modules", "dist"))
 
     # Install and build
+    is_win = sys.platform == "win32"
     try:
         console.print("  Installing dependencies...")
-        subprocess.run(["npm", "install"], cwd=user_bridge, check=True, capture_output=True)
+        if is_win:
+            subprocess.run("npm install", cwd=user_bridge, check=True, capture_output=True, shell=True)
+        else:
+            subprocess.run(["npm", "install"], cwd=user_bridge, check=True, capture_output=True)
 
         console.print("  Building...")
-        subprocess.run(["npm", "run", "build"], cwd=user_bridge, check=True, capture_output=True)
+        if is_win:
+            subprocess.run("npm run build", cwd=user_bridge, check=True, capture_output=True, shell=True)
+        else:
+            subprocess.run(["npm", "run", "build"], cwd=user_bridge, check=True, capture_output=True)
 
         console.print("[green]✓[/green] Bridge ready\n")
     except subprocess.CalledProcessError as e:
@@ -775,7 +782,10 @@ def channels_login():
         env["BRIDGE_TOKEN"] = config.channels.whatsapp.bridge_token
 
     try:
-        subprocess.run(["npm", "start"], cwd=bridge_dir, check=True, env=env)
+        if sys.platform == "win32":
+            subprocess.run("npm start", cwd=bridge_dir, check=True, env=env, shell=True)
+        else:
+            subprocess.run(["npm", "start"], cwd=bridge_dir, check=True, env=env)
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Bridge failed: {e}[/red]")
     except FileNotFoundError:
