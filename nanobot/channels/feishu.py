@@ -246,6 +246,26 @@ def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
 
 
 
+def _check_bot_mentioned(mentions: list[dict], bot_open_id: str | None) -> bool:
+    """Check if bot is @mentioned in a message."""
+    if not bot_open_id:
+        return False
+    return any(m.get("id", {}).get("open_id") == bot_open_id for m in mentions)
+
+
+def _strip_bot_mention(text: str, mentions: list[dict]) -> str:
+    """Remove @BotName tokens from message text."""
+    result = text
+    for m in mentions:
+        name = m.get("name", "")
+        key = m.get("key", "")
+        if name:
+            result = re.sub(rf"@{re.escape(name)}\s*", "", result)
+        if key:
+            result = result.replace(key, "")
+    return result.strip()
+
+
 class FeishuChannel(BaseChannel):
     """
     Feishu/Lark channel using WebSocket long connection.
@@ -410,6 +430,78 @@ class FeishuChannel(BaseChannel):
         except Exception as e:
             logger.warning("Failed to fetch bot open_id: {}", e)
             return None
+
+    _sender_name_cache: dict[str, tuple[str, float]] = {}
+    _SENDER_NAME_TTL = 600.0  # 10 minutes
+
+    def _fetch_sender_name_sync(self, open_id: str, client: Any) -> str | None:
+        """Fetch display name for a user open_id (cached)."""
+        import time
+        cached = self._sender_name_cache.get(open_id)
+        if cached and cached[1] > time.time():
+            return cached[0]
+        try:
+            from lark_oapi.api.contact.v3 import GetUserRequest
+            request = GetUserRequest.builder() \
+                .user_id(open_id) \
+                .user_id_type("open_id") \
+                .build()
+            res = client.contact.v3.user.get(request)
+            if res.success() and res.data and res.data.user:
+                name = res.data.user.name or getattr(res.data.user, "nickname", None)
+                if name:
+                    self._sender_name_cache[open_id] = (name, time.time() + self._SENDER_NAME_TTL)
+                    return name
+        except Exception as e:
+            logger.debug("Failed to fetch sender name for {}: {}", open_id, e)
+        return None
+
+    async def _handle_group_message(
+        self,
+        sender_id: str,
+        chat_id: str,
+        content: str,
+        message_id: str,
+        mentions: list[dict],
+        account_id: str,
+        media: list[str] | None = None,
+        metadata: dict | None = None,
+    ) -> None:
+        """Handle group message with group-level permission and mention gating."""
+        # 1. Group allowlist check
+        group_allow_from = self.config.group_allow_from
+        if group_allow_from and chat_id not in group_allow_from:
+            logger.debug("Feishu group {} not in group_allow_from, skipping", chat_id)
+            return
+
+        # 2. requireMention check
+        if self.config.require_mention:
+            bot_open_id = self._bot_open_ids.get(account_id)
+            if not _check_bot_mentioned(mentions, bot_open_id):
+                logger.debug("Feishu group message in {} not mentioning bot, skipping", chat_id)
+                return
+            content = _strip_bot_mention(content, mentions)
+
+        # 3. Sender name injection
+        client = self._clients.get(account_id)
+        if client and sender_id:
+            loop = asyncio.get_running_loop()
+            name = await loop.run_in_executor(None, self._fetch_sender_name_sync, sender_id, client)
+            if name:
+                content = f"[{name}]: {content}" if content else f"[{name}]"
+
+        # 4. Forward to bus
+        from nanobot.bus.events import InboundMessage
+        msg_meta = {**(metadata or {}), "message_id": message_id, "account_id": account_id}
+        msg = InboundMessage(
+            channel=self.name,
+            sender_id=sender_id,
+            chat_id=chat_id,
+            content=content,
+            media=media or [],
+            metadata=msg_meta,
+        )
+        await self.bus.publish_inbound(msg)
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str, client=None) -> str | None:
         """Sync helper for adding reaction (runs in thread pool). Returns reaction_id."""
@@ -894,20 +986,43 @@ class FeishuChannel(BaseChannel):
                 return
 
             # Forward to message bus
-            reply_to = chat_id if chat_type == "group" else sender_id
-            await self._handle_message(
-                sender_id=sender_id,
-                chat_id=reply_to,
-                content=content,
-                media=media_paths,
-                metadata={
-                    "message_id": message_id,
-                    "reaction_id": reaction_id,
-                    "chat_type": chat_type,
-                    "msg_type": msg_type,
-                    "account_id": account_id,
-                }
-            )
+            base_metadata = {
+                "message_id": message_id,
+                "reaction_id": reaction_id,
+                "chat_type": chat_type,
+                "msg_type": msg_type,
+                "account_id": account_id,
+            }
+            if chat_type == "group":
+                # Extract mentions from event
+                mentions_raw: list[dict] = []
+                if hasattr(message, "mentions") and message.mentions:
+                    mentions_raw = [
+                        {
+                            "key": m.key,
+                            "id": {"open_id": m.id.open_id if m.id else ""},
+                            "name": m.name,
+                        }
+                        for m in message.mentions
+                    ]
+                await self._handle_group_message(
+                    sender_id=sender_id,
+                    chat_id=chat_id,
+                    content=content,
+                    message_id=message_id,
+                    mentions=mentions_raw,
+                    account_id=account_id,
+                    media=media_paths,
+                    metadata=base_metadata,
+                )
+            else:
+                await self._handle_message(
+                    sender_id=sender_id,
+                    chat_id=sender_id,
+                    content=content,
+                    media=media_paths,
+                    metadata=base_metadata,
+                )
 
         except Exception as e:
             logger.error("Error processing Feishu message: {}", e)
