@@ -524,6 +524,7 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        openviking_config=config.tools.openviking,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -1018,6 +1019,7 @@ def cron_run(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        openviking_config=config.tools.openviking,
     )
 
     store_path = get_data_dir() / "cron" / "jobs.json"
