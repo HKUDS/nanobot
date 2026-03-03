@@ -30,7 +30,7 @@ dependencies = [
     "rich>=14.0.0,<15.0.0",
     "croniter>=6.0.0,<7.0.0",
     "dingtalk-stream>=0.24.0,<1.0.0",
-    "python-telegram-bot[socks]>=22.0,<23.0",
+    "python-telegram-bot[socks] @ git+https://github.com/python-telegram-bot/python-telegram-bot.git@master",
     "lark-oapi>=1.5.0,<2.0.0",
     "socksio>=1.0.0,<2.0.0",
     "python-socketio>=5.16.0,<6.0.0",
@@ -62,6 +62,9 @@ nanobot = "nanobot.cli.commands:app"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["nanobot"]
