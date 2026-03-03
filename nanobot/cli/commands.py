@@ -258,9 +258,10 @@ def gateway(
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
     
+    from loguru import logger
+
     if verbose:
         # Configure enhanced logging
-        from loguru import logger
         from nanobot.logging_config import setup_agent_logging, get_log_level_from_env
         
         # Check if LOGURU_LEVEL is set, otherwise use DEBUG for verbose
