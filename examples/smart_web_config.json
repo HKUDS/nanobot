@@ -1,0 +1,47 @@
+{
+  "comment": "Example configuration for Smart Web Tools (AI-powered extraction like Claude Code)",
+
+  "providers": {
+    "bedrock": {
+      "apiBase": "us-east-1"
+    }
+  },
+
+  "agents": {
+    "defaults": {
+      "model": "bedrock/anthropic.claude-sonnet-4-6",
+      "maxTokens": 8192,
+      "temperature": 0.7
+    }
+  },
+
+  "tools": {
+    "web": {
+      "comment": "Web tools configuration",
+
+      "search": {
+        "comment": "Traditional web search (Brave API)",
+        "apiKey": "YOUR_BRAVE_API_KEY_HERE",
+        "maxResults": 5
+      },
+
+      "smart": {
+        "comment": "AI-powered web extraction (inspired by Claude Code)",
+        "enabled": true,
+        "extractionModel": "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
+        "maxChars": 50000,
+        "cacheTtl": 900
+      },
+
+      "proxy": null
+    },
+
+    "restrictToWorkspace": false
+  },
+
+  "channels": {
+    "telegram": {
+      "enabled": false
+    }
+  }
+}

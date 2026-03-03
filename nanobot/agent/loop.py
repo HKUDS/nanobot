@@ -22,13 +22,14 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.agent.tools.smart_web import SmartWebFetchTool, SmartWebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, SmartWebConfig
     from nanobot.cron.service import CronService
 
 
@@ -65,8 +66,9 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        smart_web_config: SmartWebConfig | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, SmartWebConfig
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -80,6 +82,7 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
+        self.smart_web_config = smart_web_config or SmartWebConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
@@ -125,6 +128,24 @@ class AgentLoop:
         ))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
+
+        # Register smart web tools if enabled (AI-powered extraction like Claude Code)
+        if self.smart_web_config.enabled:
+            logger.info("Smart web tools enabled (AI-powered extraction)")
+            smart_fetch = SmartWebFetchTool(
+                llm_provider=self.provider,
+                extraction_model=self.smart_web_config.extraction_model or None,
+                max_chars=self.smart_web_config.max_chars,
+                proxy=self.web_proxy,
+                cache_ttl=self.smart_web_config.cache_ttl
+            )
+            self.tools.register(smart_fetch)
+            self.tools.register(SmartWebSearchTool(
+                llm_provider=self.provider,
+                smart_fetch_tool=smart_fetch,
+                extraction_model=self.smart_web_config.extraction_model or None
+            ))
+
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:

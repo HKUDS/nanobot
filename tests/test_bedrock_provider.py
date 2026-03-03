@@ -11,7 +11,7 @@ def test_bedrock_spec_exists():
     assert spec is not None
     assert spec.name == "bedrock"
     assert spec.litellm_prefix == "bedrock"
-    assert spec.supports_prompt_caching is True
+    assert spec.supports_prompt_caching is False  # Disabled due to region/model availability
     assert spec.display_name == "AWS Bedrock"
 
 
@@ -50,9 +50,9 @@ def test_bedrock_skip_prefixes():
 
 
 def test_bedrock_cache_control_support():
-    """Verify Claude models support prompt caching."""
+    """Verify prompt caching is disabled (varies by region/model)."""
     spec = find_by_name("bedrock")
-    assert spec.supports_prompt_caching is True
+    assert spec.supports_prompt_caching is False  # Disabled to avoid errors
 
 
 def test_bedrock_not_gateway():

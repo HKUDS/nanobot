@@ -289,11 +289,21 @@ class WebSearchConfig(Base):
     max_results: int = 5
 
 
+class SmartWebConfig(Base):
+    """Smart web tools configuration (AI-powered extraction like Claude Code)."""
+
+    enabled: bool = False  # Enable smart_web_fetch and smart_web_search tools
+    extraction_model: str = ""  # Model for content extraction (empty = use default, recommend fast model like Haiku)
+    max_chars: int = 50000  # Maximum characters to fetch from URLs
+    cache_ttl: int = 900  # Cache TTL in seconds (default 15 minutes)
+
+
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    smart: SmartWebConfig = Field(default_factory=SmartWebConfig)  # AI-powered web tools
 
 
 class ExecToolConfig(Base):
