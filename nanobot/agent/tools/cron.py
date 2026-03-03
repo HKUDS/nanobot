@@ -1,5 +1,6 @@
 """Cron tool for scheduling reminders and tasks."""
 
+from contextvars import ContextVar
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
@@ -14,11 +15,20 @@ class CronTool(Tool):
         self._cron = cron_service
         self._channel = ""
         self._chat_id = ""
+        self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
 
     def set_context(self, channel: str, chat_id: str) -> None:
         """Set the current session context for delivery."""
         self._channel = channel
         self._chat_id = chat_id
+
+    def set_cron_context(self, active: bool):
+        """Mark whether the tool is executing inside a cron job callback."""
+        return self._in_cron_context.set(active)
+
+    def reset_cron_context(self, token) -> None:
+        """Restore previous cron context."""
+        self._in_cron_context.reset(token)
 
     @property
     def name(self) -> str:
@@ -72,6 +82,8 @@ class CronTool(Tool):
         **kwargs: Any,
     ) -> str:
         if action == "add":
+            if self._in_cron_context.get():
+                return "Error: cannot schedule new jobs from within a cron job execution"
             return self._add_job(message, every_seconds, cron_expr, tz, at)
         elif action == "list":
             return self._list_jobs()
