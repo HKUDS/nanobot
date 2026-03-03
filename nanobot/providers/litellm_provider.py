@@ -65,6 +65,21 @@ class LiteLLMProvider(LLMProvider):
         spec = self._gateway or find_by_model(model)
         if not spec:
             return
+
+        # Special handling for AWS Bedrock
+        if spec.name == "bedrock":
+            # If api_key provided, treat as AWS_ACCESS_KEY_ID (optional)
+            if api_key:
+                os.environ.setdefault("AWS_ACCESS_KEY_ID", api_key)
+
+            # Map api_base (region) to AWS_REGION_NAME
+            effective_base = api_base or spec.default_api_base
+            if effective_base:
+                os.environ.setdefault("AWS_REGION_NAME", effective_base)
+
+            # AWS_SECRET_ACCESS_KEY comes from env or ~/.aws/credentials
+            return
+
         if not spec.env_key:
             # OAuth/provider-only specs (for example: openai_codex)
             return
@@ -86,6 +101,13 @@ class LiteLLMProvider(LLMProvider):
 
     def _resolve_model(self, model: str) -> str:
         """Resolve model name by applying provider/gateway prefixes."""
+        # Special handling for Bedrock ARNs (cross-region inference profiles)
+        if model.startswith("arn:aws:bedrock:"):
+            # Cross-region inference profile ARN format
+            if not model.startswith("bedrock/"):
+                return f"bedrock/{model}"
+            return model
+
         if self._gateway:
             # Gateway mode: apply gateway prefix, skip provider-specific prefixes
             prefix = self._gateway.litellm_prefix
@@ -245,9 +267,25 @@ class LiteLLMProvider(LLMProvider):
             response = await acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
+            error_msg = str(e)
+
+            # Provide helpful hints for common Bedrock errors
+            if "bedrock" in self.default_model.lower() or "arn:aws:bedrock:" in self.default_model:
+                if "credentials" in error_msg.lower() or "access" in error_msg.lower():
+                    error_msg = (
+                        f"AWS Bedrock authentication failed: {error_msg}\n\n"
+                        "Troubleshooting:\n"
+                        "1. Configure AWS credentials: `aws configure`\n"
+                        "2. Set environment variables: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY\n"
+                        "3. Use IAM role (EC2/ECS)\n"
+                        "4. Check IAM permissions include bedrock:InvokeModel"
+                    )
+                elif "region" in error_msg.lower():
+                    error_msg = f"AWS Bedrock region error: {error_msg}\n\nSet region in config: providers.bedrock.apiBase = \"us-east-1\""
+
             # Return error as content for graceful handling
             return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
+                content=f"Error calling LLM: {error_msg}",
                 finish_reason="error",
             )
 

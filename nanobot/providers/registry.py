@@ -180,6 +180,27 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         supports_prompt_caching=True,
     ),
 
+    # AWS Bedrock: Claude models via AWS infrastructure (uses IAM/boto3 auth)
+    ProviderSpec(
+        name="bedrock",
+        keywords=("bedrock", "aws", "amazon"),
+        env_key="",                          # No API key - uses AWS credential chain
+        display_name="AWS Bedrock",
+        litellm_prefix="bedrock",
+        skip_prefixes=("bedrock/",),
+        env_extras=(
+            ("AWS_REGION_NAME", "{api_base}"),  # Map api_base → AWS_REGION_NAME
+        ),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="us-east-1",
+        strip_model_prefix=False,
+        model_overrides=(),
+        supports_prompt_caching=False,       # Prompt caching availability varies by region/model
+    ),
+
     # OpenAI: LiteLLM recognizes "gpt-*" natively, no prefix needed.
     ProviderSpec(
         name="openai",

@@ -664,6 +664,7 @@ Config file: `~/.nanobot/config.json`
 | `custom` | Any OpenAI-compatible endpoint (direct, no LiteLLM) | — |
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
+| `bedrock` | LLM (Claude via AWS Bedrock) | IAM role or [AWS credentials](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html) |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
@@ -768,6 +769,77 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
   }
 }
 ```
+
+</details>
+
+<details>
+<summary><b>AWS Bedrock (Claude models)</b></summary>
+
+AWS Bedrock provides Claude models through AWS infrastructure with benefits like IAM-based authentication, regional deployment, cross-region failover, and integration with AWS services.
+
+**Setup AWS Credentials** (choose one):
+```bash
+# Option 1: AWS CLI
+aws configure
+
+# Option 2: Environment Variables
+export AWS_ACCESS_KEY_ID="your-key"
+export AWS_SECRET_ACCESS_KEY="your-secret"
+
+# Option 3: IAM Role (EC2/ECS/Lambda) - no config needed
+```
+
+**Configuration**:
+```json
+{
+  "providers": {
+    "bedrock": {
+      "apiBase": "us-east-1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0"
+    }
+  }
+}
+```
+
+**Supported Models**:
+- `bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0` (recommended)
+- `bedrock/anthropic.claude-3-opus-20240229-v1:0`
+- `bedrock/anthropic.claude-3-sonnet-20240229-v1:0`
+- `bedrock/anthropic.claude-3-haiku-20240307-v1:0`
+
+**Note**: Model IDs in Bedrock differ from Anthropic's direct API. Check [AWS Bedrock model documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/model-ids.html) for the full list.
+
+**Cross-Region Inference** (optional, for high availability):
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+    }
+  }
+}
+```
+
+**IAM Permissions Required**:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["bedrock:InvokeModel"],
+    "Resource": "*"
+  }]
+}
+```
+
+**Important**:
+1. Enable model access in [AWS Bedrock Console](https://console.aws.amazon.com/bedrock/) before use
+2. Not all models are available in all regions - check [region availability](https://docs.aws.amazon.com/bedrock/latest/userguide/models-regions.html)
+3. Bedrock uses AWS credential chain (IAM roles, ~/.aws/credentials, env vars) - no API key needed
 
 </details>
 
