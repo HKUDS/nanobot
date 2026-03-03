@@ -6,6 +6,7 @@ import select
 import signal
 import sys
 from pathlib import Path
+from typing import TypedDict
 
 import typer
 from prompt_toolkit import PromptSession
@@ -198,15 +199,29 @@ def onboard():
 
 
 
-def _make_provider(config: Config):
-    """Create the appropriate LLM provider from config."""
+class AgentRuntimeConfig(TypedDict):
+    """Runtime configuration for an agent (main or subagent)."""
+    provider: object  # LLMProvider, use object to avoid circular import
+    model: str
+    max_tokens: int
+    temperature: float
+    reasoning_effort: str | None
+
+
+def _create_provider(config: Config, model: str, provider: str | None = None):
+    """Create LLM provider for given model. Raises error if no API key.
+
+    Args:
+        config: Config object
+        model: Model name
+        provider: Provider override (e.g., "zhipu", "dashscope"). None or "auto" means auto-detect.
+    """
     from nanobot.providers.custom_provider import CustomProvider
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
-    model = config.agents.defaults.model
-    provider_name = config.get_provider_name(model)
-    p = config.get_provider(model)
+    provider_name = config.get_provider_name(model, provider)
+    p = config.get_provider(model, provider)
 
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
@@ -216,7 +231,7 @@ def _make_provider(config: Config):
     if provider_name == "custom":
         return CustomProvider(
             api_key=p.api_key if p else "no-key",
-            api_base=config.get_api_base(model) or "http://localhost:8000/v1",
+            api_base=config.get_api_base(model, provider) or "http://localhost:8000/v1",
             default_model=model,
         )
 
@@ -229,11 +244,36 @@ def _make_provider(config: Config):
 
     return LiteLLMProvider(
         api_key=p.api_key if p else None,
-        api_base=config.get_api_base(model),
+        api_base=config.get_api_base(model, provider),
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=provider_name,
     )
+
+
+def _get_agent_config(config: Config, agent_cfg, shared_provider=None) -> AgentRuntimeConfig:
+    """Build runtime config for an agent.
+
+    Args:
+        config: Full config object
+        agent_cfg: AgentDefaults object (main or subagent)
+        shared_provider: Existing provider to reuse if same provider type
+    """
+    # Reuse provider if same provider type (model can differ)
+    main_provider_name = config.get_provider_name(config.agents.defaults.model, config.agents.defaults.provider)
+    agent_provider_name = config.get_provider_name(agent_cfg.model, agent_cfg.provider)
+    if shared_provider and agent_provider_name == main_provider_name:
+        provider = shared_provider
+    else:
+        provider = _create_provider(config, agent_cfg.model, agent_cfg.provider)
+
+    return {
+        "provider": provider,
+        "model": agent_cfg.model,
+        "max_tokens": agent_cfg.max_tokens,
+        "temperature": agent_cfg.temperature,
+        "reasoning_effort": agent_cfg.reasoning_effort,
+    }
 
 
 # ============================================================================
@@ -265,8 +305,11 @@ def gateway(
     config = load_config()
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
-    provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
+
+    # Get agent configs (main + subagent)
+    main_cfg = _get_agent_config(config, config.agents.defaults)
+    sub_cfg = _get_agent_config(config, config.agents.subagent or config.agents.defaults, shared_provider=main_cfg["provider"])
 
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
@@ -275,14 +318,10 @@ def gateway(
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
-        provider=provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        temperature=config.agents.defaults.temperature,
-        max_tokens=config.agents.defaults.max_tokens,
+        agent_config=main_cfg,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
-        reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
@@ -291,6 +330,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        subagent_config=sub_cfg,
     )
 
     # Set cron callback (needs agent)
@@ -380,7 +420,7 @@ def gateway(
     hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
-        provider=provider,
+        provider=main_cfg["provider"],
         model=agent.model,
         on_execute=on_heartbeat_execute,
         on_notify=on_heartbeat_notify,
@@ -445,7 +485,10 @@ def agent(
     sync_workspace_templates(config.workspace_path)
 
     bus = MessageBus()
-    provider = _make_provider(config)
+
+    # Get agent configs (main + subagent)
+    main_cfg = _get_agent_config(config, config.agents.defaults)
+    sub_cfg = _get_agent_config(config, config.agents.subagent or config.agents.defaults, shared_provider=main_cfg["provider"])
 
     # Create cron service for tool usage (no callback needed for CLI unless running)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
@@ -458,14 +501,10 @@ def agent(
 
     agent_loop = AgentLoop(
         bus=bus,
-        provider=provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        temperature=config.agents.defaults.temperature,
-        max_tokens=config.agents.defaults.max_tokens,
+        agent_config=main_cfg,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
-        reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
@@ -473,6 +512,7 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        subagent_config=sub_cfg,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
