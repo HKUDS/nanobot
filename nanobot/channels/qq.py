@@ -1,6 +1,7 @@
 """QQ channel implementation using botpy SDK."""
 
 import asyncio
+import random
 from collections import deque
 from typing import TYPE_CHECKING
 
@@ -102,11 +103,13 @@ class QQChannel(BaseChannel):
             return
         try:
             msg_id = msg.metadata.get("message_id")
+            msg_seq = random.randint(1, 1000000)
             await self._client.api.post_c2c_message(
                 openid=msg.chat_id,
                 msg_type=0,
                 content=msg.content,
                 msg_id=msg_id,
+                msg_seq=msg_seq,
             )
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
