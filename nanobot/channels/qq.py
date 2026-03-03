@@ -31,7 +31,8 @@ def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
 
     class _Bot(botpy.Client):
         def __init__(self):
-            super().__init__(intents=intents)
+            # Disable botpy's file log — nanobot uses loguru; default "botpy.log" fails on read-only fs
+            super().__init__(intents=intents, ext_handlers=False)
 
         async def on_ready(self):
             logger.info("QQ bot ready: {}", self.robot.name)
