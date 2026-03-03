@@ -94,6 +94,7 @@ class WhatsAppChannel(BaseChannel):
 
     async def _handle_bridge_message(self, raw: str) -> None:
         """Handle a message from the bridge."""
+        logger.debug("Bridge raw message: {}", raw[:200])
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
