@@ -21,99 +21,6 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import WebChatConfig
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-@dataclass(slots=True)
-class ChatRecord:
-    id: str
-    title: str
-    created_at: str
-    history: list[dict[str, str]]
-
-class ChatStore:
-    def __init__(self, config: WebChatConfig) -> None:
-        self._config = config
-        self._state_path = Path.home() / ".nanobot" / "workspace" / "web_chats.json"
-        self._lock = threading.RLock()
-        self._chats: dict[str, ChatRecord] = {}
-        self._state_path.parent.mkdir(parents=True, exist_ok=True)
-        self._load()
-
-    def _load(self) -> None:
-        if not self._state_path.exists():
-            return
-        try:
-            raw = json.loads(self._state_path.read_text(encoding="utf-8"))
-            for item in raw.get("chats", []):
-                chat = ChatRecord(
-                    id=item["id"],
-                    title=item["title"],
-                    created_at=item["created_at"],
-                    history=item.get("history", []),
-                )
-                self._chats[chat.id] = chat
-        except Exception as e:
-            logger.error(f"Failed to load chat store: {e}")
-
-    def _save(self) -> None:
-        payload = {
-            "chats": [
-                {
-                    "id": t.id,
-                    "title": t.title,
-                    "created_at": t.created_at,
-                    "history": t.history,
-                }
-                for t in sorted(self._chats.values(), key=lambda x: x.created_at, reverse=True)
-            ]
-        }
-        self._state_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-    def list_chats(self) -> list[dict[str, Any]]:
-        with self._lock:
-            rows = sorted(self._chats.values(), key=lambda x: x.created_at, reverse=True)
-            return [
-                {
-                    "id": t.id,
-                    "title": t.title,
-                    "created_at": t.created_at,
-                }
-                for t in rows
-            ]
-
-    def create_chat(self, title: str) -> dict[str, Any]:
-        with self._lock:
-            chat_id = uuid.uuid4().hex[:12]
-            chat = ChatRecord(
-                id=chat_id,
-                title=title,
-                created_at=_utc_now(),
-                history=[],
-            )
-            self._chats[chat_id] = chat
-            self._save()
-            return {
-                "id": chat.id,
-                "title": chat.title,
-                "created_at": chat.created_at,
-            }
-
-    def get_messages(self, chat_id: str) -> list[dict[str, str]]:
-        with self._lock:
-            chat = self._chats.get(chat_id)
-            if not chat:
-                raise KeyError(chat_id)
-            return list(chat.history)
-
-    def append_message(self, chat_id: str, role: str, content: str) -> None:
-        with self._lock:
-            chat = self._chats.get(chat_id)
-            if not chat:
-                raise KeyError(chat_id)
-            chat.history.append({"role": role, "content": content})
-            self._save()
-
 
 HTML_PAGE = """<!doctype html>
 <html lang="en">
@@ -229,8 +136,8 @@ HTML_PAGE = """<!doctype html>
       line-height: 1.35;
       animation: fadein .2s ease;
     }
-    .user { align-self: flex-end; background: #b0b8d7f; border-color: var(--line); }
-    .assistant { align-self: flex-start; background: #7777777f; }
+    .user { align-self: flex-end; background: #94a1b933; border-color: var(--line); }
+    .assistant { align-self: flex-start; background: #7f7f7f1f; }
     .system { align-self: center; font-size: 12px; }
     .error { border-color: #fecdd3; background: #fff1f27f; color: var(--danger); }
 
@@ -329,32 +236,46 @@ HTML_PAGE = """<!doctype html>
       }
     }
 
-    async function loadChats() {
-      const r = await fetch('/api/chats');
-      chats = await r.json();
+    function loadChats() {
+      const data = localStorage.getItem('webchat_chats');
+      chats = data ? JSON.parse(data) : [];
       if (!activeChatId && chats.length && window.innerWidth > 768) {
         activeChatId = chats[0].id;
       }
       renderChats();
-      if (activeChatId) await selectChat(activeChatId);
+      if (activeChatId) selectChat(activeChatId);
     }
 
-    async function refreshMessages() {
-      if (!activeChatId) return;
-      const r = await fetch(`/api/chats/${activeChatId}/messages`);
-      const rows = await r.json();
+    function saveChats(list) {
+      localStorage.setItem('webchat_chats', JSON.stringify(list));
+    }
 
+    function loadMessages(id) {
+      const data = localStorage.getItem(`webchat_messages_${id}`);
+      try {
+        return data ? JSON.parse(data) : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveMessages(id, msgs) {
+      localStorage.setItem(`webchat_messages_${id}`, JSON.stringify(msgs));
+    }
+
+    function refreshMessages() {
+      if (!activeChatId) return;
+      const data = localStorage.getItem(`webchat_messages_${activeChatId}`);
+      const rows = data ? JSON.parse(data) : [];
       messages.innerHTML = '';
       if (!rows.length) {
         addMessage('system', 'No messages yet. Start the chat.');
       } else {
-        for (const m of rows) {
-          addMessage(m.role, m.content, m.role === 'assistant_error' ? 'error' : '');
-        }
+        rows.forEach(m => addMessage(m.role, m.content, m.role === 'assistant_error' ? 'error' : ''));
       }
     }
 
-    async function selectChat(chatId) {
+    function selectChat(chatId) {
       activeChatId = chatId;
       renderChats();
       const t = chats.find(x => x.id === chatId);
@@ -363,7 +284,7 @@ HTML_PAGE = """<!doctype html>
       shell.classList.add('show-chat');
       shell.classList.remove('show-list');
 
-      await refreshMessages();
+      refreshMessages();
     }
 
     function setupSSE() {
@@ -375,6 +296,9 @@ HTML_PAGE = """<!doctype html>
           if (msg.chat_id === activeChatId) {
             const sys = messages.querySelector('.msg.system');
             if (sys) sys.remove();
+            const msgs = loadMessages(activeChatId);
+            msgs.push(msg);
+            saveMessages(activeChatId, msgs);
             addMessage(msg.role, msg.content, msg.role === 'assistant_error' ? 'error' : '');
           }
         } catch (e) {}
@@ -389,19 +313,17 @@ HTML_PAGE = """<!doctype html>
       shell.classList.remove('show-chat');
     };
 
-    newChatForm.onsubmit = async (ev) => {
+    newChatForm.onsubmit = (ev) => {
       ev.preventDefault();
       const title = chatTitleInput.value.trim();
       if (!title) return;
-      const r = await fetch('/api/chats', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({title})
-      });
-      const created = await r.json();
+      const id = ((Math.floor(512 * (1 + Math.random())) + (Date.now() & 0x3FF)) * Date.now()).toString(16);
+      const newChat = { id, title, created_at: new Date().toISOString().replace('T', ' ').replace('Z', '') };
+      chats.push(newChat);
+      saveChats(chats);
+      renderChats();
       chatTitleInput.value = '';
-      await loadChats();
-      await selectChat(created.id);
+      selectChat(newChat.id);
     };
 
     sendForm.onsubmit = async (ev) => {
@@ -412,6 +334,11 @@ HTML_PAGE = """<!doctype html>
 
       const sys = messages.querySelector('.msg.system');
       if (sys) sys.remove();
+
+      // Add user message locally
+      const msgs = loadMessages(activeChatId);
+      msgs.push({ role: 'user', content });
+      saveMessages(activeChatId, msgs);
       addMessage('user', content);
 
       promptBox.value = '';
@@ -419,8 +346,8 @@ HTML_PAGE = """<!doctype html>
 
       const r = await fetch(`/api/chats/${activeChatId}/messages`, {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({content})
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content })
       });
 
       if (!r.ok) {
@@ -447,7 +374,6 @@ class WebChatChannel(BaseChannel):
 
     def __init__(self, config: WebChatConfig, bus: MessageBus):
         super().__init__(config, bus)
-        self.store = ChatStore(config)
         self._server = None
         self._server_thread = None
         self._sse_queues = []
@@ -467,25 +393,6 @@ class WebChatChannel(BaseChannel):
         def events():
             return Response(self._sse_generator(), mimetype='text/event-stream')
 
-        @self.app.route('/api/chats', methods=['GET'])
-        def list_chats():
-            return jsonify(self.store.list_chats())
-
-        @self.app.route('/api/chats', methods=['POST'])
-        def create_chat():
-            data = request.json
-            title = data.get('title', '').strip()
-            if not title:
-                return jsonify({"error": "title is required"}), 400
-            created = self.store.create_chat(title)
-            return jsonify(created), 201
-
-        @self.app.route('/api/chats/<chat_id>/messages', methods=['GET'])
-        def get_messages(chat_id):
-            try:
-                return jsonify(self.store.get_messages(chat_id))
-            except KeyError:
-                return jsonify({"error": "chat not found"}), 404
 
         @self.app.route('/api/chats/<chat_id>/messages', methods=['POST'])
         async def post_message(chat_id):
@@ -496,7 +403,6 @@ class WebChatChannel(BaseChannel):
 
             try:
                 # Use the BaseChannel._handle_message directly via await
-                self.store.append_message(chat_id, "user", content)
                 await self._handle_message(
                     sender_id="web-user",
                     chat_id=chat_id,
@@ -561,8 +467,4 @@ class WebChatChannel(BaseChannel):
         chat_id = msg.chat_id
         content = msg.content
 
-        try:
-            self.store.append_message(chat_id, "assistant", content)
-            self._notify_sse(chat_id, "assistant", content)
-        except KeyError:
-            logger.warning(f"Received message for unknown chat {chat_id}")
+        self._notify_sse(chat_id, "assistant", content)
