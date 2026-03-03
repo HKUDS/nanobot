@@ -132,9 +132,10 @@ class TelegramChannel(BaseChannel):
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
         # Streaming draft support
-        self._draft_ids: dict[str, int] = {}  # chat_id -> current draft_id
+        self._draft_ids: dict[str, int] = {}  # chat_id -> base draft_id (increments per message)
         self._draft_contents: dict[str, str] = {}  # chat_id -> last sent draft content
         self._draft_locks: dict[str, asyncio.Lock] = {}  # chat_id -> lock for draft operations
+        self._message_counters: dict[str, int] = {}  # chat_id -> message counter for unique draft_ids
 
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -241,8 +242,24 @@ class TelegramChannel(BaseChannel):
             await self._send_draft(msg)
             return
 
-        # Final message - stop typing and clear any draft
+        # Final message - stop typing
         self._stop_typing(msg.chat_id)
+
+        # Check if we need to finalize a draft
+        try:
+            chat_id = int(msg.chat_id)
+        except ValueError:
+            logger.error("Invalid chat_id: {}", msg.chat_id)
+            return
+
+        had_draft = chat_id in self._draft_contents and self._draft_contents[chat_id]
+
+        if had_draft:
+            # Finalize draft (send permanent message and clear draft state)
+            await self._finalize_draft(msg)
+            return  # Important: return to avoid duplicate send
+
+        # No draft - proceed with normal message sending
         await self._clear_draft(msg.chat_id)
 
         try:
@@ -359,6 +376,11 @@ class TelegramChannel(BaseChannel):
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
 
+        # Clear draft state when receiving new message to avoid false "had_draft" detection
+        # This prevents the bug where residual draft state causes messages not to send
+        str_chat_id = str(chat_id)
+        await self._clear_draft(str_chat_id)
+
         # Build content from text and/or media
         content_parts = []
         media_paths = []
@@ -423,8 +445,6 @@ class TelegramChannel(BaseChannel):
         content = "\n".join(content_parts) if content_parts else "[empty message]"
 
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
-
-        str_chat_id = str(chat_id)
 
         # Telegram media groups: buffer briefly, forward as one aggregated turn.
         if media_group_id := getattr(message, "media_group_id", None):
@@ -531,11 +551,18 @@ class TelegramChannel(BaseChannel):
             self._draft_locks[chat_id] = asyncio.Lock()
 
         async with self._draft_locks[chat_id]:
-            # Get or create draft_id for this chat (increments for each new conversation)
-            if chat_id not in self._draft_ids:
-                self._draft_ids[chat_id] = int(time.time() * 1000) % 1000000
-
-            draft_id = self._draft_ids[chat_id]
+            # Generate unique draft_id for each message (using counter + timestamp)
+            # This ensures each message gets its own draft_id, preventing overlap
+            if chat_id not in self._message_counters:
+                self._message_counters[chat_id] = 0
+            
+            # Only increment counter when content is empty (new message starting)
+            if chat_id not in self._draft_contents or not self._draft_contents.get(chat_id):
+                self._message_counters[chat_id] += 1
+            
+            # Create unique draft_id: base_timestamp + message_counter
+            base_id = int(time.time() * 1000) % 1000000
+            draft_id = base_id + self._message_counters[chat_id] * 1000
 
             # Skip if content hasn't changed significantly
             last_content = self._draft_contents.get(chat_id, "")
@@ -558,6 +585,7 @@ class TelegramChannel(BaseChannel):
                     parse_mode="HTML",
                 )
                 self._draft_contents[chat_id] = msg.content
+                self._draft_ids[chat_id] = draft_id  # Store current draft_id for finalization
             except Exception as e:
                 logger.debug("Draft send failed (non-critical): {}", e)
 
@@ -566,10 +594,50 @@ class TelegramChannel(BaseChannel):
         try:
             cid = int(chat_id)
             self._draft_contents.pop(cid, None)
-            # Generate new draft_id for next conversation
-            self._draft_ids[cid] = int(time.time() * 1000) % 1000000
+            self._draft_ids.pop(cid, None)
+            # Keep message counter for next message (don't reset)
         except ValueError:
             pass
+
+    async def _finalize_draft(self, msg: OutboundMessage) -> None:
+        """Finalize draft by sending a permanent message to replace the temporary draft.
+
+        This prevents Telegram from recycling the draft message.
+        """
+        try:
+            chat_id = int(msg.chat_id)
+        except ValueError:
+            logger.error("Invalid chat_id: {}", msg.chat_id)
+            return
+
+        # Check if we had a draft for this chat
+        had_draft = chat_id in self._draft_contents and self._draft_contents[chat_id]
+
+        # If we had a draft, send the final message to make it permanent
+        if had_draft:
+            logger.debug("Finalizing draft for chat {}", chat_id)
+
+            # Send the final permanent message
+            if msg.content and msg.content != "[empty message]":
+                try:
+                    html = _markdown_to_telegram_html(msg.content)
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=html,
+                        parse_mode="HTML",
+                    )
+                except Exception as e:
+                    logger.warning("HTML parse failed in finalize, falling back to plain text: {}", e)
+                    try:
+                        await self._app.bot.send_message(
+                            chat_id=chat_id,
+                            text=msg.content,
+                        )
+                    except Exception as e2:
+                        logger.error("Error sending final message: {}", e2)
+
+        # Clear draft state regardless (including draft_id to prevent reuse)
+        await self._clear_draft(msg.chat_id)
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
