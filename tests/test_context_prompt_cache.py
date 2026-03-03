@@ -39,8 +39,8 @@ def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) ->
     assert prompt1 == prompt2
 
 
-def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
-    """Runtime metadata should be a separate user message before the actual user message."""
+def test_runtime_context_is_merged_into_untrusted_user_message(tmp_path) -> None:
+    """Runtime metadata should be merged into the current user message payload."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -54,13 +54,11 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert messages[0]["role"] == "system"
     assert "## Current Session" not in messages[0]["content"]
 
-    assert messages[-2]["role"] == "user"
-    runtime_content = messages[-2]["content"]
-    assert isinstance(runtime_content, str)
-    assert ContextBuilder._RUNTIME_CONTEXT_TAG in runtime_content
-    assert "Current Time:" in runtime_content
-    assert "Channel: cli" in runtime_content
-    assert "Chat ID: direct" in runtime_content
-
     assert messages[-1]["role"] == "user"
-    assert messages[-1]["content"] == "Return exactly: OK"
+    merged_content = messages[-1]["content"]
+    assert isinstance(merged_content, str)
+    assert ContextBuilder._RUNTIME_CONTEXT_TAG in merged_content
+    assert "Current Time:" in merged_content
+    assert "Channel: cli" in merged_content
+    assert "Chat ID: direct" in merged_content
+    assert "Return exactly: OK" in merged_content

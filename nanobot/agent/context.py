@@ -102,6 +102,16 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
         return "\n\n".join(parts) if parts else ""
 
+    def _merge_runtime_context(
+        self,
+        runtime_ctx: str,
+        user_content: str | list[dict[str, Any]],
+    ) -> str | list[dict[str, Any]]:
+        """Merge runtime metadata into the current user message content."""
+        if isinstance(user_content, str):
+            return f"{runtime_ctx}\n\n{user_content}"
+        return [{"type": "text", "text": runtime_ctx}, *user_content]
+
     def build_messages(
         self,
         history: list[dict[str, Any]],
@@ -114,18 +124,12 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id)
         user_content = self._build_user_content(current_message, media)
-
-        # Merge runtime context and user content into a single user message
-        # to avoid consecutive same-role messages that some providers reject.
-        if isinstance(user_content, str):
-            merged = f"{runtime_ctx}\n\n{user_content}"
-        else:
-            merged = [{"type": "text", "text": runtime_ctx}] + user_content
+        merged_content = self._merge_runtime_context(runtime_ctx, user_content)
 
         return [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
             *history,
-            {"role": "user", "content": merged},
+            {"role": "user", "content": merged_content},
         ]
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
