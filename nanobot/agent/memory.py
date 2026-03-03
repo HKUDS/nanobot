@@ -26,8 +26,8 @@ _SAVE_MEMORY_TOOL = [
                 "properties": {
                     "history_entry": {
                         "type": "string",
-                        "description": "A paragraph (2-5 sentences) summarizing key events/decisions/topics. "
-                        "Start with [YYYY-MM-DD HH:MM]. Include detail useful for grep search.",
+                        "description": "One or two concise sentences summarizing key outcomes only. "
+                        "Start with [YYYY-MM-DD HH:MM]. Omit tool names, internal steps, and verbose logs; keep only facts useful for grep.",
                     },
                     "memory_update": {
                         "type": "string",
@@ -45,10 +45,11 @@ _SAVE_MEMORY_TOOL = [
 class MemoryStore:
     """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, history_max_chars: int = 0):
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
+        self.history_max_chars = history_max_chars  # 0 = no limit
 
     def read_long_term(self) -> str:
         if self.memory_file.exists():
@@ -61,6 +62,14 @@ class MemoryStore:
     def append_history(self, entry: str) -> None:
         with open(self.history_file, "a", encoding="utf-8") as f:
             f.write(entry.rstrip() + "\n\n")
+        if self.history_max_chars > 0 and self.history_file.exists():
+            text = self.history_file.read_text(encoding="utf-8")
+            if len(text) > self.history_max_chars:
+                trimmed = text[-self.history_max_chars :]
+                first_nl = trimmed.find("\n")
+                start = first_nl + 1 if first_nl >= 0 else 0
+                self.history_file.write_text(trimmed[start :], encoding="utf-8")
+                logger.debug("HISTORY.md trimmed to {} chars", self.history_max_chars)
 
     def get_memory_context(self) -> str:
         long_term = self.read_long_term()
@@ -113,7 +122,7 @@ class MemoryStore:
         try:
             response = await provider.chat(
                 messages=[
-                    {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+                    {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool. Keep history_entry short (1-2 sentences, key facts only). Do not list every tool or minor detail."},
                     {"role": "user", "content": prompt},
                 ],
                 tools=_SAVE_MEMORY_TOOL,
