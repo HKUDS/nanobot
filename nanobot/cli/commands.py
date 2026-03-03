@@ -6,6 +6,7 @@ import signal
 from pathlib import Path
 import select
 import sys
+import threading
 
 import typer
 from rich.console import Console
@@ -488,6 +489,11 @@ def agent(
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    timeout_s: int = typer.Option(
+        180,
+        "--timeout",
+        help="Timeout in seconds for single-message mode (--message). Use 0 to disable.",
+    ),
 ):
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config, get_data_dir
@@ -565,13 +571,46 @@ def agent(
     if message:
         # Single message mode — direct call, no bus needed
         async def run_once():
-            with _thinking_ctx():
-                response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
-            _print_agent_response(response, render_markdown=markdown)
-            await agent_loop.close_mcp()
-            await _drain_pending_tasks()
+            try:
+                with _thinking_ctx():
+                    coro = agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
+                    if timeout_s > 0:
+                        response = await asyncio.wait_for(coro, timeout=float(timeout_s))
+                    else:
+                        response = await coro
+                _print_agent_response(response, render_markdown=markdown)
+            except TimeoutError:
+                console.print(
+                    f"[red]Error:[/red] agent timed out after {timeout_s}s in single-message mode."
+                )
+                raise typer.Exit(124)
+            finally:
+                agent_loop.stop()
+                try:
+                    await asyncio.wait_for(agent_loop.close_mcp(), timeout=5.0)
+                except TimeoutError:
+                    console.print("[yellow]Warning:[/yellow] timed out while closing provider/MCP resources.")
+                try:
+                    await asyncio.wait_for(_drain_pending_tasks(), timeout=2.0)
+                except TimeoutError:
+                    pass
 
-        asyncio.run(run_once())
+        watchdog: threading.Timer | None = None
+        if timeout_s > 0:
+            def _hard_timeout_kill() -> None:
+                # Last-resort guard for blocking calls that ignore cancellation.
+                os.write(2, f"\nError: agent exceeded hard timeout ({timeout_s}s)\n".encode("utf-8"))
+                os._exit(124)
+
+            watchdog = threading.Timer(float(timeout_s), _hard_timeout_kill)
+            watchdog.daemon = True
+            watchdog.start()
+
+        try:
+            asyncio.run(run_once())
+        finally:
+            if watchdog:
+                watchdog.cancel()
     else:
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage

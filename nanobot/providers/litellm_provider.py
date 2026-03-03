@@ -200,6 +200,18 @@ class LiteLLMProvider(LLMProvider):
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
+        # Bound remote latency and retry fan-out so a single request cannot block indefinitely.
+        # Env overrides allow tuning without code changes.
+        try:
+            timeout_s = float(os.getenv("NANOBOT_LLM_TIMEOUT_S", "60"))
+        except ValueError:
+            timeout_s = 60.0
+        try:
+            max_retries = int(os.getenv("NANOBOT_LLM_MAX_RETRIES", "1"))
+        except ValueError:
+            max_retries = 1
+        kwargs["timeout"] = max(1.0, timeout_s)
+        kwargs["num_retries"] = max(0, max_retries)
         
         # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
         self._apply_model_overrides(model, kwargs)
