@@ -199,6 +199,18 @@ class MatrixConfig(Base):
     group_policy: Literal["open", "mention", "allowlist"] = "open"
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
+    
+
+class LuffaConfig(BaseModel):
+    """Configuration for the Luffa bot channel."""
+
+    enabled: bool = False
+
+    # Bot token from robot.luffa.im
+    token: str = ""
+    allow_from: list[str] = Field(default_factory=lambda: ["*"])
+    mode: str = "polling"
+    poll_interval: float = 1.5
 
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
@@ -215,6 +227,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    luffa: LuffaConfig = Field(default_factory=LuffaConfig) 
 
 
 class AgentDefaults(Base):

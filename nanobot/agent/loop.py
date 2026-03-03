@@ -44,8 +44,6 @@ class AgentLoop:
     5. Sends responses back
     """
 
-    _TOOL_RESULT_MAX_CHARS = 500
-
     def __init__(
         self,
         bus: MessageBus,
@@ -154,10 +152,17 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
-            if tool := self.tools.get(name):
-                if hasattr(tool, "set_context"):
-                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+        if message_tool := self.tools.get("message"):
+            if isinstance(message_tool, MessageTool):
+                message_tool.set_context(channel, chat_id, message_id)
+
+        if spawn_tool := self.tools.get("spawn"):
+            if isinstance(spawn_tool, SpawnTool):
+                spawn_tool.set_context(channel, chat_id)
+
+        if cron_tool := self.tools.get("cron"):
+            if isinstance(cron_tool, CronTool):
+                cron_tool.set_context(channel, chat_id)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -233,18 +238,7 @@ class AgentLoop:
                         messages, tool_call.id, tool_call.name, result
                     )
             else:
-                clean = self._strip_think(response.content)
-                # Don't persist error responses to session history — they can
-                # poison the context and cause permanent 400 loops (#1303).
-                if response.finish_reason == "error":
-                    logger.error("LLM returned error: {}", (clean or "")[:200])
-                    final_content = clean or "Sorry, I encountered an error calling the AI model."
-                    break
-                messages = self.context.add_assistant_message(
-                    messages, clean, reasoning_content=response.reasoning_content,
-                    thinking_blocks=response.thinking_blocks,
-                )
-                final_content = clean
+                final_content = self._strip_think(response.content)
                 break
 
         if final_content is None and iteration >= self.max_iterations:
@@ -327,6 +321,18 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
 
+    def _get_consolidation_lock(self, session_key: str) -> asyncio.Lock:
+        lock = self._consolidation_locks.get(session_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._consolidation_locks[session_key] = lock
+        return lock
+
+    def _prune_consolidation_lock(self, session_key: str, lock: asyncio.Lock) -> None:
+        """Drop lock entry if no longer in use."""
+        if not lock.locked():
+            self._consolidation_locks.pop(session_key, None)
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -362,7 +368,7 @@ class AgentLoop:
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
+            lock = self._get_consolidation_lock(session.key)
             self._consolidating.add(session.key)
             try:
                 async with lock:
@@ -383,6 +389,7 @@ class AgentLoop:
                 )
             finally:
                 self._consolidating.discard(session.key)
+                self._prune_consolidation_lock(session.key, lock)
 
             session.clear()
             self.sessions.save(session)
@@ -391,12 +398,12 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
+                                  content=" nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
             self._consolidating.add(session.key)
-            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
+            lock = self._get_consolidation_lock(session.key)
 
             async def _consolidate_and_unlock():
                 try:
@@ -404,6 +411,7 @@ class AgentLoop:
                         await self._consolidate_memory(session)
                 finally:
                     self._consolidating.discard(session.key)
+                    self._prune_consolidation_lock(session.key, lock)
                     _task = asyncio.current_task()
                     if _task is not None:
                         self._consolidation_tasks.discard(_task)
@@ -439,50 +447,32 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
+        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
 
-        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
-            return None
+        if message_tool := self.tools.get("message"):
+            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+                return None
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},
         )
 
+    _TOOL_RESULT_MAX_CHARS = 500
+
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
         for m in messages[skip:]:
-            entry = dict(m)
-            role, content = entry.get("role"), entry.get("content")
-            if role == "assistant" and not content and not entry.get("tool_calls"):
-                continue  # skip empty assistant messages — they poison session context
-            if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
-                entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
-            elif role == "user":
-                if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                    # Strip the runtime-context prefix, keep only the user text.
-                    parts = content.split("\n\n", 1)
-                    if len(parts) > 1 and parts[1].strip():
-                        entry["content"] = parts[1]
-                    else:
-                        continue
-                if isinstance(content, list):
-                    filtered = []
-                    for c in content:
-                        if c.get("type") == "text" and isinstance(c.get("text"), str) and c["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                            continue  # Strip runtime context from multimodal messages
-                        if (c.get("type") == "image_url"
-                                and c.get("image_url", {}).get("url", "").startswith("data:image/")):
-                            filtered.append({"type": "text", "text": "[image]"})
-                        else:
-                            filtered.append(c)
-                    if not filtered:
-                        continue
-                    entry["content"] = filtered
+            entry = {k: v for k, v in m.items() if k != "reasoning_content"}
+            if entry.get("role") == "tool" and isinstance(entry.get("content"), str):
+                content = entry["content"]
+                if len(content) > self._TOOL_RESULT_MAX_CHARS:
+                    entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now()
