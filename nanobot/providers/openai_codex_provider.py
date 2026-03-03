@@ -35,25 +35,31 @@ class OpenAICodexProvider(LLMProvider):
     ) -> LLMResponse:
         model = model or self.default_model
         system_prompt, input_items = _convert_messages(messages)
+        model_name = _strip_model_prefix(model)
+        converted_tools = _convert_tools(tools) if tools else None
 
         token = await asyncio.to_thread(get_codex_token)
         headers = _build_headers(token.account_id, token.access)
 
         body: dict[str, Any] = {
-            "model": _strip_model_prefix(model),
+            "model": model_name,
             "store": False,
             "stream": True,
             "instructions": system_prompt,
             "input": input_items,
             "text": {"verbosity": "medium"},
             "include": ["reasoning.encrypted_content"],
-            "prompt_cache_key": _prompt_cache_key(messages),
+            "prompt_cache_key": _prompt_cache_key(
+                messages,
+                model=model_name,
+                tools=converted_tools,
+            ),
             "tool_choice": "auto",
             "parallel_tool_calls": True,
         }
 
-        if tools:
-            body["tools"] = _convert_tools(tools)
+        if converted_tools:
+            body["tools"] = converted_tools
 
         url = DEFAULT_CODEX_URL
 
@@ -218,8 +224,44 @@ def _split_tool_call_id(tool_call_id: Any) -> tuple[str, str | None]:
     return "call_0", None
 
 
-def _prompt_cache_key(messages: list[dict[str, Any]]) -> str:
-    raw = json.dumps(messages, ensure_ascii=True, sort_keys=True)
+_RUNTIME_CONTEXT_TAG_PREFIX = "[Runtime Context"
+_RUNTIME_TIME_LINE_PREFIX = "Current Time:"
+_RUNTIME_TIME_CANONICAL_LINE = "Current Time: <normalized>"
+
+
+def _normalize_runtime_context(content: str) -> str:
+    """Normalize volatile runtime metadata so prompt cache keys stay stable."""
+    lines = content.splitlines()
+    if not lines:
+        return content
+    if not lines[0].strip().startswith(_RUNTIME_CONTEXT_TAG_PREFIX):
+        return content
+    return "\n".join(
+        _RUNTIME_TIME_CANONICAL_LINE if line.startswith(_RUNTIME_TIME_LINE_PREFIX) else line
+        for line in lines
+    )
+
+
+def _prompt_cache_key(
+    messages: list[dict[str, Any]],
+    *,
+    model: str | None = None,
+    tools: list[dict[str, Any]] | None = None,
+) -> str:
+    normalized_messages: list[dict[str, Any]] = []
+    for msg in messages:
+        if msg.get("role") != "user" or not isinstance(msg.get("content"), str):
+            normalized_messages.append(msg)
+            continue
+        normalized_messages.append({**msg, "content": _normalize_runtime_context(msg["content"])})
+
+    payload: dict[str, Any] = {"messages": normalized_messages}
+    if model is not None:
+        payload["model"] = model
+    if tools is not None:
+        payload["tools"] = tools
+
+    raw = json.dumps(payload, ensure_ascii=True, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
