@@ -116,11 +116,20 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         relevant_history = self.memory.get_relevant_history(current_message, top_k=5)
         if relevant_history:
             system_content += "\n\n## Relevant History (retrieved by query)\n\n" + relevant_history
+        runtime_ctx = self._build_runtime_context(channel, chat_id)
+        user_content = self._build_user_content(current_message, media)
+
+        # Merge runtime context and user content into a single user message
+        # to avoid consecutive same-role messages that some providers reject.
+        if isinstance(user_content, str):
+            merged = f"{runtime_ctx}\n\n{user_content}"
+        else:
+            merged = [{"type": "text", "text": runtime_ctx}] + user_content
+
         return [
             {"role": "system", "content": system_content},
             *history,
-            {"role": "user", "content": self._build_runtime_context(channel, chat_id)},
-            {"role": "user", "content": self._build_user_content(current_message, media)},
+            {"role": "user", "content": merged},
         ]
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
