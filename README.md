@@ -1030,6 +1030,92 @@ If you edit the `.service` file itself, run `systemctl --user daemon-reload` bef
 > loginctl enable-linger $USER
 > ```
 
+## 🧠 OpenViking — Persistent Memory
+
+OpenViking gives the agent long-term memory: it stores every conversation, extracts structured memories (user preferences, entities, past decisions), and makes them searchable via semantic search.
+
+### Prerequisites
+
+Install OpenViking (not yet on PyPI — install from source):
+
+```bash
+pip install -e /path/to/OpenViking   # or: pip install nanobot-ai[openviking]
+```
+
+### Step 1 — Create `~/.openviking/ov.conf`
+
+OpenViking reads its config from `~/.openviking/ov.conf` regardless of where data is stored.
+
+```bash
+mkdir -p ~/.openviking
+```
+
+Create `~/.openviking/ov.conf` with the following content (using OpenRouter + Qwen3-Embedding-8B):
+
+```json
+{
+  "storage": {
+    "workspace": "~/.nanobot/ov_data",
+    "vectordb": { "backend": "local" },
+    "agfs":     { "backend": "local" }
+  },
+  "embedding": {
+    "dense": {
+      "provider":  "openai",
+      "model":     "qwen/qwen3-embedding-8b",
+      "api_key":   "YOUR_OPENROUTER_API_KEY",
+      "api_base":  "https://openrouter.ai/api/v1",
+      "dimension": 4096
+    }
+  },
+  "vlm": {
+    "provider":    "openai",
+    "model":       "qwen/qwen3-8b",
+    "api_key":     "YOUR_OPENROUTER_API_KEY",
+    "api_base":    "https://openrouter.ai/api/v1",
+    "temperature": 0.0
+  }
+}
+```
+
+> Replace `YOUR_OPENROUTER_API_KEY` with your key from [openrouter.ai/keys](https://openrouter.ai/keys).
+>
+> `embedding` — used to vectorize memories for semantic search (`qwen/qwen3-embedding-8b`, dim 4096, $0.01/M tokens).
+> `vlm` — used to extract structured memories from conversations after each session commit (`qwen/qwen3-8b` is cheap and sufficient).
+
+### Step 2 — Enable in nanobot config
+
+Add to your `~/.nanobot/config.json`:
+
+```json
+{
+  "tools": {
+    "openviking": {
+      "enabled": true,
+      "dataPath": "~/.nanobot/ov_data",
+      "autoCommit": true
+    }
+  }
+}
+```
+
+### What you get
+
+Once enabled, the agent gains 6 new tools:
+
+| Tool | Description |
+|------|-------------|
+| `user_memory_search` | Search past memories and user preferences |
+| `openviking_search` | Semantic search across all stored content |
+| `openviking_read` | Read a specific memory by URI |
+| `openviking_list` | List memories in a directory |
+| `openviking_grep` | Regex search across memories |
+| `openviking_glob` | Glob pattern matching |
+
+After each conversation, nanobot automatically commits the turn to OpenViking (`autoCommit: true`). OpenViking extracts long-term memories in the background — no action needed.
+
+**Storage:** mostly text files + embeddings under `~/.nanobot/ov_data`. Typical usage stays well under 1 GB. There is no automatic pruning; old sessions accumulate in `history/` subdirectories.
+
 ## 📁 Project Structure
 
 ```
