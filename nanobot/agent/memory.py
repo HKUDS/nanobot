@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -60,16 +62,94 @@ class MemoryStore:
         self.memory_file.write_text(content, encoding="utf-8")
 
     def append_history(self, entry: str) -> None:
+        self._ensure_history_db()
         with open(self.history_file, "a", encoding="utf-8") as f:
             f.write(entry.rstrip() + "\n\n")
-        if self.history_max_chars > 0 and self.history_file.exists():
-            text = self.history_file.read_text(encoding="utf-8")
-            if len(text) > self.history_max_chars:
-                trimmed = text[-self.history_max_chars :]
-                first_nl = trimmed.find("\n")
-                start = first_nl + 1 if first_nl >= 0 else 0
-                self.history_file.write_text(trimmed[start :], encoding="utf-8")
-                logger.debug("HISTORY.md trimmed to {} chars", self.history_max_chars)
+        self._insert_history_entry(entry.strip())
+
+    def _history_db_path(self) -> Path:
+        return self.memory_dir / "history.db"
+
+    def _ensure_history_db(self) -> None:
+        path = self._history_db_path()
+        if path.exists():
+            return
+        conn = sqlite3.connect(path)
+        conn.execute(
+            "CREATE TABLE history_entries (id INTEGER PRIMARY KEY, content TEXT NOT NULL, created_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "CREATE VIRTUAL TABLE history_fts USING fts5(content, content='history_entries', content_rowid='id')"
+        )
+        conn.execute(
+            "CREATE TRIGGER history_entries_ai AFTER INSERT ON history_entries BEGIN "
+            "INSERT INTO history_fts(rowid, content) VALUES (new.id, new.content); END"
+        )
+        conn.commit()
+        conn.close()
+        self._backfill_history_from_file()
+
+    def _backfill_history_from_file(self) -> None:
+        if not self.history_file.exists():
+            return
+        text = self.history_file.read_text(encoding="utf-8")
+        entries = [e.strip() for e in text.split("\n\n") if e.strip()]
+        if not entries:
+            return
+        conn = sqlite3.connect(self._history_db_path())
+        cur = conn.execute("SELECT COUNT(*) FROM history_entries")
+        if cur.fetchone()[0] > 0:
+            conn.close()
+            return
+        for entry in entries:
+            conn.execute(
+                "INSERT INTO history_entries (content, created_at) VALUES (?, ?)",
+                (entry, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())),
+            )
+        conn.commit()
+        conn.close()
+        logger.debug("Backfilled {} history entries into DB", len(entries))
+
+    def _insert_history_entry(self, content: str) -> None:
+        self._ensure_history_db()
+        conn = sqlite3.connect(self._history_db_path())
+        conn.execute(
+            "INSERT INTO history_entries (content, created_at) VALUES (?, ?)",
+            (content, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())),
+        )
+        conn.commit()
+        conn.close()
+
+    def get_relevant_history(self, query: str, top_k: int = 5) -> str:
+        """Retrieve history entries relevant to the query via SQLite FTS5. No history loss; full log stays in HISTORY.md."""
+        self._ensure_history_db()
+        conn = sqlite3.connect(self._history_db_path())
+        query = (query or "").strip()
+        if not query:
+            rows = conn.execute(
+                "SELECT content FROM history_entries ORDER BY id DESC LIMIT ?", (top_k,)
+            ).fetchall()
+        else:
+            terms = query.replace('"', ' ').split()
+            fts_query = " OR ".join(f'"{t}"' for t in terms if t)
+            if not fts_query:
+                rows = conn.execute(
+                    "SELECT content FROM history_entries ORDER BY id DESC LIMIT ?", (top_k,)
+                ).fetchall()
+            else:
+                try:
+                    rows = conn.execute(
+                        "SELECT content FROM history_fts WHERE history_fts MATCH ? ORDER BY rank LIMIT ?",
+                        (fts_query, top_k),
+                    ).fetchall()
+                except sqlite3.OperationalError:
+                    rows = conn.execute(
+                        "SELECT content FROM history_entries ORDER BY id DESC LIMIT ?", (top_k,)
+                    ).fetchall()
+        conn.close()
+        if not rows:
+            return ""
+        return "\n\n".join(r[0] for r in rows)
 
     def get_memory_context(self) -> str:
         long_term = self.read_long_term()
