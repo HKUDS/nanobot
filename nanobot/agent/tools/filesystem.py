@@ -4,7 +4,25 @@ import difflib
 from pathlib import Path
 from typing import Any
 
+import pymupdf
+
 from nanobot.agent.tools.base import Tool
+
+_MAX_READ_CHARS = 100_000
+
+
+def _read_pdf(file_path: Path) -> str:
+    """Extract text from a PDF file page-by-page using pymupdf."""
+    doc = pymupdf.open(file_path)
+    pages: list[str] = []
+    for i, page in enumerate(doc, 1):
+        text = page.get_text().strip()
+        if text:
+            pages.append(f"--- Page {i} ---\n{text}")
+    doc.close()
+    if not pages:
+        return "This PDF contains no extractable text (it may be scanned/image-based)."
+    return "\n\n".join(pages)
 
 
 def _resolve_path(path: str, workspace: Path | None = None, allowed_dir: Path | None = None) -> Path:
@@ -34,7 +52,7 @@ class ReadFileTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Read the contents of a file at the given path."
+        return "Read the contents of a file at the given path. Supports PDF files."
     
     @property
     def parameters(self) -> dict[str, Any]:
@@ -57,7 +75,13 @@ class ReadFileTool(Tool):
             if not file_path.is_file():
                 return f"Error: Not a file: {path}"
 
-            content = file_path.read_text(encoding="utf-8")
+            if file_path.suffix.lower() == ".pdf":
+                content = _read_pdf(file_path)
+            else:
+                content = file_path.read_text(encoding="utf-8")
+
+            if len(content) > _MAX_READ_CHARS:
+                content = content[:_MAX_READ_CHARS] + "\n\n[Truncated — file exceeds 100 000 characters]"
             return content
         except PermissionError as e:
             return f"Error: {e}"
