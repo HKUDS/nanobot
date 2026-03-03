@@ -425,6 +425,8 @@ def run_gateway_foreground_loop(
     asyncio.run(run())
 
 
+# Gateway commands are grouped under a sub-app to expose unified runtime
+# semantics: `gateway`, `gateway restart`, `gateway status`, `gateway logs`.
 gateway_app = typer.Typer(
     help="Start and manage the nanobot gateway runtime.",
     invoke_without_command=True,
@@ -483,6 +485,7 @@ def gateway(
 
     from nanobot.gateway_runtime.models import GatewayStartOptions
 
+    # Flow: parse explicit CLI mode -> resolve policy -> build facade -> start.
     cli_mode = _resolve_gateway_cli_mode(foreground=foreground, background=background)
     facade, policy = _build_gateway_runtime_facade(
         cli_mode=cli_mode,
@@ -517,6 +520,8 @@ def gateway_restart(
     """Restart gateway with unified runtime semantics."""
     from nanobot.gateway_runtime.models import GatewayStartOptions
 
+    # Keep restart semantics stable; adapter decides whether action is managed
+    # restart or legacy compatibility response.
     cli_mode = _resolve_gateway_cli_mode(foreground=foreground, background=background)
     facade, policy = _build_gateway_runtime_facade(
         cli_mode=cli_mode,
@@ -542,6 +547,7 @@ def gateway_status(
     background: bool = typer.Option(False, "--background", help="Request background managed mode"),
 ):
     """Show gateway runtime status."""
+    # Status is designed to be always callable regardless of runtime mode.
     cli_mode = _resolve_gateway_cli_mode(foreground=foreground, background=background)
     facade, _ = _build_gateway_runtime_facade(cli_mode=cli_mode)
     status = facade.status()
@@ -565,6 +571,8 @@ def gateway_logs(
     background: bool = typer.Option(False, "--background", help="Request background managed mode"),
 ):
     """Show gateway runtime logs."""
+    # Even in legacy mode, this command should stay available and explain why
+    # no managed background stream is present.
     cli_mode = _resolve_gateway_cli_mode(foreground=foreground, background=background)
     facade, _ = _build_gateway_runtime_facade(cli_mode=cli_mode)
     code = facade.logs(follow=follow, tail=tail)

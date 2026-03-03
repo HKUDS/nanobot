@@ -19,7 +19,13 @@ from nanobot.gateway_runtime.state_store import GatewayStateStore
 
 
 class ForegroundLegacyAdapter:
-    """Adapter that delegates gateway execution to the existing foreground loop."""
+    """Adapter that delegates gateway execution to the existing foreground loop.
+
+    This adapter intentionally keeps old behavior:
+    - start: run foreground loop directly
+    - restart/stop: non-destructive compatibility responses
+    - status/logs: explain legacy mode instead of failing command
+    """
 
     def __init__(
         self,
@@ -75,6 +81,8 @@ class ForegroundLegacyAdapter:
 
     def status(self) -> GatewayStatus:
         pid = self._state_store.read_pid()
+        # In legacy mode, running is best-effort from pid file only.
+        # Process-level verification is a later enhancement.
         return GatewayStatus(
             running=pid is not None,
             mode=RuntimeMode.FOREGROUND_LEGACY,

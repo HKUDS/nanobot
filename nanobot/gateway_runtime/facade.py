@@ -19,7 +19,10 @@ from nanobot.gateway_runtime.state_store import GatewayStateStore
 
 
 class GatewayRuntimeFacade:
-    """Gateway runtime command facade used by CLI entry points."""
+    """Gateway runtime command facade used by CLI entry points.
+
+    Design goal: CLI semantics stay stable while runtime strategy can evolve.
+    """
 
     def __init__(
         self,
@@ -29,6 +32,8 @@ class GatewayRuntimeFacade:
         state_store: GatewayStateStore | None = None,
         adapter: RuntimeAdapter | None = None,
     ):
+        # policy/state_store/adapter are injectable for unit tests.
+        # In normal runtime, defaults are resolved lazily from current env/platform.
         self._policy = policy or resolve_runtime_policy()
         self._state_store = state_store or GatewayStateStore()
         self._run_foreground_loop = run_foreground_loop
@@ -59,7 +64,8 @@ class GatewayRuntimeFacade:
                 state_store=self._state_store,
             )
 
-        # Background adapter is intentionally not enabled in this framework phase.
+        # Framework phase does not ship managed daemon adapter yet.
+        # Keep command compatibility by downgrading to legacy path explicitly.
         fallback_policy = RuntimePolicy(
             mode=RuntimeMode.FOREGROUND_LEGACY,
             reason="fallback_to_legacy_foreground",

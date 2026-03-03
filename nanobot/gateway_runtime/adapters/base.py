@@ -1,4 +1,8 @@
-"""Runtime adapter contract for gateway execution backends."""
+"""Runtime adapter contract for gateway execution backends.
+
+The CLI should never branch on platform-specific runtime details directly.
+It talks to GatewayRuntimeFacade, which delegates to one RuntimeAdapter.
+"""
 
 from typing import Protocol
 
@@ -12,7 +16,13 @@ from nanobot.gateway_runtime.models import (
 
 
 class RuntimeAdapter(Protocol):
-    """Adapter protocol for gateway runtime operations."""
+    """Adapter protocol for gateway runtime operations.
+
+    All adapters expose the same command semantics:
+    - start/restart/stop return structured results (not print directly).
+    - status returns an always-available, explainable snapshot.
+    - logs keeps command available even if mode has no daemon log stream.
+    """
 
     def start(self, options: GatewayStartOptions) -> StartResult:
         """Start gateway runtime."""

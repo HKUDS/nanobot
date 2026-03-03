@@ -13,6 +13,11 @@ class GatewayStateStore:
     """Read and write gateway runtime files under ~/.nanobot."""
 
     def __init__(self, data_dir: Path | None = None):
+        # Runtime filesystem layout:
+        #   <data>/run/gateway.pid
+        #   <data>/run/gateway.state.json
+        #   <data>/run/gateway.lock   (reserved for future single-instance lock)
+        #   <data>/logs/gateway.log
         base_dir = data_dir or get_data_dir()
         self.run_dir = base_dir / "run"
         self.logs_dir = base_dir / "logs"
