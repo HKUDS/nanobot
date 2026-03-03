@@ -11,6 +11,7 @@ import struct
 import time
 from collections import OrderedDict
 
+import os
 import aiohttp
 import secp256k1
 from cryptography.hazmat.backends import default_backend
@@ -38,6 +39,13 @@ DEFAULT_RELAYS = [
 ]
 
 HISTORY_SECS = 7 * 24 * 3600  # Fetch messages from the last 7 days
+
+# Respect standard proxy environment variables
+PROXY = (
+    os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") or
+    os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or
+    os.environ.get("ALL_PROXY")   or os.environ.get("all_proxy")
+)
 
 _SSL = ssl.create_default_context()
 _SSL.check_hostname = False
@@ -281,6 +289,7 @@ class _RelayPool:
         self._running = True
         self._sess = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=60, connect=15, sock_read=60),
+            connector=aiohttp.TCPConnector(ssl=_SSL) if PROXY else None,
         )
         for url in self._relays:
             self._tasks.append(asyncio.create_task(self._connect(url)))
@@ -319,16 +328,27 @@ class _RelayPool:
         backoff = 2
         while self._running:
             try:
-                async with self._sess.ws_connect(url, ssl=_SSL) as ws:
+                kw: dict = {"headers": {"User-Agent": "NostrBot/1.0"}}
+                if PROXY:
+                    kw["proxy"] = PROXY
+                async with self._sess.ws_connect(url, ssl=_SSL, **kw) as ws:
                     self._conns[url] = ws
                     backoff = 2
                     logger.debug("Nostr relay connected: {}", url)
                     await self._subscribe(ws)
-                    async for msg in ws:
-                        if msg.type == aiohttp.WSMsgType.TEXT:
-                            await self._handle(msg.data)
-                        elif msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSED):
-                            break
+                    ping = asyncio.create_task(self._ping(ws, url))
+                    try:
+                        async for msg in ws:
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                await self._handle(msg.data)
+                            elif msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSED):
+                                break
+                    finally:
+                        ping.cancel()
+                        try:
+                            await ping
+                        except asyncio.CancelledError:
+                            pass
             except asyncio.CancelledError:
                 return
             except Exception as e:
@@ -338,6 +358,20 @@ class _RelayPool:
             if self._running:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)
+
+    async def _ping(self, ws, url: str) -> None:
+        """Send a WebSocket ping every 30 seconds. Close the connection on timeout."""
+        while True:
+            await asyncio.sleep(30)
+            try:
+                await asyncio.wait_for(ws.ping(), timeout=10)
+                logger.debug("Nostr relay {} ping ok", url)
+            except asyncio.TimeoutError:
+                logger.warning("Nostr relay {} ping timeout, dropping connection", url)
+                await ws.close()
+                break
+            except Exception:
+                break
 
     async def _subscribe(self, ws) -> None:
         since_hist = int(time.time()) - HISTORY_SECS
