@@ -51,6 +51,7 @@ class DiscordChannel(BaseChannel):
         self.config: DiscordConfig = config
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._seq: int | None = None
+        self._bot_user_id: str | None = None
         self._heartbeat_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
@@ -169,6 +170,7 @@ class DiscordChannel(BaseChannel):
                 await self._start_heartbeat(interval_ms / 1000)
                 await self._identify()
             elif op == 0 and event_type == "READY":
+                self._bot_user_id = str((payload.get("user") or {}).get("id") or "") or None
                 logger.info("Discord gateway READY")
             elif op == 0 and event_type == "MESSAGE_CREATE":
                 await self._handle_message_create(payload)
@@ -223,6 +225,9 @@ class DiscordChannel(BaseChannel):
         if author.get("bot") and not self.config.allow_bot_messages:
             return
 
+        if self.config.allow_bot_messages and not self._is_ping_for_bot(payload):
+            return
+
         sender_id = str(author.get("id", ""))
         channel_id = str(payload.get("channel_id", ""))
         content = payload.get("content") or ""
@@ -273,6 +278,25 @@ class DiscordChannel(BaseChannel):
                 "reply_to": reply_to,
             },
         )
+
+    def _is_ping_for_bot(self, payload: dict[str, Any]) -> bool:
+        """Return True when this message explicitly pings the bot."""
+        if payload.get("mention_everyone"):
+            return True
+
+        mentions = payload.get("mentions") or []
+        if not isinstance(mentions, list):
+            return False
+
+        bot_id = self._bot_user_id
+        if bot_id:
+            for mention in mentions:
+                if str((mention or {}).get("id", "")) == bot_id:
+                    return True
+            content = payload.get("content") or ""
+            return f"<@{bot_id}>" in content or f"<@!{bot_id}>" in content
+
+        return any(bool((mention or {}).get("bot")) for mention in mentions)
 
     async def _start_typing(self, channel_id: str) -> None:
         """Start periodic typing indicator for a channel."""

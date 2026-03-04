@@ -300,7 +300,7 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 }
 ```
 
-- `allowBotMessages` defaults to `true`. Set it to `false` to ignore bot-authored messages.
+- `allowBotMessages` defaults to `true`. In this mode, Discord replies only when the bot is pinged (`@bot`) by any sender (human or bot). Set it to `false` to disable bot-authored messages and allow normal non-mention flow for human senders.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator
