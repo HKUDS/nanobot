@@ -108,7 +108,6 @@ class QQChannel(BaseChannel):
                     openid=msg.chat_id,
                     msg_type=2,
                     markdown={"content": msg.content},
-                    msg_id=msg_id,
                 )
             else:
                 await self._client.api.post_c2c_message(
