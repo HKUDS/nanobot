@@ -224,14 +224,16 @@ class DiscordChannel(BaseChannel):
         author = payload.get("author") or {}
         sender_id = str(author.get("id", ""))
 
-        if self._bot_user_id and sender_id == self._bot_user_id:
-            return
-
-        if author.get("bot") and not self.config.allow_bot_messages:
-            return
-
-        if self.config.allow_bot_messages and not self._is_ping_for_bot(payload):
-            return
+        is_bot_author = bool(author.get("bot"))
+        if is_bot_author:
+            # Ignore our own messages, and all bot messages before READY has set our ID
+            if not self._bot_user_id or sender_id == self._bot_user_id:
+                return
+            if not self.config.allow_bot_messages:
+                return
+            # Require explicit ping for bot-authored messages to prevent ping loops
+            if not self._is_ping_for_bot(payload):
+                return
 
         channel_id = str(payload.get("channel_id", ""))
         content = payload.get("content") or ""
