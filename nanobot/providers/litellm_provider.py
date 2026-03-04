@@ -261,10 +261,16 @@ class LiteLLMProvider(LLMProvider):
         tool_calls = []
         if hasattr(message, "tool_calls") and message.tool_calls:
             for tc in message.tool_calls:
-                # Parse arguments from JSON string if needed
+                # Parse arguments - ensure it's always a valid dict
                 args = tc.function.arguments
                 if isinstance(args, str):
-                    args = json_repair.loads(args)
+                    # Some providers (e.g., qwen/dashscope) may return malformed JSON
+                    # Use json_repair to fix it, then ensure result is a dict
+                    repaired = json_repair.loads(args)
+                    args = repaired if isinstance(repaired, dict) else {}
+                elif not isinstance(args, dict):
+                    # Fallback for unexpected types
+                    args = {}
 
                 tool_calls.append(ToolCallRequest(
                     id=_short_tool_id(),
