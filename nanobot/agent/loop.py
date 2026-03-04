@@ -359,9 +359,9 @@ class AgentLoop:
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
 
-        # Slash commands
+        # Slash commands (support both /cmd and !cmd for compatibility)
         cmd = msg.content.strip().lower()
-        if cmd == "/new":
+        if cmd in ("/new", "!new"):
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
             self._consolidating.add(session.key)
             try:
@@ -389,9 +389,9 @@ class AgentLoop:
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
-        if cmd == "/help":
+        if cmd in ("/help", "!help"):
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/new or !new — Start a new conversation\n/stop — Stop the current task\n/help or !help — Show available commands")
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
