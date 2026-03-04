@@ -70,12 +70,16 @@ class NanobotDingTalkHandler(CallbackHandler):
             sender_id = chatbot_msg.sender_staff_id or chatbot_msg.sender_id
             sender_name = chatbot_msg.sender_nick or "Unknown"
 
-            logger.info("Received DingTalk message from {} ({}): {}", sender_name, sender_id, content)
+            logger.info(
+                "Received DingTalk message from {} ({}): {}", sender_name, sender_id, content
+            )
 
             # Forward to Nanobot via _on_message (non-blocking).
             # Store reference to prevent GC before task completes.
             task = asyncio.create_task(
-                self.channel._on_message(content, sender_id, sender_name)
+                self.channel._on_message(
+                    content, sender_id, sender_name, webhook=chatbot_msg.session_webhook
+                )
             )
             self.channel._background_tasks.add(task)
             task.add_done_callback(self.channel._background_tasks.discard)
@@ -121,9 +125,7 @@ class DingTalkChannel(BaseChannel):
         """Start the DingTalk bot with Stream Mode."""
         try:
             if not DINGTALK_AVAILABLE:
-                logger.error(
-                    "DingTalk Stream SDK not installed. Run: pip install dingtalk-stream"
-                )
+                logger.error("DingTalk Stream SDK not installed. Run: pip install dingtalk-stream")
                 return
 
             if not self.config.client_id or not self.config.client_secret:
@@ -204,14 +206,19 @@ class DingTalkChannel(BaseChannel):
 
     def _guess_upload_type(self, media_ref: str) -> str:
         ext = Path(urlparse(media_ref).path).suffix.lower()
-        if ext in self._IMAGE_EXTS: return "image"
-        if ext in self._AUDIO_EXTS: return "voice"
-        if ext in self._VIDEO_EXTS: return "video"
+        if ext in self._IMAGE_EXTS:
+            return "image"
+        if ext in self._AUDIO_EXTS:
+            return "voice"
+        if ext in self._VIDEO_EXTS:
+            return "video"
         return "file"
 
     def _guess_filename(self, media_ref: str, upload_type: str) -> str:
         name = os.path.basename(urlparse(media_ref).path)
-        return name or {"image": "image.jpg", "voice": "audio.amr", "video": "video.mp4"}.get(upload_type, "file.bin")
+        return name or {"image": "image.jpg", "voice": "audio.amr", "video": "video.mp4"}.get(
+            upload_type, "file.bin"
+        )
 
     async def _read_media_bytes(
         self,
@@ -272,16 +279,35 @@ class DingTalkChannel(BaseChannel):
         try:
             resp = await self._http.post(url, files=files)
             text = resp.text
-            result = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            result = (
+                resp.json()
+                if resp.headers.get("content-type", "").startswith("application/json")
+                else {}
+            )
             if resp.status_code >= 400:
-                logger.error("DingTalk media upload failed status={} type={} body={}", resp.status_code, media_type, text[:500])
+                logger.error(
+                    "DingTalk media upload failed status={} type={} body={}",
+                    resp.status_code,
+                    media_type,
+                    text[:500],
+                )
                 return None
             errcode = result.get("errcode", 0)
             if errcode != 0:
-                logger.error("DingTalk media upload api error type={} errcode={} body={}", media_type, errcode, text[:500])
+                logger.error(
+                    "DingTalk media upload api error type={} errcode={} body={}",
+                    media_type,
+                    errcode,
+                    text[:500],
+                )
                 return None
             sub = result.get("result") or {}
-            media_id = result.get("media_id") or result.get("mediaId") or sub.get("media_id") or sub.get("mediaId")
+            media_id = (
+                result.get("media_id")
+                or result.get("mediaId")
+                or sub.get("media_id")
+                or sub.get("mediaId")
+            )
             if not media_id:
                 logger.error("DingTalk media upload missing media_id body={}", text[:500])
                 return None
@@ -290,53 +316,112 @@ class DingTalkChannel(BaseChannel):
             logger.error("DingTalk media upload error type={} err={}", media_type, e)
             return None
 
+    def _parse_webhook_msg(self, msg_key: str, msg_param: dict[str, Any]) -> str:
+        if msg_key == "sampleMarkdown":
+            text = msg_param.get("text", "")
+            payload = {
+                "msgtype": "markdown",
+                "markdown": {
+                    "text": text,
+                    "title": text if len(text) <= 30 else text[:27] + "...",
+                },
+            }
+        elif msg_key == "sampleImageMsg":
+            # 以markdown形式发送图片消息，兼容webhook和批量接口
+            payload = {
+                "msgtype": "markdown",
+                "markdown": {
+                    "text": f"![image]({msg_param.get('photoURL')})",
+                    "title": "Image",
+                },
+            }
+        elif msg_key == "sampleFile":
+            # 以 markdown 形式发送文件消息，兼容webhook和批量接口
+            # {"mediaId": media_id, "fileName": filename, "fileType": file_type},
+            payload = {
+                "msgtype": "markdown",
+                "markdown": {
+                    "text": f"[{msg_param.get('fileName')}]({msg_param.get('mediaId')})",
+                    "title": msg_param.get("fileName", "File"),
+                },
+            }
+        else:
+            logger.warning(
+                f"Unsupported msg_key for webhook send: {msg_key}, defaulting to markdown"
+            )
+            payload = {
+                "msgtype": "markdown",
+                "markdown": {
+                    "text": json.dumps(msg_param, ensure_ascii=False),
+                    "title": "Message",
+                },
+            }
+        return payload
+
     async def _send_batch_message(
         self,
         token: str,
         chat_id: str,
         msg_key: str,
         msg_param: dict[str, Any],
+        webhook: str | None = None,
     ) -> bool:
         if not self._http:
             logger.warning("DingTalk HTTP client not initialized, cannot send")
             return False
 
-        url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
         headers = {"x-acs-dingtalk-access-token": token}
-        payload = {
-            "robotCode": self.config.client_id,
-            "userIds": [chat_id],
-            "msgKey": msg_key,
-            "msgParam": json.dumps(msg_param, ensure_ascii=False),
-        }
+        if webhook:
+            url = webhook
+            payload = self._parse_webhook_msg(msg_key, msg_param)
+            logger.debug(f"Sending DingTalk message via webhook, {webhook=}, {payload=}")
+        else:
+            url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
+            payload = {
+                "robotCode": self.config.client_id,
+                "userIds": [chat_id],
+                "msgKey": msg_key,
+                "msgParam": json.dumps(msg_param, ensure_ascii=False),
+            }
 
         try:
             resp = await self._http.post(url, json=payload, headers=headers)
             body = resp.text
             if resp.status_code != 200:
-                logger.error("DingTalk send failed msgKey={} status={} body={}", msg_key, resp.status_code, body[:500])
+                logger.error(
+                    f"DingTalk send failed msgKey={msg_key} status={resp.status_code} body={body[:500]}"
+                )
                 return False
-            try: result = resp.json()
-            except Exception: result = {}
+            try:
+                result = resp.json()
+            except Exception:
+                result = {}
             errcode = result.get("errcode")
             if errcode not in (None, 0):
-                logger.error("DingTalk send api error msgKey={} errcode={} body={}", msg_key, errcode, body[:500])
+                logger.error(
+                    f"DingTalk send api error msgKey={msg_key} errcode={errcode} body={body[:500]}"
+                )
                 return False
-            logger.debug("DingTalk message sent to {} with msgKey={}", chat_id, msg_key)
+            logger.debug(f"DingTalk message sent to {chat_id} with msgKey={msg_key}")
             return True
         except Exception as e:
-            logger.error("Error sending DingTalk message msgKey={} err={}", msg_key, e)
+            logger.error(f"Error sending DingTalk message msgKey={msg_key} err={e}")
             return False
 
-    async def _send_markdown_text(self, token: str, chat_id: str, content: str) -> bool:
+    async def _send_markdown_text(
+        self, token: str, chat_id: str, content: str, webhook: str | None = None
+    ) -> bool:
         return await self._send_batch_message(
             token,
             chat_id,
             "sampleMarkdown",
-            {"text": content, "title": "Nanobot Reply"},
+            {"text": content},
+            webhook=webhook,
         )
 
-    async def _send_media_ref(self, token: str, chat_id: str, media_ref: str) -> bool:
+    async def _send_media_ref(
+        self, token: str, chat_id: str, media_ref: str, webhook: str | None = None
+    ) -> bool:
         media_ref = (media_ref or "").strip()
         if not media_ref:
             return True
@@ -348,6 +433,7 @@ class DingTalkChannel(BaseChannel):
                 chat_id,
                 "sampleImageMsg",
                 {"photoURL": media_ref},
+                webhook=webhook,
             )
             if ok:
                 return True
@@ -383,16 +469,20 @@ class DingTalkChannel(BaseChannel):
                 chat_id,
                 "sampleImageMsg",
                 {"photoURL": media_id},
+                webhook=webhook,
             )
             if ok:
                 return True
-            logger.warning("DingTalk image media_id send failed, falling back to file: {}", media_ref)
+            logger.warning(
+                "DingTalk image media_id send failed, falling back to file: {}", media_ref
+            )
 
         return await self._send_batch_message(
             token,
             chat_id,
             "sampleFile",
             {"mediaId": media_id, "fileName": filename, "fileType": file_type},
+            webhook=webhook,
         )
 
     async def send(self, msg: OutboundMessage) -> None:
@@ -402,7 +492,9 @@ class DingTalkChannel(BaseChannel):
             return
 
         if msg.content and msg.content.strip():
-            await self._send_markdown_text(token, msg.chat_id, msg.content.strip())
+            await self._send_markdown_text(
+                token, msg.chat_id, msg.content.strip(), webhook=msg.metadata.get("webhook")
+            )
 
         for media_ref in msg.media or []:
             ok = await self._send_media_ref(token, msg.chat_id, media_ref)
@@ -415,9 +507,12 @@ class DingTalkChannel(BaseChannel):
                 token,
                 msg.chat_id,
                 f"[Attachment send failed: {filename}]",
+                webhook=msg.metadata.get("webhook"),
             )
 
-    async def _on_message(self, content: str, sender_id: str, sender_name: str) -> None:
+    async def _on_message(
+        self, content: str, sender_id: str, sender_name: str, webhook: str = None
+    ) -> None:
         """Handle incoming message (called by NanobotDingTalkHandler).
 
         Delegates to BaseChannel._handle_message() which enforces allow_from
@@ -432,6 +527,7 @@ class DingTalkChannel(BaseChannel):
                 metadata={
                     "sender_name": sender_name,
                     "platform": "dingtalk",
+                    "webhook": webhook,
                 },
             )
         except Exception as e:
