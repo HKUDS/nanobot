@@ -25,11 +25,14 @@ try:
         CreateImageRequestBody,
         CreateMessageReactionRequest,
         CreateMessageReactionRequestBody,
+        DeleteMessageReactionRequest,
         CreateMessageRequest,
         CreateMessageRequestBody,
         Emoji,
         GetMessageResourceRequest,
         P2ImMessageReceiveV1,
+        ReplyMessageRequest,
+        ReplyMessageRequestBody,
     )
     FEISHU_AVAILABLE = True
 except ImportError:
@@ -268,6 +271,7 @@ class FeishuChannel(BaseChannel):
         self._ws_client: Any = None
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
+        self._reaction_ids: dict[str, str] = {}  # message_id -> reaction_id
         self._loop: asyncio.AbstractEventLoop | None = None
 
     async def start(self) -> None:
@@ -337,9 +341,9 @@ class FeishuChannel(BaseChannel):
         """
         self._running = False
         logger.info("Feishu bot stopped")
-
-    def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
-        """Sync helper for adding reaction (runs in thread pool)."""
+    
+    def _add_reaction_sync(self, message_id: str, emoji_type: str) -> str | None:
+        """Sync helper for adding reaction (runs in thread pool). Returns reaction_id."""
         try:
             request = CreateMessageReactionRequest.builder() \
                 .message_id(message_id) \
@@ -353,23 +357,55 @@ class FeishuChannel(BaseChannel):
 
             if not response.success():
                 logger.warning("Failed to add reaction: code={}, msg={}", response.code, response.msg)
+                return None
             else:
+                reaction_id = response.data.reaction_id
                 logger.debug("Added {} reaction to message {}", emoji_type, message_id)
+                return reaction_id
         except Exception as e:
             logger.warning("Error adding reaction: {}", e)
+            return None
 
-    async def _add_reaction(self, message_id: str, emoji_type: str = "THUMBSUP") -> None:
+    def _remove_reaction_sync(self, message_id: str, reaction_id: str) -> None:
+        """Sync helper for removing reaction (runs in thread pool)."""
+        try:
+            request = DeleteMessageReactionRequest.builder() \
+                .message_id(message_id) \
+                .reaction_id(reaction_id) \
+                .build()
+            
+            response = self._client.im.v1.message_reaction.delete(request)
+            if not response.success():
+                logger.warning("Failed to remove reaction: code={}, msg={}", response.code, response.msg)
+        except Exception as e:
+            logger.warning("Error removing reaction: {}", e)
+
+    async def _add_reaction(self, message_id: str, emoji_type: str | None = None) -> str | None:
         """
         Add a reaction emoji to a message (non-blocking).
-
-        Common emoji types: THUMBSUP, OK, EYES, DONE, OnIt, HEART
+        
+        Common emoji types: THUMBSUP, OK, DONE, OnIt, HEART
         """
         if not self._client or not Emoji:
-            return
-
+            return None
+        
+        emoji_type = emoji_type or self.config.react_emoji
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
+        reaction_id = await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
+        if reaction_id:
+            self._reaction_ids[message_id] = reaction_id
+        return reaction_id
 
+    async def _remove_reaction(self, message_id: str) -> None:
+        """Remove the reaction associated with a message."""
+        if not self._client:
+            return
+        
+        reaction_id = self._reaction_ids.pop(message_id, None)
+        if reaction_id:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self._remove_reaction_sync, message_id, reaction_id)
+    
     # Regex to match markdown tables (header + separator + data rows)
     _TABLE_RE = re.compile(
         r"((?:^[ \t]*\|.+\|[ \t]*\n)(?:^[ \t]*\|[-:\s|]+\|[ \t]*\n)(?:^[ \t]*\|.+\|[ \t]*\n?)+)",
@@ -600,29 +636,43 @@ class FeishuChannel(BaseChannel):
 
         return None, f"[{msg_type}: download failed]"
 
-    def _send_message_sync(self, receive_id_type: str, receive_id: str, msg_type: str, content: str) -> bool:
-        """Send a single message (text/image/file/interactive) synchronously."""
+    def _send_message_sync(self, receive_id_type: str, receive_id: str, msg_type: str, content: str, reply_to: str | None = None) -> bool:
+        """Send a single message (text/image/file/interactive) or reply to an existing one."""
         try:
-            request = CreateMessageRequest.builder() \
-                .receive_id_type(receive_id_type) \
-                .request_body(
-                    CreateMessageRequestBody.builder()
-                    .receive_id(receive_id)
-                    .msg_type(msg_type)
-                    .content(content)
-                    .build()
-                ).build()
-            response = self._client.im.v1.message.create(request)
+            if reply_to:
+                # Reply to an existing message (this will automatically reference the parent)
+                request = ReplyMessageRequest.builder() \
+                    .message_id(reply_to) \
+                    .request_body(
+                        ReplyMessageRequestBody.builder()
+                        .msg_type(msg_type)
+                        .content(content)
+                        .build()
+                    ).build()
+                response = self._client.im.v1.message.reply(request)
+            else:
+                # Send as a new message
+                request = CreateMessageRequest.builder() \
+                    .receive_id_type(receive_id_type) \
+                    .request_body(
+                        CreateMessageRequestBody.builder()
+                        .receive_id(receive_id)
+                        .msg_type(msg_type)
+                        .content(content)
+                        .build()
+                    ).build()
+                response = self._client.im.v1.message.create(request)
+            
             if not response.success():
                 logger.error(
-                    "Failed to send Feishu {} message: code={}, msg={}, log_id={}",
+                    "Failed to send/reply Feishu {} message: code={}, msg={}, log_id={}",
                     msg_type, response.code, response.msg, response.get_log_id()
                 )
                 return False
-            logger.debug("Feishu {} message sent to {}", msg_type, receive_id)
+            logger.debug("Feishu {} message {} to {}", msg_type, "replied" if reply_to else "sent", receive_id)
             return True
         except Exception as e:
-            logger.error("Error sending Feishu {} message: {}", msg_type, e)
+            logger.error("Error sending/replying Feishu {} message: {}", msg_type, e)
             return False
 
     async def send(self, msg: OutboundMessage) -> None:
@@ -635,6 +685,9 @@ class FeishuChannel(BaseChannel):
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
             loop = asyncio.get_running_loop()
 
+            # Check if we should reply (quote) to the original message
+            reply_to = msg.metadata.get("message_id")
+
             for file_path in msg.media:
                 if not os.path.isfile(file_path):
                     logger.warning("Media file not found: {}", file_path)
@@ -646,6 +699,7 @@ class FeishuChannel(BaseChannel):
                         await loop.run_in_executor(
                             None, self._send_message_sync,
                             receive_id_type, msg.chat_id, "image", json.dumps({"image_key": key}, ensure_ascii=False),
+                            reply_to
                         )
                 else:
                     key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
@@ -654,6 +708,7 @@ class FeishuChannel(BaseChannel):
                         await loop.run_in_executor(
                             None, self._send_message_sync,
                             receive_id_type, msg.chat_id, media_type, json.dumps({"file_key": key}, ensure_ascii=False),
+                            reply_to
                         )
 
             if msg.content and msg.content.strip():
@@ -661,7 +716,12 @@ class FeishuChannel(BaseChannel):
                 await loop.run_in_executor(
                     None, self._send_message_sync,
                     receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
+                    reply_to
                 )
+            
+            # If this is the final response (not progress update), remove the 'processing' reaction
+            if not msg.metadata.get("_progress") and reply_to:
+                await self._remove_reaction(reply_to)
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
