@@ -530,6 +530,10 @@ class FeishuChannel(BaseChannel):
         self, message_id: str, file_key: str, resource_type: str = "file"
     ) -> tuple[bytes | None, str | None]:
         """Download a file/audio/media from a Feishu message by message_id and file_key."""
+        # Feishu API only accepts 'image' or 'file' as type parameter
+        # Convert 'audio' to 'file' for API compatibility
+        if resource_type == "audio":
+            resource_type = "file"
         try:
             request = (
                 GetMessageResourceRequest.builder()
