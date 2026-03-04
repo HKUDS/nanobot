@@ -44,7 +44,8 @@ class AgentLoop:
     5. Sends responses back
     """
 
-    _TOOL_RESULT_MAX_CHARS = 500
+    _TOOL_RESULT_MAX_CHARS = 500           # Session persistence
+    _TOOL_RESULT_MAX_CHARS_INLOOP = 16000  # In-loop (LLM sees this)
 
     def __init__(
         self,
@@ -187,6 +188,10 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        error_retries = 0
+        max_error_retries = 2
+        context_trims = 0
+        max_context_trims = 5
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -201,6 +206,7 @@ class AgentLoop:
             )
 
             if response.has_tool_calls:
+                error_retries = 0
                 if on_progress:
                     clean = self._strip_think(response.content)
                     if clean:
@@ -229,6 +235,8 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    if isinstance(result, str) and len(result) > self._TOOL_RESULT_MAX_CHARS_INLOOP:
+                        result = result[:self._TOOL_RESULT_MAX_CHARS_INLOOP] + "\n... (truncated)"
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -236,10 +244,42 @@ class AgentLoop:
                 clean = self._strip_think(response.content)
                 # Don't persist error responses to session history — they can
                 # poison the context and cause permanent 400 loops (#1303).
+                if response.finish_reason == "context_overflow":
+                    system_msgs = [m for m in messages if m.get("role") == "system"]
+                    non_system = [m for m in messages if m.get("role") != "system"]
+                    if len(non_system) > 4 and context_trims < max_context_trims:
+                        context_trims += 1
+                        trim_count = max(2, len(non_system) // 4)
+                        non_system = non_system[trim_count:]
+                        # Align to a user-turn boundary
+                        while non_system and non_system[0].get("role") != "user":
+                            non_system = non_system[1:]
+                        messages = system_msgs + non_system
+                        iteration -= 1  # Don't count against max_iterations
+                        logger.warning(
+                            "Context window exceeded, trimmed {} messages, retrying ({} remaining)",
+                            trim_count, len(non_system),
+                        )
+                        continue
+                    else:
+                        logger.error("Context window exceeded and cannot trim further.")
+                        final_content = "Sorry, the conversation history is too long for the AI model's context window."
+                        break
                 if response.finish_reason == "error":
-                    logger.error("LLM returned error: {}", (clean or "")[:200])
+                    if error_retries < max_error_retries:
+                        error_retries += 1
+                        iteration -= 1  # error retries don't count against max_iterations
+                        delay = 5 * (2 ** (error_retries - 1))
+                        logger.warning(
+                            "LLM error (retry {}/{}), retrying in {}s: {}",
+                            error_retries, max_error_retries, delay, (clean or "")[:200],
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    logger.error("LLM returned error after {} retries: {}", max_error_retries, (clean or "")[:200])
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
+                error_retries = 0
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,

@@ -119,6 +119,11 @@ class SubagentManager:
             max_iterations = 15
             iteration = 0
             final_result: str | None = None
+            error_retries = 0
+            max_error_retries = 2
+            context_trims = 0
+            max_context_trims = 3
+            _TOOL_RESULT_MAX_CHARS = 16000
 
             while iteration < max_iterations:
                 iteration += 1
@@ -133,6 +138,7 @@ class SubagentManager:
                 )
 
                 if response.has_tool_calls:
+                    error_retries = 0
                     # Add assistant message with tool calls
                     tool_call_dicts = [
                         {
@@ -156,6 +162,8 @@ class SubagentManager:
                         args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                         logger.debug("Subagent [{}] executing: {} with arguments: {}", task_id, tool_call.name, args_str)
                         result = await tools.execute(tool_call.name, tool_call.arguments)
+                        if isinstance(result, str) and len(result) > _TOOL_RESULT_MAX_CHARS:
+                            result = result[:_TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
@@ -163,6 +171,45 @@ class SubagentManager:
                             "content": result,
                         })
                 else:
+                    # Handle context overflow
+                    if response.finish_reason == "context_overflow":
+                        non_system = [m for m in messages if m.get("role") != "system"]
+                        if len(non_system) > 4 and context_trims < max_context_trims:
+                            context_trims += 1
+                            system_msgs = [m for m in messages if m.get("role") == "system"]
+                            trim_count = max(2, len(non_system) // 4)
+                            non_system = non_system[trim_count:]
+                            while non_system and non_system[0].get("role") != "user":
+                                non_system = non_system[1:]
+                            messages = system_msgs + non_system
+                            iteration -= 1
+                            logger.warning(
+                                "Subagent [{}] context overflow, trimmed {} messages (trim {}/{})",
+                                task_id, trim_count, context_trims, max_context_trims,
+                            )
+                            continue
+                        else:
+                            logger.error("Subagent [{}] context overflow, cannot trim further", task_id)
+                            final_result = "Sorry, the conversation exceeded the model's context window."
+                            break
+
+                    # Handle error with retry
+                    if response.finish_reason == "error":
+                        if error_retries < max_error_retries:
+                            error_retries += 1
+                            iteration -= 1
+                            delay = 5 * (2 ** (error_retries - 1))
+                            logger.warning(
+                                "Subagent [{}] LLM error (retry {}/{}), retrying in {}s",
+                                task_id, error_retries, max_error_retries, delay,
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        logger.error("Subagent [{}] LLM error after {} retries", task_id, max_error_retries)
+                        final_result = response.content or "Sorry, I encountered an error calling the AI model."
+                        break
+
+                    error_retries = 0
                     final_result = response.content
                     break
 

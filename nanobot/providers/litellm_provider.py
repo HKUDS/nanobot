@@ -8,6 +8,7 @@ from typing import Any
 import json_repair
 import litellm
 from litellm import acompletion
+from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
@@ -16,6 +17,8 @@ from nanobot.providers.registry import find_by_model, find_gateway
 _ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
 _ANTHROPIC_EXTRA_KEYS = frozenset({"thinking_blocks"})
 _ALNUM = string.ascii_letters + string.digits
+_DEFAULT_TIMEOUT = 300
+_DEFAULT_NUM_RETRIES = 3
 
 def _short_tool_id() -> str:
     """Generate a 9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
@@ -216,6 +219,8 @@ class LiteLLMProvider(LLMProvider):
             "messages": self._sanitize_messages(self._sanitize_empty_content(messages), extra_keys=extra_msg_keys),
             "max_tokens": max_tokens,
             "temperature": temperature,
+            "timeout": _DEFAULT_TIMEOUT,
+            "num_retries": _DEFAULT_NUM_RETRIES,
         }
 
         # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
@@ -244,8 +249,15 @@ class LiteLLMProvider(LLMProvider):
         try:
             response = await acompletion(**kwargs)
             return self._parse_response(response)
+        except litellm.ContextWindowExceededError as e:
+            logger.warning("Context window exceeded: {}", str(e)[:200])
+            return LLMResponse(
+                content="Context window exceeded.",
+                finish_reason="context_overflow",
+            )
         except Exception as e:
             # Return error as content for graceful handling
+            logger.warning("LLM call failed after retries: {} - {}", type(e).__name__, str(e)[:200])
             return LLMResponse(
                 content=f"Error calling LLM: {str(e)}",
                 finish_reason="error",
