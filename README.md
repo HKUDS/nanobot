@@ -161,6 +161,21 @@ nanobot agent
 ```
 
 That's it! You have a working AI assistant in 2 minutes.
+### Web UI (Setup Wizard)
+
+You can configure nanobot from a browser instead of editing JSON manually:
+
+```bash
+# Runs on http://localhost:8080
+nanobot webui --auth --token your-secret-token
+```
+
+Then open the page, enter the token, and use:
+- **Setup wizard** for provider/model/channel basics
+- **Full config JSON** editor for advanced options
+- **Gateway control** to start/stop `nanobot gateway` from the UI
+
+
 
 ## 💬 Chat Apps
 
@@ -958,6 +973,21 @@ docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
 # Or run a single command
 docker run -v ~/.nanobot:/root/.nanobot --rm nanobot agent -m "Hello!"
 docker run -v ~/.nanobot:/root/.nanobot --rm nanobot status
+```
+
+### Railway
+
+A ready-to-deploy Railway manifest is included at `railway.json`.
+
+1. Create a new Railway project from this repository.
+2. Attach a volume and mount it at `/root/.nanobot` (required for config, workspace, and memory persistence).
+3. Add environment variables from `railway.env.example` (set `NANOBOT_WEBUI_TOKEN`).
+4. Deploy, open the generated URL, enter your Web UI token, and finish setup in the browser.
+
+The service starts with:
+
+```bash
+nanobot webui --host 0.0.0.0 --port $PORT --with-gateway --gateway-port 18790
 ```
 
 ## 🐧 Linux Service

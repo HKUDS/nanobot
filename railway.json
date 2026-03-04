@@ -1,0 +1,16 @@
+﻿{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile"
+  },
+  "deploy": {
+    "startCommand": "sh -lc 'nanobot webui --host 0.0.0.0 --port \"${PORT:-8080}\" --with-gateway --gateway-port 18790'",
+    "runtime": "V2",
+    "sleepApplication": false,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10,
+    "requiredMountPath": "/root/.nanobot",
+    "healthcheckPath": "/api/health"
+  }
+}

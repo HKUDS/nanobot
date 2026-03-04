@@ -421,6 +421,34 @@ def gateway(
 
 
 
+@app.command()
+def webui(
+    host: str = typer.Option("0.0.0.0", "--host", help="Web UI host"),
+    port: int | None = typer.Option(None, "--port", "-p", help="Web UI port (defaults to $PORT or 8080)"),
+    with_gateway: bool = typer.Option(False, "--with-gateway/--no-gateway", help="Start gateway subprocess with web UI"),
+    gateway_port: int = typer.Option(18790, "--gateway-port", help="Gateway subprocess port"),
+    gateway_verbose: bool = typer.Option(False, "--gateway-verbose", help="Enable verbose gateway logs"),
+    auth: bool = typer.Option(True, "--auth/--no-auth", help="Require token for API access"),
+    token: str | None = typer.Option(None, "--token", help="Web UI token (defaults to NANOBOT_WEBUI_TOKEN or random)"),
+):
+    """Start the nanobot web UI (wizard + config editor + gateway controls)."""
+    from nanobot.webui import run_webui
+
+    resolved_port = port if port is not None else int(os.getenv("PORT", "8080"))
+    resolved_token = token if token else os.getenv("NANOBOT_WEBUI_TOKEN")
+
+    run_webui(
+        host=host,
+        port=resolved_port,
+        with_gateway=with_gateway,
+        gateway_port=gateway_port,
+        gateway_verbose=gateway_verbose,
+        auth_enabled=auth,
+        access_token=resolved_token,
+    )
+
+
+
 # ============================================================================
 # Agent Commands
 # ============================================================================
