@@ -216,9 +216,8 @@ class DingTalkChannel(BaseChannel):
 
     def _guess_filename(self, media_ref: str, upload_type: str) -> str:
         name = os.path.basename(urlparse(media_ref).path)
-        return name or {"image": "image.jpg", "voice": "audio.amr", "video": "video.mp4"}.get(
-            upload_type, "file.bin"
-        )
+        default_names = {"image": "image.jpg", "voice": "audio.amr", "video": "video.mp4"}
+        return name or default_names.get(upload_type, "file.bin")
 
     async def _read_media_bytes(
         self,
@@ -497,7 +496,12 @@ class DingTalkChannel(BaseChannel):
             )
 
         for media_ref in msg.media or []:
-            ok = await self._send_media_ref(token, msg.chat_id, media_ref)
+            ok = await self._send_media_ref(
+                token,
+                msg.chat_id,
+                media_ref,
+                webhook=msg.metadata.get("webhook"),
+            )
             if ok:
                 continue
             logger.error("DingTalk media send failed for {}", media_ref)
