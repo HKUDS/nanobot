@@ -44,8 +44,16 @@ class ExecTool(Tool):
 
     @property
     def description(self) -> str:
+<<<<<<< HEAD
+        return ("Execute a shell command and return its output. Use with caution. "
+                "On Windows, when using 'wt nt' to open a new tab, do NOT quote the entire nested "
+                "command; use 'wt nt cmd /c \"command\"' or 'wt nt powershell -Command \"Start-Process 'C:\\Path\\To\\App.exe'\"'. "
+                "CRITICAL: Always quote paths with spaces inside PowerShell command strings.")
+    
+=======
         return "Execute a shell command and return its output. Use with caution."
 
+>>>>>>> a5962170f66eeb9d7563cdee6d9f6e9644599b1c
     @property
     def parameters(self) -> dict[str, Any]:
         return {
