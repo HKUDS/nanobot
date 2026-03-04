@@ -1,5 +1,5 @@
 from unittest.mock import AsyncMock, MagicMock, patch
-from nanobot.channels.feishu import FeishuChannel
+from nanobot.channels.feishu import FeishuChannel, _should_use_card
 
 
 def make_channel():
@@ -98,3 +98,15 @@ def test_group_allow_from_blocks_unlisted_group():
     asyncio.run(run())
     bus.publish_inbound.assert_not_called()
 
+
+# Task 4 tests
+def test_should_use_card_detects_code_block():
+    assert _should_use_card("```python\nprint('hi')\n```") is True
+
+
+def test_should_use_card_detects_table():
+    assert _should_use_card("| a | b |\n|---|---|\n| 1 | 2 |") is True
+
+
+def test_should_use_card_plain_text():
+    assert _should_use_card("just plain text") is False

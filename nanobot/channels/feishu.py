@@ -246,6 +246,14 @@ def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
 
 
 
+def _should_use_card(text: str) -> bool:
+    """Detect if text contains markdown that benefits from card rendering."""
+    return bool(
+        re.search(r"```[\s\S]*?```", text) or
+        re.search(r"\|.+\|[\r\n]+\|[-:| ]+\|", text)
+    )
+
+
 def _check_bot_mentioned(mentions: list[dict], bot_open_id: str | None) -> bool:
     """Check if bot is @mentioned in a message."""
     if not bot_open_id:
@@ -878,11 +886,22 @@ class FeishuChannel(BaseChannel):
                         )
 
             if msg.content and msg.content.strip():
-                card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
-                await loop.run_in_executor(
-                    None, self._send_message_sync,
-                    receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False), client,
+                render_mode = self.config.render_mode
+                use_card = (
+                    render_mode == "card" or
+                    (render_mode == "auto" and _should_use_card(msg.content))
                 )
+                if use_card:
+                    card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
+                    await loop.run_in_executor(
+                        None, self._send_message_sync,
+                        receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False), client,
+                    )
+                else:
+                    await loop.run_in_executor(
+                        None, self._send_message_sync,
+                        receive_id_type, msg.chat_id, "text", json.dumps({"text": msg.content}, ensure_ascii=False), client,
+                    )
 
             # Delete the "thinking" reaction after final reply (not on progress messages)
             if not is_progress and msg.metadata:
