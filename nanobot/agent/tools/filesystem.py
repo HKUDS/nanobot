@@ -1,10 +1,15 @@
 """File system tools: read, write, edit."""
 
 import difflib
+import re
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.tools.base import Tool
+from rich.console import Console
+from rich.text import Text
+
+from nanobot.agent.tools.base import Tool, ToolResult
 
 
 def _resolve_path(
@@ -99,16 +104,57 @@ class WriteFileTool(Tool):
             "required": ["path", "content"],
         }
 
-    async def execute(self, path: str, content: str, **kwargs: Any) -> str:
+    async def execute(self, path: str, content: str, **kwargs: Any) -> str | ToolResult:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
-            return f"Successfully wrote {len(content)} bytes to {file_path}"
+
+            # Generate content preview for user display
+            preview = self._format_content_preview(content, str(file_path))
+
+            return ToolResult(
+                content=f"Successfully wrote {len(content)} bytes to {file_path}",
+                display=preview,
+                display_type="write_preview",
+            )
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
             return f"Error writing file: {str(e)}"
+
+    def _format_content_preview(self, content: str, path: str, max_lines: int = 20) -> str:
+        """
+        Format a preview of written file content.
+
+        Args:
+            content: The content that was written.
+            path: File path for display.
+            max_lines: Maximum number of lines to preview.
+
+        Returns:
+            Formatted preview string.
+        """
+        lines = content.splitlines(keepends=False)
+        total_lines = len(lines)
+
+        preview = []
+        preview.append(f"Wrote {len(content)} bytes to {path}")
+
+        if total_lines == 0:
+            preview.append("(empty file)")
+        elif total_lines <= max_lines:
+            # Show all content with line numbers
+            for i, line in enumerate(lines, 1):
+                preview.append(f" {i:>4}   {line}")
+        else:
+            # Show first max_lines with indicator
+            preview.append(f"--- Content preview (first {max_lines} of {total_lines} lines) ---")
+            for i in range(max_lines):
+                preview.append(f" {i+1:>4}   {lines[i]}")
+            preview.append(f"... ({total_lines - max_lines} more lines)")
+
+        return "\n".join(preview) + "\n"
 
 
 class EditFileTool(Tool):
@@ -138,7 +184,7 @@ class EditFileTool(Tool):
             "required": ["path", "old_text", "new_text"],
         }
 
-    async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
+    async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> str | ToolResult:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
             if not file_path.exists():
@@ -154,14 +200,94 @@ class EditFileTool(Tool):
             if count > 1:
                 return f"Warning: old_text appears {count} times. Please provide more context to make it unique."
 
+            old_lines = content.splitlines(keepends=True)
             new_content = content.replace(old_text, new_text, 1)
+            new_lines = new_content.splitlines(keepends=True)
             file_path.write_text(new_content, encoding="utf-8")
 
-            return f"Successfully edited {file_path}"
+            # Generate colored diff for user display
+            diff_display = self._format_colored_diff(old_lines, new_lines, str(file_path))
+
+            return ToolResult(
+                content=f"Successfully edited {file_path}",
+                display=diff_display,
+                display_type="diff",
+            )
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
             return f"Error editing file: {str(e)}"
+
+    def _format_colored_diff(self, old_lines: list[str], new_lines: list[str], path: str) -> str:
+        """
+        Format diff with ANSI colors for terminal display.
+
+        Format:
+        - Line numbers on left
+        - + for added lines (green background)
+        - - for removed lines (red background)
+        - Space for unchanged lines (no color)
+
+        Args:
+            old_lines: Original file lines.
+            new_lines: Modified file lines.
+            path: File path for display.
+
+        Returns:
+            Formatted diff string with ANSI color codes.
+        """
+        # ANSI color codes - using darker/muted background colors
+        RESET = "\x1b[0m"
+        # Darker red background (RGB: 100, 0, 0) for removed lines
+        RED_BG = "\x1b[48;2;100;0;0m"
+        # Darker green background (RGB: 0, 100, 0) for added lines
+        GREEN_BG = "\x1b[48;2;0;100;0m"
+        BOLD = "\x1b[1m"  # Bold for header
+
+        # Generate unified diff
+        diff = list(difflib.unified_diff(old_lines, new_lines, lineterm=""))
+
+        if not diff:
+            return "No changes to display\n"
+
+        lines = []
+        lines.append(f"{BOLD}Diff: {path}{RESET}\n")
+
+        # Track line numbers for old and new files
+        old_line_num = 0
+        new_line_num = 0
+
+        for line in diff:
+            if line.startswith("@@"):
+                # Parse hunk header to get line numbers, but don't display it
+                match = re.search(r"-(\d+)", line)
+                if match:
+                    old_line_num = int(match.group(1)) - 1  # Will increment before use
+                match = re.search(r"\+(\d+)", line)
+                if match:
+                    new_line_num = int(match.group(1)) - 1  # Will increment before use
+                # Skip the @@ header line
+            elif line.startswith("---") or line.startswith("+++"):
+                # Skip file header lines
+                continue
+            elif line.startswith("-"):
+                # Removed line - show with old line number and red background
+                old_line_num += 1
+                content = line[1:].rstrip("\n")
+                lines.append(f"{RED_BG} {old_line_num:>4} - {content}{RESET}\n")
+            elif line.startswith("+"):
+                # Added line - show with new line number and green background
+                new_line_num += 1
+                content = line[1:].rstrip("\n")
+                lines.append(f"{GREEN_BG} {new_line_num:>4} + {content}{RESET}\n")
+            elif line.startswith(" "):
+                # Unchanged line - increment both, show without color
+                old_line_num += 1
+                new_line_num += 1
+                content = line[1:].rstrip("\n")
+                lines.append(f" {old_line_num:>4}   {content}\n")
+
+        return "".join(lines)
 
     @staticmethod
     def _not_found_message(old_text: str, content: str, path: str) -> str:

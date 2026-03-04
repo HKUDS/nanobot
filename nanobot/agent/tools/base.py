@@ -1,7 +1,26 @@
 """Base class for agent tools."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any
+
+
+@dataclass
+class ToolResult:
+    """
+    Result of tool execution with separate content for LLM and display for user.
+
+    This separation allows tools to provide rich, formatted output to users
+    while keeping the LLM context clean with concise information.
+
+    Attributes:
+        content: The result content sent to the LLM (included in context).
+        display: Formatted content displayed directly to the user (not sent to LLM).
+        display_type: Type of display content for rendering (e.g., 'text', 'diff', 'raw').
+    """
+    content: str  # Sent to LLM (included in context)
+    display: str | None = None  # Displayed to user only (not in context)
+    display_type: str = "text"  # Rendering hint: text/diff/raw/etc.
 
 
 class Tool(ABC):
@@ -40,7 +59,7 @@ class Tool(ABC):
         pass
 
     @abstractmethod
-    async def execute(self, **kwargs: Any) -> str:
+    async def execute(self, **kwargs: Any) -> str | ToolResult:
         """
         Execute the tool with given parameters.
 
@@ -48,7 +67,8 @@ class Tool(ABC):
             **kwargs: Tool-specific parameters.
 
         Returns:
-            String result of the tool execution.
+            String result of the tool execution, or ToolResult for separate
+            LLM content and user display.
         """
         pass
 
