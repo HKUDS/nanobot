@@ -30,6 +30,8 @@ try:
         Emoji,
         GetMessageResourceRequest,
         P2ImMessageReceiveV1,
+        ReplyMessageRequest,
+        ReplyMessageRequestBody,
     )
     FEISHU_AVAILABLE = True
 except ImportError:
@@ -625,6 +627,31 @@ class FeishuChannel(BaseChannel):
             logger.error("Error sending Feishu {} message: {}", msg_type, e)
             return False
 
+    def _reply_message_sync(self, message_id: str, msg_type: str, content: str) -> bool:
+        """Reply to a specific message (for thread replies) synchronously."""
+        try:
+            request = ReplyMessageRequest.builder() \
+                .message_id(message_id) \
+                .request_body(
+                    ReplyMessageRequestBody.builder()
+                    .msg_type(msg_type)
+                    .content(content)
+                    .reply_in_thread(True)
+                    .build()
+                ).build()
+            response = self._client.im.v1.message.reply(request)
+            if not response.success():
+                logger.error(
+                    "Failed to reply Feishu {} message: code={}, msg={}, log_id={}",
+                    msg_type, response.code, response.msg, response.get_log_id()
+                )
+                return False
+            logger.debug("Feishu {} reply sent to thread {}", msg_type, message_id)
+            return True
+        except Exception as e:
+            logger.error("Error replying Feishu {} message: {}", msg_type, e)
+            return False
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu, including media (images/files) if present."""
         if not self._client:
@@ -635,6 +662,12 @@ class FeishuChannel(BaseChannel):
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
             loop = asyncio.get_running_loop()
 
+            # Determine if we should reply in a thread
+            feishu_meta = msg.metadata or {}
+            thread_root_id = feishu_meta.get("thread_root_id")
+            chat_type = feishu_meta.get("chat_type")
+            use_thread = thread_root_id and chat_type == "group"
+
             for file_path in msg.media:
                 if not os.path.isfile(file_path):
                     logger.warning("Media file not found: {}", file_path)
@@ -643,25 +676,46 @@ class FeishuChannel(BaseChannel):
                 if ext in self._IMAGE_EXTS:
                     key = await loop.run_in_executor(None, self._upload_image_sync, file_path)
                     if key:
-                        await loop.run_in_executor(
-                            None, self._send_message_sync,
-                            receive_id_type, msg.chat_id, "image", json.dumps({"image_key": key}, ensure_ascii=False),
-                        )
+                        content = json.dumps({"image_key": key}, ensure_ascii=False)
+                        if use_thread:
+                            await loop.run_in_executor(
+                                None, self._reply_message_sync,
+                                thread_root_id, "image", content,
+                            )
+                        else:
+                            await loop.run_in_executor(
+                                None, self._send_message_sync,
+                                receive_id_type, msg.chat_id, "image", content,
+                            )
                 else:
                     key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
                     if key:
                         media_type = "audio" if ext in self._AUDIO_EXTS else "file"
-                        await loop.run_in_executor(
-                            None, self._send_message_sync,
-                            receive_id_type, msg.chat_id, media_type, json.dumps({"file_key": key}, ensure_ascii=False),
-                        )
+                        content = json.dumps({"file_key": key}, ensure_ascii=False)
+                        if use_thread:
+                            await loop.run_in_executor(
+                                None, self._reply_message_sync,
+                                thread_root_id, media_type, content,
+                            )
+                        else:
+                            await loop.run_in_executor(
+                                None, self._send_message_sync,
+                                receive_id_type, msg.chat_id, media_type, content,
+                            )
 
             if msg.content and msg.content.strip():
                 card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
-                await loop.run_in_executor(
-                    None, self._send_message_sync,
-                    receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
-                )
+                card_content = json.dumps(card, ensure_ascii=False)
+                if use_thread:
+                    await loop.run_in_executor(
+                        None, self._reply_message_sync,
+                        thread_root_id, "interactive", card_content,
+                    )
+                else:
+                    await loop.run_in_executor(
+                        None, self._send_message_sync,
+                        receive_id_type, msg.chat_id, "interactive", card_content,
+                    )
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
@@ -750,6 +804,23 @@ class FeishuChannel(BaseChannel):
             if not content and not media_paths:
                 return
 
+            # Thread-scoped session for group chats
+            root_id = getattr(message, "root_id", None) or None
+            parent_id = getattr(message, "parent_id", None) or None
+
+            # Determine thread root for session isolation
+            thread_root_id = root_id  # Already in a thread
+            if self.config.reply_in_thread and chat_type == "group" and not thread_root_id:
+                # Start a new thread from this message
+                thread_root_id = message_id
+
+            # Thread-scoped session key for group messages (like Slack's thread_ts)
+            session_key = (
+                f"feishu:{chat_id}:{thread_root_id}"
+                if thread_root_id and chat_type == "group"
+                else None
+            )
+
             # Forward to message bus
             reply_to = chat_id if chat_type == "group" else sender_id
             await self._handle_message(
@@ -761,7 +832,11 @@ class FeishuChannel(BaseChannel):
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
-                }
+                    "root_id": root_id,
+                    "parent_id": parent_id,
+                    "thread_root_id": thread_root_id,
+                },
+                session_key=session_key,
             )
 
         except Exception as e:
