@@ -277,9 +277,8 @@ def gateway(
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
-    # Create channel manager (before agent so api_channel can be passed in)
+    # Create channel manager
     channels = ChannelManager(config, bus, session_manager)
-    api_channel = channels.get_api_channel()
 
     # Create agent with cron service
     agent = AgentLoop(
@@ -300,7 +299,6 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
-        api_channel=api_channel,
     )
 
     # Set cron callback (needs agent)

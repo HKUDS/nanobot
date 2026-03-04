@@ -347,8 +347,20 @@ class SignalChannel(BaseChannel):
             # Extract group ID from either groupInfo or groupV2
             chat_id = group_id or sender_number
 
-            # Add to group message buffer BEFORE checking if we should respond
-            # This ensures we capture context even for messages we don't reply to
+            # Check if this group is allowed before doing anything else
+            if not self.config.group.enabled:
+                logger.debug(f"Ignoring group message from {chat_id} (groups disabled)")
+                return
+            if (
+                self.config.group.policy == "allowlist"
+                and chat_id not in self.config.group.allow_from
+            ):
+                logger.debug(
+                    f"Ignoring group message from {chat_id} (policy: {self.config.group.policy})"
+                )
+                return
+
+            # Add to group message buffer (group is allowed)
             self._add_to_group_buffer(
                 group_id=chat_id,
                 sender_name=sender_name or sender_number,
@@ -364,13 +376,6 @@ class SignalChannel(BaseChannel):
                 )
                 if command_handled:
                     return  # Command was handled, don't process further
-
-            # Check if this group is allowed
-            if not self._is_allowed(sender_id, chat_id, is_group=True):
-                logger.debug(
-                    f"Ignoring group message from {chat_id} (policy: {self.config.group.policy})"
-                )
-                return
 
             # Check if we should respond to this group message (mention requirement)
             should_respond = self._should_respond_in_group(message_text, mentions)
@@ -393,9 +398,16 @@ class SignalChannel(BaseChannel):
                     return  # Command was handled, don't process further
 
             # Check if sender is allowed for DMs
-            if not self._is_allowed(sender_id, chat_id, is_group=False):
-                logger.debug(f"Ignoring DM from {sender_id} (policy: {self.config.dm.policy})")
+            if not self.config.dm.enabled:
+                logger.debug(f"Ignoring DM from {sender_id} (DMs disabled)")
                 return
+            if self.config.dm.policy == "allowlist":
+                allow_list = self.config.dm.allow_from
+                sender_str = str(sender_id)
+                parts = [sender_str] + (sender_str.split("|") if "|" in sender_str else [])
+                if not any(p for p in parts if p in allow_list):
+                    logger.debug(f"Ignoring DM from {sender_id} (policy: {self.config.dm.policy})")
+                    return
 
         # Build content from text and attachments
         content_parts = []
@@ -477,9 +489,7 @@ class SignalChannel(BaseChannel):
                     "sender_name": sender_name,
                     "sender_number": sender_number,
                     "is_group": is_group_message,
-                    "group_id": (
-                        group_id
-                    ),
+                    "group_id": (group_id),
                 },
             )
         except Exception:
@@ -571,7 +581,21 @@ class SignalChannel(BaseChannel):
             True if command was handled, False otherwise
         """
         # Check if sender is allowed (respects DM and group policies)
-        if not self._is_allowed(sender_id, chat_id, is_group):
+        allowed = False
+        if is_group:
+            if self.config.group.enabled and (
+                self.config.group.policy != "allowlist" or chat_id in self.config.group.allow_from
+            ):
+                allowed = True
+        else:
+            if self.config.dm.enabled:
+                if self.config.dm.policy != "allowlist":
+                    allowed = True
+                else:
+                    sender_str = str(sender_id)
+                    parts_list = [sender_str] + (sender_str.split("|") if "|" in sender_str else [])
+                    allowed = any(p for p in parts_list if p in self.config.dm.allow_from)
+        if not allowed:
             logger.warning(
                 f"Command access denied for sender {sender_id} on channel {self.name}. "
                 f"Check dm.policy and dm.allow_from (for DMs) or group.policy and group.allow_from (for groups)."
@@ -663,15 +687,21 @@ class SignalChannel(BaseChannel):
         if not isinstance(value, str):
             return False
         return any(
-            candidate in self._account_id_aliases
-            for candidate in self._normalize_signal_id(value)
+            candidate in self._account_id_aliases for candidate in self._normalize_signal_id(value)
         )
 
     @staticmethod
     def _collect_sender_id_parts(envelope: dict[str, Any]) -> list[str]:
         """Collect all known sender identifier variants from an envelope."""
         parts: list[str] = []
-        for key in ("sourceNumber", "source", "sourceUuid", "sourceServiceId", "sourceAci", "sourceACI"):
+        for key in (
+            "sourceNumber",
+            "source",
+            "sourceUuid",
+            "sourceServiceId",
+            "sourceAci",
+            "sourceACI",
+        ):
             value = envelope.get(key)
             if not isinstance(value, str):
                 continue
@@ -753,7 +783,7 @@ class SignalChannel(BaseChannel):
             return None
 
         marker = text[start]
-        if marker not in ("\uFFFC", "\uFFFD", "\x1b"):
+        if marker not in ("\ufffc", "\ufffd", "\x1b"):
             return None
 
         next_index = start + 1
@@ -871,43 +901,6 @@ class SignalChannel(BaseChannel):
 
         return text.strip()
 
-    def _is_allowed(self, sender_id: str, chat_id: str, is_group: bool) -> bool:
-        """
-        Check if a sender is allowed to interact with the bot.
-
-        Args:
-            sender_id: The sender's identifier (phone number or UUID)
-            chat_id: The chat/group ID
-            is_group: Whether this is a group message
-
-        Returns:
-            True if allowed, False otherwise
-        """
-        if is_group:
-            # For groups, check if group itself is enabled and allowed
-            if not self.config.group.enabled:
-                return False
-            if self.config.group.policy == "allowlist":
-                return chat_id in self.config.group.allow_from
-            return True
-
-        # For DMs, check dm policy
-        if not self.config.dm.enabled:
-            return False
-        if self.config.dm.policy == "allowlist":
-            # Check sender_id against allowlist
-            allow_list = self.config.dm.allow_from
-            sender_str = str(sender_id)
-            if sender_str in allow_list:
-                return True
-            # Also check individual parts if sender_id contains "|" (number|uuid format)
-            if "|" in sender_str:
-                for part in sender_str.split("|"):
-                    if part and part in allow_list:
-                        return True
-            return False
-        return True
-
     @staticmethod
     def _is_group_chat_id(chat_id: str) -> bool:
         """Return True when chat_id appears to be a Signal group ID (base64)."""
@@ -992,9 +985,7 @@ class SignalChannel(BaseChannel):
 
     async def _ensure_typing_indicators_enabled(self) -> None:
         """Enable typing indicators on the bot account."""
-        response = await self._send_request(
-            "updateConfiguration", {"typingIndicators": True}
-        )
+        response = await self._send_request("updateConfiguration", {"typingIndicators": True})
         if "error" in response:
             logger.warning(f"Failed to enable Signal typing indicators: {response['error']}")
         else:

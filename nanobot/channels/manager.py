@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from loguru import logger
 
@@ -12,9 +12,6 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
 from nanobot.session.manager import SessionManager
-
-if TYPE_CHECKING:
-    from nanobot.channels.api import ApiChannel
 
 
 class ChannelManager:
@@ -34,7 +31,6 @@ class ChannelManager:
         self.bus = bus
         self.session_manager = session_manager
         self.channels: dict[str, BaseChannel] = {}
-        self._api_channel: ApiChannel | None = None
         self._dispatch_task: asyncio.Task | None = None
 
         self._init_channels()
@@ -166,19 +162,6 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
 
-        # API channel
-        if self.config.channels.api.enabled:
-            try:
-                from nanobot.channels.api import ApiChannel
-
-                self._api_channel = ApiChannel(
-                    self.config.channels.api,
-                    self.bus,
-                )
-                logger.info("API channel enabled")
-            except ImportError as e:
-                logger.warning("API channel not available: {}", e)
-
         self._validate_allow_from()
 
     def _validate_allow_from(self) -> None:
@@ -280,7 +263,3 @@ class ChannelManager:
     def enabled_channels(self) -> list[str]:
         """Get list of enabled channel names."""
         return list(self.channels.keys())
-
-    def get_api_channel(self) -> ApiChannel | None:
-        """Get the API channel instance if enabled."""
-        return self._api_channel

@@ -16,7 +16,6 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.display import ShowImageTool, ShowTextTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -29,7 +28,6 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.channels.api import ApiChannel
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig
     from nanobot.cron.service import CronService
 
@@ -67,13 +65,11 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
-        api_channel: ApiChannel | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
 
         self.bus = bus
         self.channels_config = channels_config
-        self._api_channel = api_channel
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
@@ -138,9 +134,6 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
-        if self._api_channel:
-            self.tools.register(ShowTextTool(api_channel=self._api_channel))
-            self.tools.register(ShowImageTool(api_channel=self._api_channel))
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -171,10 +164,6 @@ class AgentLoop:
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
-        for name in ("show_text", "show_image"):
-            if tool := self.tools.get(name):
-                if hasattr(tool, "set_chat_id"):
-                    tool.set_chat_id(chat_id)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -489,16 +478,10 @@ class AgentLoop:
                 )
             )
 
-        if self._api_channel:
-            await self._api_channel.push_agent_state("thinking")
-        try:
-            final_content, _, all_msgs = await self._run_agent_loop(
-                initial_messages,
-                on_progress=on_progress or _bus_progress,
-            )
-        finally:
-            if self._api_channel:
-                await self._api_channel.push_agent_state("idle")
+        final_content, _, all_msgs = await self._run_agent_loop(
+            initial_messages,
+            on_progress=on_progress or _bus_progress,
+        )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."

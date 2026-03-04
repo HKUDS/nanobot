@@ -226,12 +226,15 @@ class SignalConfig(Base):
     dm: SignalDMConfig = Field(default_factory=SignalDMConfig)
     group: SignalGroupConfig = Field(default_factory=SignalGroupConfig)
 
+    @property
+    def allow_from(self) -> list[str]:
+        """Aggregate allowlist for the base-class is_allowed() check.
 
-class ApiChannelConfig(Base):
-    """API channel configuration (Unix-socket server for external clients)."""
-
-    enabled: bool = False
-    socket_path: str = "~/.nanobot/api.sock"  # Path to the Unix domain socket
+        Returns the union of dm.allow_from and group.allow_from so the base
+        channel gate sees a populated list when either sub-policy is configured.
+        A ``"*"`` wildcard in either sub-list propagates to allow all.
+        """
+        return list(dict.fromkeys(self.dm.allow_from + self.group.allow_from))
 
 
 class ChannelsConfig(Base):
@@ -250,7 +253,6 @@ class ChannelsConfig(Base):
     qq: QQConfig = Field(default_factory=QQConfig)
     signal: SignalConfig = Field(default_factory=SignalConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
-    api: ApiChannelConfig = Field(default_factory=ApiChannelConfig)
 
 
 class AgentDefaults(Base):
