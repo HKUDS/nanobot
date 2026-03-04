@@ -55,6 +55,7 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "## Current Session" not in messages[0]["content"]
 
     assert len(messages) == 2
+
     # Runtime context is now merged with user message into a single message
     assert messages[-1]["role"] == "user"
     user_content = messages[-1]["content"]
