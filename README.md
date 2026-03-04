@@ -1087,6 +1087,8 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 </p>
 
 
+<!-- Test comment: verifying PR workflow from orghi fork -->
+
 <p align="center">
   <sub>nanobot is for educational, research, and technical exchange purposes only</sub>
 </p>
