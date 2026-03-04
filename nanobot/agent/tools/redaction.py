@@ -12,6 +12,12 @@ REDACTION_RULES: list[tuple[str, re.Pattern[str], str]] = [
         re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]{1,10000}?-----END [A-Z ]*PRIVATE KEY-----"),
         "[REDACTED_PRIVATE_KEY]",
     ),
+    # SSH public keys (ssh-rsa, ssh-ed25519, ssh-dss, ecdsa-sha2-*)
+    (
+        "ssh_public_key",
+        re.compile(r"\b(?:ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-\S+)\s+AAAA[A-Za-z0-9+/=]{40,}(?:\s+\S+)?"),
+        "[REDACTED_SSH_PUBLIC_KEY]",
+    ),
     # OpenAI API keys (specific format)
     ("openai_key", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{32,}\b"), "sk-***"),
     # GitHub PATs
