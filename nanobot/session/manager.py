@@ -81,6 +81,58 @@ class SessionManager:
         self.sessions_dir = ensure_dir(self.workspace / "sessions")
         self.legacy_sessions_dir = Path.home() / ".nanobot" / "sessions"
         self._cache: dict[str, Session] = {}
+        self._active_sessions_file = self.workspace / "active_sessions.json"
+        self._active_sessions: dict[str, str] = {}  # "channel:chat_id" -> "suffix" (empty = default)
+        self._load_active_sessions()
+
+    def _load_active_sessions(self) -> None:
+        """Load active session tracking from disk."""
+        if self._active_sessions_file.exists():
+            try:
+                with open(self._active_sessions_file, encoding="utf-8") as f:
+                    self._active_sessions = json.load(f)
+            except Exception:
+                self._active_sessions = {}
+
+    def _save_active_sessions(self) -> None:
+        """Save active session tracking to disk."""
+        try:
+            with open(self._active_sessions_file, "w", encoding="utf-8") as f:
+                json.dump(self._active_sessions, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def get_active_session_key(self, channel: str, chat_id: str) -> str:
+        """
+        Get the active session key for a user.
+
+        Returns the full session key including suffix if set.
+        """
+        base_key = f"{channel}:{chat_id}"
+        suffix = self._active_sessions.get(base_key, "")
+        if suffix:
+            return f"{base_key}:{suffix}"
+        return base_key
+
+    def set_active_session(self, channel: str, chat_id: str, suffix: str | None) -> str:
+        """
+        Set the active session for a user.
+
+        Args:
+            suffix: Session suffix (e.g., "work"), or None/empty for default session.
+
+        Returns:
+            The full session key that was activated.
+        """
+        base_key = f"{channel}:{chat_id}"
+        if suffix:
+            self._active_sessions[base_key] = suffix
+            full_key = f"{base_key}:{suffix}"
+        else:
+            self._active_sessions.pop(base_key, None)
+            full_key = base_key
+        self._save_active_sessions()
+        return full_key
 
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
@@ -210,3 +262,84 @@ class SessionManager:
                 continue
 
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+
+    def get_session_metadata(self, key: str) -> dict[str, Any] | None:
+        """
+        Get session metadata including message count and last message preview.
+
+        Returns dict with: key, created_at, updated_at, message_count, last_message_preview
+        Returns None if session not found.
+        """
+        path = self._get_session_path(key)
+        if not path.exists():
+            return None
+
+        try:
+            message_count = 0
+            last_content = None
+            created_at = None
+            updated_at = None
+
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    if data.get("_type") == "metadata":
+                        created_at = data.get("created_at")
+                        updated_at = data.get("updated_at")
+                    else:
+                        message_count += 1
+                        if data.get("content"):
+                            last_content = data["content"]
+
+            # Truncate preview
+            preview = None
+            if last_content and isinstance(last_content, str):
+                preview = last_content.replace("\n", " ").strip()[:80]
+                if len(last_content) > 80:
+                    preview += "..."
+
+            return {
+                "key": key,
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "message_count": message_count,
+                "last_message_preview": preview,
+            }
+        except Exception:
+            return None
+
+    def list_user_sessions(self, channel: str, chat_id: str) -> list[dict[str, Any]]:
+        """
+        List all sessions for a specific user (channel:chat_id prefix).
+
+        This finds sessions matching:
+        - channel:chat_id (default session)
+        - channel:chat_id:<suffix> (named sessions)
+
+        Returns:
+            List of session info dicts, sorted by updated_at desc.
+        """
+        prefix = f"{channel}:{chat_id}"
+        all_sessions = self.list_sessions()
+
+        user_sessions = []
+        for s in all_sessions:
+            key = s["key"]
+            # Match exact prefix or prefix with ":suffix"
+            if key == prefix or key.startswith(f"{prefix}:"):
+                metadata = self.get_session_metadata(key)
+                if metadata:
+                    # Extract suffix for display
+                    if key == prefix:
+                        suffix = "default"
+                    else:
+                        suffix = key[len(prefix) + 1:]  # Remove "channel:chat_id:"
+                    user_sessions.append({
+                        **metadata,
+                        "suffix": suffix,
+                    })
+
+        return sorted(user_sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
