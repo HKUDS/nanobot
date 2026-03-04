@@ -93,3 +93,40 @@ async def test_feishu_wiki_list_spaces_calls_api():
     with patch("nanobot.agent.tools.feishu.wiki.get_feishu_client", return_value=mock_client):
         result = await tool.execute(action="list_spaces")
     assert "sp_123" in result
+
+
+# Task 8: feishu_bitable tests
+def test_feishu_bitable_tool_name():
+    from nanobot.agent.tools.feishu.bitable import FeishuBitableTool
+    tool = FeishuBitableTool(FeishuConfig(enabled=True, app_id="a", app_secret="b"))
+    assert tool.name == "feishu_bitable"
+
+
+def test_feishu_bitable_tool_has_required_params():
+    from nanobot.agent.tools.feishu.bitable import FeishuBitableTool
+    tool = FeishuBitableTool(FeishuConfig(enabled=True, app_id="a", app_secret="b"))
+    props = tool.parameters["properties"]
+    assert "action" in props
+    assert "app_token" in props
+
+
+@pytest.mark.asyncio
+async def test_feishu_bitable_list_records_calls_api():
+    from unittest.mock import MagicMock, patch
+    from nanobot.agent.tools.feishu.bitable import FeishuBitableTool
+
+    tool = FeishuBitableTool(FeishuConfig(enabled=True, app_id="a", app_secret="b"))
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.success.return_value = True
+    mock_record = MagicMock()
+    mock_record.record_id = "rec_abc"
+    mock_record.fields = {"Name": "Alice"}
+    mock_resp.data.items = [mock_record]
+    mock_resp.data.has_more = False
+    mock_client.bitable.v1.app_table_record.list.return_value = mock_resp
+
+    with patch("nanobot.agent.tools.feishu.bitable.get_feishu_client", return_value=mock_client):
+        result = await tool.execute(action="list_records", app_token="bascABC", table_id="tblXYZ")
+    assert "rec_abc" in result
+
