@@ -10,6 +10,7 @@ from typing import Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.agent.skill_ranker import SkillRanker
 
 
 class ContextBuilder:
@@ -22,9 +23,17 @@ class ContextBuilder:
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self.skill_ranker = SkillRanker(self.skills)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills."""
+    def build_system_prompt(self, skill_names: list[str] | None = None, user_query: str | None = None, top_k_skills: int = 5) -> str:
+        """
+        Build the system prompt from identity, bootstrap files, memory, and skills.
+        
+        Args:
+            skill_names: Explicit skill names to load (overrides ranking)
+            user_query: User query for TF-IDF skill ranking
+            top_k_skills: Number of top relevant skills to inject (0 = disable smart injection)
+        """
         parts = [self._get_identity()]
 
         bootstrap = self._load_bootstrap_files()
@@ -35,12 +44,24 @@ class ContextBuilder:
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
+        # Always load skills marked as always=true
         always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
+        
+        # Smart skill injection: rank by relevance to user query (only if enabled)
+        relevant_skills = []
+        if top_k_skills > 0 and user_query and user_query.strip():
+            ranked = self.skill_ranker.rank_skills(user_query, top_k=top_k_skills)
+            relevant_skills = [name for name, score in ranked if name not in always_skills]
+        
+        # Combine always skills + relevant skills
+        skills_to_load = always_skills + relevant_skills
+        
+        if skills_to_load:
+            skills_content = self.skills.load_skills_for_context(skills_to_load)
+            if skills_content:
+                parts.append(f"# Active Skills\n\n{skills_content}")
 
+        # Show summary of all other skills
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
             parts.append(f"""# Skills
@@ -110,6 +131,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        top_k_skills: int = 5,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id)
@@ -123,7 +145,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, user_query=current_message, top_k_skills=top_k_skills)},
             *history,
             {"role": "user", "content": merged},
         ]
