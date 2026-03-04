@@ -1,5 +1,6 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import asyncio
 import os
 import secrets
 import string
@@ -86,6 +87,57 @@ class LiteLLMProvider(LLMProvider):
             resolved = env_val.replace("{api_key}", api_key)
             resolved = resolved.replace("{api_base}", effective_base)
             os.environ.setdefault(env_name, resolved)
+
+    async def _chat_with_retry(self, kwargs: dict[str, Any]) -> Any:
+        """Execute litellm completion with exponential backoff retry.
+        
+        Retries up to 3 times with 1s/2s/4s delays on transient errors
+        (429 rate limits, 5xx errors, timeouts, connection errors).
+        """
+        max_retries = 3
+        base_delay = 1.0
+        
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                return await acompletion(**kwargs)
+            except Exception as e:
+                error_str = str(e).lower()
+                # Check if error is transient and worth retrying
+                is_transient = (
+                    "429" in error_str or
+                    "rate limit" in error_str or
+                    "502" in error_str or
+                    "503" in error_str or
+                    "504" in error_str or
+                    "timeout" in error_str or
+                    "connection" in error_str or
+                    "temporarily unavailable" in error_str
+                )
+                # Don't retry on permanent errors (400, 401, 403, 404)
+                is_permanent = (
+                    "400" in error_str or
+                    "401" in error_str or
+                    "403" in error_str or
+                    "404" in error_str or
+                    "invalid request" in error_str
+                )
+                
+                if is_permanent or not is_transient:
+                    # Don't retry permanent errors on later attempts
+                    if attempt >= max_retries - 1:
+                        raise
+                    # But do continue to retry on the last attempt
+                    last_error = e
+                    continue
+                
+                last_error = e
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    await asyncio.sleep(delay)
+        
+        # If we get here, all retries exhausted
+        raise last_error
 
     def _resolve_model(self, model: str) -> str:
         """Resolve model name by applying provider/gateway prefixes."""
@@ -257,7 +309,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tool_choice"] = "auto"
 
         try:
-            response = await acompletion(**kwargs)
+            response = await self._chat_with_retry(kwargs)
             return self._parse_response(response)
         except Exception as e:
             # Return error as content for graceful handling
