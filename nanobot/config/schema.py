@@ -311,6 +311,8 @@ class MCPServerConfig(Base):
     url: str = ""  # HTTP: streamable HTTP endpoint URL
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP: Custom HTTP Headers
     tool_timeout: int = 30  # Seconds before a tool call is cancelled
+    disabled_tools: list[str] = Field(default_factory=list)  # Deny list, applied after enabled_tools
+    enabled_tools: list[str] = Field(default_factory=list)  # Allow list (empty = all enabled)
 
 
 class ToolsConfig(Base):

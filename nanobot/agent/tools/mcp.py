@@ -89,11 +89,17 @@ async def connect_mcp_servers(
             await session.initialize()
 
             tools = await session.list_tools()
+            registered = 0
             for tool_def in tools.tools:
+                if cfg.enabled_tools and tool_def.name not in cfg.enabled_tools:
+                    continue
+                if tool_def.name in cfg.disabled_tools:
+                    continue
                 wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
                 registry.register(wrapper)
+                registered += 1
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
 
-            logger.info("MCP server '{}': connected, {} tools registered", name, len(tools.tools))
+            logger.info("MCP server '{}': connected, {} tools registered", name, registered)
         except Exception as e:
             logger.error("MCP server '{}': failed to connect: {}", name, e)
