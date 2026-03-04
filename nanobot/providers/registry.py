@@ -376,6 +376,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # LM Studio: local LLM runner with OpenAI-compatible API.
+    # Detected when config key is "lmstudio".
+    ProviderSpec(
+        name="lmstudio",
+        keywords=("lmstudio",),
+        env_key="LMSTUDIO_API_KEY",
+        display_name="LM Studio",
+        litellm_prefix="lmstudio",
+        skip_prefixes=("lmstudio/",),
+        env_extras=(),
+        is_gateway=False,
+        is_local=True,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="http://localhost:1234/v1",  # LM Studio default port
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # === Auxiliary (not a primary LLM provider) ============================
 
     # Groq: mainly used for Whisper voice transcription, also usable for LLM.
