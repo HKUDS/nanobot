@@ -7,6 +7,7 @@ from pathlib import Path
 import datetime as datetime_module
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.providers.litellm_provider import LiteLLMProvider
 
 
 class _FakeDatetime(real_datetime):
@@ -64,3 +65,21 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
 
     assert messages[-1]["role"] == "user"
     assert messages[-1]["content"] == "Return exactly: OK"
+
+
+def test_minimax_model_overrides_enable_reasoning_split_in_extra_body() -> None:
+    provider = LiteLLMProvider(default_model="minimax/MiniMax-M2.5")
+    kwargs: dict[str, object] = {}
+
+    provider._apply_model_overrides("minimax/MiniMax-M2.5", kwargs)
+
+    assert kwargs.get("extra_body") == {"reasoning_split": True}
+
+
+def test_model_overrides_merge_extra_body_and_keep_existing_fields() -> None:
+    provider = LiteLLMProvider(default_model="minimax/MiniMax-M2.5")
+    kwargs: dict[str, object] = {"extra_body": {"foo": "bar"}}
+
+    provider._apply_model_overrides("minimax/MiniMax-M2.5", kwargs)
+
+    assert kwargs.get("extra_body") == {"foo": "bar", "reasoning_split": True}

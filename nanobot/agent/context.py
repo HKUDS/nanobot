@@ -160,8 +160,29 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         tool_calls: list[dict[str, Any]] | None = None,
         reasoning_content: str | None = None,
         thinking_blocks: list[dict] | None = None,
+        reasoning_details: Any | None = None,
     ) -> list[dict[str, Any]]:
         """Add an assistant message to the message list."""
+        messages.append(
+            self.build_assistant_message(
+                content=content,
+                tool_calls=tool_calls,
+                reasoning_content=reasoning_content,
+                thinking_blocks=thinking_blocks,
+                reasoning_details=reasoning_details,
+            )
+        )
+        return messages
+
+    @staticmethod
+    def build_assistant_message(
+        content: str | None,
+        tool_calls: list[dict[str, Any]] | None = None,
+        reasoning_content: str | None = None,
+        thinking_blocks: list[dict] | None = None,
+        reasoning_details: Any | None = None,
+    ) -> dict[str, Any]:
+        """Build a normalized assistant message payload."""
         msg: dict[str, Any] = {"role": "assistant", "content": content}
         if tool_calls:
             msg["tool_calls"] = tool_calls
@@ -169,5 +190,6 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             msg["reasoning_content"] = reasoning_content
         if thinking_blocks:
             msg["thinking_blocks"] = thinking_blocks
-        messages.append(msg)
-        return messages
+        if reasoning_details is not None:
+            msg["reasoning_details"] = reasoning_details
+        return msg
