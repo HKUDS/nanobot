@@ -213,6 +213,7 @@ class AgentLoop:
                     tool_hint_str = self._tool_hint(response.tool_calls)
                     
                     if combined_thoughts:
+                        await on_progress(combined_thoughts)
                         await on_progress(f"{combined_thoughts}\n\n{tool_hint_str}", tool_hint=True)
                     else:
                         await on_progress(tool_hint_str, tool_hint=True)
