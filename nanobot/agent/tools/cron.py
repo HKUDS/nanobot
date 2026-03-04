@@ -122,7 +122,10 @@ class CronTool(Tool):
         elif at:
             from datetime import datetime
 
-            dt = datetime.fromisoformat(at)
+            try:
+                dt = datetime.fromisoformat(at)
+            except ValueError:
+                return f"Error: Invalid ISO datetime format: '{at}'. Use format like '2024-12-31T23:59:00' or '2024-12-31T23:59:00+08:00'"
             at_ms = int(dt.timestamp() * 1000)
             schedule = CronSchedule(kind="at", at_ms=at_ms)
             delete_after = True
