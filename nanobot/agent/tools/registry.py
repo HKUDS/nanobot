@@ -1,8 +1,36 @@
 """Tool registry for dynamic tool management."""
 
+import re
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+
+
+# Common API key patterns for redaction
+_SECRET_PATTERNS = [
+    # Generic patterns
+    (r'(api[_-]?key["\s:=]+["\']?)([a-zA-Z0-9_\-]{20,})', r'\1[REDACTED]'),
+    (r'(secret["\s:=]+["\']?)([a-zA-Z0-9_\-]{20,})', r'\1[REDACTED]'),
+    (r'(token["\s:=]+["\']?)([a-zA-Z0-9_\-]{20,})', r'\1[REDACTED]'),
+    # Provider-specific
+    (r'(sk[-_]?or[-_]?[a-zA-Z0-9]{20,})', '[REDACTED]'),
+    (r'(sk[-_]?ant[-_]?api[-_]?[a-zA-Z0-9]{20,})', '[REDACTED]'),
+    (r'(sk[-_]?openai[-_]?[a-zA-Z0-9]{20,})', '[REDACTED]'),
+    (r'(ghp_[a-zA-Z0-9]{36})', '[REDACTED]'),
+    (r'(github_pat_[a-zA-Z0-9_]{22,})', '[REDACTED]'),
+    (r'(xox[baprs]-[a-zA-Z0-9]{10,})', '[REDACTED]'),  # Slack
+    (r'(AIza[0-9A-Za-z_\-]{35})', '[REDACTED]'),  # Google API
+    (r'(AKIA[0-9A-Z]{16})', '[REDACTED]'),  # AWS Access Key
+]
+
+_RE_COMPILED = [(re.compile(p, re.IGNORECASE), r) for p, r in _SECRET_PATTERNS]
+
+
+def _redact_secrets(text: str) -> str:
+    """Redact common API key patterns from text."""
+    for pattern, replacement in _RE_COMPILED:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 class ToolRegistry:
@@ -50,7 +78,8 @@ class ToolRegistry:
             result = await tool.execute(**params)
             if isinstance(result, str) and result.startswith("Error"):
                 return result + _HINT
-            return result
+            # Redact secrets from tool output (defense-in-depth)
+            return _redact_secrets(result)
         except Exception as e:
             return f"Error executing {name}: {str(e)}" + _HINT
 

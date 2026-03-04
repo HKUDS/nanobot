@@ -122,7 +122,10 @@ class CronTool(Tool):
         elif at:
             from datetime import datetime
 
-            dt = datetime.fromisoformat(at)
+            try:
+                dt = datetime.fromisoformat(at)
+            except ValueError:
+                return f"Error: Invalid ISO datetime format: '{at}'. Use format like '2024-12-31T23:59:00' or '2024-12-31T23:59:00+08:00'"
             at_ms = int(dt.timestamp() * 1000)
             schedule = CronSchedule(kind="at", at_ms=at_ms)
             delete_after = True
@@ -144,7 +147,38 @@ class CronTool(Tool):
         jobs = self._cron.list_jobs()
         if not jobs:
             return "No scheduled jobs."
-        lines = [f"- {j.name} (id: {j.id}, {j.schedule.kind})" for j in jobs]
+        
+        lines = []
+        for j in jobs:
+            # Build schedule details
+            schedule_info = []
+            if j.schedule.kind == "cron":
+                schedule_info.append(f"cron: {j.schedule.expr}")
+                if j.schedule.tz:
+                    schedule_info.append(f"tz: {j.schedule.tz}")
+            elif j.schedule.kind == "every":
+                every_sec = j.schedule.every_ms / 1000
+                if every_sec >= 3600:
+                    schedule_info.append(f"every {every_sec/3600:.1f}h")
+                elif every_sec >= 60:
+                    schedule_info.append(f"every {every_sec/60:.1f}m")
+                else:
+                    schedule_info.append(f"every {every_sec}s")
+            elif j.schedule.kind == "at":
+                from datetime import datetime
+                dt = datetime.fromtimestamp(j.schedule.at_ms / 1000)
+                schedule_info.append(f"at: {dt.isoformat()}")
+            
+            # Include next run time if available
+            next_run = ""
+            if j.state.next_run_at_ms:
+                from datetime import datetime
+                dt = datetime.fromtimestamp(j.state.next_run_at_ms / 1000)
+                next_run = f", next: {dt.strftime('%Y-%m-%d %H:%M')}"
+            
+            details = ", ".join(schedule_info) if schedule_info else j.schedule.kind
+            lines.append(f"- {j.name} (id: {j.id}, {details}{next_run})")
+        
         return "Scheduled jobs:\n" + "\n".join(lines)
 
     def _remove_job(self, job_id: str | None) -> str:

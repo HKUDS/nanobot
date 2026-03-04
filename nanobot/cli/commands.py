@@ -222,7 +222,10 @@ def _make_provider(config: Config):
 
     from nanobot.providers.registry import find_by_name
     spec = find_by_name(provider_name)
-    if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
+    # Allow local providers (LM Studio, vLLM, etc.) without API key
+    # Also allow if spec is None (unknown provider) - will use fallback
+    is_local_provider = spec and spec.is_local
+    if not model.startswith("bedrock/") and not is_local_provider and not (p and p.api_key) and not (spec and spec.is_oauth):
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers section")
         raise typer.Exit(1)

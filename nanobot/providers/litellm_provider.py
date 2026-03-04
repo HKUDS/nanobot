@@ -1,5 +1,6 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import asyncio
 import os
 import secrets
 import string
@@ -42,6 +43,7 @@ class LiteLLMProvider(LLMProvider):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self._provider_name = provider_name  # Store explicit provider for model resolution
 
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -52,8 +54,10 @@ class LiteLLMProvider(LLMProvider):
         if api_key:
             self._setup_env(api_key, api_base, default_model)
 
-        if api_base:
-            litellm.api_base = api_base
+        # NOTE: Do NOT set litellm.api_base globally here.
+        # The api_base is passed per-request in chat() via kwargs["api_base"].
+        # Global mutation causes issues when multiple providers exist with
+        # different api_base values (#1509).
 
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
@@ -84,6 +88,57 @@ class LiteLLMProvider(LLMProvider):
             resolved = resolved.replace("{api_base}", effective_base)
             os.environ.setdefault(env_name, resolved)
 
+    async def _chat_with_retry(self, kwargs: dict[str, Any]) -> Any:
+        """Execute litellm completion with exponential backoff retry.
+        
+        Retries up to 3 times with 1s/2s/4s delays on transient errors
+        (429 rate limits, 5xx errors, timeouts, connection errors).
+        """
+        max_retries = 3
+        base_delay = 1.0
+        
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                return await acompletion(**kwargs)
+            except Exception as e:
+                error_str = str(e).lower()
+                # Check if error is transient and worth retrying
+                is_transient = (
+                    "429" in error_str or
+                    "rate limit" in error_str or
+                    "502" in error_str or
+                    "503" in error_str or
+                    "504" in error_str or
+                    "timeout" in error_str or
+                    "connection" in error_str or
+                    "temporarily unavailable" in error_str
+                )
+                # Don't retry on permanent errors (400, 401, 403, 404)
+                is_permanent = (
+                    "400" in error_str or
+                    "401" in error_str or
+                    "403" in error_str or
+                    "404" in error_str or
+                    "invalid request" in error_str
+                )
+                
+                if is_permanent or not is_transient:
+                    # Don't retry permanent errors on later attempts
+                    if attempt >= max_retries - 1:
+                        raise
+                    # But do continue to retry on the last attempt
+                    last_error = e
+                    continue
+                
+                last_error = e
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    await asyncio.sleep(delay)
+        
+        # If we get here, all retries exhausted
+        raise last_error
+
     def _resolve_model(self, model: str) -> str:
         """Resolve model name by applying provider/gateway prefixes."""
         if self._gateway:
@@ -95,7 +150,19 @@ class LiteLLMProvider(LLMProvider):
                 model = f"{prefix}/{model}"
             return model
 
-        # Standard mode: auto-prefix for known providers
+        # Explicit provider specified — use it instead of auto-detection by model name
+        if self._provider_name and self._provider_name != "auto":
+            from nanobot.providers.registry import find_by_name
+            spec = find_by_name(self._provider_name)
+            if spec:
+                # Apply canonical prefix, skip if already present
+                if spec.litellm_prefix:
+                    model = self._canonicalize_explicit_prefix(model, spec.name, spec.litellm_prefix)
+                    if not any(model.startswith(s) for s in spec.skip_prefixes):
+                        model = f"{spec.litellm_prefix}/{model}"
+                return model
+
+        # Standard mode: auto-prefix for known providers (fallback)
         spec = find_by_model(model)
         if spec and spec.litellm_prefix:
             model = self._canonicalize_explicit_prefix(model, spec.name, spec.litellm_prefix)
@@ -242,7 +309,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tool_choice"] = "auto"
 
         try:
-            response = await acompletion(**kwargs)
+            response = await self._chat_with_retry(kwargs)
             return self._parse_response(response)
         except Exception as e:
             # Return error as content for graceful handling
@@ -259,10 +326,16 @@ class LiteLLMProvider(LLMProvider):
         tool_calls = []
         if hasattr(message, "tool_calls") and message.tool_calls:
             for tc in message.tool_calls:
-                # Parse arguments from JSON string if needed
+                # Parse arguments - ensure it's always a valid dict
                 args = tc.function.arguments
                 if isinstance(args, str):
-                    args = json_repair.loads(args)
+                    # Some providers (e.g., qwen/dashscope) may return malformed JSON
+                    # Use json_repair to fix it, then ensure result is a dict
+                    repaired = json_repair.loads(args)
+                    args = repaired if isinstance(repaired, dict) else {}
+                elif not isinstance(args, dict):
+                    # Fallback for unexpected types
+                    args = {}
 
                 tool_calls.append(ToolCallRequest(
                     id=_short_tool_id(),

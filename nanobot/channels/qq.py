@@ -1,6 +1,7 @@
 """QQ channel implementation using botpy SDK."""
 
 import asyncio
+import random
 from collections import deque
 from typing import TYPE_CHECKING
 
@@ -56,6 +57,8 @@ class QQChannel(BaseChannel):
         self.config: QQConfig = config
         self._client: "botpy.Client | None" = None
         self._processed_ids: deque = deque(maxlen=1000)
+        # Track msg_seq per user to avoid QQ deduplication limit (4 messages per msg_id in 5 min)
+        self._msg_seq_cache: dict[str, int] = {}
 
     async def start(self) -> None:
         """Start the QQ bot."""
@@ -102,11 +105,16 @@ class QQChannel(BaseChannel):
             return
         try:
             msg_id = msg.metadata.get("message_id")
+            # Generate unique msg_seq to avoid QQ's deduplication limit
+            # (max 4 messages per msg_id within 5 minutes)
+            # Use large random number to minimize collision probability
+            msg_seq = random.randint(100_000_000, 999_999_999)
             await self._client.api.post_c2c_message(
                 openid=msg.chat_id,
                 msg_type=0,
                 content=msg.content,
                 msg_id=msg_id,
+                msg_seq=msg_seq,
             )
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
