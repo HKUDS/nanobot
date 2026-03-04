@@ -12,8 +12,9 @@ def ensure_dir(path: Path) -> Path:
 
 
 def get_data_path() -> Path:
-    """~/.nanobot data directory."""
-    return ensure_dir(Path.home() / ".nanobot")
+    """Get nanobot data directory (derived from config path)."""
+    from nanobot.config.loader import get_data_dir
+    return ensure_dir(get_data_dir())
 
 
 def get_workspace_path(workspace: str | None = None) -> Path:
