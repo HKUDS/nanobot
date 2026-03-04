@@ -209,10 +209,13 @@ class AgentLoop:
                           for b in (response.thinking_blocks or []) if isinstance(b, dict) and "signature" in b)
                     ]
                     
-                    if combined := "\n\n".join(filter(None, thoughts)):
-                        await on_progress(combined)
-                        
-                    await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
+                    combined_thoughts = "\n\n".join(filter(None, thoughts))
+                    tool_hint_str = self._tool_hint(response.tool_calls)
+                    
+                    if combined_thoughts:
+                        await on_progress(f"{combined_thoughts}\n\n{tool_hint_str}", tool_hint=True)
+                    else:
+                        await on_progress(tool_hint_str, tool_hint=True)
 
                 tool_call_dicts = [
                     {
