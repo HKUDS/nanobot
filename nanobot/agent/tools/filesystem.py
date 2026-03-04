@@ -26,6 +26,10 @@ def _resolve_path(
 class ReadFileTool(Tool):
     """Tool to read file contents."""
 
+    # Size limits (matching other tools like ExecTool 10KB, WebFetchTool 50KB)
+    MAX_FILE_SIZE = 512 * 1024  # 512KB - reject files larger than this
+    MAX_CONTENT_CHARS = 128 * 1024  # 128K chars - truncate larger files
+
     def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
@@ -54,7 +58,22 @@ class ReadFileTool(Tool):
             if not file_path.is_file():
                 return f"Error: Not a file: {path}"
 
+            # Fast stat check for file size limit
+            file_size = file_path.stat().st_size
+            if file_size > self.MAX_FILE_SIZE:
+                return (f"Error: File too large ({file_size // 1024}KB). "
+                        f"Max size: {self.MAX_FILE_SIZE // 1024}KB. "
+                        "Use exec with 'head', 'tail', or 'grep' to read large files.")
+
             content = file_path.read_text(encoding="utf-8")
+            
+            # Truncate if content is too long
+            if len(content) > self.MAX_CONTENT_CHARS:
+                truncated = content[:self.MAX_CONTENT_CHARS]
+                return (truncated + 
+                        f"\n\n[Content truncated at {self.MAX_CONTENT_CHARS // 1024}K chars. "
+                        "Use exec with 'head', 'tail', or 'grep' to read more.]")
+            
             return content
         except PermissionError as e:
             return f"Error: {e}"
