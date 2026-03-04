@@ -1,3 +1,15 @@
+# 🔱 MyNanobotDev - Personal Fork
+
+> **This is a personal fork of [HKUDS/nanobot](https://github.com/HKUDS/nanobot)** for custom development and experimentation.
+> 
+> - **Upstream:** [HKUDS/nanobot](https://github.com/HKUDS/nanobot)
+> - **Purpose:** Custom features, private integrations, and experimental modifications
+> - **Sync Status:** Forked from `v0.1.4.post3` (2026-03-04)
+> 
+> For the official nanobot project, please visit the upstream repository.
+
+---
+
 <div align="center">
   <img src="nanobot_logo.png" alt="nanobot" width="500">
   <h1>nanobot: Ultra-Lightweight Personal AI Assistant</h1>
