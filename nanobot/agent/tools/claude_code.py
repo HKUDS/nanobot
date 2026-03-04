@@ -266,21 +266,16 @@ class ClaudeCodeTool(Tool):
 
         self._ensure_tmux_socket_dir()
 
-        # Build the claude command
-        claude_cmd = "claude"
-        if message:
-            # Use --message for non-interactive prompt
-            escaped = message.replace("'", "'\\''")
-            claude_cmd = f"claude --message '{escaped}'"
-
+        # Create tmux session with a shell (not running claude directly)
+        # This ensures the session persists even after claude exits
         try:
+            # Step 1: Create tmux session with a shell
             subprocess.run(
                 [
                     "tmux", "-S", TMUX_SOCKET,
                     "new-session", "-d",
                     "-s", tmux_session_name,
                     "-c", work_dir,
-                    claude_cmd,
                 ],
                 capture_output=True,
                 text=True,
@@ -288,6 +283,41 @@ class ClaudeCodeTool(Tool):
             )
         except subprocess.TimeoutExpired:
             return "Error: tmux session creation timed out"
+        except FileNotFoundError:
+            return "Error: tmux is not installed or not in PATH"
+
+        # Step 2: Send the claude command to the shell
+        claude_cmd = "claude"
+        if message:
+            # Use --message for non-interactive prompt
+            escaped = message.replace("'", "'\\''")
+            claude_cmd = f"claude --message '{escaped}'"
+
+        try:
+            # Send command as literal string
+            subprocess.run(
+                [
+                    "tmux", "-S", TMUX_SOCKET,
+                    "send-keys", "-t", f"{tmux_session_name}:0.0",
+                    "-l", "--", claude_cmd,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            # Send Enter to execute
+            subprocess.run(
+                [
+                    "tmux", "-S", TMUX_SOCKET,
+                    "send-keys", "-t", f"{tmux_session_name}:0.0",
+                    "Enter",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except subprocess.TimeoutExpired:
+            return "Error: sending command to tmux timed out"
         except FileNotFoundError:
             return "Error: tmux is not installed or not in PATH"
 

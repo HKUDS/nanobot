@@ -156,9 +156,13 @@ async def test_create_session_with_message(tmp_path):
             message="Hello Claude!",
         )
 
-    # Verify the tmux command included --message flag
-    call_args = mock_run.call_args[0][0]
-    cmd_str = call_args[-1]  # last arg is the claude command string
+    # Verify the tmux send-keys command included --message flag
+    # call_args_list: [0] create session, [1] send-keys with command, [2] send Enter
+    assert mock_run.call_count == 3
+    send_keys_call = mock_run.call_args_list[1][0][0]
+    assert "send-keys" in send_keys_call
+    # The claude command with --message is in the send-keys args
+    cmd_str = " ".join(send_keys_call)
     assert "--message" in cmd_str
     assert "Hello Claude!" in cmd_str
 
