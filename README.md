@@ -29,6 +29,7 @@
 - **2026-02-22** 🛡️ Slack thread isolation, Discord typing fix, agent reliability improvements.
 - **2026-02-21** 🎉 Released **v0.1.4.post1** — new providers, media support across channels, and major stability improvements. See [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post1) for details.
 - **2026-02-20** 🐦 Feishu now receives multimodal files from users. More reliable memory under the hood.
+- **2026-02-20** 🔔 Added Signal support — integrate with Signal Messenger via signal-cli daemon!
 - **2026-02-19** ✨ Slack now sends files, Discord splits long messages, and subagents work in CLI mode.
 
 <details>
@@ -164,6 +165,8 @@ That's it! You have a working AI assistant in 2 minutes.
 
 ## 💬 Chat Apps
 
+
+
 Connect nanobot to your favorite chat platform.
 
 | Channel | What you need |
@@ -171,6 +174,7 @@ Connect nanobot to your favorite chat platform.
 | **Telegram** | Bot token from @BotFather |
 | **Discord** | Bot token + Message Content intent |
 | **WhatsApp** | QR code scan |
+| **Signal** | Medium (requires signal-cli) |
 | **Feishu** | App ID + App Secret |
 | **Mochat** | Claw token (auto-setup available) |
 | **DingTalk** | App Key + App Secret |
@@ -314,6 +318,87 @@ nanobot gateway
 </details>
 
 <details>
+<summary><b>Signal</b></summary>
+
+Requires **signal-cli** daemon running in the background.
+
+**1. Install and setup signal-cli**
+
+Follow the [signal-cli installation guide](https://github.com/AsamK/signal-cli#installation) to install and register/link your Signal account.
+
+**2. Start signal-cli daemon**
+
+```bash
+signal-cli -a +1234567890 daemon --http localhost:8080
+```
+
+**3. Configure nanobot**
+
+```json
+{
+  "channels": {
+    "signal": {
+      "enabled": true,
+      "account": "+1234567890",
+      "daemonHost": "localhost",
+      "daemonPort": 8080,
+      "groupMessageBufferSize": 20,
+      "dm": {
+        "enabled": true,
+        "policy": "allowlist",
+        "allowFrom": ["deadbeef-1234-5678-90ab-cdef12345678"]
+      },
+      "group": {
+        "enabled": true,
+        "policy": "allowlist",
+        "allowFrom": ["deadbeefcafebabe1234567890abcdef"],
+        "requireMention": true
+      }
+    }
+  }
+}
+```
+
+**Configuration options:**
+
+**Top-level:**
+- `account`: Your Signal phone number (e.g., `"+1234567890"`)
+- `daemonHost`: Hostname where signal-cli daemon is running (default: `"localhost"`)
+- `daemonPort`: Port number for signal-cli HTTP API (default: `8080`)
+- `groupMessageBufferSize`: Number of recent group messages to keep for context (default: `20`)
+  - When the bot is mentioned in a group, it will include the last N messages as context
+  - Set to `0` to disable context buffering
+
+**DM configuration (`dm`):**
+- `enabled`: Whether to respond to direct messages (default: `false`)
+- `policy`: Access control policy
+  - `"open"`: Respond to all DMs
+  - `"allowlist"`: Only respond to whitelisted users (set via `allowFrom`)
+- `allowFrom`: List of phone numbers or UUIDs to allow (empty = deny all when policy is "allowlist")
+
+**Group configuration (`group`):**
+- `enabled`: Whether to respond in group chats (default: `false`)
+- `policy`: Which groups to operate in
+  - `"open"`: Respond in all groups
+  - `"allowlist"`: Only respond in whitelisted groups (set via `allowFrom`)
+- `allowFrom`: List of group IDs to allow (only used when `policy` is `"allowlist"`)
+- `requireMention`: Whether bot must be @mentioned to respond (default: `true`)
+
+**Available commands:**
+- `/reset` — Clear conversation history for this chat
+- `/help` — Show available commands
+
+**4. Run**
+
+```bash
+nanobot gateway
+```
+
+Now send a Signal message to your bot and it will respond!
+
+</details>
+
+<details>
 <summary><b>Matrix (Element)</b></summary>
 
 Install Matrix dependencies first:
@@ -367,9 +452,6 @@ pip install nanobot-ai[matrix]
 | `allowRoomMentions` | Accept `@room` mentions in mention mode. |
 | `e2eeEnabled` | E2EE support (default `true`). Set `false` for plaintext-only. |
 | `maxMediaBytes` | Max attachment size (default `20MB`). Set `0` to block all media. |
-
-
-
 
 **4. Run**
 
