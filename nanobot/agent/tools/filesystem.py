@@ -1,8 +1,11 @@
 """File system tools: read, write, edit."""
 
 import difflib
+import re
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
 
 from nanobot.agent.tools.base import Tool
 
@@ -26,9 +29,15 @@ def _resolve_path(
 class ReadFileTool(Tool):
     """Tool to read file contents."""
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        redact_sensitive: bool = True,
+    ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
+        self._redact_sensitive = redact_sensitive
 
     @property
     def name(self) -> str:
@@ -46,6 +55,82 @@ class ReadFileTool(Tool):
             "required": ["path"],
         }
 
+    SENSITIVE_PATTERNS = [
+        r"\.json$",
+        r"\.jsonc$",
+        r"\.yaml$",
+        r"\.yml$",
+        r"\.toml$",
+        r"\.ini$",
+        r"\.properties$",
+        r"\.conf$",
+        r"credentials",
+        r"secrets",
+        r"settings",
+        r"\.env\.",
+    ]
+
+    def _should_redact(self, file_path: Path) -> bool:
+        """判断文件是否需要脱敏"""
+        if not self._redact_sensitive:
+            return False
+        path_str = str(file_path)
+        return any(
+            re.search(pattern, path_str, re.IGNORECASE) for pattern in self.SENSITIVE_PATTERNS
+        )
+
+    def _redact(self, content: str) -> str:
+        """脱敏处理"""
+        redacted = content
+
+        # JSON 格式: "api_key": "xxx" (支持下划线)
+        redacted = re.sub(
+            r'(?i)"(api[_-]?key|apikey|api[_-]?secret)"\s*:\s*"[^"]+"',
+            r'"\1": "***REDACTED***"',
+            redacted,
+        )
+        # 密码字段: password, *password*, passwd, pwd
+        redacted = re.sub(
+            r'(?i)"(\w*password\w*|passwd|pwd)"\s*:\s*"[^"]+"',
+            r'"\1": "***REDACTED***"',
+            redacted,
+        )
+        # 私钥/密钥字段: secret_key, aws_secret, private_key
+        redacted = re.sub(
+            r'(?i)"(\w*secret\w*|\w*private\w*key\w*)"\s*:\s*"[^"]+"',
+            r'"\1": "***REDACTED***"',
+            redacted,
+        )
+        redacted = re.sub(
+            r'(?i)"(token|access[_-]?token|auth[_-]?token)"\s*:\s*"[^"]+"',
+            r'"\1": "***REDACTED***"',
+            redacted,
+        )
+
+        # 配置文件格式: api_key=xxx
+        redacted = re.sub(
+            r"(?i)(api[_-]?key|apikey|password|passwd|secret|token)\s*=\s*[^\s]+",
+            r"\1=***REDACTED***",
+            redacted,
+        )
+
+        # Bearer Token
+        redacted = re.sub(r"Bearer\s+[A-Za-z0-9_.=]+", r"Bearer ***REDACTED***", redacted)
+
+        # AWS Keys (Access Key)
+        redacted = re.sub(r"(AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}", r"***AWS_KEY_REDACTED***", redacted)
+
+        # sk- 开头的 Key (包括 sk-, sk-proj-, sk-admin- 等)
+        redacted = re.sub(r"sk-[A-Za-z0-9-]{20,}", r"sk-***REDACTED***", redacted)
+
+        # GitHub Token (ghp_, gho_, ghs_, ghr_)
+        redacted = re.sub(r"gh[pogrs][A-Za-z0-9_]{20,}", r"gh***REDACTED***", redacted)
+
+        # 连接字符串: postgres://user:pass@host -> postgres://***REDACTED***@host
+        redacted = re.sub(r"://[^:]+:[^@]+@", r"://***REDACTED***@", redacted)
+
+        return redacted
+
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
@@ -55,6 +140,14 @@ class ReadFileTool(Tool):
                 return f"Error: Not a file: {path}"
 
             content = file_path.read_text(encoding="utf-8")
+
+            # 脱敏处理
+            if self._should_redact(file_path):
+                original_len = len(content)
+                content = self._redact(content)
+                if len(content) != original_len:
+                    logger.info("Sensitive data redacted in file: {}", path)
+
             return content
         except PermissionError as e:
             return f"Error: {e}"
