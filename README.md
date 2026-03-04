@@ -293,11 +293,14 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
     "discord": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
+      "allowFrom": ["YOUR_USER_ID"],
+      "allowBotMessages": true
     }
   }
 }
 ```
+
+- `allowBotMessages` defaults to `true`. Set it to `false` to ignore bot-authored messages.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator

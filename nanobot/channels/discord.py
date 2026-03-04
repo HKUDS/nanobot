@@ -220,7 +220,7 @@ class DiscordChannel(BaseChannel):
     async def _handle_message_create(self, payload: dict[str, Any]) -> None:
         """Handle incoming Discord messages."""
         author = payload.get("author") or {}
-        if author.get("bot"):
+        if author.get("bot") and not self.config.allow_bot_messages:
             return
 
         sender_id = str(author.get("id", ""))
