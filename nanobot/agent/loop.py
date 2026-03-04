@@ -379,12 +379,14 @@ class AgentLoop:
         )
 
         async def _bus_progress(content: str) -> None:
+            progress_metadata = dict(msg.metadata or {})
+            progress_metadata["_nanobot_progress"] = True
             await self.bus.publish_outbound(
                 OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
                     content=content,
-                    metadata=msg.metadata or {},
+                    metadata=progress_metadata,
                 )
             )
 

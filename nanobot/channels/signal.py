@@ -29,6 +29,7 @@ class SignalChannel(BaseChannel):
     """
 
     name = "signal"
+    _TYPING_REFRESH_SECONDS = 10.0
 
     def __init__(
         self, config: SignalConfig, bus: MessageBus, session_manager: "SessionManager | None" = None
@@ -39,6 +40,10 @@ class SignalChannel(BaseChannel):
         self._http: httpx.AsyncClient | None = None
         self._request_id = 0
         self._sse_task: asyncio.Task | None = None
+        self._typing_tasks: dict[str, asyncio.Task] = {}
+        self._typing_uuid_warnings: set[str] = set()
+        self._account_id_aliases: set[str] = set()
+        self._remember_account_id_alias(self.config.account)
 
         # Rolling message buffer for group context (group_id -> deque of messages)
         # Each message is a dict with: sender_name, sender_number, content, timestamp
@@ -80,6 +85,9 @@ class SignalChannel(BaseChannel):
 
                 # Reset reconnect delay after successful connection check.
                 reconnect_delay_s = 1.0
+
+                # Ensure account-level typing indicators are enabled.
+                await self._ensure_typing_indicators_enabled()
 
                 # Start SSE receiver and supervise it. If it exits while we're still
                 # running, treat it as a disconnect and reconnect.
@@ -131,6 +139,10 @@ class SignalChannel(BaseChannel):
             except asyncio.CancelledError:
                 pass
 
+        # Cancel active typing indicators
+        for chat_id in list(self._typing_tasks):
+            await self._stop_typing(chat_id)
+
         # Close HTTP client
         if self._http:
             await self._http.aclose()
@@ -138,20 +150,11 @@ class SignalChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Signal."""
+        is_progress_message = bool(msg.metadata.get("_nanobot_progress"))
         try:
             # Prepare send request
             params: dict[str, Any] = {"message": msg.content}
-
-            # Determine if this is a group or direct message
-            # chat_id format: phone number (+1234567890), UUID, or group ID (base64)
-            # Group IDs are base64 and typically contain "=" padding
-            # UUIDs are in format "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-            if "=" in msg.chat_id or (len(msg.chat_id) > 40 and not "-" in msg.chat_id):
-                # Looks like a base64 group ID
-                params["groupId"] = msg.chat_id
-            else:
-                # Phone number or UUID - both work as recipient
-                params["recipient"] = [msg.chat_id]
+            params.update(self._recipient_params(msg.chat_id))
 
             # Add attachments if present
             if msg.media:
@@ -169,6 +172,13 @@ class SignalChannel(BaseChannel):
 
         except Exception as e:
             logger.error(f"Error sending Signal message: {e}")
+        finally:
+            # Keep typing active across progress updates; stop on the final reply.
+            if is_progress_message:
+                return
+            # Avoid immediate START->STOP for fast responses, which can be invisible
+            # in some Signal clients. Let indicator expire naturally (~15s).
+            await self._stop_typing(msg.chat_id, send_stop=False)
 
     async def _sse_receive_loop(self) -> None:
         """Receive messages via Server-Sent Events (HTTP mode)."""
@@ -248,18 +258,20 @@ class SignalChannel(BaseChannel):
                 return
 
             # Extract sender information
-            source = envelope.get("source") or envelope.get("sourceNumber")
-            source_uuid = envelope.get("sourceUuid")
+            sender_parts = self._collect_sender_id_parts(envelope)
             source_name = envelope.get("sourceName")
 
-            if not source:
+            if not sender_parts:
                 logger.debug("Received message without source, skipping")
                 return
 
-            # Build sender_id (prefer number, but include UUID for allowlist flexibility)
-            sender_id = source
-            if source_uuid:
-                sender_id = f"{source}|{source_uuid}"
+            sender_number = self._primary_sender_id(sender_parts)
+            sender_id = "|".join(sender_parts)
+
+            # Keep aliases of the bot account for robust mention matching.
+            if any(self._id_matches_account(part) for part in sender_parts):
+                for part in sender_parts:
+                    self._remember_account_id_alias(part)
 
             # Check different message types
             data_message = envelope.get("dataMessage")
@@ -273,7 +285,7 @@ class SignalChannel(BaseChannel):
 
             # Handle data messages (incoming messages from others)
             if data_message:
-                await self._handle_data_message(sender_id, source, data_message, source_name)
+                await self._handle_data_message(sender_id, sender_number, data_message, source_name)
 
             # Handle sync messages (messages sent from another device)
             elif sync_message and sync_message.get("sentMessage"):
@@ -328,16 +340,12 @@ class SignalChannel(BaseChannel):
         # Check both groupInfo (v1) and groupV2 (v2) fields for group detection
         group_v2 = data_message.get("groupV2")
         is_group_message = group_info is not None or group_v2 is not None
+        group_id = self._extract_group_id(group_info, group_v2)
 
         if is_group_message:
             # This is a group message
             # Extract group ID from either groupInfo or groupV2
-            if group_info:
-                chat_id = group_info.get("groupId", sender_number)
-            elif group_v2:
-                chat_id = group_v2.get("id", sender_number)
-            else:
-                chat_id = sender_number
+            chat_id = group_id or sender_number
 
             # Add to group message buffer BEFORE checking if we should respond
             # This ensures we capture context even for messages we don't reply to
@@ -456,26 +464,27 @@ class SignalChannel(BaseChannel):
 
         logger.debug(f"Signal message from {sender_number}: {content[:50]}...")
 
-        # Forward to message bus
-        await self._handle_message(
-            sender_id=sender_id,
-            chat_id=chat_id,
-            content=content,
-            media=media_paths,
-            metadata={
-                "timestamp": timestamp,
-                "sender_name": sender_name,
-                "sender_number": sender_number,
-                "is_group": is_group_message,
-                "group_id": (
-                    group_info.get("groupId")
-                    if group_info
-                    else group_v2.get("id")
-                    if group_v2
-                    else None
-                ),
-            },
-        )
+        await self._start_typing(chat_id)
+        try:
+            # Forward to message bus
+            await self._handle_message(
+                sender_id=sender_id,
+                chat_id=chat_id,
+                content=content,
+                media=media_paths,
+                metadata={
+                    "timestamp": timestamp,
+                    "sender_name": sender_name,
+                    "sender_number": sender_number,
+                    "is_group": is_group_message,
+                    "group_id": (
+                        group_id
+                    ),
+                },
+            )
+        except Exception:
+            await self._stop_typing(chat_id)
+            raise
 
     def _add_to_group_buffer(
         self,
@@ -624,6 +633,135 @@ class SignalChannel(BaseChannel):
             OutboundMessage(channel=self.name, chat_id=chat_id, content=help_text)
         )
 
+    @staticmethod
+    def _normalize_signal_id(value: str) -> list[str]:
+        """Normalize Signal identifiers (phone/uuid/service-id) for matching."""
+        raw = value.strip()
+        if not raw:
+            return []
+
+        normalized = [raw, raw.lower()]
+        if raw.startswith("+") and len(raw) > 1:
+            normalized.append(raw[1:])
+        elif raw.isdigit():
+            normalized.append(f"+{raw}")
+        return list(dict.fromkeys(normalized))
+
+    def _remember_account_id_alias(self, value: str | None) -> None:
+        """Remember known bot identifiers for mention matching."""
+        if not value:
+            return
+        if not isinstance(value, str):
+            return
+        for candidate in self._normalize_signal_id(value):
+            self._account_id_aliases.add(candidate)
+
+    def _id_matches_account(self, value: str | None) -> bool:
+        """Return True when an identifier refers to the bot account."""
+        if not value:
+            return False
+        if not isinstance(value, str):
+            return False
+        return any(
+            candidate in self._account_id_aliases
+            for candidate in self._normalize_signal_id(value)
+        )
+
+    @staticmethod
+    def _collect_sender_id_parts(envelope: dict[str, Any]) -> list[str]:
+        """Collect all known sender identifier variants from an envelope."""
+        parts: list[str] = []
+        for key in ("sourceNumber", "source", "sourceUuid", "sourceServiceId", "sourceAci", "sourceACI"):
+            value = envelope.get(key)
+            if not isinstance(value, str):
+                continue
+            candidate = value.strip()
+            if candidate and candidate not in parts:
+                parts.append(candidate)
+        return parts
+
+    @staticmethod
+    def _primary_sender_id(sender_parts: list[str]) -> str:
+        """Pick the best sender identifier for routing (prefer phone-like IDs)."""
+        for part in sender_parts:
+            if part.startswith("+") or part.isdigit():
+                return part
+        return sender_parts[0] if sender_parts else ""
+
+    @staticmethod
+    def _extract_group_id(group_info: Any, group_v2: Any) -> str | None:
+        """Extract group ID from groupInfo/groupV2 payloads across signal-cli variants."""
+        for group_obj in (group_info, group_v2):
+            if not isinstance(group_obj, dict):
+                continue
+            for key in ("groupId", "id", "groupID"):
+                value = group_obj.get(key)
+                if isinstance(value, str) and value:
+                    return value
+        return None
+
+    @staticmethod
+    def _mention_id_candidates(mention: dict[str, Any]) -> list[str]:
+        """Extract possible identifier fields from a mention payload."""
+        ids: list[str] = []
+
+        def _walk(value: Any, depth: int = 0) -> None:
+            if depth > 2:
+                return
+            if not isinstance(value, dict):
+                return
+            for key, child in value.items():
+                key_lower = str(key).lower()
+                if isinstance(child, str) and child:
+                    if any(token in key_lower for token in ("number", "uuid", "serviceid", "aci")):
+                        ids.append(child)
+                elif isinstance(child, dict):
+                    _walk(child, depth + 1)
+
+        _walk(mention)
+        return list(dict.fromkeys(ids))
+
+    @staticmethod
+    def _mention_span(mention: dict[str, Any]) -> tuple[int, int] | None:
+        """Extract a safe (start, length) span from a mention."""
+        try:
+            start = int(mention.get("start", 0))
+            length = int(mention.get("length", 0))
+        except (TypeError, ValueError):
+            return None
+
+        if start < 0 or length <= 0:
+            return None
+        return (start, length)
+
+    @staticmethod
+    def _leading_placeholder_span(text: str | None) -> tuple[int, int] | None:
+        """
+        Detect a leading Signal mention placeholder when mention metadata is missing.
+
+        Some clients/integrations deliver mentions as a leading placeholder character
+        (typically U+FFFC) but omit `mentions` metadata in the payload.
+        """
+        if not text:
+            return None
+
+        start = 0
+        while start < len(text) and text[start].isspace():
+            start += 1
+
+        if start >= len(text):
+            return None
+
+        marker = text[start]
+        if marker not in ("\uFFFC", "\uFFFD", "\x1b"):
+            return None
+
+        next_index = start + 1
+        if next_index < len(text) and not text[next_index].isspace():
+            return None
+
+        return (start, 1)
+
     def _should_respond_in_group(self, message_text: str, mentions: list[dict[str, Any]]) -> bool:
         """
         Determine if the bot should respond to a group message.
@@ -639,18 +777,41 @@ class SignalChannel(BaseChannel):
         if not self.config.group.require_mention:
             return True
 
-        # If mention is required, check if bot was mentioned
-        if self.config.account:
-            # Check if our account number is in the mentions list
-            for mention in mentions:
-                mentioned_number = mention.get("number") or mention.get("uuid")
-                if mentioned_number == self.config.account:
+        # If mention is required, check if bot was mentioned.
+        for mention in mentions:
+            if not isinstance(mention, dict):
+                continue
+            for mention_id in self._mention_id_candidates(mention):
+                if self._id_matches_account(mention_id):
                     return True
 
-            # Fallback: check for phone number in message text (less reliable)
-            # Signal mentions format: @+1234567890 or just +1234567890
-            if message_text and self.config.account in message_text:
+        # Some Signal clients emit mention spans without recipient identifiers
+        # (for handle-style mentions). Accept a leading identifier-less mention
+        # as a mention of the bot to avoid false negatives.
+        for mention in mentions:
+            if not isinstance(mention, dict):
+                continue
+            if self._mention_id_candidates(mention):
+                continue
+            span = self._mention_span(mention)
+            if not span:
+                continue
+            start, _ = span
+            if message_text is not None and not message_text[:start].strip():
+                logger.debug("Accepting identifier-less leading mention as bot mention")
                 return True
+
+        # Some payloads omit `mentions` but still include the leading mention
+        # placeholder character in the message body.
+        if not mentions and self._leading_placeholder_span(message_text):
+            logger.debug("Accepting leading placeholder mention without mention metadata")
+            return True
+
+        # Fallback: check for configured phone number in plain text.
+        if message_text and self.config.account:
+            for account_id in self._normalize_signal_id(self.config.account):
+                if account_id and account_id in message_text:
+                    return True
 
         return False
 
@@ -668,17 +829,34 @@ class SignalChannel(BaseChannel):
         Returns:
             Text with bot mentions removed
         """
-        if not text or not self.config.account:
+        if not text:
             return text
 
         # Build a list of (start, length) tuples for our bot's mentions
         bot_mentions = []
         for mention in mentions:
-            mentioned_number = mention.get("number") or mention.get("uuid")
-            if mentioned_number == self.config.account:
-                start = mention.get("start", 0)
-                length = mention.get("length", 0)
-                bot_mentions.append((start, length))
+            if not isinstance(mention, dict):
+                continue
+            mention_ids = self._mention_id_candidates(mention)
+            span = self._mention_span(mention)
+            if not span:
+                continue
+
+            # Strip matched bot mentions by ID.
+            if any(self._id_matches_account(mention_id) for mention_id in mention_ids):
+                bot_mentions.append(span)
+                continue
+
+            # Also strip identifier-less leading mention spans (handle mentions).
+            if not mention_ids:
+                start, _ = span
+                if not text[:start].strip():
+                    bot_mentions.append(span)
+
+        if not bot_mentions:
+            placeholder_span = self._leading_placeholder_span(text)
+            if placeholder_span:
+                bot_mentions.append(placeholder_span)
 
         # Sort mentions by start position (descending) to remove from end to start
         # This prevents position shifts when removing earlier mentions
@@ -686,7 +864,10 @@ class SignalChannel(BaseChannel):
 
         # Remove each mention
         for start, length in bot_mentions:
-            text = text[:start] + text[start + length :]
+            if start >= len(text):
+                continue
+            end = min(len(text), start + length)
+            text = text[:start] + text[end:]
 
         return text.strip()
 
@@ -726,6 +907,98 @@ class SignalChannel(BaseChannel):
                         return True
             return False
         return True
+
+    @staticmethod
+    def _is_group_chat_id(chat_id: str) -> bool:
+        """Return True when chat_id appears to be a Signal group ID (base64)."""
+        return "=" in chat_id or (len(chat_id) > 40 and "-" not in chat_id)
+
+    def _recipient_params(self, chat_id: str) -> dict[str, Any]:
+        """Build recipient params for signal-cli JSON-RPC methods."""
+        if self._is_group_chat_id(chat_id):
+            return {"groupId": chat_id}
+        return {"recipient": [chat_id]}
+
+    async def _start_typing(self, chat_id: str) -> None:
+        """Start periodic typing indicator updates for a chat."""
+        await self._stop_typing(chat_id, send_stop=False)
+        await self._send_typing(chat_id)
+        self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
+
+    async def _stop_typing(self, chat_id: str, send_stop: bool = True) -> None:
+        """Stop typing indicator updates for a chat."""
+        task = self._typing_tasks.pop(chat_id, None)
+        had_task = task is not None
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        if send_stop and had_task:
+            await self._send_typing(chat_id, stop=True)
+
+    async def _typing_loop(self, chat_id: str) -> None:
+        """Send typing updates periodically until cancelled."""
+        try:
+            while self._running:
+                await asyncio.sleep(self._TYPING_REFRESH_SECONDS)
+                await self._send_typing(chat_id, quiet_success=True)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.debug(f"Typing indicator loop stopped for {chat_id}: {e}")
+
+    async def _send_typing(
+        self, chat_id: str, stop: bool = False, quiet_success: bool = False
+    ) -> None:
+        """Send a typing START/STOP message via signal-cli."""
+        action = "stop" if stop else "start"
+        if (
+            not self._is_group_chat_id(chat_id)
+            and chat_id.startswith("+") is False
+            and chat_id not in self._typing_uuid_warnings
+        ):
+            self._typing_uuid_warnings.add(chat_id)
+            logger.warning(
+                "Signal DM recipient is UUID-only (no phone number in envelope). "
+                "Some Signal clients may not render typing indicators for this recipient form."
+            )
+        candidate_params: list[dict[str, Any]]
+        if self._is_group_chat_id(chat_id):
+            candidate_params = [{"groupId": chat_id}, {"groupId": [chat_id]}]
+        else:
+            candidate_params = [{"recipient": chat_id}, {"recipient": [chat_id]}]
+
+        last_error: Any | None = None
+        for params in candidate_params:
+            if stop:
+                params["stop"] = True
+            try:
+                response = await self._send_request("sendTyping", params)
+            except Exception as e:
+                last_error = str(e)
+                continue
+
+            if "error" not in response:
+                if not quiet_success:
+                    logger.info(f"Signal typing {action} sent for {chat_id}")
+                return
+
+            last_error = response["error"]
+
+        logger.warning(f"Failed to send Signal typing {action} for {chat_id}: {last_error}")
+
+    async def _ensure_typing_indicators_enabled(self) -> None:
+        """Enable typing indicators on the bot account."""
+        response = await self._send_request(
+            "updateConfiguration", {"typingIndicators": True}
+        )
+        if "error" in response:
+            logger.warning(f"Failed to enable Signal typing indicators: {response['error']}")
+        else:
+            logger.info("Signal typing indicators enabled on account configuration")
 
     async def _send_request(
         self, method: str, params: dict[str, Any] | None = None
