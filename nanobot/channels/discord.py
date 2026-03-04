@@ -222,13 +222,17 @@ class DiscordChannel(BaseChannel):
     async def _handle_message_create(self, payload: dict[str, Any]) -> None:
         """Handle incoming Discord messages."""
         author = payload.get("author") or {}
+        sender_id = str(author.get("id", ""))
+
+        if self._bot_user_id and sender_id == self._bot_user_id:
+            return
+
         if author.get("bot") and not self.config.allow_bot_messages:
             return
 
         if self.config.allow_bot_messages and not self._is_ping_for_bot(payload):
             return
 
-        sender_id = str(author.get("id", ""))
         channel_id = str(payload.get("channel_id", ""))
         content = payload.get("content") or ""
 
