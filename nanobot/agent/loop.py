@@ -299,6 +299,16 @@ class AgentLoop:
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
+
+                # Before ending, check if new messages arrived during the LLM call.
+                # If so, inject them and continue — let the model address them.
+                if injection := _drain_interruptions():
+                    messages.append({"role": "user", "content": injection})
+                    if on_progress:
+                        await on_progress(clean)
+                    logger.info("Steering: pending interruption after final response, continuing loop")
+                    continue
+
                 final_content = clean
                 break
 
@@ -581,9 +591,20 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        interruption_checker: InterruptionChecker | None = None,
     ) -> str:
-        """Process a message directly (for CLI or cron usage)."""
+        """Process a message directly (for CLI, cron, or gateway usage).
+
+        When *interruption_checker* is supplied, the inner agent loop will
+        check for pending messages at each tool boundary and before each
+        LLM call, enabling real-time steering without cancelling the task.
+        """
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        response = await self._process_message(
+            msg,
+            session_key=session_key,
+            on_progress=on_progress,
+            interruption_checker=interruption_checker,
+        )
         return response.content if response else ""
