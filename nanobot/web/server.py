@@ -116,6 +116,7 @@ def create_app(
             cron_service=cron_service,
             restrict_to_workspace=config.tools.restrict_to_workspace,
             session_manager=session_manager,
+            openviking_config=config.openviking,
         )
         app.state.agent = agent
     else:

@@ -1,15 +1,22 @@
 """Context builder for assembling agent prompts."""
 
+from __future__ import annotations
+
 import base64
 import mimetypes
 import platform
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+
+if TYPE_CHECKING:
+    from nanobot.openviking.client import VikingClient
 
 
 class ContextBuilder:
@@ -18,14 +25,28 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, viking_client: VikingClient | None = None):
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self._viking_client = viking_client
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def set_viking_client(self, client: VikingClient) -> None:
+        self._viking_client = client
+
+    async def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        current_message: str = "",
+    ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
+
+        # OpenViking user profile
+        if self._viking_client:
+            profile = await self.memory.get_viking_user_profile(self._viking_client)
+            if profile:
+                parts.append(profile)
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
@@ -34,6 +55,14 @@ class ContextBuilder:
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
+
+        # OpenViking semantic memory context
+        if self._viking_client and current_message:
+            viking_mem = await self.memory.get_viking_memory_context(
+                current_message, self._viking_client
+            )
+            if viking_mem:
+                parts.append(f"# Semantic Memory\n\n{viking_mem}")
 
         always_skills = self.skills.get_always_skills()
         if always_skills:
@@ -58,6 +87,13 @@ Skills with available="false" need dependencies installed first - you can try in
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
 
+        ov_section = ""
+        if self._viking_client:
+            ov_section = """
+- OpenViking workspace: managed via OpenViking tools (openviking_read, openviking_search, user_memory_search, etc.)
+- Memory recall: use user_memory_search tool for semantic memory, or grep memory/HISTORY.md for keyword search
+- Memory commit: use openviking_memory_commit tool to persist important conversations"""
+
         return f"""# hiperone_bot 🐈
 
 You are hiperone_bot, a helpful AI assistant.
@@ -69,7 +105,7 @@ You are hiperone_bot, a helpful AI assistant.
 Your workspace is at: {workspace_path}
 - Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
 - History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
-- Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
+- Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md{ov_section}
 
 ## hiperone_bot Guidelines
 - State intent before tool calls, but NEVER predict or claim results before receiving them.
@@ -102,7 +138,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
         return "\n\n".join(parts) if parts else ""
 
-    def build_messages(
+    async def build_messages(
         self,
         history: list[dict[str, Any]],
         current_message: str,
@@ -115,15 +151,17 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         runtime_ctx = self._build_runtime_context(channel, chat_id)
         user_content = self._build_user_content(current_message, media)
 
-        # Merge runtime context and user content into a single user message
-        # to avoid consecutive same-role messages that some providers reject.
         if isinstance(user_content, str):
             merged = f"{runtime_ctx}\n\n{user_content}"
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
+        system_prompt = await self.build_system_prompt(
+            skill_names, current_message=current_message,
+        )
+
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": system_prompt},
             *history,
             {"role": "user", "content": merged},
         ]

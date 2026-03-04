@@ -200,6 +200,23 @@ class MatrixConfig(Base):
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
 
+class OpenVikingConfig(Base):
+    """OpenViking semantic memory configuration."""
+
+    enabled: bool = False
+    mode: str = "local"  # "local" (embedded) or "remote" (HTTP server)
+    server_url: str = ""
+    user_id: str = ""
+    api_key: str = ""
+    data_dir: str = "~/.nanobot/openviking"
+    vlm_api_key: str = ""
+    vlm_base_url: str = ""
+    vlm_model: str = ""
+    embedding_model: str = ""
+    embedding_api_key: str = ""
+    embedding_base_url: str = ""
+
+
 class WebConfig(BaseModel):
     """Web channel configuration (WebSocket-based)."""
     enabled: bool = False
@@ -338,6 +355,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    openviking: OpenVikingConfig = Field(default_factory=OpenVikingConfig)
 
     @property
     def workspace_path(self) -> Path:
