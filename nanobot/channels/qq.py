@@ -31,10 +31,11 @@ def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
 
     class _Bot(botpy.Client):
         def __init__(self):
-            super().__init__(intents=intents)
+            # Disable botpy's file log — nanobot uses loguru; default "botpy.log" fails on read-only fs
+            super().__init__(intents=intents, ext_handlers=False)
 
         async def on_ready(self):
-            logger.info(f"QQ bot ready: {self.robot.name}")
+            logger.info("QQ bot ready: {}", self.robot.name)
 
         async def on_c2c_message_create(self, message: "C2CMessage"):
             await channel._on_message(message)
@@ -55,7 +56,6 @@ class QQChannel(BaseChannel):
         self.config: QQConfig = config
         self._client: "botpy.Client | None" = None
         self._processed_ids: deque = deque(maxlen=1000)
-        self._bot_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         """Start the QQ bot."""
@@ -71,8 +71,8 @@ class QQChannel(BaseChannel):
         BotClass = _make_bot_class(self)
         self._client = BotClass()
 
-        self._bot_task = asyncio.create_task(self._run_bot())
         logger.info("QQ bot started (C2C private message)")
+        await self._run_bot()
 
     async def _run_bot(self) -> None:
         """Run the bot connection with auto-reconnect."""
@@ -80,7 +80,7 @@ class QQChannel(BaseChannel):
             try:
                 await self._client.start(appid=self.config.app_id, secret=self.config.secret)
             except Exception as e:
-                logger.warning(f"QQ bot error: {e}")
+                logger.warning("QQ bot error: {}", e)
             if self._running:
                 logger.info("Reconnecting QQ bot in 5 seconds...")
                 await asyncio.sleep(5)
@@ -88,11 +88,10 @@ class QQChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the QQ bot."""
         self._running = False
-        if self._bot_task:
-            self._bot_task.cancel()
+        if self._client:
             try:
-                await self._bot_task
-            except asyncio.CancelledError:
+                await self._client.close()
+            except Exception:
                 pass
         logger.info("QQ bot stopped")
 
@@ -102,13 +101,15 @@ class QQChannel(BaseChannel):
             logger.warning("QQ client not initialized")
             return
         try:
+            msg_id = msg.metadata.get("message_id")
             await self._client.api.post_c2c_message(
                 openid=msg.chat_id,
                 msg_type=0,
                 content=msg.content,
+                msg_id=msg_id,
             )
         except Exception as e:
-            logger.error(f"Error sending QQ message: {e}")
+            logger.error("Error sending QQ message: {}", e)
 
     async def _on_message(self, data: "C2CMessage") -> None:
         """Handle incoming message from QQ."""
@@ -130,5 +131,5 @@ class QQChannel(BaseChannel):
                 content=content,
                 metadata={"message_id": data.id},
             )
-        except Exception as e:
-            logger.error(f"Error handling QQ message: {e}")
+        except Exception:
+            logger.exception("Error handling QQ message")

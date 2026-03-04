@@ -18,9 +18,16 @@ class CustomProvider(LLMProvider):
         self._client = AsyncOpenAI(api_key=api_key, base_url=api_base)
 
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
-                   model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7) -> LLMResponse:
-        kwargs: dict[str, Any] = {"model": model or self.default_model, "messages": messages,
-                                  "max_tokens": max(1, max_tokens), "temperature": temperature}
+                   model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
+                   reasoning_effort: str | None = None) -> LLMResponse:
+        kwargs: dict[str, Any] = {
+            "model": model or self.default_model,
+            "messages": self._sanitize_empty_content(messages),
+            "max_tokens": max(1, max_tokens),
+            "temperature": temperature,
+        }
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
         if tools:
             kwargs.update(tools=tools, tool_choice="auto")
         try:
@@ -40,8 +47,9 @@ class CustomProvider(LLMProvider):
         return LLMResponse(
             content=msg.content, tool_calls=tool_calls, finish_reason=choice.finish_reason or "stop",
             usage={"prompt_tokens": u.prompt_tokens, "completion_tokens": u.completion_tokens, "total_tokens": u.total_tokens} if u else {},
-            reasoning_content=getattr(msg, "reasoning_content", None),
+            reasoning_content=getattr(msg, "reasoning_content", None) or None,
         )
 
     def get_default_model(self) -> str:
         return self.default_model
+

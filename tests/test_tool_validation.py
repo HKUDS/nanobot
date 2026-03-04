@@ -2,6 +2,7 @@ from typing import Any
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.shell import ExecTool
 
 
 class SampleTool(Tool):
@@ -86,3 +87,22 @@ async def test_registry_returns_validation_error() -> None:
     reg.register(SampleTool())
     result = await reg.execute("sample", {"query": "hi"})
     assert "Invalid parameters" in result
+
+
+def test_exec_extract_absolute_paths_keeps_full_windows_path() -> None:
+    cmd = r"type C:\user\workspace\txt"
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert paths == [r"C:\user\workspace\txt"]
+
+
+def test_exec_extract_absolute_paths_ignores_relative_posix_segments() -> None:
+    cmd = ".venv/bin/python script.py"
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert "/bin/python" not in paths
+
+
+def test_exec_extract_absolute_paths_captures_posix_absolute_paths() -> None:
+    cmd = "cat /tmp/data.txt > /tmp/out.txt"
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert "/tmp/data.txt" in paths
+    assert "/tmp/out.txt" in paths
