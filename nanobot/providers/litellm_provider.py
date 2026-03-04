@@ -42,6 +42,7 @@ class LiteLLMProvider(LLMProvider):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self._provider_name = provider_name  # Store explicit provider for model resolution
 
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -97,7 +98,19 @@ class LiteLLMProvider(LLMProvider):
                 model = f"{prefix}/{model}"
             return model
 
-        # Standard mode: auto-prefix for known providers
+        # Explicit provider specified — use it instead of auto-detection by model name
+        if self._provider_name and self._provider_name != "auto":
+            from nanobot.providers.registry import find_by_name
+            spec = find_by_name(self._provider_name)
+            if spec:
+                # Apply canonical prefix, skip if already present
+                if spec.litellm_prefix:
+                    model = self._canonicalize_explicit_prefix(model, spec.name, spec.litellm_prefix)
+                    if not any(model.startswith(s) for s in spec.skip_prefixes):
+                        model = f"{spec.litellm_prefix}/{model}"
+                return model
+
+        # Standard mode: auto-prefix for known providers (fallback)
         spec = find_by_model(model)
         if spec and spec.litellm_prefix:
             model = self._canonicalize_explicit_prefix(model, spec.name, spec.litellm_prefix)
