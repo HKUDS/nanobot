@@ -14,6 +14,9 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
+from nanobot.utils.helpers import split_message
+
+TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -77,26 +80,6 @@ def _markdown_to_telegram_html(text: str) -> str:
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
 
     return text
-
-
-def _split_message(content: str, max_len: int = 4000) -> list[str]:
-    """Split content into chunks within max_len, preferring line breaks."""
-    if len(content) <= max_len:
-        return [content]
-    chunks: list[str] = []
-    while content:
-        if len(content) <= max_len:
-            chunks.append(content)
-            break
-        cut = content[:max_len]
-        pos = cut.rfind('\n')
-        if pos == -1:
-            pos = cut.rfind(' ')
-        if pos == -1:
-            pos = max_len
-        chunks.append(content[:pos])
-        content = content[pos:].lstrip()
-    return chunks
 
 
 class TelegramChannel(BaseChannel):
@@ -274,7 +257,7 @@ class TelegramChannel(BaseChannel):
             is_progress = msg.metadata.get("_progress", False)
             draft_id = msg.metadata.get("message_id")
             
-            for chunk in _split_message(msg.content):
+            for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
                 try:
                     html = _markdown_to_telegram_html(chunk)
                     if is_progress and draft_id:
