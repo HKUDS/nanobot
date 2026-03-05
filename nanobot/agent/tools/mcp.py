@@ -58,17 +58,48 @@ async def connect_mcp_servers(
 ) -> None:
     """Connect to configured MCP servers and register their tools."""
     from mcp import ClientSession, StdioServerParameters
+    from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
+    from mcp.client.streamable_http import streamable_http_client
 
     for name, cfg in mcp_servers.items():
         try:
-            if cfg.command:
+            transport_type = cfg.type
+            if not transport_type:
+                if cfg.command:
+                    transport_type = "stdio"
+                elif cfg.url:
+                    # Convention: URLs ending with /sse use SSE transport; others use streamableHttp
+                    transport_type = (
+                        "sse" if cfg.url.rstrip("/").endswith("/sse") else "streamableHttp"
+                    )
+                else:
+                    logger.warning("MCP server '{}': no command or url configured, skipping", name)
+                    continue
+
+            if transport_type == "stdio":
                 params = StdioServerParameters(
                     command=cfg.command, args=cfg.args, env=cfg.env or None
                 )
                 read, write = await stack.enter_async_context(stdio_client(params))
-            elif cfg.url:
-                from mcp.client.streamable_http import streamable_http_client
+            elif transport_type == "sse":
+                def httpx_client_factory(
+                    headers: dict[str, str] | None = None,
+                    timeout: httpx.Timeout | None = None,
+                    auth: httpx.Auth | None = None,
+                ) -> httpx.AsyncClient:
+                    merged_headers = {**(cfg.headers or {}), **(headers or {})}
+                    return httpx.AsyncClient(
+                        headers=merged_headers or None,
+                        follow_redirects=True,
+                        timeout=timeout,
+                        auth=auth,
+                    )
+
+                read, write = await stack.enter_async_context(
+                    sse_client(cfg.url, httpx_client_factory=httpx_client_factory)
+                )
+            elif transport_type == "streamableHttp":
                 # Always provide an explicit httpx client so MCP HTTP transport does not
                 # inherit httpx's default 5s timeout and preempt the higher-level tool timeout.
                 http_client = await stack.enter_async_context(
@@ -82,7 +113,7 @@ async def connect_mcp_servers(
                     streamable_http_client(cfg.url, http_client=http_client)
                 )
             else:
-                logger.warning("MCP server '{}': no command or url configured, skipping", name)
+                logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
                 continue
 
             session = await stack.enter_async_context(ClientSession(read, write))
