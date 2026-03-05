@@ -1,6 +1,7 @@
 """File system tools: read, write, edit."""
 
 import difflib
+import os
 import re
 from io import StringIO
 from pathlib import Path
@@ -223,10 +224,11 @@ class EditFileTool(Tool):
         Format diff with ANSI colors for terminal display.
 
         Format:
-        - Line numbers on left
+        - Line numbers on left (colored: red for removed, green for added)
         - + for added lines (green background)
         - - for removed lines (red background)
         - Space for unchanged lines (no color)
+        - Background colors extend to full terminal width
 
         Args:
             old_lines: Original file lines.
@@ -236,13 +238,24 @@ class EditFileTool(Tool):
         Returns:
             Formatted diff string with ANSI color codes.
         """
-        # ANSI color codes - using darker/muted background colors
+        # ANSI color codes - using very dark background colors
         RESET = "\x1b[0m"
-        # Darker red background (RGB: 100, 0, 0) for removed lines
-        RED_BG = "\x1b[48;2;100;0;0m"
-        # Darker green background (RGB: 0, 100, 0) for added lines
-        GREEN_BG = "\x1b[48;2;0;100;0m"
+        # Very dark red background (RGB: 50, 0, 0) for removed lines
+        RED_BG = "\x1b[48;2;50;0;0m"
+        # Very dark green background (RGB: 0, 50, 0) for added lines
+        GREEN_BG = "\x1b[48;2;0;50;0m"
+        # Red foreground for line numbers (removed lines)
+        RED_FG = "\x1b[38;2;255;100;100m"
+        # Green foreground for line numbers (added lines)
+        GREEN_FG = "\x1b[38;2;100;255;100m"
         BOLD = "\x1b[1m"  # Bold for header
+
+        # Get terminal width for full-line background
+        try:
+            terminal_width = os.get_terminal_size().columns
+        except OSError:
+            # Fallback if terminal size cannot be determined
+            terminal_width = 100
 
         # Generate unified diff
         diff = list(difflib.unified_diff(old_lines, new_lines, lineterm=""))
@@ -250,8 +263,13 @@ class EditFileTool(Tool):
         if not diff:
             return "No changes to display\n"
 
+        # Count added and removed lines
+        added_count = sum(1 for line in diff if line.startswith("+"))
+        removed_count = sum(1 for line in diff if line.startswith("-"))
+
         lines = []
-        lines.append(f"{BOLD}Diff: {path}{RESET}\n")
+        lines.append(f"{BOLD}Update: {path}{RESET}\n")
+        lines.append(f"  ↳ Added {added_count} line{'s' if added_count != 1 else ''}, removed {removed_count} line{'s' if removed_count != 1 else ''}\n")
 
         # Track line numbers for old and new files
         old_line_num = 0
@@ -260,32 +278,43 @@ class EditFileTool(Tool):
         for line in diff:
             if line.startswith("@@"):
                 # Parse hunk header to get line numbers, but don't display it
+                # Format: @@ -old_start,old_count +new_start,new_count @@
                 match = re.search(r"-(\d+)", line)
                 if match:
-                    old_line_num = int(match.group(1)) - 1  # Will increment before use
+                    old_line_num = int(match.group(1))  # Current position in old file
                 match = re.search(r"\+(\d+)", line)
                 if match:
-                    new_line_num = int(match.group(1)) - 1  # Will increment before use
+                    new_line_num = int(match.group(1))  # Current position in new file
                 # Skip the @@ header line
             elif line.startswith("---") or line.startswith("+++"):
                 # Skip file header lines
                 continue
             elif line.startswith("-"):
                 # Removed line - show with old line number and red background
-                old_line_num += 1
+                # The old_line_num represents the line number in the original file
                 content = line[1:].rstrip("\n")
-                lines.append(f"{RED_BG} {old_line_num:>4} - {content}{RESET}\n")
+                visible_prefix = f" {old_line_num:>4} - {content}"
+                remaining = max(0, terminal_width - len(visible_prefix))
+                lines.append(f"{RED_BG} {RED_FG}{old_line_num:>4}{RESET}{RED_BG} - {content}{' ' * remaining}{RESET}\n")
+                # Move to next line in old file after displaying
+                old_line_num += 1
             elif line.startswith("+"):
                 # Added line - show with new line number and green background
-                new_line_num += 1
+                # The new_line_num represents the line number in the new file
                 content = line[1:].rstrip("\n")
-                lines.append(f"{GREEN_BG} {new_line_num:>4} + {content}{RESET}\n")
+                visible_prefix = f" {new_line_num:>4} + {content}"
+                remaining = max(0, terminal_width - len(visible_prefix))
+                lines.append(f"{GREEN_BG} {GREEN_FG}{new_line_num:>4}{RESET}{GREEN_BG} + {content}{' ' * remaining}{RESET}\n")
+                # Move to next line in new file after displaying
+                new_line_num += 1
             elif line.startswith(" "):
-                # Unchanged line - increment both, show without color
+                # Unchanged line - exists in both files
+                # Show new_line_num since we're viewing the modified file
+                content = line[1:].rstrip("\n")
+                lines.append(f" {new_line_num:>4}   {content}\n")
+                # Move to next line in both files
                 old_line_num += 1
                 new_line_num += 1
-                content = line[1:].rstrip("\n")
-                lines.append(f" {old_line_num:>4}   {content}\n")
 
         return "".join(lines)
 
