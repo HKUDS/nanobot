@@ -589,6 +589,7 @@ class FeishuChannel(BaseChannel):
 
     _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif"}
     _AUDIO_EXTS = {".opus"}
+    _VIDEO_EXTS = {".mp4", ".mov", ".avi"}
     _FILE_TYPE_MAP = {
         ".opus": "opus", ".mp4": "mp4", ".pdf": "pdf", ".doc": "doc", ".docx": "doc",
         ".xls": "xls", ".xlsx": "xls", ".ppt": "ppt", ".pptx": "ppt",
@@ -797,7 +798,12 @@ class FeishuChannel(BaseChannel):
                 else:
                     key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
                     if key:
-                        media_type = "audio" if ext in self._AUDIO_EXTS else "file"
+                        # Use msg_type "media" for audio/video so users can play inline;
+                        # "file" for everything else (documents, archives, etc.)
+                        if ext in self._AUDIO_EXTS or ext in self._VIDEO_EXTS:
+                            media_type = "media"
+                        else:
+                            media_type = "file"
                         await loop.run_in_executor(
                             None, self._send_message_sync,
                             receive_id_type, msg.chat_id, media_type, json.dumps({"file_key": key}, ensure_ascii=False),
