@@ -274,7 +274,9 @@ class XmppChannel(BaseChannel):
 
     async def _start_typing(self, jid: str) -> None:
         """Start typing indicator with keepalive."""
-        await self._stop_typing(jid)
+        # Skip if already typing to this JID to prevent churn
+        if jid in self._typing_tasks:
+            return
 
         if self.client and self.client.is_connected():
             try:
