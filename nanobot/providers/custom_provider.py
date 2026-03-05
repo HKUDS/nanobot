@@ -16,6 +16,7 @@ class CustomProvider(LLMProvider):
     def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1", default_model: str = "default"):
         super().__init__(api_key, api_base)
         self.default_model = default_model
+        # Keep affinity stable for this provider instance to improve backend cache locality.
         self._client = AsyncOpenAI(
             api_key=api_key,
             base_url=api_base,
