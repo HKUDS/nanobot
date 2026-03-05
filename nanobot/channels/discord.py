@@ -174,7 +174,7 @@ class DiscordChannel(BaseChannel):
                 # Capture bot user ID for mention detection
                 user_data = payload.get("user") or {}
                 self._bot_user_id = user_data.get("id")
-                logger.info(f"Discord bot connected as user {self._bot_user_id}")
+                logger.info("Discord bot connected as user {}", self._bot_user_id)
             elif op == 0 and event_type == "MESSAGE_CREATE":
                 await self._handle_message_create(payload)
             elif op == 7:
@@ -287,8 +287,6 @@ class DiscordChannel(BaseChannel):
 
     def _should_respond_in_group(self, payload: dict[str, Any], content: str) -> bool:
         """Check if bot should respond in a group channel based on policy."""
-        channel_id = str(payload.get("channel_id", ""))
-
         if self.config.group_policy == "open":
             return True
 
@@ -303,7 +301,7 @@ class DiscordChannel(BaseChannel):
                 # Also check content for mention format <@USER_ID>
                 if f"<@{self._bot_user_id}>" in content or f"<@!{self._bot_user_id}>" in content:
                     return True
-            logger.debug(f"Discord message in {channel_id} ignored (bot not mentioned)")
+            logger.debug("Discord message in {} ignored (bot not mentioned)", payload.get("channel_id"))
             return False
 
         return True
