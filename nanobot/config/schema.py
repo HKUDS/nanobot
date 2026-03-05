@@ -216,6 +216,13 @@ class MatrixConfig(Base):
     allow_room_mentions: bool = False
 
 
+class PythonCallConfig(Base):
+    """Python call channel configuration for programmatic access."""
+
+    enabled: bool = False
+    allow_from: list[str] = Field(default_factory=lambda: ["*"])  # Default allow all for programmatic use
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -231,6 +238,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    python_call: PythonCallConfig = Field(default_factory=PythonCallConfig)
 
 
 class AgentDefaults(Base):

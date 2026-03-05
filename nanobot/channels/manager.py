@@ -149,6 +149,15 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
 
+        # Python call channel
+        if self.config.channels.python_call.enabled:
+            from nanobot.channels.python_call import PythonCallChannel
+            self.channels["python_call"] = PythonCallChannel(
+                self.config.channels.python_call,
+                self.bus,
+            )
+            logger.info("Python call channel enabled")
+
         self._validate_allow_from()
 
     def _validate_allow_from(self) -> None:
