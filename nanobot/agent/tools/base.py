@@ -3,6 +3,8 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+from loguru import logger
+
 
 class Tool(ABC):
     """
@@ -51,6 +53,118 @@ class Tool(ABC):
             String result of the tool execution.
         """
         pass
+
+    def cast_params(self, params: dict[str, Any]) -> dict[str, Any]:
+        """
+        Attempt to cast parameters to match schema types.
+        Returns modified params dict. Raises ValueError if casting is impossible.
+        """
+        schema = self.parameters or {}
+        if schema.get("type", "object") != "object":
+            return params
+
+        return self._cast_object(params, schema)
+
+    def _cast_object(self, obj: Any, schema: dict[str, Any]) -> dict[str, Any]:
+        """Cast an object (dict) according to schema."""
+        if not isinstance(obj, dict):
+            return obj
+
+        props = schema.get("properties", {})
+        result = {}
+
+        for key, value in obj.items():
+            if key in props:
+                result[key] = self._cast_value(value, props[key])
+            else:
+                result[key] = value
+
+        return result
+
+    def _cast_value(self, val: Any, schema: dict[str, Any]) -> Any:
+        """Cast a single value according to schema."""
+        target_type = schema.get("type")
+
+        # Already correct type
+        # Note: check bool before int since bool is subclass of int
+        if target_type == "boolean" and isinstance(val, bool):
+            return val
+        if target_type == "integer" and isinstance(val, int) and not isinstance(val, bool):
+            return val
+        # For array/object, don't early-return - we need to recurse into contents
+        if target_type in self._TYPE_MAP and target_type not in (
+            "boolean",
+            "integer",
+            "array",
+            "object",
+        ):
+            expected = self._TYPE_MAP[target_type]
+            if isinstance(val, expected):
+                return val
+
+        # Attempt casting
+        try:
+            if target_type == "integer":
+                if isinstance(val, bool):
+                    # Don't silently convert bool to int
+                    raise ValueError(f"Cannot cast bool to integer")
+                if isinstance(val, str):
+                    return int(val)
+                if isinstance(val, (int, float)):
+                    return int(val)
+
+            elif target_type == "number":
+                if isinstance(val, bool):
+                    # Don't silently convert bool to number
+                    raise ValueError(f"Cannot cast bool to number")
+                if isinstance(val, str):
+                    return float(val)
+                if isinstance(val, (int, float)):
+                    return float(val)
+
+            elif target_type == "string":
+                # Preserve None vs empty string distinction
+                if val is None:
+                    return val
+                return str(val)
+
+            elif target_type == "boolean":
+                if isinstance(val, str):
+                    return val.lower() in ("true", "1", "yes")
+                return bool(val)
+
+            elif target_type == "array":
+                if isinstance(val, list):
+                    # Recursively cast array items if schema defines items
+                    if "items" in schema:
+                        return [self._cast_value(item, schema["items"]) for item in val]
+                    return val
+                # Preserve None vs empty array distinction
+                if val is None:
+                    return val
+                # Try to convert single value to array
+                if val == "":
+                    return []
+                return [val]
+
+            elif target_type == "object":
+                if isinstance(val, dict):
+                    return self._cast_object(val, schema)
+                # Preserve None vs empty object distinction
+                if val is None:
+                    return val
+                # Empty string → empty object
+                if val == "":
+                    return {}
+                # Cannot cast to object
+                raise ValueError(f"Cannot cast {type(val).__name__} to object")
+
+        except (ValueError, TypeError) as e:
+            # Log failed casts for debugging, return original value
+            # Let validation catch the error
+            logger.debug("Failed to cast value %r to %s: %s", val, target_type, e)
+
+        return val
 
     def validate_params(self, params: dict[str, Any]) -> list[str]:
         """Validate tool parameters against JSON schema. Returns error list (empty if valid)."""

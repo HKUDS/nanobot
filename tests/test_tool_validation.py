@@ -106,3 +106,122 @@ def test_exec_extract_absolute_paths_captures_posix_absolute_paths() -> None:
     paths = ExecTool._extract_absolute_paths(cmd)
     assert "/tmp/data.txt" in paths
     assert "/tmp/out.txt" in paths
+
+
+# --- cast_params tests ---
+
+
+class CastTestTool(Tool):
+    """Minimal tool for testing cast_params."""
+
+    def __init__(self, schema: dict[str, Any]) -> None:
+        self._schema = schema
+
+    @property
+    def name(self) -> str:
+        return "cast_test"
+
+    @property
+    def description(self) -> str:
+        return "test tool for casting"
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return self._schema
+
+    async def execute(self, **kwargs: Any) -> str:
+        return "ok"
+
+
+def test_cast_params_string_to_int() -> None:
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"count": {"type": "integer"}},
+        }
+    )
+    result = tool.cast_params({"count": "42"})
+    assert result["count"] == 42
+    assert isinstance(result["count"], int)
+
+
+def test_cast_params_string_to_number() -> None:
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"rate": {"type": "number"}},
+        }
+    )
+    result = tool.cast_params({"rate": "3.14"})
+    assert result["rate"] == 3.14
+    assert isinstance(result["rate"], float)
+
+
+def test_cast_params_string_to_bool() -> None:
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"enabled": {"type": "boolean"}},
+        }
+    )
+    assert tool.cast_params({"enabled": "true"})["enabled"] is True
+    assert tool.cast_params({"enabled": "false"})["enabled"] is False
+    assert tool.cast_params({"enabled": "1"})["enabled"] is True
+
+
+def test_cast_params_array_items() -> None:
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {
+                "nums": {"type": "array", "items": {"type": "integer"}},
+            },
+        }
+    )
+    result = tool.cast_params({"nums": ["1", "2", "3"]})
+    assert result["nums"] == [1, 2, 3]
+
+
+def test_cast_params_nested_object() -> None:
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "properties": {
+                        "port": {"type": "integer"},
+                        "debug": {"type": "boolean"},
+                    },
+                },
+            },
+        }
+    )
+    result = tool.cast_params({"config": {"port": "8080", "debug": "true"}})
+    assert result["config"]["port"] == 8080
+    assert result["config"]["debug"] is True
+
+
+def test_cast_params_bool_not_cast_to_int() -> None:
+    """Booleans should not be silently cast to integers."""
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"count": {"type": "integer"}},
+        }
+    )
+    # Bool input should remain bool (validation will catch it)
+    result = tool.cast_params({"count": True})
+    assert result["count"] is True  # Not cast to 1
+
+
+def test_cast_params_preserves_empty_string() -> None:
+    """Empty strings should be preserved for string type."""
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        }
+    )
+    result = tool.cast_params({"name": ""})
+    assert result["name"] == ""

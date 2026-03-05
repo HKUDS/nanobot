@@ -44,6 +44,10 @@ class ToolRegistry:
             return f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
 
         try:
+            # Attempt to cast parameters to match schema types
+            params = tool.cast_params(params)
+            
+            # Validate parameters
             errors = tool.validate_params(params)
             if errors:
                 return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _HINT
