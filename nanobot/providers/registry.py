@@ -377,15 +377,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("dashscope-coding-plan", "coding-plan", "aliyun-coding", "bailian-coding"),
         env_key="DASHSCOPE_CODING_PLAN_API_KEY",
         display_name="Alibaba Cloud Coding Plan",
-        litellm_prefix="dashscope",  # → dashscope/{model}
-        skip_prefixes=("dashscope/", "openrouter/"),
+        litellm_prefix="openai",  # → openai/{model} (uses OpenAI-compatible endpoint)
+        skip_prefixes=("openai/", "dashscope/", "openrouter/"),
         env_extras=(),
         is_gateway=True,
         is_local=False,
         detect_by_key_prefix="sk-sp-",  # coding plan API keys start with "sk-sp-"
         detect_by_base_keyword="coding.dashscope",
         default_api_base="https://coding.dashscope.aliyuncs.com/v1",
-        strip_model_prefix=False,
+        strip_model_prefix=True,  # Strip "dashscope_coding_plan/" prefix
         model_overrides=(),
     ),
     # === Auxiliary (not a primary LLM provider) ============================
