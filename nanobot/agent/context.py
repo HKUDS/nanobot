@@ -133,10 +133,26 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         if not media:
             return text
 
+        # Fallback MIME types by file extension
+        _EXT_TO_MIME = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".bmp": "image/bmp",
+            ".tiff": "image/tiff",
+            ".tif": "image/tiff",
+        }
+
         images = []
         for path in media:
             p = Path(path)
             mime, _ = mimetypes.guess_type(path)
+            # Fallback to extension-based detection if mimetypes fails
+            if not mime:
+                ext = p.suffix.lower()
+                mime = _EXT_TO_MIME.get(ext)
             if not p.is_file() or not mime or not mime.startswith("image/"):
                 continue
             b64 = base64.b64encode(p.read_bytes()).decode()
