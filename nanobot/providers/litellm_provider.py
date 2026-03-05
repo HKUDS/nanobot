@@ -181,54 +181,6 @@ class LiteLLMProvider(LLMProvider):
             sanitized.append(clean)
         return sanitized
 
-    @staticmethod
-    def _is_anthropic_model(original_model: str, resolved_model: str) -> bool:
-        """Return True when the target provider is Anthropic."""
-        spec = find_by_model(original_model) or find_by_model(resolved_model)
-        return (
-            (spec is not None and spec.name == "anthropic")
-            or "claude" in original_model.lower()
-            or resolved_model.startswith("anthropic/")
-        )
-
-    @staticmethod
-    def _convert_images_for_anthropic(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Convert OpenAI-style image_url Data URIs to Anthropic's source.base64 format.
-
-        LiteLLM translates HTTP image URLs automatically, but leaves Data URIs
-        (data:<mime>;base64,<data>) in the OpenAI image_url format, which
-        Anthropic rejects with a 400 invalid_request_error.
-        """
-        result = []
-        for msg in messages:
-            content = msg.get("content")
-            if not isinstance(content, list):
-                result.append(msg)
-                continue
-            new_content = []
-            for block in content:
-                if (
-                    isinstance(block, dict)
-                    and block.get("type") == "image_url"
-                    and isinstance(block.get("image_url"), dict)
-                ):
-                    url = block["image_url"].get("url", "")
-                    if url.startswith("data:") and ";base64," in url:
-                        header, data = url.split(";base64,", 1)
-                        media_type = header[len("data:"):]
-                        new_content.append({
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": data,
-                            },
-                        })
-                        continue
-                new_content.append(block)
-            result.append({**msg, "content": new_content})
-        return result
-
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -257,9 +209,6 @@ class LiteLLMProvider(LLMProvider):
 
         if self._supports_cache_control(original_model):
             messages, tools = self._apply_cache_control(messages, tools)
-
-        if self._is_anthropic_model(original_model, model):
-            messages = self._convert_images_for_anthropic(messages)
 
         # Clamp max_tokens to at least 1 — negative or zero values cause
         # LiteLLM to reject the request with "max_tokens must be at least 1".
