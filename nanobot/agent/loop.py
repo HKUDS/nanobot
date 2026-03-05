@@ -417,12 +417,26 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.memory_window)
+
+        # Build messages with original content so persistence stays clean
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
         )
+
+        # Anchor the model's attention with an ephemeral boundary wrapper.
+        # This is never saved to session history — only the original msg.content is persisted.
+        wrapped_content = (
+            f"--- END OF HISTORY ---\n\n"
+            f"CURRENT USER REQUEST (Answer ONLY this, do NOT answer previous questions again):\n"
+            f"{msg.content}"
+        )
+        llm_messages = [
+            *initial_messages[:-1],
+            {**initial_messages[-1], "content": wrapped_content},
+        ]
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
@@ -433,13 +447,16 @@ class AgentLoop:
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            llm_messages, on_progress=on_progress or _bus_progress,
         )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        # Reconstruct save list from original initial_messages so the ephemeral wrapper
+        # is never written into persisted session history.
+        save_msgs = initial_messages + all_msgs[len(llm_messages):]
+        self._save_turn(session, save_msgs, 1 + len(history))
         self.sessions.save(session)
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:

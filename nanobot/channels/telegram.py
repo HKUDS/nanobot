@@ -268,8 +268,10 @@ class TelegramChannel(BaseChannel):
                 )
 
         # Send text content
-        if msg.content and msg.content != "[empty message]":
+        if msg.content and msg.content != "[empty message]" and msg.content.strip():
             for chunk in _split_message(msg.content):
+                if not chunk.strip():
+                    continue
                 try:
                     html = _markdown_to_telegram_html(chunk)
                     await self._app.bot.send_message(
