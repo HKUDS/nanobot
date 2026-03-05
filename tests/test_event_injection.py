@@ -475,3 +475,87 @@ async def test_event_during_tool_execution_result_preserved():
     assert results == ["result_1", "result_2"], f"Wrong results: {results}"
 
 
+
+@pytest.mark.asyncio
+async def test_event_before_final_response_combined():
+    """Test event arriving just before final response (no tool calls).
+
+    Human behavior: when about to reply but get interrupted, 
+    combine both instead of ignoring the interruption.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    workspace = MagicMock()
+    workspace.__truediv__ = MagicMock(return_value=MagicMock())
+
+    with patch("nanobot.agent.loop.ContextBuilder") as MockCtx, \
+         patch("nanobot.agent.loop.SessionManager"), \
+         patch("nanobot.agent.loop.SubagentManager"), \
+         patch("nanobot.agent.loop.ToolRegistry") as MockRegistry:
+        mock_ctx = MagicMock()
+        mock_ctx.build_messages.return_value = [
+            {"role": "system", "content": "You are nanobot"},
+            {"role": "user", "content": "What's the capital of France?"}
+        ]
+
+        mock_registry = MagicMock()
+        mock_registry.get_definitions.return_value = []
+        MockRegistry.return_value = mock_registry
+
+        # Patch check_events to return event on 2nd call (after first LLM response)
+        check_event_calls = [0]
+
+        async def mock_check_events(session_key):
+            check_event_calls[0] += 1
+            if check_event_calls[0] == 2:
+                # Return event on second call
+                return "Also tell me about Germany!"
+            return None
+
+        bus.check_events = mock_check_events
+
+        async def mock_chat(*args, **kwargs):
+            if provider.chat.call_count == 0:
+                return MagicMock(
+                    has_tool_calls=False,
+                    content="The capital of France is Paris.",
+                    reasoning_content=None,
+                    finish_reason="stop"
+                )
+            else:
+                return MagicMock(
+                    has_tool_calls=False,
+                    content="Paris is France's capital. Germany's capital is Berlin.",
+                    reasoning_content=None,
+                    finish_reason="stop"
+                )
+
+        provider.chat = AsyncMock(side_effect=mock_chat)
+
+        mock_ctx.add_assistant_message = MagicMock(
+            side_effect=lambda msgs, c, tc=None, **kw: 
+                msgs + [{"role": "assistant", "content": c, "tool_calls": tc}]
+        )
+        MockCtx.return_value = mock_ctx
+
+        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
+
+        final_content, tools_used, messages = await loop._run_agent_loop(
+            initial_messages=[{"role": "user", "content": "What's the capital of France?"}],
+            session_key="test:key",
+        )
+
+        # check_events should be called multiple times
+        assert check_event_calls[0] >= 2, f"Expected at least 2 event checks, got {check_event_calls[0]}"
+        
+        # Should call LLM twice because event was detected before break
+        assert provider.chat.call_count == 2, \
+            f"Expected 2 LLM calls (initial + after event), got {provider.chat.call_count}"
+        assert "Paris" in final_content
+        assert "Berlin" in final_content or "Germany" in final_content

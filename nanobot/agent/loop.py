@@ -205,10 +205,46 @@ class AgentLoop:
                 return True
             return False
 
+        def cancel_remaining_tools(start_idx: int, current_cancelled: bool) -> None:
+            """Cancel remaining tools by adding CANCELLED messages."""
+            reason = "before tool execution" if current_cancelled else "after tool execution (current tool completed)"
+            logger.info(f"Event received {reason}, cancelling {'current and ' if current_cancelled else ''}remaining tools")
+
+            for tc in response.tool_calls[start_idx:]:
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": tc.name,
+                    "content": "CANCELLED: User interrupted"
+                })
+
+        async def execute_tool_calls() -> bool:
+            """Execute tool calls with event checking. Returns True if should break."""
+            nonlocal messages
+            for i, tool_call in enumerate(response.tool_calls):
+                # Check before tool execution
+                if await inject_event():
+                    cancel_remaining_tools(i, current_cancelled=True)
+                    return True
+
+                # Execute tool
+                tools_used.append(tool_call.name)
+                args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                messages = self.context.add_tool_result(
+                    messages, tool_call.id, tool_call.name, result
+                )
+
+                # Check after tool execution
+                if await inject_event():
+                    cancel_remaining_tools(i + 1, current_cancelled=False)
+                    return True
+
+            return False
+
         while iteration < self.max_iterations:
             iteration += 1
-
-            # Check for user events before LLM call
             await inject_event()
 
             response = await self.provider.chat(
@@ -244,43 +280,10 @@ class AgentLoop:
                     thinking_blocks=response.thinking_blocks,
                 )
 
-                # Execute each tool, checking for events before and after each one
-                for i, tool_call in enumerate(response.tool_calls):
-                    if await inject_event():
-                        # Event received: cancel this and all remaining tools
-                        logger.info("Event received before tool execution, cancelling current and remaining tools")
-                        for tc in response.tool_calls[i:]:
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc.id,
-                                "name": tc.name,
-                                "content": "CANCELLED: User interrupted"
-                            })
-                        break
-
-                    tools_used.append(tool_call.name)
-                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                    logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
-                    )
-
-                    if await inject_event():
-                        # Event received: cancel all remaining tools
-                        logger.info("Event received after tool execution, cancelling remaining tools (current tool completed)")
-                        for tc in response.tool_calls[i+1:]:
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc.id,
-                                "name": tc.name,
-                                "content": "CANCELLED: User interrupted"
-                            })
-                        break
+                if await execute_tool_calls():
+                    continue
             else:
                 clean = self._strip_think(response.content)
-                # Don't persist error responses to session history — they can
-                # poison the context and cause permanent 400 loops (#1303).
                 if response.finish_reason == "error":
                     logger.error("LLM returned error: {}", (clean or "")[:200])
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
@@ -290,6 +293,13 @@ class AgentLoop:
                     thinking_blocks=response.thinking_blocks,
                 )
                 final_content = clean
+
+                # Check for events before returning final response
+                # If user interrupted while LLM was generating response,
+                # combine both in the next iteration (like humans do)
+                if await inject_event():
+                    continue
+
                 break
 
         if final_content is None and iteration >= self.max_iterations:
