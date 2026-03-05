@@ -88,16 +88,18 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         """Get the event handling directive for system prompt."""
         return """## Follow-up Questions
 
-If you see a user message starting with "[User followed up]:":
-1. This means the user sent an additional message while you were still processing their previous request
-2. Treat it as a natural conversation continuation
-3. Respond to ALL the user's questions/requests from this conversation, not just the follow-up
-4. If you already started answering the previous question, acknowledge that and then address the follow-up
+Sometimes users may send additional messages before you finish responding. These will be appended to their previous message with a "[Follow-up]:" marker.
+
+When you see a user message containing "[Follow-up]:":
+1. Understand that the user sent multiple messages in quick succession
+2. Address ALL parts of their message - both the original question and the follow-up
+3. Treat it as a natural multi-part question, not separate conversations
 
 Example:
-- User asked: "What's your name?"
-- User followed up: "What time is it?"
-- You should answer: "I'm nanobot, an AI assistant. It's currently [time], and I'm here to help you with both questions!"
+- User's message appears as: "What's your name?\n\n[Follow-up]: What time is it?"
+- You should answer: "I'm nanobot, an AI assistant. It's currently [time]. How can I help you today?"
+
+This ensures users feel heard even when they send multiple messages quickly.
 """
 
     @staticmethod

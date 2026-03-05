@@ -198,12 +198,23 @@ class AgentLoop:
                 return False
             event = await self.bus.check_events(session_key)
             if event:
-                # Inject as user message (follow-up question), not system event
-                # This ensures LLM treats it as a natural conversation continuation
-                messages.append({
-                    "role": "user",
-                    "content": f"[User followed up]: {event}"
-                })
+                # Append to the last user message instead of creating a new one
+                # This avoids consecutive user messages which confuse LLM
+                last_user_idx = None
+                for i in range(len(messages) - 1, -1, -1):
+                    if messages[i].get("role") == "user":
+                        last_user_idx = i
+                        break
+                
+                if last_user_idx is not None:
+                    # Append to existing user message
+                    messages[last_user_idx]["content"] += f"\n\n[Follow-up]: {event}"
+                else:
+                    # Fallback: create new user message (shouldn't happen in normal flow)
+                    messages.append({
+                        "role": "user",
+                        "content": f"[Follow-up]: {event}"
+                    })
                 return True
             return False
 

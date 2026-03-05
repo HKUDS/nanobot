@@ -80,9 +80,9 @@ def test_system_prompt_includes_event_handling():
     prompt = builder.build_system_prompt(enable_event_handling=True)
 
     assert "Follow-up Questions" in prompt
-    assert "[User followed up]:" in prompt
-    assert "natural conversation continuation" in prompt
-    assert "Respond to ALL" in prompt
+    assert "[Follow-up]:" in prompt
+    assert "natural multi-part question" in prompt
+    assert "Address ALL" in prompt
 
 
 def test_system_prompt_no_event_handling_by_default():
@@ -144,7 +144,7 @@ async def test_agent_loop_checks_events_before_llm():
         session_key="test:key",
     )
 
-    assert any(m.get("role") == "user" and "[User followed up]:" in m.get("content", "") and "User interrupt" in m.get("content", "") for m in messages)
+    assert any(m.get('role') == 'user' and m.get('content', '') == 'test\n\n[Follow-up]: - User interrupt' for m in messages)
 
 @pytest.mark.asyncio
 async def test_agent_loop_cancels_tools_on_event():
