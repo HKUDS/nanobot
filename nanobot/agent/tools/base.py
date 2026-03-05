@@ -32,9 +32,16 @@ class ToolResult:
         return cls(output=output, success=True, truncated=truncated, metadata=meta)
 
     @classmethod
-    def fail(cls, error: str, *, output: str = "", error_type: str = "unknown", **meta: Any) -> ToolResult:
+    def fail(
+        cls, error: str, *, output: str = "", error_type: str = "unknown", **meta: Any
+    ) -> ToolResult:
         """Create a failed result."""
-        return cls(output=output or error, success=False, error=error, metadata={**meta, "error_type": error_type})
+        return cls(
+            output=output or error,
+            success=False,
+            error=error,
+            metadata={**meta, "error_type": error_type},
+        )
 
     # Serialize for the LLM context (backward-compatible string)
     def to_llm_string(self) -> str:
@@ -44,15 +51,15 @@ class ToolResult:
 class Tool(ABC):
     """
     Abstract base class for agent tools.
-    
+
     Tools are capabilities that the agent can use to interact with
     the environment, such as reading files, executing commands, etc.
     """
 
     # Whether this tool only reads state (used for parallel execution).
     readonly: bool = False
-    
-    _TYPE_MAP = {
+
+    _TYPE_MAP: dict[str, type | tuple[type, ...]] = {
         "string": str,
         "integer": int,
         "number": (int, float),
@@ -60,33 +67,33 @@ class Tool(ABC):
         "array": list,
         "object": dict,
     }
-    
+
     @property
     @abstractmethod
     def name(self) -> str:
         """Tool name used in function calls."""
         pass
-    
+
     @property
     @abstractmethod
     def description(self) -> str:
         """Description of what the tool does."""
         pass
-    
+
     @property
     @abstractmethod
     def parameters(self) -> dict[str, Any]:
         """JSON Schema for tool parameters."""
         pass
-    
+
     @abstractmethod
     async def execute(self, **kwargs: Any) -> str | ToolResult:
         """
         Execute the tool with given parameters.
-        
+
         Args:
             **kwargs: Tool-specific parameters.
-        
+
         Returns:
             String result or ToolResult of the tool execution.
         """
@@ -103,7 +110,7 @@ class Tool(ABC):
         t, label = schema.get("type"), path or "parameter"
         if t in self._TYPE_MAP and not isinstance(val, self._TYPE_MAP[t]):
             return [f"{label} should be {t}"]
-        
+
         errors = []
         if "enum" in schema and val not in schema["enum"]:
             errors.append(f"{label} must be one of {schema['enum']}")
@@ -124,12 +131,14 @@ class Tool(ABC):
                     errors.append(f"missing required {path + '.' + k if path else k}")
             for k, v in val.items():
                 if k in props:
-                    errors.extend(self._validate(v, props[k], path + '.' + k if path else k))
+                    errors.extend(self._validate(v, props[k], path + "." + k if path else k))
         if t == "array" and "items" in schema:
             for i, item in enumerate(val):
-                errors.extend(self._validate(item, schema["items"], f"{path}[{i}]" if path else f"[{i}]"))
+                errors.extend(
+                    self._validate(item, schema["items"], f"{path}[{i}]" if path else f"[{i}]")
+                )
         return errors
-    
+
     def to_schema(self) -> dict[str, Any]:
         """Convert tool to OpenAI function schema format."""
         return {
@@ -138,5 +147,5 @@ class Tool(ABC):
                 "name": self.name,
                 "description": self.description,
                 "parameters": self.parameters,
-            }
+            },
         }

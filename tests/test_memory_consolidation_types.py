@@ -104,10 +104,12 @@ class TestMemoryConsolidationTypeHandling:
                 ToolCallRequest(
                     id="call_1",
                     name="save_memory",
-                    arguments=json.dumps({
-                        "history_entry": "[2026-01-01] User discussed testing.",
-                        "memory_update": "# Memory\nUser likes testing.",
-                    }),
+                    arguments=json.dumps(
+                        {
+                            "history_entry": "[2026-01-01] User discussed testing.",
+                            "memory_update": "# Memory\nUser likes testing.",
+                        }
+                    ),
                 )
             ],
         )

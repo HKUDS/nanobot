@@ -1,10 +1,11 @@
 """Test session management with cache-friendly message handling."""
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from pathlib import Path
+
 from nanobot.session.manager import Session, SessionManager
 
 # Test constants
@@ -489,9 +490,8 @@ class TestConsolidationDeduplicationGuard:
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
-
         from nanobot.config.schema import AgentConfig
+        from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
@@ -534,9 +534,8 @@ class TestConsolidationDeduplicationGuard:
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
-
         from nanobot.config.schema import AgentConfig
+        from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
@@ -587,9 +586,8 @@ class TestConsolidationDeduplicationGuard:
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
-
         from nanobot.config.schema import AgentConfig
+        from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
@@ -633,9 +631,8 @@ class TestConsolidationDeduplicationGuard:
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
-
         from nanobot.config.schema import AgentConfig
+        from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
@@ -692,9 +689,8 @@ class TestConsolidationDeduplicationGuard:
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
-
         from nanobot.config.schema import AgentConfig
+        from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
@@ -737,9 +733,8 @@ class TestConsolidationDeduplicationGuard:
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
-
         from nanobot.config.schema import AgentConfig
+        from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()
@@ -799,9 +794,8 @@ class TestConsolidationDeduplicationGuard:
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse
-
         from nanobot.config.schema import AgentConfig
+        from nanobot.providers.base import LLMResponse
 
         bus = MessageBus()
         provider = MagicMock()

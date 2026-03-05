@@ -58,6 +58,8 @@ dev = [
     "pytest>=9.0.0,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",
     "ruff>=0.1.0",
+    "mypy>=1.8",
+    "pre-commit>=3.6",
 ]
 
 [project.scripts]
@@ -77,6 +79,7 @@ packages = ["nanobot"]
 [tool.hatch.build]
 include = [
     "nanobot/**/*.py",
+    "nanobot/py.typed",
     "nanobot/templates/**/*.md",
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",
@@ -104,3 +107,24 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+check_untyped_defs = true
+ignore_missing_imports = true
+disallow_untyped_defs = false
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = "nanobot.errors"
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "nanobot.config.*"
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "nanobot.agent.tools.base"
+disallow_untyped_defs = true

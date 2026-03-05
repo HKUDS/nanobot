@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any, AsyncIterator
-
 import pytest
 
 from nanobot.providers.base import LLMProvider, LLMResponse, StreamChunk, ToolCallRequest
 
-
 # ---------------------------------------------------------------------------
 # Mock streaming provider
 # ---------------------------------------------------------------------------
+
 
 class FakeStreamProvider(LLMProvider):
     """A provider that yields pre-configured StreamChunks."""
@@ -40,6 +37,7 @@ class FakeStreamProvider(LLMProvider):
 # StreamChunk tests
 # ---------------------------------------------------------------------------
 
+
 class TestStreamChunk:
     def test_defaults(self):
         c = StreamChunk()
@@ -65,14 +63,19 @@ class TestStreamChunk:
 # Base class fallback
 # ---------------------------------------------------------------------------
 
+
 class TestBaseProviderStreamFallback:
     """The default stream_chat on LLMProvider falls back to chat()."""
 
     @pytest.mark.asyncio
     async def test_fallback_yields_single_chunk(self):
         class SimpleProvider(LLMProvider):
-            async def chat(self, messages, tools=None, model=None, max_tokens=4096, temperature=0.7):
-                return LLMResponse(content="hello world", finish_reason="stop", usage={"total_tokens": 5})
+            async def chat(
+                self, messages, tools=None, model=None, max_tokens=4096, temperature=0.7
+            ):
+                return LLMResponse(
+                    content="hello world", finish_reason="stop", usage={"total_tokens": 5}
+                )
 
             def get_default_model(self):
                 return "simple"
@@ -92,14 +95,17 @@ class TestBaseProviderStreamFallback:
 # FakeStreamProvider integration
 # ---------------------------------------------------------------------------
 
+
 class TestFakeStreamProvider:
     @pytest.mark.asyncio
     async def test_yields_all_chunks(self):
-        provider = FakeStreamProvider(chunks=[
-            StreamChunk(content_delta="Hello"),
-            StreamChunk(content_delta=" world"),
-            StreamChunk(content_delta="!", finish_reason="stop", done=True),
-        ])
+        provider = FakeStreamProvider(
+            chunks=[
+                StreamChunk(content_delta="Hello"),
+                StreamChunk(content_delta=" world"),
+                StreamChunk(content_delta="!", finish_reason="stop", done=True),
+            ]
+        )
 
         accumulated = []
         async for chunk in provider.stream_chat(messages=[]):
@@ -113,10 +119,12 @@ class TestFakeStreamProvider:
     @pytest.mark.asyncio
     async def test_tool_calls_on_final_chunk(self):
         tc = ToolCallRequest(id="tc1", name="exec", arguments={"command": "ls"})
-        provider = FakeStreamProvider(chunks=[
-            StreamChunk(content_delta="Let me check"),
-            StreamChunk(tool_calls=[tc], finish_reason="tool_calls", done=True),
-        ])
+        provider = FakeStreamProvider(
+            chunks=[
+                StreamChunk(content_delta="Let me check"),
+                StreamChunk(tool_calls=[tc], finish_reason="tool_calls", done=True),
+            ]
+        )
 
         chunks = []
         async for chunk in provider.stream_chat(messages=[]):
@@ -130,9 +138,11 @@ class TestFakeStreamProvider:
     @pytest.mark.asyncio
     async def test_chat_not_called_when_streaming(self):
         """stream_chat should NOT fall back to chat()."""
-        provider = FakeStreamProvider(chunks=[
-            StreamChunk(content_delta="ok", done=True, finish_reason="stop"),
-        ])
+        provider = FakeStreamProvider(
+            chunks=[
+                StreamChunk(content_delta="ok", done=True, finish_reason="stop"),
+            ]
+        )
 
         async for _ in provider.stream_chat(messages=[]):
             pass
@@ -145,6 +155,7 @@ class TestFakeStreamProvider:
 # Reassembly into LLMResponse (simulating what _call_llm does)
 # ---------------------------------------------------------------------------
 
+
 class TestChunkReassembly:
     """Verify that accumulating chunks produces a correct LLMResponse."""
 
@@ -153,7 +164,9 @@ class TestChunkReassembly:
         chunks = [
             StreamChunk(content_delta="The answer"),
             StreamChunk(content_delta=" is 42"),
-            StreamChunk(content_delta=".", finish_reason="stop", usage={"total_tokens": 10}, done=True),
+            StreamChunk(
+                content_delta=".", finish_reason="stop", usage={"total_tokens": 10}, done=True
+            ),
         ]
 
         content_parts = []

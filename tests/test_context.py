@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-
 import pytest
 
 from nanobot.agent.context import (
@@ -15,10 +12,10 @@ from nanobot.agent.context import (
 )
 from nanobot.providers.base import LLMResponse
 
-
 # ---------------------------------------------------------------------------
 # Token estimation
 # ---------------------------------------------------------------------------
+
 
 class TestEstimateTokens:
     def test_empty(self):
@@ -44,6 +41,7 @@ class TestEstimateTokens:
 # ---------------------------------------------------------------------------
 # compress_context (synchronous)
 # ---------------------------------------------------------------------------
+
 
 class TestCompressContext:
     def test_empty_messages(self):
@@ -107,6 +105,7 @@ class TestCompressContext:
 # summarize_and_compress (async, with mock provider)
 # ---------------------------------------------------------------------------
 
+
 class MockProvider:
     """Minimal provider for summarization tests."""
 
@@ -148,7 +147,11 @@ class TestSummarizeAndCompress:
 
         # Very tight budget that forces summarization
         result = await summarize_and_compress(
-            msgs, 100, provider, "test-model", preserve_recent=2,
+            msgs,
+            100,
+            provider,
+            "test-model",
+            preserve_recent=2,
         )
 
         # Should contain system + summary + tail
@@ -170,6 +173,7 @@ class TestSummarizeAndCompress:
 
         # Clear cache for test isolation
         from nanobot.agent.context import _summary_cache
+
         _summary_cache.clear()
 
         await summarize_and_compress(msgs, 50, provider, "m", preserve_recent=1)
@@ -184,6 +188,7 @@ class TestSummarizeAndCompress:
     @pytest.mark.asyncio
     async def test_fallback_on_provider_failure(self):
         """If LLM summary fails, falls back to dropping messages."""
+
         class FailingProvider:
             async def chat(self, **kwargs):
                 raise RuntimeError("LLM down")
@@ -196,7 +201,11 @@ class TestSummarizeAndCompress:
         msgs.append({"role": "user", "content": "last"})
 
         result = await summarize_and_compress(
-            msgs, 50, FailingProvider(), "m", preserve_recent=1,
+            msgs,
+            50,
+            FailingProvider(),
+            "m",
+            preserve_recent=1,
         )
         # Should still return something valid (system + tail)
         assert result[0]["role"] == "system"

@@ -18,7 +18,7 @@ class MCPToolWrapper(Tool):
         self._session = session
         self._original_name = tool_def.name
         self._name = f"mcp_{server_name}_{tool_def.name}"
-        self._description = tool_def.description or tool_def.name
+        self._description = str(tool_def.description or tool_def.name)
         self._parameters = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._tool_timeout = tool_timeout
 
@@ -36,6 +36,7 @@ class MCPToolWrapper(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
+
         try:
             result = await asyncio.wait_for(
                 self._session.call_tool(self._original_name, arguments=kwargs),
@@ -69,6 +70,7 @@ async def connect_mcp_servers(
                 read, write = await stack.enter_async_context(stdio_client(params))
             elif cfg.url:
                 from mcp.client.streamable_http import streamable_http_client
+
                 # Always provide an explicit httpx client so MCP HTTP transport does not
                 # inherit httpx's default 5s timeout and preempt the higher-level tool timeout.
                 http_client = await stack.enter_async_context(

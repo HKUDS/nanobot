@@ -1,4 +1,14 @@
-"""Local keyword-based event retrieval (fallback when mem0 is unavailable)."""
+"""Local keyword-based event retrieval (fallback when mem0 is unavailable).
+
+This module provides a lightweight retrieval path that does not require
+any external vector store.  It tokenizes queries and stored events into
+lowercase alphanumeric tokens and scores candidates via token overlap,
+recency decay, and salience weighting.
+
+Used by ``MemoryStore`` as the fallback retrieval strategy when mem0 is
+not configured or unhealthy, and also as the candidate generator before
+optional cross-encoder re-ranking.
+"""
 
 from __future__ import annotations
 
@@ -59,7 +69,7 @@ def _local_retrieve(
                 ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
                 days_old = max((now - ts).total_seconds() / 86400, 0)
                 decay = math.exp(-0.693 * days_old / recency_half_life_days)
-                score *= (0.5 + 0.5 * decay)
+                score *= 0.5 + 0.5 * decay
             except (ValueError, TypeError):
                 pass
 

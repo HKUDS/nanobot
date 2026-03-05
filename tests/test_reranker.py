@@ -2,29 +2,28 @@
 
 from __future__ import annotations
 
-import copy
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from nanobot.agent.memory.reranker import CrossEncoderReranker
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_items(n: int = 5) -> list[dict[str, Any]]:
     """Build *n* dummy memory items with decreasing heuristic scores."""
     items = []
     for i in range(n):
-        items.append({
-            "id": f"item_{i}",
-            "summary": f"Summary about topic {i}",
-            "score": round(1.0 - i * 0.15, 2),
-            "retrieval_reason": {"semantic": 0.8, "recency": 0.1},
-        })
+        items.append(
+            {
+                "id": f"item_{i}",
+                "summary": f"Summary about topic {i}",
+                "score": round(1.0 - i * 0.15, 2),
+                "retrieval_reason": {"semantic": 0.8, "recency": 0.1},
+            }
+        )
     return items
 
 
@@ -160,6 +159,7 @@ class TestRerankerRolloutGating:
 
     def _make_store(self, tmp_path, reranker_mode: str = "disabled"):
         from nanobot.agent.memory.store import MemoryStore
+
         store = MemoryStore(
             tmp_path,
             rollout_overrides={
@@ -188,18 +188,21 @@ class TestRerankerRolloutGating:
     def test_env_override_reranker_mode(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setenv("NANOBOT_RERANKER_MODE", "shadow")
         from nanobot.agent.memory.store import MemoryStore
+
         store = MemoryStore(tmp_path)
         assert store.rollout["reranker_mode"] == "shadow"
 
     def test_env_override_reranker_alpha(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setenv("NANOBOT_RERANKER_ALPHA", "0.8")
         from nanobot.agent.memory.store import MemoryStore
+
         store = MemoryStore(tmp_path)
         assert store.rollout["reranker_alpha"] == 0.8
 
     def test_env_override_reranker_model(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setenv("NANOBOT_RERANKER_MODEL", "custom/model")
         from nanobot.agent.memory.store import MemoryStore
+
         store = MemoryStore(tmp_path)
         assert store.rollout["reranker_model"] == "custom/model"
 
@@ -211,10 +214,13 @@ class TestRerankerRolloutGating:
 
 class TestAvailableProperty:
     def test_available_false_without_package(self) -> None:
-        with patch("nanobot.agent.memory.reranker._import_attempted", False), \
-             patch("nanobot.agent.memory.reranker._cross_encoder_cls", None):
+        with (
+            patch("nanobot.agent.memory.reranker._import_attempted", False),
+            patch("nanobot.agent.memory.reranker._cross_encoder_cls", None),
+        ):
             # Force re-import attempt that fails
             import nanobot.agent.memory.reranker as mod
+
             old_attempted = mod._import_attempted
             old_cls = mod._cross_encoder_cls
             mod._import_attempted = False

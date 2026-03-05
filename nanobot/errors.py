@@ -20,6 +20,7 @@ class NanobotError(Exception):
 # Tool errors
 # ---------------------------------------------------------------------------
 
+
 class ToolExecutionError(NanobotError):
     """A tool failed during execution."""
 
@@ -75,6 +76,7 @@ class ToolPermissionError(ToolExecutionError):
 # Provider / LLM errors
 # ---------------------------------------------------------------------------
 
+
 class ProviderError(NanobotError):
     """An LLM provider call failed."""
 
@@ -119,6 +121,7 @@ class ProviderAuthError(ProviderError):
 # Context errors
 # ---------------------------------------------------------------------------
 
+
 class ContextOverflowError(NanobotError):
     """Messages exceed the context window budget."""
 
@@ -134,6 +137,7 @@ class ContextOverflowError(NanobotError):
 # ---------------------------------------------------------------------------
 # Memory errors
 # ---------------------------------------------------------------------------
+
 
 class MemoryError(NanobotError):  # noqa: A001 — shadows built-in intentionally
     """A memory subsystem operation failed."""

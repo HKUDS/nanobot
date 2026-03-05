@@ -1,4 +1,17 @@
-"""Low-level persistence for memory files and JSON payloads."""
+"""Low-level persistence for memory files and JSON payloads.
+
+``MemoryPersistence`` owns all direct file I/O for the memory subsystem.
+It manages five files under ``<workspace>/memory/``:
+
+- ``events.jsonl`` — append-only structured events (one JSON object per line)
+- ``profile.json`` — current user profile state (facts, preferences)
+- ``MEMORY.md``    — active knowledge snapshot injected into system prompts
+- ``HISTORY.md``   — human-readable event log
+- ``metrics.json`` — memory quality metrics (counters, timestamps)
+
+All reads/writes are synchronous (file sizes are small).  Callers should
+not bypass this class to touch memory files directly.
+"""
 
 from __future__ import annotations
 

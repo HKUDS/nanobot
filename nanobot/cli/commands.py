@@ -1,26 +1,28 @@
 """CLI commands for nanobot."""
 
+from __future__ import annotations
+
 import asyncio
 import os
-import signal
-from pathlib import Path
 import select
+import signal
 import sys
 import threading
+from pathlib import Path
+from typing import Any
 
 import typer
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.patch_stdout import patch_stdout
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.table import Table
 from rich.text import Text
 
-from prompt_toolkit import PromptSession
-from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.history import FileHistory
-from prompt_toolkit.patch_stdout import patch_stdout
-
-from nanobot import __version__, __logo__
-from nanobot.config.schema import Config
+from nanobot import __logo__, __version__
+from nanobot.config.schema import AgentConfig, Config
 
 app = typer.Typer(
     name="nanobot",
@@ -50,6 +52,7 @@ def _flush_pending_tty_input() -> None:
 
     try:
         import termios
+
         termios.tcflush(fd, termios.TCIFLUSH)
         return
     except Exception:
@@ -72,6 +75,7 @@ def _restore_terminal() -> None:
         return
     try:
         import termios
+
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
     except Exception:
         pass
@@ -84,6 +88,7 @@ def _init_prompt_session() -> None:
     # Save terminal state so we can restore it on exit
     try:
         import termios
+
         _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
     except Exception:
         pass
@@ -94,7 +99,7 @@ def _init_prompt_session() -> None:
     _PROMPT_SESSION = PromptSession(
         history=FileHistory(str(history_file)),
         enable_open_in_editor=False,
-        multiline=False,   # Enter submits (single line mode)
+        multiline=False,  # Enter submits (single line mode)
     )
 
 
@@ -116,11 +121,7 @@ def _is_exit_command(command: str) -> bool:
 async def _drain_pending_tasks(timeout: float = 0.25) -> None:
     """Give pending background tasks a brief chance to finish before loop shutdown."""
     current = asyncio.current_task()
-    pending = [
-        task
-        for task in asyncio.all_tasks()
-        if task is not current and not task.done()
-    ]
+    pending = [task for task in asyncio.all_tasks() if task is not current and not task.done()]
     if not pending:
         return
     try:
@@ -141,12 +142,11 @@ async def _read_interactive_input_async() -> str:
         raise RuntimeError("Call _init_prompt_session() first")
     try:
         with patch_stdout():
-            return await _PROMPT_SESSION.prompt_async(
+            return str(await _PROMPT_SESSION.prompt_async(
                 HTML("<b fg='ansiblue'>You:</b> "),
-            )
+            ))
     except EOFError as exc:
         raise KeyboardInterrupt from exc
-
 
 
 def version_callback(value: bool):
@@ -157,9 +157,7 @@ def version_callback(value: bool):
 
 @app.callback()
 def main(
-    version: bool = typer.Option(
-        None, "--version", "-v", callback=version_callback, is_eager=True
-    ),
+    version: bool = typer.Option(None, "--version", "-v", callback=version_callback, is_eager=True),
 ):
     """nanobot - Personal AI Assistant."""
     pass
@@ -176,13 +174,15 @@ def onboard():
     from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
     from nanobot.utils.helpers import get_workspace_path
-    
+
     config_path = get_config_path()
-    
+
     if config_path.exists():
         console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
         console.print("  [bold]y[/bold] = overwrite with defaults (existing values will be lost)")
-        console.print("  [bold]N[/bold] = refresh config, keeping existing values and adding new fields")
+        console.print(
+            "  [bold]N[/bold] = refresh config, keeping existing values and adding new fields"
+        )
         if typer.confirm("Overwrite?"):
             config = Config()
             save_config(config)
@@ -190,29 +190,31 @@ def onboard():
         else:
             config = load_config()
             save_config(config)
-            console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
+            console.print(
+                f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)"
+            )
     else:
         save_config(Config())
         console.print(f"[green]✓[/green] Created config at {config_path}")
-    
+
     # Create workspace
     workspace = get_workspace_path()
-    
+
     if not workspace.exists():
         workspace.mkdir(parents=True, exist_ok=True)
         console.print(f"[green]✓[/green] Created workspace at {workspace}")
-    
+
     # Create default bootstrap files
     _create_workspace_templates(workspace)
-    
+
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
     console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
     console.print("     Get one at: https://openrouter.ai/keys")
-    console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
-    console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
-
-
+    console.print('  2. Chat: [cyan]nanobot agent -m "Hello!"[/cyan]')
+    console.print(
+        "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]"
+    )
 
 
 def _create_workspace_templates(workspace: Path):
@@ -263,8 +265,8 @@ def _create_workspace_templates(workspace: Path):
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
-    from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.custom_provider import CustomProvider
+    from nanobot.providers.litellm_provider import LiteLLMProvider
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
@@ -273,6 +275,7 @@ def _make_provider(config: Config):
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+
         return OpenAICodexProvider(default_model=model)
 
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
@@ -284,7 +287,8 @@ def _make_provider(config: Config):
         )
 
     from nanobot.providers.registry import find_by_name
-    spec = find_by_name(provider_name)
+
+    spec = find_by_name(provider_name or "")
     if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers section")
@@ -299,9 +303,10 @@ def _make_provider(config: Config):
     )
 
 
-def _make_agent_config(config: Config) -> "AgentConfig":
+def _make_agent_config(config: Config) -> AgentConfig:
     """Build an ``AgentConfig`` from the root ``Config``."""
     from nanobot.config.schema import AgentConfig
+
     return AgentConfig.from_defaults(
         config.agents.defaults,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -319,30 +324,31 @@ def gateway(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the nanobot gateway."""
-    from nanobot.config.loader import load_config, get_data_dir
-    from nanobot.bus.queue import MessageBus
     from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
-    from nanobot.session.manager import SessionManager
+    from nanobot.config.loader import get_data_dir, load_config
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
-    
+    from nanobot.session.manager import SessionManager
+
     if verbose:
         import logging
+
         logging.basicConfig(level=logging.DEBUG)
-    
+
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    
+
     config = load_config()
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
-    
+
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
-    
+
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
@@ -355,7 +361,7 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
     )
-    
+
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
@@ -367,14 +373,18 @@ def gateway(
         )
         if job.payload.deliver and job.payload.to:
             from nanobot.bus.events import OutboundMessage
-            await bus.publish_outbound(OutboundMessage(
-                channel=job.payload.channel or "cli",
-                chat_id=job.payload.to,
-                content=response or ""
-            ))
+
+            await bus.publish_outbound(
+                OutboundMessage(
+                    channel=job.payload.channel or "cli",
+                    chat_id=job.payload.to,
+                    content=response or "",
+                )
+            )
         return response
+
     cron.on_job = on_cron_job
-    
+
     # Create channel manager
     channels = ChannelManager(config, bus)
 
@@ -413,10 +423,13 @@ def gateway(
     async def on_heartbeat_notify(response: str) -> None:
         """Deliver a heartbeat response to the user's channel."""
         from nanobot.bus.events import OutboundMessage
+
         channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
             return  # No external channel available to deliver to
-        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+        await bus.publish_outbound(
+            OutboundMessage(channel=channel, chat_id=chat_id, content=response)
+        )
 
     hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(
@@ -428,18 +441,18 @@ def gateway(
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
     )
-    
+
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
-    
+
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
-    
+
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
-    
+
     async def run():
         try:
             await cron.start()
@@ -456,10 +469,8 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
-    
+
     asyncio.run(run())
-
-
 
 
 # ============================================================================
@@ -471,8 +482,12 @@ def gateway(
 def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
-    markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
-    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    markdown: bool = typer.Option(
+        True, "--markdown/--no-markdown", help="Render assistant output as Markdown"
+    ),
+    logs: bool = typer.Option(
+        False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"
+    ),
     timeout_s: int = typer.Option(
         180,
         "--timeout",
@@ -480,14 +495,15 @@ def agent(
     ),
 ):
     """Interact with the agent directly."""
-    from nanobot.config.loader import load_config, get_data_dir
-    from nanobot.bus.queue import MessageBus
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.cron.service import CronService
     from loguru import logger
-    
+
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.loader import get_data_dir, load_config
+    from nanobot.cron.service import CronService
+
     config = load_config()
-    
+
     bus = MessageBus()
     provider = _make_provider(config)
 
@@ -499,7 +515,7 @@ def agent(
         logger.enable("nanobot")
     else:
         logger.disable("nanobot")
-    
+
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -510,11 +526,12 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
     )
-    
+
     # Show spinner when logs are off (no output to miss); skip when logs are on
     def _thinking_ctx():
         if logs:
             from contextlib import nullcontext
+
             return nullcontext()
         # Animated spinner is safe to use with prompt_toolkit input handling
         return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
@@ -548,7 +565,9 @@ def agent(
                 try:
                     await asyncio.wait_for(agent_loop.close_mcp(), timeout=5.0)
                 except TimeoutError:
-                    console.print("[yellow]Warning:[/yellow] timed out while closing provider/MCP resources.")
+                    console.print(
+                        "[yellow]Warning:[/yellow] timed out while closing provider/MCP resources."
+                    )
                 try:
                     await asyncio.wait_for(_drain_pending_tasks(), timeout=2.0)
                 except TimeoutError:
@@ -556,9 +575,12 @@ def agent(
 
         watchdog: threading.Timer | None = None
         if timeout_s > 0:
+
             def _hard_timeout_kill() -> None:
                 # Last-resort guard for blocking calls that ignore cancellation.
-                os.write(2, f"\nError: agent exceeded hard timeout ({timeout_s}s)\n".encode("utf-8"))
+                os.write(
+                    2, f"\nError: agent exceeded hard timeout ({timeout_s}s)\n".encode("utf-8")
+                )
                 os._exit(124)
 
             watchdog = threading.Timer(float(timeout_s), _hard_timeout_kill)
@@ -573,8 +595,11 @@ def agent(
     else:
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
+
         _init_prompt_session()
-        console.print(f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n")
+        console.print(
+            f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n"
+        )
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)
@@ -638,12 +663,14 @@ def agent(
                         turn_done.clear()
                         turn_response.clear()
 
-                        await bus.publish_inbound(InboundMessage(
-                            channel=cli_channel,
-                            sender_id="user",
-                            chat_id=cli_chat_id,
-                            content=user_input,
-                        ))
+                        await bus.publish_inbound(
+                            InboundMessage(
+                                channel=cli_channel,
+                                sender_id="user",
+                                chat_id=cli_chat_id,
+                                content=user_input,
+                            )
+                        )
 
                         with _thinking_ctx():
                             await turn_done.wait()
@@ -691,81 +718,47 @@ def channels_status():
 
     # WhatsApp
     wa = config.channels.whatsapp
-    table.add_row(
-        "WhatsApp",
-        "✓" if wa.enabled else "✗",
-        wa.bridge_url
-    )
+    table.add_row("WhatsApp", "✓" if wa.enabled else "✗", wa.bridge_url)
 
     dc = config.channels.discord
-    table.add_row(
-        "Discord",
-        "✓" if dc.enabled else "✗",
-        dc.gateway_url
-    )
+    table.add_row("Discord", "✓" if dc.enabled else "✗", dc.gateway_url)
 
     # Feishu
     fs = config.channels.feishu
     fs_config = f"app_id: {fs.app_id[:10]}..." if fs.app_id else "[dim]not configured[/dim]"
-    table.add_row(
-        "Feishu",
-        "✓" if fs.enabled else "✗",
-        fs_config
-    )
+    table.add_row("Feishu", "✓" if fs.enabled else "✗", fs_config)
 
     # Mochat
     mc = config.channels.mochat
     mc_base = mc.base_url or "[dim]not configured[/dim]"
-    table.add_row(
-        "Mochat",
-        "✓" if mc.enabled else "✗",
-        mc_base
-    )
-    
+    table.add_row("Mochat", "✓" if mc.enabled else "✗", mc_base)
+
     # Telegram
     tg = config.channels.telegram
     tg_config = f"token: {tg.token[:10]}..." if tg.token else "[dim]not configured[/dim]"
-    table.add_row(
-        "Telegram",
-        "✓" if tg.enabled else "✗",
-        tg_config
-    )
+    table.add_row("Telegram", "✓" if tg.enabled else "✗", tg_config)
 
     # Slack
     slack = config.channels.slack
     slack_config = "socket" if slack.app_token and slack.bot_token else "[dim]not configured[/dim]"
-    table.add_row(
-        "Slack",
-        "✓" if slack.enabled else "✗",
-        slack_config
-    )
+    table.add_row("Slack", "✓" if slack.enabled else "✗", slack_config)
 
     # DingTalk
     dt = config.channels.dingtalk
-    dt_config = f"client_id: {dt.client_id[:10]}..." if dt.client_id else "[dim]not configured[/dim]"
-    table.add_row(
-        "DingTalk",
-        "✓" if dt.enabled else "✗",
-        dt_config
+    dt_config = (
+        f"client_id: {dt.client_id[:10]}..." if dt.client_id else "[dim]not configured[/dim]"
     )
+    table.add_row("DingTalk", "✓" if dt.enabled else "✗", dt_config)
 
     # QQ
     qq = config.channels.qq
     qq_config = f"app_id: {qq.app_id[:10]}..." if qq.app_id else "[dim]not configured[/dim]"
-    table.add_row(
-        "QQ",
-        "✓" if qq.enabled else "✗",
-        qq_config
-    )
+    table.add_row("QQ", "✓" if qq.enabled else "✗", qq_config)
 
     # Email
     em = config.channels.email
     em_config = em.imap_host if em.imap_host else "[dim]not configured[/dim]"
-    table.add_row(
-        "Email",
-        "✓" if em.enabled else "✗",
-        em_config
-    )
+    table.add_row("Email", "✓" if em.enabled else "✗", em_config)
 
     console.print(table)
 
@@ -774,57 +767,57 @@ def _get_bridge_dir() -> Path:
     """Get the bridge directory, setting it up if needed."""
     import shutil
     import subprocess
-    
+
     # User's bridge location
     user_bridge = Path.home() / ".nanobot" / "bridge"
-    
+
     # Check if already built
     if (user_bridge / "dist" / "index.js").exists():
         return user_bridge
-    
+
     # Check for npm
     if not shutil.which("npm"):
         console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
         raise typer.Exit(1)
-    
+
     # Find source bridge: first check package data, then source dir
     pkg_bridge = Path(__file__).parent.parent / "bridge"  # nanobot/bridge (installed)
     src_bridge = Path(__file__).parent.parent.parent / "bridge"  # repo root/bridge (dev)
-    
+
     source = None
     if (pkg_bridge / "package.json").exists():
         source = pkg_bridge
     elif (src_bridge / "package.json").exists():
         source = src_bridge
-    
+
     if not source:
         console.print("[red]Bridge source not found.[/red]")
         console.print("Try reinstalling: pip install --force-reinstall nanobot")
         raise typer.Exit(1)
-    
+
     console.print(f"{__logo__} Setting up bridge...")
-    
+
     # Copy to user directory
     user_bridge.parent.mkdir(parents=True, exist_ok=True)
     if user_bridge.exists():
         shutil.rmtree(user_bridge)
     shutil.copytree(source, user_bridge, ignore=shutil.ignore_patterns("node_modules", "dist"))
-    
+
     # Install and build
     try:
         console.print("  Installing dependencies...")
         subprocess.run(["npm", "install"], cwd=user_bridge, check=True, capture_output=True)
-        
+
         console.print("  Building...")
         subprocess.run(["npm", "run", "build"], cwd=user_bridge, check=True, capture_output=True)
-        
+
         console.print("[green]✓[/green] Bridge ready\n")
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Build failed: {e}[/red]")
         if e.stderr:
             console.print(f"[dim]{e.stderr.decode()[:500]}[/dim]")
         raise typer.Exit(1)
-    
+
     return user_bridge
 
 
@@ -832,18 +825,19 @@ def _get_bridge_dir() -> Path:
 def channels_login():
     """Link device via QR code."""
     import subprocess
+
     from nanobot.config.loader import load_config
-    
+
     config = load_config()
     bridge_dir = _get_bridge_dir()
-    
+
     console.print(f"{__logo__} Starting bridge...")
     console.print("Scan the QR code to connect.\n")
-    
+
     env = {**os.environ}
     if config.channels.whatsapp.bridge_token:
         env["BRIDGE_TOKEN"] = config.channels.whatsapp.bridge_token
-    
+
     try:
         subprocess.run(["npm", "start"], cwd=bridge_dir, check=True, env=env)
     except subprocess.CalledProcessError as e:
@@ -867,35 +861,40 @@ def cron_list(
     """List scheduled jobs."""
     from nanobot.config.loader import get_data_dir
     from nanobot.cron.service import CronService
-    
+
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
-    
+
     jobs = service.list_jobs(include_disabled=all)
-    
+
     if not jobs:
         console.print("No scheduled jobs.")
         return
-    
+
     table = Table(title="Scheduled Jobs")
     table.add_column("ID", style="cyan")
     table.add_column("Name")
     table.add_column("Schedule")
     table.add_column("Status")
     table.add_column("Next Run")
-    
+
     import time
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo
+
     for job in jobs:
         # Format schedule
         if job.schedule.kind == "every":
             sched = f"every {(job.schedule.every_ms or 0) // 1000}s"
         elif job.schedule.kind == "cron":
-            sched = f"{job.schedule.expr or ''} ({job.schedule.tz})" if job.schedule.tz else (job.schedule.expr or "")
+            sched = (
+                f"{job.schedule.expr or ''} ({job.schedule.tz})"
+                if job.schedule.tz
+                else (job.schedule.expr or "")
+            )
         else:
             sched = "one-time"
-        
+
         # Format next run
         next_run = ""
         if job.state.next_run_at_ms:
@@ -905,11 +904,11 @@ def cron_list(
                 next_run = _dt.fromtimestamp(ts, tz).strftime("%Y-%m-%d %H:%M")
             except Exception:
                 next_run = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
-        
+
         status = "[green]enabled[/green]" if job.enabled else "[dim]disabled[/dim]"
-        
+
         table.add_row(job.id, job.name, sched, status, next_run)
-    
+
     console.print(table)
 
 
@@ -919,17 +918,21 @@ def cron_add(
     message: str = typer.Option(..., "--message", "-m", help="Message for agent"),
     every: int = typer.Option(None, "--every", "-e", help="Run every N seconds"),
     cron_expr: str = typer.Option(None, "--cron", "-c", help="Cron expression (e.g. '0 9 * * *')"),
-    tz: str | None = typer.Option(None, "--tz", help="IANA timezone for cron (e.g. 'America/Vancouver')"),
+    tz: str | None = typer.Option(
+        None, "--tz", help="IANA timezone for cron (e.g. 'America/Vancouver')"
+    ),
     at: str = typer.Option(None, "--at", help="Run once at time (ISO format)"),
     deliver: bool = typer.Option(False, "--deliver", "-d", help="Deliver response to channel"),
     to: str = typer.Option(None, "--to", help="Recipient for delivery"),
-    channel: str = typer.Option(None, "--channel", help="Channel for delivery (e.g. 'telegram', 'whatsapp')"),
+    channel: str = typer.Option(
+        None, "--channel", help="Channel for delivery (e.g. 'telegram', 'whatsapp')"
+    ),
 ):
     """Add a scheduled job."""
     from nanobot.config.loader import get_data_dir
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronSchedule
-    
+
     if tz and not cron_expr:
         console.print("[red]Error: --tz can only be used with --cron[/red]")
         raise typer.Exit(1)
@@ -941,15 +944,16 @@ def cron_add(
         schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz)
     elif at:
         import datetime
+
         dt = datetime.datetime.fromisoformat(at)
         schedule = CronSchedule(kind="at", at_ms=int(dt.timestamp() * 1000))
     else:
         console.print("[red]Error: Must specify --every, --cron, or --at[/red]")
         raise typer.Exit(1)
-    
+
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
-    
+
     try:
         job = service.add_job(
             name=name,
@@ -973,10 +977,10 @@ def cron_remove(
     """Remove a scheduled job."""
     from nanobot.config.loader import get_data_dir
     from nanobot.cron.service import CronService
-    
+
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
-    
+
     if service.remove_job(job_id):
         console.print(f"[green]✓[/green] Removed job {job_id}")
     else:
@@ -991,10 +995,10 @@ def cron_enable(
     """Enable or disable a job."""
     from nanobot.config.loader import get_data_dir
     from nanobot.cron.service import CronService
-    
+
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
-    
+
     job = service.enable_job(job_id, enabled=not disable)
     if job:
         status = "disabled" if disable else "enabled"
@@ -1010,11 +1014,13 @@ def cron_run(
 ):
     """Manually run a job."""
     from loguru import logger
-    from nanobot.config.loader import load_config, get_data_dir
+
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.loader import get_data_dir, load_config
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
-    from nanobot.bus.queue import MessageBus
-    from nanobot.agent.loop import AgentLoop
+
     logger.disable("nanobot")
 
     config = load_config()
@@ -1066,6 +1072,7 @@ def cron_run(
 memory_app = typer.Typer(help="Manage memory system")
 app.add_typer(memory_app, name="memory")
 
+
 def _memory_rollout_overrides(config: Config) -> dict[str, object]:
     defaults = config.agents.defaults
     return {
@@ -1095,8 +1102,8 @@ def memory_inspect(
     top_k: int = typer.Option(6, "--top-k", "-k", help="Top-k memories to display"),
 ):
     """Inspect memory profile, metrics, and retrieval results."""
-    from nanobot.config.loader import load_config
     from nanobot.agent.memory import MemoryStore
+    from nanobot.config.loader import load_config
 
     config = load_config()
     store = MemoryStore(
@@ -1152,8 +1159,14 @@ def memory_inspect(
     kpi_table.add_column("KPI", style="cyan")
     kpi_table.add_column("Value", style="green")
     kpi_table.add_row("retrieval_hit_rate", str(kpis.get("retrieval_hit_rate", 0.0)))
-    kpi_table.add_row("contradiction_rate_per_100_messages", str(kpis.get("contradiction_rate_per_100_messages", 0.0)))
-    kpi_table.add_row("user_correction_rate_per_100_user_messages", str(kpis.get("user_correction_rate_per_100_user_messages", 0.0)))
+    kpi_table.add_row(
+        "contradiction_rate_per_100_messages",
+        str(kpis.get("contradiction_rate_per_100_messages", 0.0)),
+    )
+    kpi_table.add_row(
+        "user_correction_rate_per_100_user_messages",
+        str(kpis.get("user_correction_rate_per_100_user_messages", 0.0)),
+    )
     kpi_table.add_row("avg_memory_context_tokens", str(kpis.get("avg_memory_context_tokens", 0.0)))
     kpi_table.add_row("max_memory_context_tokens", str(kpis.get("max_memory_context_tokens", 0)))
     console.print(kpi_table)
@@ -1181,23 +1194,29 @@ def memory_inspect(
         console.print()
         console.print(out)
 
-    pref_count = len(profile.get("preferences", [])) if isinstance(profile.get("preferences"), list) else 0
-    fact_count = len(profile.get("stable_facts", [])) if isinstance(profile.get("stable_facts"), list) else 0
+    pref_count = (
+        len(profile.get("preferences", [])) if isinstance(profile.get("preferences"), list) else 0
+    )
+    fact_count = (
+        len(profile.get("stable_facts", [])) if isinstance(profile.get("stable_facts"), list) else 0
+    )
     console.print(f"\nProfile breakdown: preferences={pref_count}, stable_facts={fact_count}")
 
 
 @memory_app.command("metrics")
 def memory_metrics(
     delta: bool = typer.Option(False, "--delta", help="Show metric deltas vs baseline snapshot"),
-    write_baseline: bool = typer.Option(False, "--write-baseline", help="Write current metrics snapshot as baseline"),
+    write_baseline: bool = typer.Option(
+        False, "--write-baseline", help="Write current metrics snapshot as baseline"
+    ),
     baseline_file: str = typer.Option("", "--baseline-file", help="Optional baseline JSON path"),
 ):
     """Show memory metrics and optional deltas against a saved baseline snapshot."""
     import json
     from datetime import datetime, timezone
 
-    from nanobot.config.loader import load_config
     from nanobot.agent.memory import MemoryStore
+    from nanobot.config.loader import load_config
 
     config = load_config()
     store = MemoryStore(
@@ -1207,7 +1226,11 @@ def memory_metrics(
     observability = store.get_observability_report()
     metrics = observability.get("metrics", {}) if isinstance(observability, dict) else {}
     kpis = observability.get("kpis", {}) if isinstance(observability, dict) else {}
-    baseline_path = Path(baseline_file).expanduser() if baseline_file else (config.workspace_path / "memory" / "reports" / "metrics_baseline.json")
+    baseline_path = (
+        Path(baseline_file).expanduser()
+        if baseline_file
+        else (config.workspace_path / "memory" / "reports" / "metrics_baseline.json")
+    )
 
     if write_baseline:
         baseline_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1216,7 +1239,9 @@ def memory_metrics(
             "metrics": metrics,
             "kpis": kpis,
         }
-        baseline_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        baseline_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         console.print(f"[green]✓[/green] Wrote baseline snapshot: {baseline_path}")
 
     if delta:
@@ -1266,11 +1291,18 @@ def memory_metrics(
         kpi_table.add_column("Baseline", style="yellow")
         kpi_table.add_column("Current", style="green")
         kpi_table.add_column("Delta", style="magenta")
-        for key in ("retrieval_hit_rate", "history_fallback_ratio", "avg_memory_context_tokens", "avg_shadow_overlap"):
-            baseline_value = float(baseline_kpis.get(key, 0.0) or 0.0)
-            current_value = float(kpis.get(key, 0.0) or 0.0)
+        for key in (
+            "retrieval_hit_rate",
+            "history_fallback_ratio",
+            "avg_memory_context_tokens",
+            "avg_shadow_overlap",
+        ):
+            baseline_value = float(baseline_kpis.get(key, 0.0) or 0.0)  # type: ignore[assignment]
+            current_value = float(kpis.get(key, 0.0) or 0.0)  # type: ignore[assignment]
             delta_value = current_value - baseline_value
-            kpi_table.add_row(key, f"{baseline_value:.4f}", f"{current_value:.4f}", f"{delta_value:+.4f}")
+            kpi_table.add_row(
+                key, f"{baseline_value:.4f}", f"{current_value:.4f}", f"{delta_value:+.4f}"
+            )
         console.print(kpi_table)
         console.print(f"[dim]Baseline file: {baseline_path}[/dim]")
         return
@@ -1299,11 +1331,13 @@ def memory_metrics(
 
 @memory_app.command("rebuild")
 def memory_rebuild(
-    max_events: int = typer.Option(30, "--max-events", help="Max recent events for MEMORY.md snapshot"),
+    max_events: int = typer.Option(
+        30, "--max-events", help="Max recent events for MEMORY.md snapshot"
+    ),
 ):
     """Rebuild memory/MEMORY.md from structured memory profile and events."""
-    from nanobot.config.loader import load_config
     from nanobot.agent.memory import MemoryStore
+    from nanobot.config.loader import load_config
 
     config = load_config()
     store = MemoryStore(
@@ -1317,7 +1351,9 @@ def memory_rebuild(
 
 @memory_app.command("reindex")
 def memory_reindex(
-    max_events: int = typer.Option(0, "--max-events", help="Optional max events to include (0 = all)"),
+    max_events: int = typer.Option(
+        0, "--max-events", help="Optional max events to include (0 = all)"
+    ),
     reset: bool = typer.Option(
         True,
         "--reset/--no-reset",
@@ -1325,8 +1361,8 @@ def memory_reindex(
     ),
 ):
     """Reindex mem0 vectors from structured profile/events only."""
-    from nanobot.config.loader import load_config
     from nanobot.agent.memory import MemoryStore
+    from nanobot.config.loader import load_config
 
     config = load_config()
     store = MemoryStore(
@@ -1356,7 +1392,9 @@ def memory_reindex(
 
 @memory_app.command("compact")
 def memory_compact(
-    max_events: int = typer.Option(0, "--max-events", help="Optional max events to include (0 = all)"),
+    max_events: int = typer.Option(
+        0, "--max-events", help="Optional max events to include (0 = all)"
+    ),
     reset: bool = typer.Option(
         True,
         "--reset/--no-reset",
@@ -1364,8 +1402,8 @@ def memory_compact(
     ),
 ):
     """Compact backend memory (dedup/drop superseded) and rebuild mem0 from structured sources."""
-    from nanobot.config.loader import load_config
     from nanobot.agent.memory import MemoryStore
+    from nanobot.config.loader import load_config
 
     config = load_config()
     store = MemoryStore(
@@ -1399,11 +1437,13 @@ def memory_compact(
 
 @memory_app.command("verify")
 def memory_verify(
-    stale_days: int = typer.Option(90, "--stale-days", help="Age threshold for stale events without TTL"),
+    stale_days: int = typer.Option(
+        90, "--stale-days", help="Age threshold for stale events without TTL"
+    ),
 ):
     """Verify memory consistency and freshness."""
-    from nanobot.config.loader import load_config
     from nanobot.agent.memory import MemoryStore
+    from nanobot.config.loader import load_config
 
     config = load_config()
     store = MemoryStore(
@@ -1431,18 +1471,30 @@ def memory_verify(
 @memory_app.command("eval")
 def memory_eval(
     cases_file: str = typer.Option("", "--cases-file", help="Path to JSON benchmark cases file"),
-    top_k: int = typer.Option(6, "--top-k", "-k", help="Default top-k when case does not specify it"),
-    seeded_profile: str = typer.Option("", "--seeded-profile", help="Optional seeded profile JSON path"),
-    seeded_events: str = typer.Option("", "--seeded-events", help="Optional seeded events JSONL path"),
-    seed_only: bool = typer.Option(False, "--seed-only", help="Seed + reindex only, do not run evaluation"),
-    export: bool = typer.Option(False, "--export", help="Save evaluation report JSON under memory/reports/"),
-    output_file: str = typer.Option("", "--output-file", help="Optional JSON output path (implies --export)"),
+    top_k: int = typer.Option(
+        6, "--top-k", "-k", help="Default top-k when case does not specify it"
+    ),
+    seeded_profile: str = typer.Option(
+        "", "--seeded-profile", help="Optional seeded profile JSON path"
+    ),
+    seeded_events: str = typer.Option(
+        "", "--seeded-events", help="Optional seeded events JSONL path"
+    ),
+    seed_only: bool = typer.Option(
+        False, "--seed-only", help="Seed + reindex only, do not run evaluation"
+    ),
+    export: bool = typer.Option(
+        False, "--export", help="Save evaluation report JSON under memory/reports/"
+    ),
+    output_file: str = typer.Option(
+        "", "--output-file", help="Optional JSON output path (implies --export)"
+    ),
 ):
     """Evaluate memory retrieval quality (Recall@k, Precision@k) plus runtime KPIs."""
     import json
 
-    from nanobot.config.loader import load_config
     from nanobot.agent.memory import MemoryStore
+    from nanobot.config.loader import load_config
 
     config = load_config()
     store = MemoryStore(
@@ -1452,7 +1504,9 @@ def memory_eval(
 
     if seeded_profile or seeded_events:
         if not seeded_profile or not seeded_events:
-            console.print("[red]Both --seeded-profile and --seeded-events are required together.[/red]")
+            console.print(
+                "[red]Both --seeded-profile and --seeded-events are required together.[/red]"
+            )
             raise typer.Exit(1)
         seed_result = store.seed_structured_corpus(
             profile_path=Path(seeded_profile).expanduser(),
@@ -1465,10 +1519,14 @@ def memory_eval(
         seed_table.add_row("reason", str(seed_result.get("reason", "")))
         seed_table.add_row("seeded_profile_items", str(seed_result.get("seeded_profile_items", 0)))
         seed_table.add_row("seeded_events", str(seed_result.get("seeded_events", 0)))
-        reindex_payload = seed_result.get("reindex", {}) if isinstance(seed_result.get("reindex"), dict) else {}
+        reindex_payload = (
+            seed_result.get("reindex", {}) if isinstance(seed_result.get("reindex"), dict) else {}
+        )
         seed_table.add_row("reindex_written", str(reindex_payload.get("written", 0)))
         seed_table.add_row("reindex_failed", str(reindex_payload.get("failed", 0)))
-        seed_table.add_row("vector_points_after", str(reindex_payload.get("vector_points_after", 0)))
+        seed_table.add_row(
+            "vector_points_after", str(reindex_payload.get("vector_points_after", 0))
+        )
         console.print(seed_table)
         if not bool(seed_result.get("ok")):
             raise typer.Exit(2)
@@ -1476,7 +1534,9 @@ def memory_eval(
             console.print("[green]✓[/green] Seed-only completed.")
             return
 
-    path = Path(cases_file) if cases_file else (config.workspace_path / "memory" / "eval_cases.json")
+    path = (
+        Path(cases_file) if cases_file else (config.workspace_path / "memory" / "eval_cases.json")
+    )
     if not path.exists():
         template = {
             "cases": [
@@ -1520,8 +1580,14 @@ def memory_eval(
     table.add_row("recall_at_k", str(eval_summary.get("recall_at_k", 0.0)))
     table.add_row("precision_at_k", str(eval_summary.get("precision_at_k", 0.0)))
     table.add_row("retrieval_hit_rate", str(kpis.get("retrieval_hit_rate", 0.0)))
-    table.add_row("contradiction_rate_per_100_messages", str(kpis.get("contradiction_rate_per_100_messages", 0.0)))
-    table.add_row("user_correction_rate_per_100_user_messages", str(kpis.get("user_correction_rate_per_100_user_messages", 0.0)))
+    table.add_row(
+        "contradiction_rate_per_100_messages",
+        str(kpis.get("contradiction_rate_per_100_messages", 0.0)),
+    )
+    table.add_row(
+        "user_correction_rate_per_100_user_messages",
+        str(kpis.get("user_correction_rate_per_100_user_messages", 0.0)),
+    )
     table.add_row("avg_memory_context_tokens", str(kpis.get("avg_memory_context_tokens", 0.0)))
     table.add_row("avg_shadow_overlap", str(kpis.get("avg_shadow_overlap", 0.0)))
     table.add_row("rollout_gate_passed", str(rollout_gate.get("passed", False)))
@@ -1584,8 +1650,8 @@ def memory_conflicts(
     all: bool = typer.Option(False, "--all", help="Include resolved conflicts"),
 ):
     """List memory conflicts for manual review."""
-    from nanobot.config.loader import load_config
     from nanobot.agent.memory import MemoryStore
+    from nanobot.config.loader import load_config
 
     config = load_config()
     store = MemoryStore(
@@ -1620,12 +1686,14 @@ def memory_conflicts(
 
 @memory_app.command("resolve")
 def memory_resolve(
-    index: int = typer.Option(..., "--index", help="Conflict index from `nanobot memory conflicts`"),
+    index: int = typer.Option(
+        ..., "--index", help="Conflict index from `nanobot memory conflicts`"
+    ),
     action: str = typer.Option(..., "--action", help="Resolution: keep_old | keep_new | dismiss"),
 ):
     """Resolve a single memory conflict."""
-    from nanobot.config.loader import load_config
     from nanobot.agent.memory import MemoryStore
+    from nanobot.config.loader import load_config
 
     config = load_config()
     store = MemoryStore(
@@ -1652,12 +1720,16 @@ def memory_resolve(
 
 @memory_app.command("pin")
 def memory_pin(
-    field: str = typer.Option(..., "--field", help="Profile field (preferences|stable_facts|active_projects|relationships|constraints)"),
+    field: str = typer.Option(
+        ...,
+        "--field",
+        help="Profile field (preferences|stable_facts|active_projects|relationships|constraints)",
+    ),
     text: str = typer.Option(..., "--text", help="Memory text to pin"),
 ):
     """Pin a memory item so it is prioritized in snapshots and context."""
-    from nanobot.config.loader import load_config
     from nanobot.agent.memory import MemoryStore
+    from nanobot.config.loader import load_config
 
     config = load_config()
     store = MemoryStore(
@@ -1680,8 +1752,8 @@ def memory_unpin(
     text: str = typer.Option(..., "--text", help="Memory text to unpin"),
 ):
     """Unpin a memory item."""
-    from nanobot.config.loader import load_config
     from nanobot.agent.memory import MemoryStore
+    from nanobot.config.loader import load_config
 
     config = load_config()
     store = MemoryStore(
@@ -1704,8 +1776,8 @@ def memory_outdated(
     text: str = typer.Option(..., "--text", help="Memory text to mark outdated"),
 ):
     """Mark a memory item as outdated (stale)."""
-    from nanobot.config.loader import load_config
     from nanobot.agent.memory import MemoryStore
+    from nanobot.config.loader import load_config
 
     config = load_config()
     store = MemoryStore(
@@ -1725,7 +1797,9 @@ def memory_outdated(
 
 @app.command("replay-deadletters")
 def replay_deadletters(
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview what would be replayed without sending."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview what would be replayed without sending."
+    ),
 ):
     """Replay undelivered outbound messages from the dead-letter file."""
     from nanobot.config.loader import load_config
@@ -1739,7 +1813,12 @@ def replay_deadletters(
         raise typer.Exit(0)
 
     import json
-    lines = [l.strip() for l in dead_letter_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+    lines = [
+        line.strip()
+        for line in dead_letter_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     if not lines:
         console.print("[dim]Dead-letter file is empty — nothing to replay.[/dim]")
         raise typer.Exit(0)
@@ -1759,7 +1838,7 @@ def replay_deadletters(
                     console.print(f"     [dim]error: {error}[/dim]")
             except json.JSONDecodeError:
                 console.print(f"  {i}. [red]invalid JSON line[/red]")
-        console.print(f"\n[dim]Dry run — no messages sent. Use without --dry-run to replay.[/dim]")
+        console.print("\n[dim]Dry run — no messages sent. Use without --dry-run to replay.[/dim]")
         raise typer.Exit(0)
 
     # Real replay requires starting channels
@@ -1779,7 +1858,9 @@ def replay_deadletters(
         return await manager.replay_dead_letters(dry_run=False)
 
     total, ok, fail = asyncio.run(_run())
-    console.print(f"\nReplay complete: [green]{ok} sent[/green], [red]{fail} failed[/red] (of {total})")
+    console.print(
+        f"\nReplay complete: [green]{ok} sent[/green], [red]{fail} failed[/red] (of {total})"
+    )
     if fail:
         console.print(f"[dim]Failed messages remain in {dead_letter_path}[/dim]")
 
@@ -1787,7 +1868,7 @@ def replay_deadletters(
 @app.command()
 def status():
     """Show nanobot status."""
-    from nanobot.config.loader import load_config, get_config_path
+    from nanobot.config.loader import get_config_path, load_config
 
     config_path = get_config_path()
     config = load_config()
@@ -1795,14 +1876,18 @@ def status():
 
     console.print(f"{__logo__} nanobot Status\n")
 
-    console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
-    console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
+    console.print(
+        f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}"
+    )
+    console.print(
+        f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}"
+    )
 
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS
 
         console.print(f"Model: {config.agents.defaults.model}")
-        
+
         # Check API keys from registry
         for spec in PROVIDERS:
             p = getattr(config.providers, spec.name, None)
@@ -1818,7 +1903,9 @@ def status():
                     console.print(f"{spec.label}: [dim]not set[/dim]")
             else:
                 has_key = bool(p.api_key)
-                console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+                console.print(
+                    f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}"
+                )
 
 
 # ============================================================================
@@ -1829,19 +1916,22 @@ provider_app = typer.Typer(help="Manage providers")
 app.add_typer(provider_app, name="provider")
 
 
-_LOGIN_HANDLERS: dict[str, callable] = {}
+_LOGIN_HANDLERS: dict[str, Any] = {}
 
 
 def _register_login(name: str):
     def decorator(fn):
         _LOGIN_HANDLERS[name] = fn
         return fn
+
     return decorator
 
 
 @provider_app.command("login")
 def provider_login(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    provider: str = typer.Argument(
+        ..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"
+    ),
 ):
     """Authenticate with an OAuth provider."""
     from nanobot.providers.registry import PROVIDERS
@@ -1866,6 +1956,7 @@ def provider_login(
 def _login_openai_codex() -> None:
     try:
         from oauth_cli_kit import get_token, login_oauth_interactive
+
         token = None
         try:
             token = get_token()
@@ -1880,7 +1971,9 @@ def _login_openai_codex() -> None:
         if not (token and token.access):
             console.print("[red]✗ Authentication failed[/red]")
             raise typer.Exit(1)
-        console.print(f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]")
+        console.print(
+            f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]"
+        )
     except ImportError:
         console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
         raise typer.Exit(1)
@@ -1894,7 +1987,12 @@ def _login_github_copilot() -> None:
 
     async def _trigger():
         from litellm import acompletion
-        await acompletion(model="github_copilot/gpt-4o", messages=[{"role": "user", "content": "hi"}], max_tokens=1)
+
+        await acompletion(
+            model="github_copilot/gpt-4o",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=1,
+        )
 
     try:
         asyncio.run(_trigger())

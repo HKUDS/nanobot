@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import re
 import sqlite3
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -66,7 +64,8 @@ class _Mem0Adapter:
                 provider = str(item.get("provider", "")).strip().lower()
                 if not provider:
                     continue
-                config = item.get("config") if isinstance(item.get("config"), dict) else {}
+                _raw_config = item.get("config")
+                config: dict[str, Any] = _raw_config if isinstance(_raw_config, dict) else {}
                 dims_raw = item.get("embedding_model_dims", 384)
                 try:
                     dims = int(dims_raw)
@@ -87,7 +86,9 @@ class _Mem0Adapter:
         if not key or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
             return None
         value = value.strip()
-        if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        if (value.startswith('"') and value.endswith('"')) or (
+            value.startswith("'") and value.endswith("'")
+        ):
             value = value[1:-1]
         return key, value
 
@@ -243,7 +244,9 @@ class _Mem0Adapter:
                 self.enabled = True
                 self.mode = f"oss-local-fallback-{provider}"
                 self.error = None
-                logger.warning("mem0 switched to local fallback embedder ({}): {}", provider, reason)
+                logger.warning(
+                    "mem0 switched to local fallback embedder ({}): {}", provider, reason
+                )
                 return True
             except Exception as exc:
                 self.error = str(exc)
@@ -331,11 +334,14 @@ class _Mem0Adapter:
             return 0.0
         return overlap / max(len(q), 1)
 
-    def _row_to_item(self, item: dict[str, Any], *, fallback_score: float | None = None) -> dict[str, Any] | None:
+    def _row_to_item(
+        self, item: dict[str, Any], *, fallback_score: float | None = None
+    ) -> dict[str, Any] | None:
         summary = str(item.get("memory") or item.get("text") or item.get("summary") or "").strip()
         if not summary:
             return None
-        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        _raw_meta = item.get("metadata")
+        metadata: dict[str, Any] = _raw_meta if isinstance(_raw_meta, dict) else {}
         memory_type = str(metadata.get("memory_type", "episodic")).strip().lower() or "episodic"
         if memory_type not in {"semantic", "episodic", "reflection"}:
             memory_type = "episodic"
@@ -346,7 +352,9 @@ class _Mem0Adapter:
         topic = str(metadata.get("topic", "general")).strip() or "general"
         confidence_raw = metadata.get("confidence")
         try:
-            confidence = min(max(float(confidence_raw if confidence_raw is not None else 0.7), 0.0), 1.0)
+            confidence = min(
+                max(float(confidence_raw if confidence_raw is not None else 0.7), 0.0), 1.0
+            )
         except (TypeError, ValueError):
             confidence = 0.7
         evidence_refs = metadata.get("evidence_refs")
@@ -354,10 +362,7 @@ class _Mem0Adapter:
             evidence_refs = []
         evidence_refs = [str(x).strip() for x in evidence_refs if str(x).strip()]
         timestamp = (
-            item.get("updated_at")
-            or item.get("created_at")
-            or metadata.get("timestamp")
-            or ""
+            item.get("updated_at") or item.get("created_at") or metadata.get("timestamp") or ""
         )
         event_type = str(metadata.get("event_type", "fact"))
         raw_score = item.get("score", 0.0)
@@ -428,14 +433,21 @@ class _Mem0Adapter:
         rejected_blob_like = 0
         seen_norm: set[str] = set()
         for item in self._rows(raw):
-            summary = str(item.get("memory") or item.get("text") or item.get("summary") or "").strip()
+            summary = str(
+                item.get("memory") or item.get("text") or item.get("summary") or ""
+            ).strip()
             if not summary:
                 continue
             if len(summary) > max_summary_chars:
                 continue
-            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            _raw_meta = item.get("metadata")
+            metadata: dict[str, Any] = _raw_meta if isinstance(_raw_meta, dict) else {}
             source = str(metadata.get("source", "mem0_get_all")).strip().lower() or "mem0_get_all"
-            if isinstance(allowed_sources, set) and allowed_sources and source not in allowed_sources:
+            if (
+                isinstance(allowed_sources, set)
+                and allowed_sources
+                and source not in allowed_sources
+            ):
                 continue
             if reject_blob_like and self._looks_blob_like_summary(summary):
                 rejected_blob_like += 1
@@ -461,9 +473,23 @@ class _Mem0Adapter:
     @staticmethod
     def _history_memory_type(summary: str) -> str:
         text = summary.lower()
-        if any(token in text for token in ("failed", "error", "incident", "tried", "attempt", "resolved", "yesterday")):
+        if any(
+            token in text
+            for token in (
+                "failed",
+                "error",
+                "incident",
+                "tried",
+                "attempt",
+                "resolved",
+                "yesterday",
+            )
+        ):
             return "episodic"
-        if any(token in text for token in ("prefer", "always", "never", "must", "cannot", "user", "setup", "uses")):
+        if any(
+            token in text
+            for token in ("prefer", "always", "never", "must", "cannot", "user", "setup", "uses")
+        ):
             return "semantic"
         return "semantic"
 
@@ -555,9 +581,24 @@ class _Mem0Adapter:
         kwargs: dict[str, Any] = {"user_id": self.user_id}
         if metadata:
             kwargs["metadata"] = metadata
-        add_debug = str(os.getenv("NANOBOT_MEM0_ADD_DEBUG", "")).strip().lower() in {"1", "true", "yes", "on"}
-        verify_write = str(os.getenv("NANOBOT_MEM0_VERIFY_WRITE", "true")).strip().lower() not in {"0", "false", "no", "off"}
-        force_infer_true = str(os.getenv("NANOBOT_MEM0_FORCE_INFER_TRUE", "")).strip().lower() in {"1", "true", "yes", "on"}
+        add_debug = str(os.getenv("NANOBOT_MEM0_ADD_DEBUG", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        verify_write = str(os.getenv("NANOBOT_MEM0_VERIFY_WRITE", "true")).strip().lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
+        force_infer_true = str(os.getenv("NANOBOT_MEM0_FORCE_INFER_TRUE", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         before_count = self.get_all_count(limit=200) if verify_write or add_debug else -1
 
         def _is_infer_true_disabled_error(exc: Exception) -> bool:
@@ -582,17 +623,24 @@ class _Mem0Adapter:
                     self._infer_true_disabled = True
                     self._infer_true_disable_reason = str(exc)
                     if add_debug:
-                        logger.debug("mem0 infer_true disabled due to compatibility error: {}", self._infer_true_disable_reason)
+                        logger.debug(
+                            "mem0 infer_true disabled due to compatibility error: {}",
+                            self._infer_true_disable_reason,
+                        )
                 return False
             self.last_add_mode = mode
             after_count = self.get_all_count(limit=200) if verify_write or add_debug else -1
             if add_debug:
-                logger.debug("mem0 add_text mode={} before={} after={}", mode, before_count, after_count)
+                logger.debug(
+                    "mem0 add_text mode={} before={} after={}", mode, before_count, after_count
+                )
             if verify_write and after_count <= before_count:
                 return False
             return True
 
-        infer_true_allowed = force_infer_true or (self.mode == "hosted" and not self._infer_true_disabled)
+        infer_true_allowed = force_infer_true or (
+            self.mode == "hosted" and not self._infer_true_disabled
+        )
         if infer_true_allowed:
             # Hosted mem0 can usually use infer=True end to end.
             if _attempt("infer_true", lambda: self.client.add(messages, infer=True, **kwargs)):
@@ -600,23 +648,39 @@ class _Mem0Adapter:
             # Fallback for older hosted client signatures.
             if _attempt("default_signature", lambda: self.client.add(messages, **kwargs)):
                 return True
-            if _attempt("infer_false_fallback", lambda: self.client.add(messages, infer=False, **kwargs)):
+            if _attempt(
+                "infer_false_fallback", lambda: self.client.add(messages, infer=False, **kwargs)
+            ):
                 return True
         else:
             # OSS/local mem0 path: prefer infer=False to avoid LLM quota/auth coupling.
-            if _attempt("infer_false_primary", lambda: self.client.add(messages, infer=False, **kwargs)):
+            if _attempt(
+                "infer_false_primary", lambda: self.client.add(messages, infer=False, **kwargs)
+            ):
                 return True
-            if force_infer_true and _attempt("infer_true_forced", lambda: self.client.add(messages, infer=True, **kwargs)):
+            if force_infer_true and _attempt(
+                "infer_true_forced", lambda: self.client.add(messages, infer=True, **kwargs)
+            ):
                 return True
             if _attempt("default_signature_fallback", lambda: self.client.add(messages, **kwargs)):
                 return True
 
-        if self._activate_local_fallback(reason="add_text write verification failed") and self.client:
-            if _attempt("infer_false_local_fallback", lambda: self.client.add(messages, infer=False, **kwargs)):
+        if (
+            self._activate_local_fallback(reason="add_text write verification failed")
+            and self.client
+        ):
+            if _attempt(
+                "infer_false_local_fallback",
+                lambda: self.client.add(messages, infer=False, **kwargs),
+            ):
                 return True
-            if force_infer_true and _attempt("infer_true_local_forced", lambda: self.client.add(messages, infer=True, **kwargs)):
+            if force_infer_true and _attempt(
+                "infer_true_local_forced", lambda: self.client.add(messages, infer=True, **kwargs)
+            ):
                 return True
-            if _attempt("default_signature_local_fallback", lambda: self.client.add(messages, **kwargs)):
+            if _attempt(
+                "default_signature_local_fallback", lambda: self.client.add(messages, **kwargs)
+            ):
                 return True
         return False
 

@@ -1,4 +1,17 @@
-"""LLM + heuristic extraction of structured memory events."""
+"""LLM + heuristic extraction of structured memory events.
+
+``MemoryExtractor`` converts raw conversation messages into structured
+memory event dicts suitable for storage in ``events.jsonl``.  The pipeline:
+
+1. **Heuristic pre-filter** — skip short/trivial messages to avoid LLM calls.
+2. **LLM extraction** — ask the provider to identify entities, facts, and
+   events from conversation context; output structured JSON via tool-call.
+3. **Coercion + validation** — normalize extracted events (timestamps,
+   entity lists, salience scores, TTL) into the canonical event schema.
+
+Extracted events are consumed by ``MemoryStore.consolidate()`` which
+persists them and updates the active knowledge snapshot.
+"""
 
 from __future__ import annotations
 
@@ -134,7 +147,11 @@ class MemoryExtractor:
         for pattern in patterns:
             for match in re.finditer(pattern, text, flags=re.IGNORECASE):
                 subject = self._clean_phrase(match.group(1))
-                if "prefer" in subject.lower() or "want" in subject.lower() or "use" in subject.lower():
+                if (
+                    "prefer" in subject.lower()
+                    or "want" in subject.lower()
+                    or "use" in subject.lower()
+                ):
                     continue
 
                 if "is not" in pattern:
@@ -257,8 +274,14 @@ class MemoryExtractor:
             if response.has_tool_calls:
                 args = self.parse_tool_args(response.tool_calls[0].arguments)
                 if args:
-                    raw_events = args.get("events") if isinstance(args.get("events"), list) else []
-                    raw_updates = args.get("profile_updates") if isinstance(args.get("profile_updates"), dict) else {}
+                    _raw_events = args.get("events")
+                    raw_events: list[Any] = (
+                        _raw_events if isinstance(_raw_events, list) else []
+                    )
+                    _raw_updates = args.get("profile_updates")
+                    raw_updates: dict[str, Any] = (
+                        _raw_updates if isinstance(_raw_updates, dict) else {}
+                    )
                     updates = self.default_profile_updates()
                     for key in updates:
                         updates[key] = self.to_str_list(raw_updates.get(key))
@@ -273,7 +296,10 @@ class MemoryExtractor:
                             or len(source_span) != 2
                             or not all(isinstance(x, int) for x in source_span)
                         ):
-                            source_span = [source_start, source_start + max(len(old_messages) - 1, 0)]
+                            source_span = [
+                                source_start,
+                                source_start + max(len(old_messages) - 1, 0),
+                            ]
                         event = self.coerce_event(item, source_span=source_span)
                         if event:
                             events.append(event)
@@ -281,6 +307,8 @@ class MemoryExtractor:
                             break
                     return events, updates
         except Exception:
-            logger.exception("Structured event extraction failed, falling back to heuristic extraction")
+            logger.exception(
+                "Structured event extraction failed, falling back to heuristic extraction"
+            )
 
         return self.heuristic_extract_events(old_messages, source_start=source_start)

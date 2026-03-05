@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from nanobot.agent.skills import SkillsLoader
-from nanobot.agent.tools.base import Tool, ToolResult
-
+from nanobot.agent.tools.base import ToolResult
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_skill(
     skill_dir: Path,
@@ -106,7 +105,9 @@ class TestDiscoverTools:
         _make_skill(workspace / "skills", "plain-skill")
         assert loader.discover_tools() == []
 
-    def test_discovers_tools_from_workspace_skill(self, workspace: Path, loader: SkillsLoader) -> None:
+    def test_discovers_tools_from_workspace_skill(
+        self, workspace: Path, loader: SkillsLoader
+    ) -> None:
         _make_skill(workspace / "skills", "demo", tools_py=SIMPLE_TOOLS_PY)
         tools = loader.discover_tools()
         names = {t.name for t in tools}
@@ -125,7 +126,10 @@ class TestDiscoverTools:
         """If both workspace and builtin have the same skill, workspace wins."""
         builtin_dir = workspace / "_builtin"
         # Builtin with one tool
-        _make_skill(builtin_dir, "demo", tools_py='''\
+        _make_skill(
+            builtin_dir,
+            "demo",
+            tools_py="""\
 from nanobot.agent.tools.base import Tool, ToolResult
 from typing import Any
 
@@ -137,7 +141,8 @@ class BuiltinOnly(Tool):
     @property
     def parameters(self): return {"type": "object", "properties": {}}
     async def execute(self, **kw): return ToolResult.ok("builtin")
-''')
+""",
+        )
         # Workspace overrides with a different tool
         _make_skill(workspace / "skills", "demo", tools_py=SIMPLE_TOOLS_PY)
         loader = SkillsLoader(workspace, builtin_skills_dir=builtin_dir)
@@ -157,7 +162,10 @@ class BuiltinOnly(Tool):
 
     def test_abstract_classes_not_instantiated(self, workspace: Path, loader: SkillsLoader) -> None:
         """Abstract Tool subclasses (missing implementations) are skipped."""
-        _make_skill(workspace / "skills", "abstract-skill", tools_py='''\
+        _make_skill(
+            workspace / "skills",
+            "abstract-skill",
+            tools_py='''\
 from nanobot.agent.tools.base import Tool
 from typing import Any
 
@@ -166,12 +174,16 @@ class IncompleteTool(Tool):
     @property
     def name(self): return "incomplete"
     # Missing description, parameters, execute
-''')
+''',
+        )
         tools = loader.discover_tools(["abstract-skill"])
         assert len(tools) == 0
 
     def test_private_classes_ignored(self, workspace: Path, loader: SkillsLoader) -> None:
-        _make_skill(workspace / "skills", "private-skill", tools_py='''\
+        _make_skill(
+            workspace / "skills",
+            "private-skill",
+            tools_py="""\
 from nanobot.agent.tools.base import Tool, ToolResult
 from typing import Any
 
@@ -183,7 +195,8 @@ class _HelperTool(Tool):
     @property
     def parameters(self): return {"type": "object", "properties": {}}
     async def execute(self, **kw): return ToolResult.ok("hidden")
-''')
+""",
+        )
         tools = loader.discover_tools(["private-skill"])
         assert len(tools) == 0
 
@@ -203,9 +216,14 @@ class _HelperTool(Tool):
         tools = loader.discover_tools(["broken"])
         assert tools == []
 
-    def test_tool_requiring_constructor_args_skipped(self, workspace: Path, loader: SkillsLoader) -> None:
+    def test_tool_requiring_constructor_args_skipped(
+        self, workspace: Path, loader: SkillsLoader
+    ) -> None:
         """Tools that require constructor args can't be auto-instantiated."""
-        _make_skill(workspace / "skills", "needs-args", tools_py='''\
+        _make_skill(
+            workspace / "skills",
+            "needs-args",
+            tools_py="""\
 from nanobot.agent.tools.base import Tool, ToolResult
 from typing import Any
 
@@ -219,7 +237,8 @@ class NeedsArgsTool(Tool):
     @property
     def parameters(self): return {"type": "object", "properties": {}}
     async def execute(self, **kw): return ToolResult.ok(self.api_key)
-''')
+""",
+        )
         tools = loader.discover_tools(["needs-args"])
         assert len(tools) == 0
 
