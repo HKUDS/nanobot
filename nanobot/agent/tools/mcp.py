@@ -58,7 +58,9 @@ async def connect_mcp_servers(
 ) -> None:
     """Connect to configured MCP servers and register their tools."""
     from mcp import ClientSession, StdioServerParameters
+    from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
+    from mcp.client.streamable_http import streamable_http_client
 
     for name, cfg in mcp_servers.items():
         try:
@@ -67,6 +69,7 @@ async def connect_mcp_servers(
                 if cfg.command:
                     transport_type = "stdio"
                 elif cfg.url:
+                    # Convention: URLs ending with /sse use SSE transport; others use streamableHttp
                     transport_type = (
                         "sse" if cfg.url.rstrip("/").endswith("/sse") else "streamableHttp"
                     )
@@ -80,8 +83,6 @@ async def connect_mcp_servers(
                 )
                 read, write = await stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
-                from mcp.client.sse import sse_client
-
                 def httpx_client_factory(
                     headers: dict[str, str] | None = None,
                     timeout: httpx.Timeout | None = None,
@@ -99,7 +100,6 @@ async def connect_mcp_servers(
                     sse_client(cfg.url, httpx_client_factory=httpx_client_factory)
                 )
             elif transport_type == "streamableHttp":
-                from mcp.client.streamable_http import streamable_http_client
                 # Always provide an explicit httpx client so MCP HTTP transport does not
                 # inherit httpx's default 5s timeout and preempt the higher-level tool timeout.
                 http_client = await stack.enter_async_context(
