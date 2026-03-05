@@ -45,8 +45,6 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 500
-    _CHAT_RETRY_MAX = 2
-    _CHAT_RETRY_BASE_DELAY_SECONDS = 0.8
 
     def __init__(
         self,
@@ -179,71 +177,6 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
-    @staticmethod
-    def _is_retryable_error(text: str | None) -> bool:
-        """Return True for transient provider errors that should be retried."""
-        t = (text or "").lower()
-        markers = (
-            "apiconnectionerror",
-            "server disconnected",
-            "timeout",
-            "temporarily unavailable",
-            "rate limit",
-            "429",
-            "connection reset",
-            "network",
-            "econnreset",
-        )
-        return any(marker in t for marker in markers)
-
-    @staticmethod
-    def _friendly_error_message(text: str | None) -> str:
-        """Map low-level provider errors into user-facing messages."""
-        t = (text or "").lower()
-        if any(marker in t for marker in ("401", "unauthorized", "invalid api key")):
-            return "Model authentication failed. Please check your API key."
-        if "rate limit" in t or "429" in t:
-            return "The model is rate-limiting requests. Please try again shortly."
-        if any(marker in t for marker in ("timeout", "apiconnectionerror", "server disconnected", "network")):
-            return "The model connection is unstable right now. Please try again."
-        return "Sorry, I encountered an error calling the AI model."
-
-    async def _chat_with_retry(self, messages: list[dict]) -> tuple[Any, str | None]:
-        """Call provider.chat with retry for transient errors."""
-        last_response = None
-        max_attempts = self._CHAT_RETRY_MAX + 1
-
-        for attempt in range(max_attempts):
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                reasoning_effort=self.reasoning_effort,
-            )
-            last_response = response
-
-            if response.finish_reason != "error":
-                return response, None
-
-            clean_err = self._strip_think(response.content)
-            logger.warning(
-                "LLM returned error (attempt {}/{}): {}",
-                attempt + 1,
-                max_attempts,
-                (clean_err or "")[:300],
-            )
-
-            if (not self._is_retryable_error(clean_err)) or attempt == self._CHAT_RETRY_MAX:
-                logger.error("LLM failed after retries: {}", (clean_err or "")[:500])
-                return response, self._friendly_error_message(clean_err)
-
-            await asyncio.sleep(self._CHAT_RETRY_BASE_DELAY_SECONDS * (2 ** attempt))
-
-        clean_err = self._strip_think(getattr(last_response, "content", None))
-        return last_response, self._friendly_error_message(clean_err)
-
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -258,9 +191,14 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
-            response, user_error = await self._chat_with_retry(messages)
-            if user_error:
-                return user_error, tools_used, messages
+            response = await self.provider.chat(
+                messages=messages,
+                tools=self.tools.get_definitions(),
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                reasoning_effort=self.reasoning_effort,
+            )
 
             if response.has_tool_calls:
                 if on_progress:
@@ -300,8 +238,8 @@ class AgentLoop:
                 # Don't persist error responses to session history — they can
                 # poison the context and cause permanent 400 loops (#1303).
                 if response.finish_reason == "error":
-                    logger.error("LLM returned error: {}", (clean or "")[:300])
-                    final_content = self._friendly_error_message(clean)
+                    logger.error("LLM returned error: {}", (clean or "")[:200])
+                    final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
