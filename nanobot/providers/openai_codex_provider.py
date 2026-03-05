@@ -14,14 +14,20 @@ from oauth_cli_kit import get_token as get_codex_token
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
+DEFAULT_RESPONSES_URL = "https://api.openai.com/v1/responses"
 DEFAULT_ORIGINATOR = "nanobot"
 
 
 class OpenAICodexProvider(LLMProvider):
-    """Use Codex OAuth to call the Responses API."""
+    """Use Codex OAuth or custom Responses API to call the Responses endpoint."""
 
-    def __init__(self, default_model: str = "openai-codex/gpt-5.1-codex"):
-        super().__init__(api_key=None, api_base=None)
+    def __init__(
+        self,
+        default_model: str = "openai-codex/gpt-5.1-codex",
+        api_key: str | None = None,
+        api_base: str | None = None,
+    ):
+        super().__init__(api_key=api_key, api_base=api_base)
         self.default_model = default_model
 
     async def chat(
@@ -36,8 +42,14 @@ class OpenAICodexProvider(LLMProvider):
         model = model or self.default_model
         system_prompt, input_items = _convert_messages(messages)
 
-        token = await asyncio.to_thread(get_codex_token)
-        headers = _build_headers(token.account_id, token.access)
+        use_custom_responses = bool(self.api_base or self.api_key)
+        if use_custom_responses:
+            headers = _build_custom_headers(self.api_key)
+            url = _build_responses_url(self.api_base)
+        else:
+            token = await asyncio.to_thread(get_codex_token)
+            headers = _build_headers(token.account_id, token.access)
+            url = DEFAULT_CODEX_URL
 
         body: dict[str, Any] = {
             "model": _strip_model_prefix(model),
@@ -57,8 +69,6 @@ class OpenAICodexProvider(LLMProvider):
 
         if tools:
             body["tools"] = _convert_tools(tools)
-
-        url = DEFAULT_CODEX_URL
 
         try:
             try:
@@ -99,6 +109,30 @@ def _build_headers(account_id: str, token: str) -> dict[str, str]:
         "accept": "text/event-stream",
         "content-type": "application/json",
     }
+
+
+def _build_custom_headers(api_key: str | None) -> dict[str, str]:
+    headers = {
+        "accept": "text/event-stream",
+        "content-type": "application/json",
+        "User-Agent": "nanobot (python)",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+def _build_responses_url(api_base: str | None) -> str:
+    base = (api_base or "").strip()
+    if not base:
+        return DEFAULT_RESPONSES_URL
+
+    base = base.rstrip("/")
+    if base.endswith("/responses"):
+        return base
+    if base.endswith("/v1"):
+        return f"{base}/responses"
+    return f"{base}/v1/responses"
 
 
 async def _request_codex(
