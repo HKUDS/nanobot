@@ -1,11 +1,11 @@
 ---
 name: daily-report
-description: 卓然早晚报统一生成与管理 Skill。...
+description: HiperOne早晚报统一生成与管理 Skill。...
 ---
 
 # Daily Report Skill
 
-卓然早晚报统一生成与管理 Skill。
+HiperOne早晚报统一生成与管理 Skill。
 
 ## 功能
 

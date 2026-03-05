@@ -85,7 +85,7 @@ WELCOME_CONFIG = {
 
 ```python
 WELCOME_TEMPLATES = [
-    "🦞 欢迎 {names} 加入「{group}」！\n\n我是卓然...",
+    "🦞 欢迎 {names} 加入「{group}」！\n\n我是HiperOne...",
     # 添加你的自定义模板
 ]
 ```

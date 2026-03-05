@@ -11,7 +11,7 @@
     python create_feishu_doc.py <md_file> <title> --type other
 
 示例:
-    python create_feishu_doc.py 卓然AI早报_2026-02-08_V5.md "📰 卓然AI早报 | 2026-02-08"
+    python create_feishu_doc.py HiperOneAI早报_2026-02-08_V5.md "📰 HiperOneAI早报 | 2026-02-08"
 """
 
 import sys
@@ -363,7 +363,7 @@ def main():
     parser.add_argument('md_file', help='Markdown 文件路径')
     parser.add_argument('title', help='文档标题')
     parser.add_argument('--type', default='daily_report', choices=['daily_report', 'other'], 
-                        help='文档类型: daily_report=AI日报存档, other=我是卓然')
+                        help='文档类型: daily_report=AI日报存档, other=我是HiperOne')
     parser.add_argument('--output-dir', default='/tmp/daily_report_workflow', help='临时输出目录')
     
     args = parser.parse_args()
@@ -372,7 +372,7 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    print("🦞 卓然早晚报飞书文档生成器")
+    print("🦞 HiperOne早晚报飞书文档生成器")
     print("=" * 50)
     
     # 1. 加载配置
@@ -380,7 +380,7 @@ def main():
     config = load_config()
     token = get_token(config)
     print("  ✅ Token 获取成功")
-    print(f"  📁 目标父节点: {'AI日报存档' if args.type == 'daily_report' else '我是卓然'}")
+    print(f"  📁 目标父节点: {'AI日报存档' if args.type == 'daily_report' else '我是HiperOne'}")
     
     # 2. 解析 Markdown
     print("\n[2/5] 解析 Markdown...")

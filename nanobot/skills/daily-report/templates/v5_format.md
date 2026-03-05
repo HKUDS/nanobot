@@ -1,4 +1,4 @@
-# 🦞 卓然AI{report_type}（{date_str}）
+# 🦞 HiperOneAI{report_type}（{date_str}）
 ## 今日核心要闻（8条精选）
 1. {emoji1} {title1} ({source1}, {date1})
 2. {emoji2} {title2} ({source2}, {date2})

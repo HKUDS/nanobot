@@ -113,4 +113,4 @@ python3 skills/twitter_scraper/scripts/scrape.py --user sama --output tweets.jso
 
 ## 作者
 
-卓然 (Zhuoran) for 非凡产研
+HiperOne (Zhuoran) for 非凡产研

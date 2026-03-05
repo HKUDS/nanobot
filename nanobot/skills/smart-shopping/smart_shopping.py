@@ -105,7 +105,7 @@ class ShoppingAssistant:
         time: new Date().toLocaleString()
     };
     navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-    alert('已复制！粘贴到飞书发给卓然');
+    alert('已复制！粘贴到飞书发给HiperOne');
 })();
 ```
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-RSS自动拉取脚本 - 卓然晨间内容工厂
+RSS自动拉取脚本 - HiperOne晨间内容工厂
 每小时检查一次RSS源，输出结构化数据
 """
 

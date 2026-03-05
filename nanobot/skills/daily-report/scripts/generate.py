@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-卓然早晚报生成器 - V5 格式
+HiperOne早晚报生成器 - V5 格式
 """
 
 import json
@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 # V5 格式模板
-V5_TEMPLATE = """# 🦞 卓然AI{report_type}（{date_str}）
+V5_TEMPLATE = """# 🦞 HiperOneAI{report_type}（{date_str}）
 ## 今日核心要闻（8条精选）
 {headlines}
 ## 📝 深度文章 | {deep_title}
@@ -113,7 +113,7 @@ def generate_daily_report(
     )
     
     # 保存文件
-    filename = f"卓然AI{report_type}_{date}_V5.md"
+    filename = f"HiperOneAI{report_type}_{date}_V5.md"
     filepath = f"{output_dir}/{filename}"
     
     with open(filepath, 'w', encoding='utf-8') as f:
