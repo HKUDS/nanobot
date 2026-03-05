@@ -497,8 +497,8 @@ def agent(
         if ch and not tool_hint and not ch.send_progress:
             return
 
-        # For diff and write_preview types, use print() directly for better formatting control
-        if display_type in ("diff", "write_preview"):
+        # For diff, write_preview, exec_output, and list_result types, use print() directly
+        if display_type in ("diff", "write_preview", "exec_output", "list_result"):
             print(content, end="")
         else:
             console.print(f"  [dim]↳ {content}[/dim]")
@@ -548,7 +548,7 @@ def agent(
                                 pass
                             elif ch and not is_tool_hint and not ch.send_progress:
                                 pass
-                            elif display_type in ("diff", "write_preview"):
+                            elif display_type in ("diff", "write_preview", "exec_output", "list_result"):
                                 # For these types, use print() for better formatting control
                                 print(msg.content, end="")
                             else:

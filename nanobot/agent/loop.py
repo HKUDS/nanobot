@@ -190,8 +190,8 @@ class AgentLoop:
                 return f'{tc.name}("<{len(val)} chars>")'
 
             # Truncate if too long
-            if len(val) > 40:
-                val = val[:40] + "…"
+            if len(val) > 100:
+                val = val[:100] + "…"
             return f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 

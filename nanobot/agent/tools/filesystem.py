@@ -370,7 +370,7 @@ class ListDirTool(Tool):
             "required": ["path"],
         }
 
-    async def execute(self, path: str, **kwargs: Any) -> str:
+    async def execute(self, path: str, **kwargs: Any) -> str | ToolResult:
         try:
             dir_path = _resolve_path(path, self._workspace, self._allowed_dir)
             if not dir_path.exists():
@@ -384,9 +384,20 @@ class ListDirTool(Tool):
                 items.append(f"{prefix}{item.name}")
 
             if not items:
-                return f"Directory {path} is empty"
+                # Empty directory: return ToolResult with empty display
+                return ToolResult(
+                    content=f"Directory {path} is empty",
+                    display="",  # No output for empty directory
+                    display_type="list_result",
+                )
 
-            return "\n".join(items)
+            result = "\n".join(items)
+
+            return ToolResult(
+                content=f"Listed {len(items)} items",
+                display=result,
+                display_type="list_result",
+            )
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
