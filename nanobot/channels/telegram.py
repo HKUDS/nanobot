@@ -309,7 +309,8 @@ class TelegramChannel(BaseChannel):
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
-            "/help — Show available commands"
+            "/help — Show available commands\n"
+            "\n@model — Route a message to a specific model, e.g. @haiku hello"
         )
 
     @staticmethod
