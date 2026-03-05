@@ -54,6 +54,7 @@ class QQChannel(BaseChannel):
     def __init__(self, config: QQConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: QQConfig = config
+        self._markdown_enabled = getattr(config, 'markdown_enabled', True)
         self._client: "botpy.Client | None" = None
         self._processed_ids: deque = deque(maxlen=1000)
         self._msg_seq: int = 1  # 消息序列号，避免被 QQ API 去重
@@ -104,13 +105,22 @@ class QQChannel(BaseChannel):
         try:
             msg_id = msg.metadata.get("message_id")
             self._msg_seq += 1  # 递增序列号
-            await self._client.api.post_c2c_message(
-                openid=msg.chat_id,
-                msg_type=0,
-                content=msg.content,
-                msg_id=msg_id,
-                msg_seq=self._msg_seq,  # 添加序列号避免去重
-            )
+            if self._markdown_enabled:
+                await self._client.api.post_c2c_message(
+                    openid=msg.chat_id,
+                    msg_type=2,
+                    markdown={"content": msg.content},
+                    msg_id=msg_id,
+                    msg_seq=self._msg_seq,  # 添加序列号避免去重
+                )
+            else:
+                await self._client.api.post_c2c_message(
+                    openid=msg.chat_id,
+                    msg_type=0,
+                    content=msg.content,
+                    msg_id=msg_id,
+                    msg_seq=self._msg_seq,  # 添加序列号避免去重
+                )
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
 

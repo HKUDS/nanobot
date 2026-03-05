@@ -184,6 +184,7 @@ class QQConfig(Base):
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
     allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
+    markdown_enabled: bool = True # 默认启用markdown格式
 
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
