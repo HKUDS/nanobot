@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
-from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -17,7 +15,6 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
 
-_DATE_PREFIX_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2})")
 
 _SAVE_MEMORY_TOOL = [
     {
@@ -47,17 +44,12 @@ _SAVE_MEMORY_TOOL = [
 
 
 class MemoryStore:
-    """Two-layer memory: MEMORY.md (long-term facts) + daily history files (grep-searchable log)."""
+    """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
 
     def __init__(self, workspace: Path):
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
-        self.history_dir = ensure_dir(self.memory_dir / "history")
-        self._legacy_history_file = self.memory_dir / "HISTORY.md"
-
-    # ------------------------------------------------------------------
-    # Long-term memory (MEMORY.md) — unchanged
-    # ------------------------------------------------------------------
+        self.history_file = self.memory_dir / "HISTORY.md"
 
     def read_long_term(self) -> str:
         if self.memory_file.exists():
@@ -67,131 +59,13 @@ class MemoryStore:
     def write_long_term(self, content: str) -> None:
         self.memory_file.write_text(content, encoding="utf-8")
 
+    def append_history(self, entry: str) -> None:
+        with open(self.history_file, "a", encoding="utf-8") as f:
+            f.write(entry.rstrip() + "\n\n")
+
     def get_memory_context(self) -> str:
         long_term = self.read_long_term()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
-
-    # ------------------------------------------------------------------
-    # Daily history files
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _parse_date_from_entry(entry: str) -> str:
-        """Extract YYYY-MM-DD from a ``[YYYY-MM-DD ...]`` prefix, fallback to today."""
-        m = _DATE_PREFIX_RE.match(entry.strip())
-        return m.group(1) if m else date.today().isoformat()
-
-    def _daily_file(self, day: str) -> Path:
-        return self.history_dir / f"{day}.md"
-
-    def append_history(self, entry: str) -> None:
-        """Append *entry* to the daily history file derived from its date prefix."""
-        day = self._parse_date_from_entry(entry)
-        with open(self._daily_file(day), "a", encoding="utf-8") as f:
-            f.write(entry.rstrip() + "\n\n")
-
-    def list_history_files(self) -> list[Path]:
-        """Return ``history/*.md`` sorted by filename (i.e. date ascending)."""
-        files = sorted(self.history_dir.glob("*.md"))
-        return files
-
-    def read_history(self, days: int | None = None) -> str:
-        """Read concatenated history.  *days*=None means all files."""
-        files = self.list_history_files()
-        if days is not None and days > 0:
-            cutoff = (date.today() - timedelta(days=days)).isoformat()
-            files = [f for f in files if f.stem >= cutoff]
-        parts: list[str] = []
-        for f in files:
-            parts.append(f.read_text(encoding="utf-8"))
-        return "\n".join(parts)
-
-    def search_history(self, pattern: str) -> list[tuple[str, str]]:
-        """Grep *pattern* (case-insensitive) across all daily files.
-
-        Returns list of ``(date_stem, matching_line)`` tuples.
-        """
-        try:
-            compiled = re.compile(pattern, re.IGNORECASE)
-        except re.error:
-            compiled = re.compile(re.escape(pattern), re.IGNORECASE)
-
-        results: list[tuple[str, str]] = []
-        for f in self.list_history_files():
-            for line in f.read_text(encoding="utf-8").splitlines():
-                if compiled.search(line):
-                    results.append((f.stem, line))
-        return results
-
-    def get_history_stats(self) -> dict[str, Any]:
-        """Return stats: file count, total bytes, date range."""
-        files = self.list_history_files()
-        total_bytes = sum(f.stat().st_size for f in files)
-        return {
-            "file_count": len(files),
-            "total_bytes": total_bytes,
-            "earliest": files[0].stem if files else None,
-            "latest": files[-1].stem if files else None,
-        }
-
-    def cleanup_history(self, retention_days: int) -> int:
-        """Delete daily files older than *retention_days*.  Returns count deleted."""
-        if retention_days <= 0:
-            return 0
-        cutoff = (date.today() - timedelta(days=retention_days)).isoformat()
-        deleted = 0
-        for f in self.list_history_files():
-            if f.stem < cutoff:
-                f.unlink()
-                deleted += 1
-        if deleted:
-            logger.info("History cleanup: deleted {} files older than {}", deleted, cutoff)
-        return deleted
-
-    # ------------------------------------------------------------------
-    # Legacy migration
-    # ------------------------------------------------------------------
-
-    def migrate_legacy_history(self) -> bool:
-        """Split old single-file ``HISTORY.md`` into daily files.
-
-        Returns True if migration was performed, False if skipped.
-        """
-        if not self._legacy_history_file.exists():
-            return False
-        content = self._legacy_history_file.read_text(encoding="utf-8").strip()
-        if not content:
-            self._legacy_history_file.rename(self._legacy_history_file.with_suffix(".md.bak"))
-            return True
-
-        buckets: dict[str, list[str]] = {}
-        current_entry_lines: list[str] = []
-        current_day: str | None = None
-
-        for line in content.splitlines():
-            m = _DATE_PREFIX_RE.match(line)
-            if m:
-                if current_entry_lines and current_day:
-                    buckets.setdefault(current_day, []).append("\n".join(current_entry_lines))
-                current_day = m.group(1)
-                current_entry_lines = [line]
-            else:
-                current_entry_lines.append(line)
-
-        if current_entry_lines and current_day:
-            buckets.setdefault(current_day, []).append("\n".join(current_entry_lines))
-        elif current_entry_lines and not current_day:
-            today = date.today().isoformat()
-            buckets.setdefault(today, []).append("\n".join(current_entry_lines))
-
-        for day, entries in buckets.items():
-            with open(self._daily_file(day), "a", encoding="utf-8") as f:
-                for entry in entries:
-                    f.write(entry.rstrip() + "\n\n")
-
-        self._legacy_history_file.rename(self._legacy_history_file.with_suffix(".md.bak"))
-        logger.info("Migrated legacy HISTORY.md into {} daily files", len(buckets))
-        return True
 
     # ------------------------------------------------------------------
     # OpenViking semantic memory
@@ -223,11 +97,9 @@ class MemoryStore:
         *,
         archive_all: bool = False,
         memory_window: int = 50,
-        history_retention_days: int = 0,
     ) -> bool:
-        """Consolidate old messages into MEMORY.md + daily history files via LLM tool call.
+        """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
 
-        When *history_retention_days* > 0, old daily files are pruned after consolidation.
         Returns True on success (including no-op), False on failure.
         """
         if archive_all:
@@ -295,10 +167,6 @@ class MemoryStore:
 
             session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
             logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)
-
-            if history_retention_days > 0:
-                self.cleanup_history(history_retention_days)
-
             return True
         except Exception:
             logger.exception("Memory consolidation failed")

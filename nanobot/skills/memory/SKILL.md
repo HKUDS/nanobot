@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Enhanced memory system with two layers - grep-based MEMORY.md + daily history files (always available) plus optional OpenViking semantic search for structured conversation storage and advanced recall. When OpenViking is enabled, native tools (openviking_read, openviking_search, user_memory_search, openviking_memory_commit, etc.) are available directly. Use when users ask to remember information, search past conversations, recall previous discussions, or work with documents.
+description: Enhanced memory system with two layers - grep-based MEMORY.md/HISTORY.md (always available) plus optional OpenViking semantic search for structured conversation storage and advanced recall. When OpenViking is enabled, native tools (openviking_read, openviking_search, user_memory_search, openviking_memory_commit, etc.) are available directly. Use when users ask to remember information, search past conversations, recall previous discussions, or work with documents.
 always: true
 ---
 
@@ -15,15 +15,15 @@ The foundational memory system that works without any dependencies:
 ### Structure
 
 - `memory/MEMORY.md` — Long-term facts (preferences, project context, relationships). Always loaded into your context.
-- `memory/history/` — Daily event log files (YYYY-MM-DD.md). NOT loaded into context. Search with `grep -ri`. Each entry starts with `[YYYY-MM-DD HH:MM]`.
+- `memory/HISTORY.md` — Append-only event log. NOT loaded into context. Search it with grep. Each entry starts with `[YYYY-MM-DD HH:MM]`.
 
 ### Search Past Events
 
 ```bash
-grep -ri "keyword" memory/history/
+grep -i "keyword" memory/HISTORY.md
 ```
 
-Use the `exec` tool to run grep. Combine patterns: `grep -riE "meeting|deadline" memory/history/`
+Use the `exec` tool to run grep. Combine patterns: `grep -iE "meeting|deadline" memory/HISTORY.md`
 
 ### When to Update MEMORY.md
 
@@ -34,7 +34,7 @@ Write important facts immediately using `edit_file` or `write_file`:
 
 ### Auto-consolidation
 
-Old conversations are automatically summarized and written to daily history files (`memory/history/YYYY-MM-DD.md`) when the session grows large. Long-term facts are extracted to MEMORY.md. Old daily files are auto-cleaned based on retention settings. You don't need to manage this. When OpenViking is enabled, conversations are also committed to OpenViking during consolidation for semantic indexing.
+Old conversations are automatically summarized and appended to HISTORY.md when the session grows large. Long-term facts are extracted to MEMORY.md. You don't need to manage this. When OpenViking is enabled, conversations are also committed to OpenViking during consolidation for semantic indexing.
 
 ---
 
@@ -144,12 +144,12 @@ Set `wait=true` so the content is immediately searchable after ingestion.
 | Task | Use This |
 |------|----------|
 | Store simple fact | Edit MEMORY.md directly |
-| Search for keyword | grep -ri on memory/history/ |
+| Search for keyword | grep on HISTORY.md |
 | Semantic search ("concepts related to X") | `user_memory_search` or `openviking_search` |
 | Read resource details | `openviking_read` (abstract → overview → read) |
 | Commit conversation to memory | `openviking_memory_commit` |
 | Ingest user's documents | `openviking_add_resource` |
-| Keyword search ("find 'deadline'") | grep -ri memory/history/ |
+| Keyword search ("find 'deadline'") | grep HISTORY.md |
 
 ---
 
@@ -175,7 +175,7 @@ Set `wait=true` so the content is immediately searchable after ingestion.
 
 ## Reference
 
-- Core layer: `memory/MEMORY.md` (facts), `memory/history/YYYY-MM-DD.md` (daily events)
+- Core layer: `memory/MEMORY.md` (facts), `memory/HISTORY.md` (events)
 - OpenViking tools: `user_memory_search`, `openviking_read`, `openviking_search`, `openviking_memory_commit`, etc.
 - OpenViking CLI (fallback): `scripts/openviking_client.py --help`
 - URI scheme: `viking://resources/`, `viking://user/memories/`, `viking://agent/memories/`

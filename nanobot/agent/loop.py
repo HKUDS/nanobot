@@ -68,8 +68,6 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         openviking_config: OpenVikingConfig | None = None,
-        history_retention_days: int = 90,
-        history_auto_cleanup: bool = True,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -81,8 +79,6 @@ class AgentLoop:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.memory_window = memory_window
-        self.history_retention_days = history_retention_days
-        self.history_auto_cleanup = history_auto_cleanup
         self.reasoning_effort = reasoning_effort
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
@@ -114,7 +110,6 @@ class AgentLoop:
         if openviking_config and openviking_config.enabled:
             self._register_openviking_hooks()
 
-        self._history_migrated = False
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
@@ -580,21 +575,11 @@ class AgentLoop:
             session.messages.append(entry)
         session.updated_at = datetime.now()
 
-    def _maybe_migrate_history(self) -> None:
-        """One-time migration of legacy HISTORY.md to daily files."""
-        if self._history_migrated:
-            return
-        self._history_migrated = True
-        MemoryStore(self.workspace).migrate_legacy_history()
-
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
-        self._maybe_migrate_history()
-        retention = self.history_retention_days if self.history_auto_cleanup else 0
         result = await MemoryStore(self.workspace).consolidate(
             session, self.provider, self.model,
             archive_all=archive_all, memory_window=self.memory_window,
-            history_retention_days=retention,
         )
 
         if result and self.hook_manager.has_hooks("message.compact"):
@@ -616,7 +601,6 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
-        self._maybe_migrate_history()
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)

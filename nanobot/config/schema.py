@@ -252,8 +252,6 @@ class AgentDefaults(Base):
     temperature: float = 0.1
     max_tool_iterations: int = 40
     memory_window: int = 100
-    history_retention_days: int = 90  # Daily history files older than this are pruned; 0 = keep forever
-    history_auto_cleanup: bool = True  # Prune expired history files during consolidation
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
 
 

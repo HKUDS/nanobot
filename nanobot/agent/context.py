@@ -91,7 +91,7 @@ Skills with available="false" need dependencies installed first - you can try in
         if self._viking_client:
             ov_section = """
 - OpenViking workspace: managed via OpenViking tools (openviking_read, openviking_search, user_memory_search, etc.)
-- Memory recall: use user_memory_search tool for semantic memory, or grep -ri memory/history/ for keyword search
+- Memory recall: use user_memory_search tool for semantic memory, or grep memory/HISTORY.md for keyword search
 - Memory commit: use openviking_memory_commit tool to persist important conversations"""
 
         return f"""# hiperone_bot 🐈
@@ -104,7 +104,7 @@ You are hiperone_bot, a helpful AI assistant.
 ## Workspace
 Your workspace is at: {workspace_path}
 - Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
-- History log: {workspace_path}/memory/history/ (per-day files like YYYY-MM-DD.md, grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
+- History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md{ov_section}
 
 ## hiperone_bot Guidelines
