@@ -1,10 +1,12 @@
 """Feishu/Lark channel implementation using lark-oapi SDK with WebSocket long connection."""
 
 import asyncio
+import importlib.util
 import json
 import os
 import re
 import threading
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -15,8 +17,6 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import FeishuConfig
-
-import importlib.util
 
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 
@@ -275,11 +275,21 @@ class FeishuChannel(BaseChannel):
             .build()
 
         # Create event handler (only register message receive, ignore other events)
+        # Register no-op handlers for other events to suppress SDK error logs
+        def _noop(*args, **kwargs) -> None:
+            pass
+
         event_handler = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
             self.config.verification_token or "",
         ).register_p2_im_message_receive_v1(
             self._on_message_sync
+        ).register_p2_im_message_message_read_v1(
+            _noop
+        ).register_p2_im_message_reaction_created_v1(
+            _noop
+        ).register_p2_im_chat_access_event_bot_p2p_chat_entered_v1(
+            _noop
         ).build()
 
         # Create WebSocket client for long connection
@@ -296,7 +306,6 @@ class FeishuChannel(BaseChannel):
         # instead of the already-running main asyncio loop, which would cause
         # "This event loop is already running" errors.
         def run_ws():
-            import time
             import lark_oapi.ws.client as _lark_ws_client
             ws_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(ws_loop)
@@ -319,9 +328,20 @@ class FeishuChannel(BaseChannel):
         logger.info("Feishu bot started with WebSocket long connection")
         logger.info("No public IP required - using WebSocket to receive events")
 
-        # Keep running until stopped
+        # Keep running until stopped; check thread liveness every 5 minutes
+        THREAD_CHECK_INTERVAL = 300
+        last_thread_check = time.time()
+
         while self._running:
-            await asyncio.sleep(1)
+            await asyncio.sleep(60)
+            now = time.time()
+            if now - last_thread_check >= THREAD_CHECK_INTERVAL:
+                last_thread_check = now
+                if self._ws_thread and not self._ws_thread.is_alive():
+                    logger.error("Feishu WebSocket thread died, restarting...")
+                    self._ws_thread = threading.Thread(target=run_ws, daemon=True)
+                    self._ws_thread.start()
+                    logger.info("Feishu WebSocket thread restarted")
 
     async def stop(self) -> None:
         """
