@@ -53,6 +53,7 @@ class DiscordChannel(BaseChannel):
         self._seq: int | None = None
         self._heartbeat_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
+        self._processing_status_msgs: dict[str, str] = {}  # channel_id -> temp status message_id
         self._http: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -275,26 +276,48 @@ class DiscordChannel(BaseChannel):
         )
 
     async def _start_typing(self, channel_id: str) -> None:
-        """Start periodic typing indicator for a channel."""
+        """Start 👀 processing status for a channel."""
         await self._stop_typing(channel_id)
 
         async def typing_loop() -> None:
-            url = f"{DISCORD_API_BASE}/channels/{channel_id}/typing"
+            url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
             headers = {"Authorization": f"Bot {self.config.token}"}
+            payload = {"content": "👀 正在处理…"}
             while self._running:
                 try:
-                    await self._http.post(url, headers=headers)
+                    if channel_id not in self._processing_status_msgs:
+                        response = await self._http.post(url, headers=headers, json=payload)
+                        if response.status_code < 400:
+                            data = response.json()
+                            message_id = str(data.get("id", ""))
+                            if message_id:
+                                self._processing_status_msgs[channel_id] = message_id
                 except asyncio.CancelledError:
                     return
                 except Exception as e:
-                    logger.debug("Discord typing indicator failed for {}: {}", channel_id, e)
+                    logger.debug("Discord processing status failed for {}: {}", channel_id, e)
                     return
                 await asyncio.sleep(8)
 
         self._typing_tasks[channel_id] = asyncio.create_task(typing_loop())
 
     async def _stop_typing(self, channel_id: str) -> None:
-        """Stop typing indicator for a channel."""
+        """Stop processing status for a channel."""
         task = self._typing_tasks.pop(channel_id, None)
         if task:
             task.cancel()
+
+        message_id = self._processing_status_msgs.pop(channel_id, None)
+        if message_id:
+            await self._delete_processing_status(channel_id, message_id)
+
+    async def _delete_processing_status(self, channel_id: str, message_id: str) -> None:
+        """Delete temporary 👀 processing status message."""
+        if not self._http:
+            return
+        url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}"
+        headers = {"Authorization": f"Bot {self.config.token}"}
+        try:
+            await self._http.delete(url, headers=headers)
+        except Exception as e:
+            logger.debug("Failed to delete Discord processing status for {}: {}", channel_id, e)

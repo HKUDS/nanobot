@@ -127,10 +127,10 @@ class TelegramChannel(BaseChannel):
         self.groq_api_key = groq_api_key
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
-        self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
+        self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> processing status task
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
-
+        self._processing_status_msgs: dict[str, int] = {}  # chat_id -> temp status message_id
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
         if not self.config.token:
@@ -464,27 +464,41 @@ class TelegramChannel(BaseChannel):
             self._media_group_tasks.pop(key, None)
 
     def _start_typing(self, chat_id: str) -> None:
-        """Start sending 'typing...' indicator for a chat."""
-        # Cancel any existing typing task for this chat
+        """Start sending processing status for a chat."""
         self._stop_typing(chat_id)
         self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
 
     def _stop_typing(self, chat_id: str) -> None:
-        """Stop the typing indicator for a chat."""
+        """Stop processing status for a chat and clean up temp marker."""
         task = self._typing_tasks.pop(chat_id, None)
         if task and not task.done():
             task.cancel()
 
+        msg_id = self._processing_status_msgs.pop(chat_id, None)
+        if msg_id and self._app:
+            asyncio.create_task(self._delete_processing_status(chat_id, msg_id))
+
     async def _typing_loop(self, chat_id: str) -> None:
-        """Repeatedly send 'typing' action until cancelled."""
+        """Post a temporary 👀 processing status until cancelled."""
         try:
+            if self._app:
+                status_msg = await self._app.bot.send_message(chat_id=int(chat_id), text="👀 正在处理…")
+                self._processing_status_msgs[chat_id] = status_msg.message_id
             while self._app:
-                await self._app.bot.send_chat_action(chat_id=int(chat_id), action="typing")
-                await asyncio.sleep(4)
+                await asyncio.sleep(30)
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
+            logger.debug("Processing status stopped for {}: {}", chat_id, e)
+
+    async def _delete_processing_status(self, chat_id: str, message_id: int) -> None:
+        """Delete temporary 👀 processing status message."""
+        if not self._app:
+            return
+        try:
+            await self._app.bot.delete_message(chat_id=int(chat_id), message_id=message_id)
+        except Exception as e:
+            logger.debug("Failed to delete processing status for {}: {}", chat_id, e)
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
