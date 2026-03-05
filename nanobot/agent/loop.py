@@ -190,6 +190,10 @@ class AgentLoop:
         messages = initial_messages
         iteration = 0
         final_content = None
+        
+        # Track the index of the current request's user message
+        # This ensures follow-up events are appended to the correct message, not historical ones
+        current_user_msg_idx = len(messages) - 1 if messages and messages[-1].get("role") == "user" else None
         tools_used: list[str] = []
 
         async def inject_event() -> bool:
@@ -198,19 +202,26 @@ class AgentLoop:
                 return False
             event = await self.bus.check_events(session_key)
             if event:
-                # Append to the last user message instead of creating a new one
-                # This avoids consecutive user messages which confuse LLM
-                last_user_idx = None
-                for i in range(len(messages) - 1, -1, -1):
-                    if messages[i].get("role") == "user":
-                        last_user_idx = i
-                        break
+                # Prefer the current request's user message if available
+                target_idx = current_user_msg_idx
                 
-                if last_user_idx is not None:
+                # Fallback: find last user message in history (shouldn't happen in normal flow)
+                if target_idx is None:
+                    for i in range(len(messages) - 1, -1, -1):
+                        if messages[i].get("role") == "user":
+                            target_idx = i
+                            break
+                
+                if target_idx is not None:
                     # Append to existing user message
-                    messages[last_user_idx]["content"] += f"\n\n[Follow-up]: {event}"
+                    original_content = messages[target_idx]["content"]
+                    original_preview = original_content[:50] + "..." if len(original_content) > 50 else original_content
+                    messages[target_idx]["content"] += f"\n\n[Follow-up]: {event}"
+                    logger.info("Appended follow-up to user message {}: \"{}\" + \"[Follow-up]: {}\"", 
+                               target_idx, original_preview, event[:50])
                 else:
                     # Fallback: create new user message (shouldn't happen in normal flow)
+                    logger.warning("No user message found in history, creating new message for follow-up: {}", event[:50])
                     messages.append({
                         "role": "user",
                         "content": f"[Follow-up]: {event}"
@@ -301,18 +312,18 @@ class AgentLoop:
                     logger.error("LLM returned error: {}", (clean or "")[:200])
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
+
+                # Check for events BEFORE adding assistant message to history
+                # If user sent follow-up while LLM was generating, append it and re-generate
+                # This prevents creating two separate assistant responses
+                if await inject_event():
+                    continue
+
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
                 final_content = clean
-
-                # Check for events before returning final response
-                # If user interrupted while LLM was generating response,
-                # combine both in the next iteration (like humans do)
-                if await inject_event():
-                    continue
-
                 break
 
         if final_content is None and iteration >= self.max_iterations:
