@@ -4,22 +4,76 @@ import difflib
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.tools.audit import get_audit_logger
 from nanobot.agent.tools.base import Tool
 
 
 def _resolve_path(
-    path: str, workspace: Path | None = None, allowed_dir: Path | None = None
+    path: str,
+    workspace: Path | None = None,
+    allowed_dir: Path | None = None,
+    check_symlinks: bool = True,
+    session_key: str | None = None,
 ) -> Path:
-    """Resolve path against workspace (if relative) and enforce directory restriction."""
+    """Resolve path against workspace (if relative) and enforce directory restriction.
+
+    Args:
+        path: The path to resolve
+        workspace: Optional workspace for relative path resolution
+        allowed_dir: Optional directory to restrict access to
+        check_symlinks: Whether to check for symlink escape attempts
+        session_key: Optional session key for audit logging
+    """
+    audit = get_audit_logger()
     p = Path(path).expanduser()
+
     if not p.is_absolute() and workspace:
         p = workspace / p
+
+    # Resolve to absolute path
     resolved = p.resolve()
+
+    # Check for symlink escape attempts if enabled
+    if check_symlinks and allowed_dir:
+        # Walk the path components to check for symlinks
+        current = Path(resolved.root)
+        for part in resolved.relative_to(current).parts:
+            current = current / part
+            if current.is_symlink():
+                symlink_target = current.readlink()
+                # Resolve the symlink target relative to current directory
+                if not symlink_target.is_absolute():
+                    symlink_target = (current.parent / symlink_target).resolve()
+                # Check if symlink points outside allowed directory
+                try:
+                    symlink_target.relative_to(allowed_dir.resolve())
+                except ValueError:
+                    audit.log_symlink_escape_attempt(
+                        path=str(path),
+                        symlink_target=symlink_target,
+                        allowed_dir=allowed_dir,
+                        session_key=session_key,
+                    )
+                    raise PermissionError(
+                        f"Path {path} contains symlink escaping allowed directory "
+                        f"(points to {symlink_target})"
+                    )
+
+    # Enforce directory restriction
     if allowed_dir:
         try:
             resolved.relative_to(allowed_dir.resolve())
         except ValueError:
-            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
+            audit.log_file_access_denied(
+                path=str(path),
+                reason="Path outside allowed directory",
+                allowed_dir=allowed_dir,
+                session_key=session_key,
+            )
+            raise PermissionError(
+                f"Path {path} is outside allowed directory {allowed_dir}"
+            )
+
     return resolved
 
 

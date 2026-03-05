@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.tools.audit import get_audit_logger
 from nanobot.agent.tools.base import Tool
 
 
@@ -122,21 +123,38 @@ class ExecTool(Tool):
         except Exception as e:
             return f"Error executing command: {str(e)}"
 
-    def _guard_command(self, command: str, cwd: str) -> str | None:
+    def _guard_command(self, command: str, cwd: str, session_key: str | None = None) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
         lower = cmd.lower()
+        audit = get_audit_logger()
 
         for pattern in self.deny_patterns:
             if re.search(pattern, lower):
+                audit.log_command_blocked(
+                    command=command,
+                    reason="dangerous pattern detected",
+                    pattern_matched=pattern,
+                    session_key=session_key,
+                )
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
 
         if self.allow_patterns:
             if not any(re.search(p, lower) for p in self.allow_patterns):
+                audit.log_command_blocked(
+                    command=command,
+                    reason="not in allowlist",
+                    session_key=session_key,
+                )
                 return "Error: Command blocked by safety guard (not in allowlist)"
 
         if self.restrict_to_workspace:
             if "..\\" in cmd or "../" in cmd:
+                audit.log_path_traversal_attempt(
+                    path=command,
+                    allowed_dir=Path(cwd).resolve(),
+                    session_key=session_key,
+                )
                 return "Error: Command blocked by safety guard (path traversal detected)"
 
             cwd_path = Path(cwd).resolve()
@@ -147,6 +165,12 @@ class ExecTool(Tool):
                 except Exception:
                     continue
                 if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
+                    audit.log_workspace_violation(
+                        operation="exec",
+                        attempted_path=raw,
+                        workspace=cwd_path,
+                        session_key=session_key,
+                    )
                     return "Error: Command blocked by safety guard (path outside working dir)"
 
         return None

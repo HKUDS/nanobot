@@ -313,12 +313,23 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # Seconds before a tool call is cancelled
 
 
+class AuditConfig(Base):
+    """Audit logging configuration for security events."""
+
+    enabled: bool = True  # Enable/disable audit logging
+    log_file: str = ""  # Optional: log to file (default: console only)
+    max_file_size_mb: int = 10  # Max audit log file size before rotation
+    backup_count: int = 5  # Number of backup audit log files to keep
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
+    check_symlinks: bool = True  # If true, check for symlink escape attempts
+    audit: AuditConfig = Field(default_factory=AuditConfig)  # Audit logging configuration
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
