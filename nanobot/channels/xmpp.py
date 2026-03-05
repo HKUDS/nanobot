@@ -81,10 +81,11 @@ class XmppClient(ClientXMPP):
             return
 
         if msg_type in ("chat", "normal"):
-            # Direct message
+            # Direct message - use bare JID for typing to handle multi-resource clients
+            bare_jid = str(msg["from"].bare)
             logger.info("Direct message from {}: {}", msg_from, msg_body[:100] if msg_body else "")
             asyncio.create_task(self._channel._handle_dm(
-                sender_jid=str(msg["from"]),
+                sender_jid=bare_jid,
                 body=msg_body,
             ))
         elif msg_type == "groupchat":
