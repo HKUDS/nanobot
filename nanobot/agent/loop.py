@@ -205,18 +205,16 @@ class AgentLoop:
                     thoughts = [
                         self._strip_think(response.content),
                         response.reasoning_content,
-                        *(f"Thinking [{b.get('signature', '...')}]:\n{b.get('thought', '...')}" 
-                          for b in (response.thinking_blocks or []) if isinstance(b, dict) and "signature" in b)
+                        *(
+                            f"Thinking [{b.get('signature', '...')}]:\n{b.get('thought', '...')}"
+                            for b in (response.thinking_blocks or [])
+                            if isinstance(b, dict) and "signature" in b
+                        ),
                     ]
-                    
                     combined_thoughts = "\n\n".join(filter(None, thoughts))
-                    tool_hint_str = self._tool_hint(response.tool_calls)
-                    
                     if combined_thoughts:
                         await on_progress(combined_thoughts)
-                        await on_progress(f"{combined_thoughts}\n\n{tool_hint_str}", tool_hint=True)
-                    else:
-                        await on_progress(tool_hint_str, tool_hint=True)
+                    await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
                 tool_call_dicts = [
                     {

@@ -292,7 +292,7 @@ class TelegramChannel(BaseChannel):
                             reply_parameters=reply_params
                         )
                 except Exception as e:
-                    logger.warning("HTML parse failed (or draft send failed), falling back to plain text: {}", e)
+                    logger.warning("HTML parse failed, falling back to plain text: {}", e)
                     try:
                         if is_progress and draft_id:
                             await self._app.bot.send_message_draft(
