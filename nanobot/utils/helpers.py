@@ -103,6 +103,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     for item in tpl.iterdir():
         if item.name.endswith(".md"):
             if item.name == "SECURITY.md" and not config.agents.defaults.security:
+                (workspace / "SECURITY.md").unlink(missing_ok=True)
                 continue
             _write(item, workspace / item.name)
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
