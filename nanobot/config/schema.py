@@ -234,6 +234,7 @@ class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    subagent: AgentDefaults | None = None  # If None, uses defaults
 
 
 class ProviderConfig(Base):
@@ -336,11 +337,17 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
 
-    def _match_provider(self, model: str | None = None) -> tuple["ProviderConfig | None", str | None]:
-        """Match provider config and its registry name. Returns (config, spec_name)."""
+    def _match_provider(self, model: str | None = None, provider: str | None = None) -> tuple["ProviderConfig | None", str | None]:
+        """Match provider config and its registry name. Returns (config, spec_name).
+
+        Args:
+            model: Model name to match
+            provider: Provider override (e.g., "zhipu", "dashscope"). "auto" or None means auto-detect.
+        """
         from nanobot.providers.registry import PROVIDERS
 
-        forced = self.agents.defaults.provider
+        # Use provided provider if not "auto", otherwise use defaults.provider
+        forced = provider if provider and provider != "auto" else self.agents.defaults.provider
         if forced != "auto":
             p = getattr(self.providers, forced, None)
             return (p, forced) if p else (None, None)
@@ -378,26 +385,26 @@ class Config(BaseSettings):
                 return p, spec.name
         return None, None
 
-    def get_provider(self, model: str | None = None) -> ProviderConfig | None:
+    def get_provider(self, model: str | None = None, provider: str | None = None) -> ProviderConfig | None:
         """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
-        p, _ = self._match_provider(model)
+        p, _ = self._match_provider(model, provider)
         return p
 
-    def get_provider_name(self, model: str | None = None) -> str | None:
+    def get_provider_name(self, model: str | None = None, provider: str | None = None) -> str | None:
         """Get the registry name of the matched provider (e.g. "deepseek", "openrouter")."""
-        _, name = self._match_provider(model)
+        _, name = self._match_provider(model, provider)
         return name
 
-    def get_api_key(self, model: str | None = None) -> str | None:
+    def get_api_key(self, model: str | None = None, provider: str | None = None) -> str | None:
         """Get API key for the given model. Falls back to first available key."""
-        p = self.get_provider(model)
+        p = self.get_provider(model, provider)
         return p.api_key if p else None
 
-    def get_api_base(self, model: str | None = None) -> str | None:
+    def get_api_base(self, model: str | None = None, provider: str | None = None) -> str | None:
         """Get API base URL for the given model. Applies default URLs for known gateways."""
         from nanobot.providers.registry import find_by_name
 
-        p, name = self._match_provider(model)
+        p, name = self._match_provider(model, provider)
         if p and p.api_base:
             return p.api_base
         # Only gateways get a default api_base here. Standard providers

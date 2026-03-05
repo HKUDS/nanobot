@@ -49,14 +49,10 @@ class AgentLoop:
     def __init__(
         self,
         bus: MessageBus,
-        provider: LLMProvider,
         workspace: Path,
-        model: str | None = None,
+        agent_config: dict,
         max_iterations: int = 40,
-        temperature: float = 0.1,
-        max_tokens: int = 4096,
         memory_window: int = 100,
-        reasoning_effort: str | None = None,
         brave_api_key: str | None = None,
         web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
@@ -65,18 +61,19 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        subagent_config: dict | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
         self.channels_config = channels_config
-        self.provider = provider
+        self.provider = agent_config["provider"]
         self.workspace = workspace
-        self.model = model or provider.get_default_model()
+        self.model = agent_config["model"]
         self.max_iterations = max_iterations
-        self.temperature = temperature
-        self.max_tokens = max_tokens
+        self.temperature = agent_config["temperature"]
+        self.max_tokens = agent_config["max_tokens"]
         self.memory_window = memory_window
-        self.reasoning_effort = reasoning_effort
+        self.reasoning_effort = agent_config.get("reasoning_effort")
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
@@ -86,14 +83,17 @@ class AgentLoop:
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
+
+        # Build subagent config with fallbacks to main agent settings
+        sub = subagent_config or {}
         self.subagents = SubagentManager(
-            provider=provider,
+            provider=sub.get("provider", self.provider),
             workspace=workspace,
             bus=bus,
-            model=self.model,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            reasoning_effort=reasoning_effort,
+            model=sub.get("model", self.model),
+            temperature=sub.get("temperature", self.temperature),
+            max_tokens=sub.get("max_tokens", self.max_tokens),
+            reasoning_effort=sub.get("reasoning_effort", self.reasoning_effort),
             brave_api_key=brave_api_key,
             web_proxy=web_proxy,
             exec_config=self.exec_config,
