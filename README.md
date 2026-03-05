@@ -14,7 +14,7 @@
 
 🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw).
 
-⚡️ Delivers core agent functionality with **99% fewer lines of code** than OpenClaw, making it more customizable and understandable.
+⚡️ Delivers core agent functionality with **99% fewer lines of code** than OpenClaw.
 
 📏 Real-time line count: run `bash core_agent_lines.sh` to verify anytime.
 
