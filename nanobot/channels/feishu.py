@@ -272,6 +272,7 @@ class FeishuChannel(BaseChannel):
             .app_id(self.config.app_id) \
             .app_secret(self.config.app_secret) \
             .log_level(lark.LogLevel.INFO) \
+            .domain(self.config.domain) \
             .build()
 
         # Create event handler (only register message receive, ignore other events)
@@ -287,7 +288,8 @@ class FeishuChannel(BaseChannel):
             self.config.app_id,
             self.config.app_secret,
             event_handler=event_handler,
-            log_level=lark.LogLevel.INFO
+            log_level=lark.LogLevel.INFO,
+            domain=self.config.domain
         )
 
         # Start WebSocket client in a separate thread with reconnect loop.
