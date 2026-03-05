@@ -270,6 +270,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._user_name_cache: dict[str, str] = {}
 
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
@@ -597,6 +598,26 @@ class FeishuChannel(BaseChannel):
 
         return None, f"[{msg_type}: download failed]"
 
+    def _get_user_name_sync(self, open_id: str) -> str:
+        """Look up a user's display name by open_id, with in-memory cache."""
+        if open_id in self._user_name_cache:
+            return self._user_name_cache[open_id]
+        try:
+            from lark_oapi.api.contact.v3 import GetUserRequest as ContactGetUserRequest
+            request = ContactGetUserRequest.builder() \
+                .user_id(open_id) \
+                .user_id_type("open_id") \
+                .build()
+            response = self._client.contact.v3.user.get(request)
+            if response.success() and response.data and response.data.user:
+                name = response.data.user.name or ""
+                self._user_name_cache[open_id] = name
+                return name
+        except Exception as e:
+            logger.debug("Failed to fetch user name for {}: {}", open_id, e)
+        self._user_name_cache[open_id] = ""
+        return ""
+
     def _get_message_sync(self, message_id: str) -> dict | None:
         """Fetch a message by ID and return its msg_type and body content."""
         try:
@@ -731,6 +752,11 @@ class FeishuChannel(BaseChannel):
             chat_type = message.chat_type
             msg_type = message.message_type
 
+            loop = asyncio.get_running_loop()
+            sender_name = await loop.run_in_executor(
+                None, self._get_user_name_sync, sender_id,
+            ) if sender_id != "unknown" else ""
+
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
 
@@ -823,6 +849,7 @@ class FeishuChannel(BaseChannel):
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
+                    "sender_name": sender_name,
                 }
             )
 
