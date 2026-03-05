@@ -104,6 +104,7 @@ class QQChannel(BaseChannel):
             return
         try:
             msg_id = msg.metadata.get("message_id")
+            self._msg_seq += 1  # 递增序列号
             if self._markdown_enabled:
                 await self._client.api.post_c2c_message(
                     openid=msg.chat_id,
