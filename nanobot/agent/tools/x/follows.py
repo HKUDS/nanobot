@@ -15,7 +15,11 @@ class XFollowUserTool(XBaseTool):
     def description(self) -> str:
         return (
             "Follow a user on X by their user ID. "
-            "Authentication is automatic — never ask the user for credentials, tokens, or bot_id."
+            "Authentication is automatic — never ask the user for credentials, tokens, or bot_id.\n\n"
+            "DISPLAY FORMAT: Include this directive when confirming the follow:\n"
+            '::x-user{name="<display_name>" username="@<username>" url="https://x.com/<username>" size="inline"}\n'
+            "Replace placeholders with actual values from the response. Omit attributes not available.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
         )
 
     @property
@@ -74,7 +78,13 @@ class XGetFollowersTool(XBaseTool):
 
     @property
     def description(self) -> str:
-        return "Get the followers of an X user by their user ID. Authentication is automatic."
+        return (
+            "Get the followers of an X user by their user ID. Authentication is automatic.\n\n"
+            "DISPLAY FORMAT: Include a directive for EACH follower in your response:\n"
+            '::x-user{name="<display_name>" username="@<username>" url="https://x.com/<username>" metrics="<followers_count> followers" size="compact"}\n'
+            "Use compact size when listing multiple users. Replace placeholders with actual values from each user.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -110,7 +120,13 @@ class XGetFollowingTool(XBaseTool):
 
     @property
     def description(self) -> str:
-        return "Get the users that an X user is following by their user ID. Authentication is automatic."
+        return (
+            "Get the users that an X user is following by their user ID. Authentication is automatic.\n\n"
+            "DISPLAY FORMAT: Include a directive for EACH followed user in your response:\n"
+            '::x-user{name="<display_name>" username="@<username>" url="https://x.com/<username>" metrics="<followers_count> followers" size="compact"}\n'
+            "Use compact size when listing multiple users. Replace placeholders with actual values from each user.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:

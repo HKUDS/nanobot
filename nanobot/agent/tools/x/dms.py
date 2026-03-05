@@ -15,7 +15,11 @@ class XSendDmTool(XBaseTool):
     def description(self) -> str:
         return (
             "Send a direct message to a user on X. "
-            "Authentication is automatic — never ask the user for credentials, tokens, or bot_id."
+            "Authentication is automatic — never ask the user for credentials, tokens, or bot_id.\n\n"
+            "DISPLAY FORMAT: Include this directive when confirming the sent message:\n"
+            '::x-dm{text="<message_text>" participant="@<recipient_username>" size="default"}\n'
+            "Replace placeholders with actual values. Use the recipient's username if available.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
         )
 
     @property
@@ -50,7 +54,13 @@ class XGetDmEventsTool(XBaseTool):
 
     @property
     def description(self) -> str:
-        return "Get recent DM events (messages) across all conversations on X. Authentication is automatic."
+        return (
+            "Get recent DM events (messages) across all conversations on X. Authentication is automatic.\n\n"
+            "DISPLAY FORMAT: Include a directive for EACH DM event in your response:\n"
+            '::x-dm{text="<message_text>" participant="@<sender_username>" size="compact"}\n'
+            "Use compact size when listing multiple messages. Replace placeholders with actual values from each event.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -85,7 +95,13 @@ class XGetDmConversationTool(XBaseTool):
 
     @property
     def description(self) -> str:
-        return "Get DM events from a specific conversation on X by conversation ID. Authentication is automatic."
+        return (
+            "Get DM events from a specific conversation on X by conversation ID. Authentication is automatic.\n\n"
+            "DISPLAY FORMAT: Include a directive for EACH DM event in your response:\n"
+            '::x-dm{text="<message_text>" participant="@<sender_username>" size="compact"}\n'
+            "Use compact size when listing multiple messages. Replace placeholders with actual values from each event.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:

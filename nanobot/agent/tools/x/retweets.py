@@ -15,7 +15,11 @@ class XRetweetTool(XBaseTool):
     def description(self) -> str:
         return (
             "Retweet a tweet on X. "
-            "Authentication is automatic — never ask the user for credentials, tokens, or bot_id."
+            "Authentication is automatic — never ask the user for credentials, tokens, or bot_id.\n\n"
+            "DISPLAY FORMAT: Include this directive when confirming the retweet:\n"
+            '::x-tweet{text="<tweet_text>" author="@<author_username>" url="https://x.com/<author_username>/status/<tweet_id>" size="inline"}\n'
+            "Replace placeholders with actual values. If tweet text is not available from the response, omit the text attribute.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
         )
 
     @property

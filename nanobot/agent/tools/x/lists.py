@@ -15,7 +15,11 @@ class XCreateListTool(XBaseTool):
     def description(self) -> str:
         return (
             "Create a new list on X. "
-            "Authentication is automatic — never ask the user for credentials, tokens, or bot_id."
+            "Authentication is automatic — never ask the user for credentials, tokens, or bot_id.\n\n"
+            "DISPLAY FORMAT: Include this directive when confirming the created list:\n"
+            '::x-list{name="<list_name>" url="https://x.com/i/lists/<list_id>" members="0 members" size="default"}\n'
+            "Replace placeholders with actual values from the response.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
         )
 
     @property
@@ -80,7 +84,13 @@ class XGetListTool(XBaseTool):
 
     @property
     def description(self) -> str:
-        return "Get details of an X list by its ID. Authentication is automatic."
+        return (
+            "Get details of an X list by its ID. Authentication is automatic.\n\n"
+            "DISPLAY FORMAT: Include this directive when presenting the list:\n"
+            '::x-list{name="<list_name>" description="<list_description>" url="https://x.com/i/lists/<list_id>" members="<member_count> members" size="default"}\n'
+            "Replace placeholders with actual values. Omit description if not available.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -109,7 +119,13 @@ class XGetOwnedListsTool(XBaseTool):
 
     @property
     def description(self) -> str:
-        return "Get all lists owned by the authenticated X user. Authentication is automatic."
+        return (
+            "Get all lists owned by the authenticated X user. Authentication is automatic.\n\n"
+            "DISPLAY FORMAT: Include a directive for EACH list in your response:\n"
+            '::x-list{name="<list_name>" url="https://x.com/i/lists/<list_id>" members="<member_count> members" size="compact"}\n'
+            "Use compact size when listing multiple lists. Replace placeholders with actual values from each list.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:

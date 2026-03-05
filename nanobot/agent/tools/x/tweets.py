@@ -15,7 +15,11 @@ class XPostTweetTool(XBaseTool):
     def description(self) -> str:
         return (
             "Post a tweet on X (Twitter). Can optionally reply to an existing tweet or quote-tweet. "
-            "Authentication is automatic — never ask the user for credentials, tokens, or bot_id."
+            "Authentication is automatic — never ask the user for credentials, tokens, or bot_id.\n\n"
+            "DISPLAY FORMAT: Include this directive when confirming the posted tweet:\n"
+            '::x-tweet{text="<tweet_text>" author="@<your_username>" url="https://x.com/<your_username>/status/<tweet_id>" size="default"}\n'
+            "Replace placeholders with actual values from the response. Use the tweet_id from the response for the url.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
         )
 
     @property
@@ -85,7 +89,11 @@ class XGetTweetTool(XBaseTool):
     def description(self) -> str:
         return (
             "Get the full content of a specific tweet by its ID, including author info and engagement metrics. "
-            "Authentication is automatic."
+            "Authentication is automatic.\n\n"
+            "DISPLAY FORMAT: Include this directive when presenting the tweet:\n"
+            '::x-tweet{text="<tweet_text>" author="@<author_username>" url="https://x.com/<author_username>/status/<tweet_id>" metrics="<likes> likes · <retweets> retweets" size="default"}\n'
+            "Replace placeholders with actual values. Build the url from the author's username and tweet id.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
         )
 
     @property
@@ -118,7 +126,11 @@ class XSearchTweetsTool(XBaseTool):
         return (
             "Search recent tweets on X using a query string. Supports X search operators "
             "(e.g. 'from:username', '#hashtag', 'keyword -filter:retweets'). "
-            "Authentication is automatic."
+            "Authentication is automatic.\n\n"
+            "DISPLAY FORMAT: Include a directive for EACH matching tweet in your response:\n"
+            '::x-tweet{text="<tweet_text>" author="@<author_username>" url="https://x.com/<author_username>/status/<tweet_id>" metrics="<likes> likes · <retweets> retweets" size="compact"}\n'
+            "Use compact size when listing multiple tweets. Replace placeholders with actual values from each tweet.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
         )
 
     @property
@@ -157,7 +169,11 @@ class XGetUserTweetsTool(XBaseTool):
     def description(self) -> str:
         return (
             "Get recent tweets posted by a specific X user (by their X user ID). "
-            "Authentication is automatic."
+            "Authentication is automatic.\n\n"
+            "DISPLAY FORMAT: Include a directive for EACH tweet in your response:\n"
+            '::x-tweet{text="<tweet_text>" author="@<author_username>" url="https://x.com/<author_username>/status/<tweet_id>" metrics="<likes> likes · <retweets> retweets" size="compact"}\n'
+            "Use compact size when listing multiple tweets. Replace placeholders with actual values from each tweet.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
         )
 
     @property
@@ -196,7 +212,11 @@ class XGetUserMentionsTool(XBaseTool):
     def description(self) -> str:
         return (
             "Get recent tweets mentioning a specific X user (by their X user ID). "
-            "Authentication is automatic."
+            "Authentication is automatic.\n\n"
+            "DISPLAY FORMAT: Include a directive for EACH mention in your response:\n"
+            '::x-tweet{text="<tweet_text>" author="@<author_username>" url="https://x.com/<author_username>/status/<tweet_id>" metrics="<likes> likes · <retweets> retweets" size="compact"}\n'
+            "Use compact size when listing multiple mentions. Replace placeholders with actual values from each tweet.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
         )
 
     @property

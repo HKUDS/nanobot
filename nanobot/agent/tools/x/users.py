@@ -15,7 +15,11 @@ class XGetMeTool(XBaseTool):
     def description(self) -> str:
         return (
             "Get the authenticated X user's profile (name, username, bio, follower count, etc.). "
-            "Authentication is automatic — never ask the user for credentials, tokens, or bot_id."
+            "Authentication is automatic — never ask the user for credentials, tokens, or bot_id.\n\n"
+            "DISPLAY FORMAT: Include this directive when presenting the user profile:\n"
+            '::x-user{name="<display_name>" username="@<username>" url="https://x.com/<username>" bio="<bio_text>" metrics="<followers_count> followers · <following_count> following" size="default"}\n'
+            "Replace placeholders with actual values. Omit bio if not available.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
         )
 
     @property
@@ -43,7 +47,13 @@ class XGetUserByIdTool(XBaseTool):
 
     @property
     def description(self) -> str:
-        return "Look up an X user by their numeric user ID. Authentication is automatic."
+        return (
+            "Look up an X user by their numeric user ID. Authentication is automatic.\n\n"
+            "DISPLAY FORMAT: Include this directive when presenting the user:\n"
+            '::x-user{name="<display_name>" username="@<username>" url="https://x.com/<username>" bio="<bio_text>" metrics="<followers_count> followers · <following_count> following" size="default"}\n'
+            "Replace placeholders with actual values. Omit bio if not available.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -74,7 +84,11 @@ class XGetUserByUsernameTool(XBaseTool):
     def description(self) -> str:
         return (
             "Look up an X user by their @username (without the @ symbol). "
-            "Authentication is automatic."
+            "Authentication is automatic.\n\n"
+            "DISPLAY FORMAT: Include this directive when presenting the user:\n"
+            '::x-user{name="<display_name>" username="@<username>" url="https://x.com/<username>" bio="<bio_text>" metrics="<followers_count> followers · <following_count> following" size="default"}\n'
+            "Replace placeholders with actual values. Omit bio if not available.\n"
+            'Size options: "default" for standalone results, "compact" when listing multiple items, "inline" for brief mentions in text.'
         )
 
     @property
