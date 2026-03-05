@@ -304,6 +304,13 @@ class XmppChannel(BaseChannel):
 
         if self.client and self.client.is_connected():
             try:
+                # Send "paused" to indicate stopped typing
                 self.client.send_typing(jid, typing=False)
+                # After a brief delay, send "active" to clear the indicator entirely
+                await asyncio.sleep(0.5)
+                if self.client and self.client.is_connected():
+                    msg = self.client.make_message(mto=jid, mtype="chat")
+                    msg["chat_state"] = "active"
+                    msg.send()
             except Exception:
                 pass
