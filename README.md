@@ -890,6 +890,33 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
 
 
+## Multiple Instances
+
+Run multiple nanobot instances simultaneously, each with its own workspace and configuration.
+
+```bash
+# Instance A - Telegram bot
+nanobot gateway -w ~/.nanobot/botA -p 18791
+
+# Instance B - Discord bot
+nanobot gateway -w ~/.nanobot/botB -p 18792
+
+# Instance C - Using custom config file
+nanobot gateway -w ~/.nanobot/botC -c ~/.nanobot/botC/config.json -p 18793
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--workspace` | `-w` | Workspace directory (default: `~/.nanobot/workspace`) |
+| `--config` | `-c` | Config file path (default: `~/.nanobot/config.json`) |
+| `--port` | `-p` | Gateway port (default: `18790`) |
+
+Each instance has its own:
+- Workspace directory (MEMORY.md, HEARTBEAT.md, session files)
+- Cron jobs storage (`workspace/cron/jobs.json`)
+- Configuration (if using `--config`)
+
+
 ## CLI Reference
 
 | Command | Description |
