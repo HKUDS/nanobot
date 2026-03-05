@@ -64,4 +64,8 @@ class MessageBus:
             except asyncio.QueueEmpty:
                 break
 
+        # Clean up empty queues to prevent memory leak
+        if queue.empty():
+            self._event_channels.pop(session_key, None)
+
         return "\n".join(f"- {e}" for e in events) if events else None

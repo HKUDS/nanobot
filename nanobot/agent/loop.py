@@ -244,11 +244,11 @@ class AgentLoop:
                     thinking_blocks=response.thinking_blocks,
                 )
 
-                # Execute each tool, checking for events before each one
+                # Execute each tool, checking for events before and after each one
                 for i, tool_call in enumerate(response.tool_calls):
                     if await inject_event():
                         # Event received: cancel this and all remaining tools
-                        logger.info("Event received during tool execution, cancelling remaining tools")
+                        logger.info("Event received before tool execution, cancelling current and remaining tools")
                         for tc in response.tool_calls[i:]:
                             messages.append({
                                 "role": "tool",
@@ -265,6 +265,18 @@ class AgentLoop:
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+
+                    if await inject_event():
+                        # Event received: cancel all remaining tools
+                        logger.info("Event received after tool execution, cancelling remaining tools (current tool completed)")
+                        for tc in response.tool_calls[i+1:]:
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "name": tc.name,
+                                "content": "CANCELLED: User interrupted"
+                            })
+                        break
             else:
                 clean = self._strip_think(response.content)
                 # Don't persist error responses to session history — they can

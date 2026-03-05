@@ -392,3 +392,86 @@ async def test_event_published_when_active_task_exists():
     # After processing completes, task is removed from _processing_tasks
     loop._processing_tasks.discard(session_key)
     assert session_key not in loop._processing_tasks
+
+
+
+
+@pytest.mark.asyncio
+async def test_event_during_tool_execution_result_preserved():
+    """Test Bug 1: tool result preserved when event arrives during execution.
+    
+    Key point: if tool completes execution, its result should be preserved
+    even if an event arrived during execution. The event only cancels REMAINING tools.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    mock_response = MagicMock()
+    mock_response.has_tool_calls = True
+    mock_response.content = "Processing"
+    mock_response.reasoning_content = None
+    
+    tools = []
+    for i in range(1, 4):
+        tc = MagicMock()
+        tc.id = f"call_{i}"
+        tc.name = "test_tool"
+        tc.arguments = {"index": i}
+        tools.append(tc)
+    
+    mock_response.tool_calls = tools
+
+    workspace = MagicMock()
+    workspace.__truediv__ = MagicMock(return_value=MagicMock())
+
+    with patch("nanobot.agent.loop.ContextBuilder"), \
+         patch("nanobot.agent.loop.SessionManager"), \
+         patch("nanobot.agent.loop.SubagentManager"), \
+         patch("nanobot.agent.loop.ToolRegistry") as MockRegistry:
+        mock_registry = MagicMock()
+        mock_registry.get_definitions.return_value = []
+        
+        results = []
+        
+        async def mock_execute(name, args):
+            idx = args["index"]
+            # Event arrives during second tool execution
+            if idx == 2:
+                await bus.publish_event("test:key", "Stop!")
+            results.append(f"result_{idx}")
+            return f"result_{idx}"
+        
+        mock_registry.execute = AsyncMock(side_effect=mock_execute)
+        MockRegistry.return_value = mock_registry
+        
+        # LLM returns tool calls first, then final response
+        final_response = MagicMock()
+        final_response.has_tool_calls = False
+        final_response.content = "Interrupted"
+        final_response.reasoning_content = None
+        final_response.finish_reason = "stop"
+        
+        provider.chat = AsyncMock(side_effect=[mock_response, final_response])
+
+        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
+
+    final_content, tools_used, _ = await loop._run_agent_loop(
+        initial_messages=[{"role": "user", "content": "test"}],
+        session_key="test:key",
+    )
+
+    # Key assertions:
+    # 1. First two tools executed (third was cancelled)
+    assert tools_used == ["test_tool", "test_tool"], \
+        f"Expected first 2 tools to execute, got: {tools_used}"
+    
+    # 2. Both completed successfully and returned results
+    assert len(results) == 2, f"Expected 2 results, got {len(results)}"
+    assert results == ["result_1", "result_2"], f"Wrong results: {results}"
+
+
