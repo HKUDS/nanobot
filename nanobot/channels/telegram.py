@@ -225,9 +225,7 @@ class TelegramChannel(BaseChannel):
             logger.warning("Telegram bot not running")
             return
 
-        # Only stop typing indicator for final responses
-        if not msg.metadata.get("_progress", False):
-            self._stop_typing(msg.chat_id)
+        self._stop_typing(msg.chat_id)
 
         try:
             chat_id = int(msg.chat_id)
@@ -271,41 +269,23 @@ class TelegramChannel(BaseChannel):
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
-            is_progress = msg.metadata.get("_progress", False)
-            draft_id = msg.metadata.get("message_id")
-            
             for chunk in _split_message(msg.content):
                 try:
                     html = _markdown_to_telegram_html(chunk)
-                    if is_progress and draft_id:
-                        await self._app.bot.send_message_draft(
-                            chat_id=chat_id,
-                            draft_id=draft_id,
-                            text=html,
-                            parse_mode="HTML"
-                        )
-                    else:
-                        await self._app.bot.send_message(
-                            chat_id=chat_id,
-                            text=html,
-                            parse_mode="HTML",
-                            reply_parameters=reply_params
-                        )
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=html,
+                        parse_mode="HTML",
+                        reply_parameters=reply_params
+                    )
                 except Exception as e:
                     logger.warning("HTML parse failed, falling back to plain text: {}", e)
                     try:
-                        if is_progress and draft_id:
-                            await self._app.bot.send_message_draft(
-                                chat_id=chat_id,
-                                draft_id=draft_id,
-                                text=chunk
-                            )
-                        else:
-                            await self._app.bot.send_message(
-                                chat_id=chat_id,
-                                text=chunk,
-                                reply_parameters=reply_params
-                            )
+                        await self._app.bot.send_message(
+                            chat_id=chat_id,
+                            text=chunk,
+                            reply_parameters=reply_params
+                        )
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
 
@@ -441,7 +421,8 @@ class TelegramChannel(BaseChannel):
                         "is_group": message.chat.type != "private",
                     },
                 }
-                self._start_typing(str_chat_id)
+                if self.is_allowed(sender_id):
+                    self._start_typing(str_chat_id)
             buf = self._media_group_buffers[key]
             if content and content != "[empty message]":
                 buf["contents"].append(content)
@@ -450,8 +431,9 @@ class TelegramChannel(BaseChannel):
                 self._media_group_tasks[key] = asyncio.create_task(self._flush_media_group(key))
             return
 
-        # Start typing indicator before processing
-        self._start_typing(str_chat_id)
+        # Start typing indicator only for allowed users (avoid "typing..." for denied users)
+        if self.is_allowed(sender_id):
+            self._start_typing(str_chat_id)
 
         # Forward to the message bus
         await self._handle_message(
