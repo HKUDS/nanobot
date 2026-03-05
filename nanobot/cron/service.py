@@ -20,7 +20,10 @@ def _now_ms() -> int:
 def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
     """Compute next run time in ms."""
     if schedule.kind == "at":
-        return schedule.at_ms if schedule.at_ms and schedule.at_ms > now_ms else None
+        # Return at_ms even if it's in the past — _arm_timer uses max(0, delay) so past
+        # times fire immediately on the next tick. This handles LLM latency where the
+        # agent computes a future time but the tool call executes a few seconds later.
+        return schedule.at_ms if schedule.at_ms else None
     
     if schedule.kind == "every":
         if not schedule.every_ms or schedule.every_ms <= 0:
