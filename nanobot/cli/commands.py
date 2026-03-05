@@ -244,15 +244,24 @@ def _make_provider(config: Config):
 @app.command()
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    config: str = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Start the nanobot gateway."""
+    # Set config path if provided (must be done before any imports that use get_data_dir)
+    if config:
+        from nanobot.config.loader import set_config_path
+        config_path = Path(config).expanduser().resolve()
+        if not config_path.exists():
+            console.print(f"[red]Error: Config file not found: {config_path}[/red]")
+            raise typer.Exit(1)
+        set_config_path(config_path)
+        console.print(f"[dim]Using config: {config_path}[/dim]")
+    
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
-    from nanobot.config.loader import load_config
+    from nanobot.config.loader import get_data_dir, load_config
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
@@ -262,20 +271,16 @@ def gateway(
         import logging
         logging.basicConfig(level=logging.DEBUG)
 
-    config_path = Path(config) if config else None
-    config = load_config(config_path)
-    if workspace:
-        config.agents.defaults.workspace = workspace
-
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
+
+    config = load_config()
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
 
     # Create cron service first (callback set after agent creation)
-    # Use workspace path for per-instance cron store
-    cron_store_path = config.workspace_path / "cron" / "jobs.json"
+    cron_store_path = get_data_dir() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
