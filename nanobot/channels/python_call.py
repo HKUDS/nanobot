@@ -19,7 +19,20 @@ class PythonCallChannel(BaseChannel):
     Usage::
 
         channel = manager.get_channel("python_call")
+
+        # One-off call (no session persistence)
         response = await channel.call("Hello, nanobot!")
+
+        # Persistent session (conversation history preserved across calls)
+        response1 = await channel.call("My name is Alice", session_id="alice")
+        response2 = await channel.call("What's my name?", session_id="alice")
+
+        # Config overrides via metadata
+        response = await channel.call(
+            "Translate to French",
+            session_id="translator",
+            metadata={"system_prompt": "You are a translator."},
+        )
 
     Each ``call()`` publishes an inbound message to the bus, then waits for
     the corresponding outbound reply (matched by ``chat_id``).
@@ -72,6 +85,8 @@ class PythonCallChannel(BaseChannel):
         *,
         sender_id: str = "python_caller",
         chat_id: str | None = None,
+        session_id: str | None = None,
+        session_key: str | None = None,
         media: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         timeout: float | None = None,
@@ -84,8 +99,17 @@ class PythonCallChannel(BaseChannel):
             sender_id: Identifier for the caller (default ``"python_caller"``).
             chat_id: Optional chat identifier.  A unique id is generated when
                      omitted so that concurrent calls don't collide.
+            session_id: Stable session identifier for conversation persistence.
+                        When provided, the same ``session_id`` across multiple
+                        calls keeps conversation history (the agent remembers
+                        prior messages).  Mutually exclusive with ``chat_id``.
+            session_key: Optional session key override passed to the bus.
+                         Allows custom session scoping (e.g. sharing a session
+                         across different chat_ids).
             media: Optional list of media URLs to attach.
-            metadata: Optional extra metadata forwarded to the agent.
+            metadata: Optional extra metadata forwarded to the agent.  Config
+                      overrides can be passed here (e.g. ``system_prompt``,
+                      ``model``).
             timeout: Maximum seconds to wait for the agent's reply.
                      ``None`` means wait indefinitely.
 
@@ -96,28 +120,40 @@ class PythonCallChannel(BaseChannel):
             asyncio.TimeoutError: If *timeout* is set and the agent does not
                 reply in time.
             RuntimeError: If the channel is not running.
+            ValueError: If both *chat_id* and *session_id* are provided.
         """
         if not self._running:
             raise RuntimeError("python_call channel is not running")
 
-        if chat_id is None:
-            chat_id = f"pycall-{uuid.uuid4().hex[:12]}"
+        if chat_id is not None and session_id is not None:
+            raise ValueError("chat_id and session_id are mutually exclusive")
+
+        # Resolve the effective chat_id
+        if session_id is not None:
+            effective_chat_id = f"session-{session_id}"
+        elif chat_id is not None:
+            effective_chat_id = chat_id
+        elif self.config.default_session_id:
+            effective_chat_id = f"session-{self.config.default_session_id}"
+        else:
+            effective_chat_id = f"pycall-{uuid.uuid4().hex[:12]}"
 
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[str] = loop.create_future()
-        self._pending[chat_id] = fut
+        self._pending[effective_chat_id] = fut
 
         try:
             await self._handle_message(
                 sender_id=sender_id,
-                chat_id=chat_id,
+                chat_id=effective_chat_id,
                 content=content,
                 media=media,
                 metadata=metadata,
+                session_key=session_key,
             )
 
             if timeout is not None:
                 return await asyncio.wait_for(fut, timeout=timeout)
             return await fut
         finally:
-            self._pending.pop(chat_id, None)
+            self._pending.pop(effective_chat_id, None)

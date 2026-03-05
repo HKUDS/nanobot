@@ -224,3 +224,198 @@ async def test_access_denied(bus):
 
     assert bus.inbound_size == 0
     await ch.stop()
+
+
+@pytest.mark.asyncio
+async def test_session_id_produces_stable_chat_id(channel, bus):
+    """session_id maps to a deterministic chat_id for session persistence."""
+    await channel.start()
+
+    received_chat_ids = []
+
+    async def fake_agent():
+        for _ in range(2):
+            msg = await asyncio.wait_for(bus.consume_inbound(), timeout=2)
+            received_chat_ids.append(msg.chat_id)
+            await bus.publish_outbound(
+                OutboundMessage(
+                    channel="python_call",
+                    chat_id=msg.chat_id,
+                    content="ok",
+                )
+            )
+
+    async def dispatch_outbound():
+        for _ in range(2):
+            msg = await asyncio.wait_for(bus.consume_outbound(), timeout=2)
+            await channel.send(msg)
+
+    agent_task = asyncio.create_task(fake_agent())
+    dispatch_task = asyncio.create_task(dispatch_outbound())
+
+    await asyncio.wait_for(
+        channel.call("msg1", session_id="alice"), timeout=3
+    )
+    await asyncio.wait_for(
+        channel.call("msg2", session_id="alice"), timeout=3
+    )
+
+    # Both calls should use the same chat_id
+    assert received_chat_ids[0] == received_chat_ids[1] == "session-alice"
+
+    await agent_task
+    await dispatch_task
+    await channel.stop()
+
+
+@pytest.mark.asyncio
+async def test_session_id_and_chat_id_mutually_exclusive(channel):
+    """Providing both session_id and chat_id raises ValueError."""
+    await channel.start()
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        await channel.call("hi", chat_id="x", session_id="y")
+
+    await channel.stop()
+
+
+@pytest.mark.asyncio
+async def test_default_session_id_from_config(bus):
+    """When config has default_session_id, calls use it as chat_id."""
+    config = PythonCallConfig(
+        enabled=True, allow_from=["*"], default_session_id="default"
+    )
+    ch = PythonCallChannel(config, bus)
+    await ch.start()
+
+    async def fake_agent():
+        msg = await asyncio.wait_for(bus.consume_inbound(), timeout=2)
+        assert msg.chat_id == "session-default"
+        await bus.publish_outbound(
+            OutboundMessage(
+                channel="python_call",
+                chat_id=msg.chat_id,
+                content="ok",
+            )
+        )
+
+    async def dispatch_outbound():
+        msg = await asyncio.wait_for(bus.consume_outbound(), timeout=2)
+        await ch.send(msg)
+
+    agent_task = asyncio.create_task(fake_agent())
+    dispatch_task = asyncio.create_task(dispatch_outbound())
+
+    result = await asyncio.wait_for(ch.call("hello"), timeout=3)
+    assert result == "ok"
+
+    await agent_task
+    await dispatch_task
+    await ch.stop()
+
+
+@pytest.mark.asyncio
+async def test_session_key_override(channel, bus):
+    """session_key is passed through to the bus message."""
+    await channel.start()
+
+    async def fake_agent():
+        msg = await asyncio.wait_for(bus.consume_inbound(), timeout=2)
+        assert msg.session_key_override == "custom:shared-session"
+        await bus.publish_outbound(
+            OutboundMessage(
+                channel="python_call",
+                chat_id=msg.chat_id,
+                content="ok",
+            )
+        )
+
+    async def dispatch_outbound():
+        msg = await asyncio.wait_for(bus.consume_outbound(), timeout=2)
+        await channel.send(msg)
+
+    agent_task = asyncio.create_task(fake_agent())
+    dispatch_task = asyncio.create_task(dispatch_outbound())
+
+    result = await asyncio.wait_for(
+        channel.call("hi", session_key="custom:shared-session"), timeout=3
+    )
+    assert result == "ok"
+
+    await agent_task
+    await dispatch_task
+    await channel.stop()
+
+
+@pytest.mark.asyncio
+async def test_metadata_passed_through(channel, bus):
+    """Metadata (including config overrides) is forwarded to the bus."""
+    await channel.start()
+
+    async def fake_agent():
+        msg = await asyncio.wait_for(bus.consume_inbound(), timeout=2)
+        assert msg.metadata.get("system_prompt") == "You are a translator."
+        await bus.publish_outbound(
+            OutboundMessage(
+                channel="python_call",
+                chat_id=msg.chat_id,
+                content="translated",
+            )
+        )
+
+    async def dispatch_outbound():
+        msg = await asyncio.wait_for(bus.consume_outbound(), timeout=2)
+        await channel.send(msg)
+
+    agent_task = asyncio.create_task(fake_agent())
+    dispatch_task = asyncio.create_task(dispatch_outbound())
+
+    result = await asyncio.wait_for(
+        channel.call(
+            "hello",
+            metadata={"system_prompt": "You are a translator."},
+        ),
+        timeout=3,
+    )
+    assert result == "translated"
+
+    await agent_task
+    await dispatch_task
+    await channel.stop()
+
+
+@pytest.mark.asyncio
+async def test_explicit_session_id_overrides_default(bus):
+    """Explicit session_id takes precedence over config default_session_id."""
+    config = PythonCallConfig(
+        enabled=True, allow_from=["*"], default_session_id="default"
+    )
+    ch = PythonCallChannel(config, bus)
+    await ch.start()
+
+    async def fake_agent():
+        msg = await asyncio.wait_for(bus.consume_inbound(), timeout=2)
+        assert msg.chat_id == "session-override"
+        await bus.publish_outbound(
+            OutboundMessage(
+                channel="python_call",
+                chat_id=msg.chat_id,
+                content="ok",
+            )
+        )
+
+    async def dispatch_outbound():
+        msg = await asyncio.wait_for(bus.consume_outbound(), timeout=2)
+        await ch.send(msg)
+
+    agent_task = asyncio.create_task(fake_agent())
+    dispatch_task = asyncio.create_task(dispatch_outbound())
+
+    result = await asyncio.wait_for(
+        ch.call("hi", session_id="override"), timeout=3
+    )
+    assert result == "ok"
+
+    await agent_task
+    await dispatch_task
+    await ch.stop()

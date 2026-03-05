@@ -221,6 +221,7 @@ class PythonCallConfig(Base):
 
     enabled: bool = False
     allow_from: list[str] = Field(default_factory=lambda: ["*"])  # Default allow all for programmatic use
+    default_session_id: str = ""  # When set, all calls without explicit session_id/chat_id use this session
 
 
 class ChannelsConfig(Base):
