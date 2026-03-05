@@ -104,6 +104,11 @@ class XmppClient(ClientXMPP):
         """Handle disconnection."""
         logger.warning("XMPP disconnected, will reconnect...")
         self._joined_rooms.clear()
+        
+        # Cancel and clear typing tasks to prevent memory leaks and orphaned tasks
+        for task in self._channel._typing_tasks.values():
+            task.cancel()
+        self._channel._typing_tasks.clear()
 
     def send_typing(self, to_jid: str, typing: bool = True) -> None:
         """Send typing notification."""
