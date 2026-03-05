@@ -34,6 +34,38 @@ def safe_filename(name: str) -> str:
     return _UNSAFE_CHARS.sub("_", name).strip()
 
 
+def split_message(content: str, max_len: int = 2000) -> list[str]:
+    """
+    Split content into chunks within max_len, preferring line breaks.
+
+    Args:
+        content: The text content to split.
+        max_len: Maximum length per chunk (default 2000 for Discord compatibility).
+
+    Returns:
+        List of message chunks, each within max_len.
+    """
+    if not content:
+        return []
+    if len(content) <= max_len:
+        return [content]
+    chunks: list[str] = []
+    while content:
+        if len(content) <= max_len:
+            chunks.append(content)
+            break
+        cut = content[:max_len]
+        # Try to break at newline first, then space, then hard break
+        pos = cut.rfind('\n')
+        if pos <= 0:
+            pos = cut.rfind(' ')
+        if pos <= 0:
+            pos = max_len
+        chunks.append(content[:pos])
+        content = content[pos:].lstrip()
+    return chunks
+
+
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
     """Sync bundled templates to workspace. Only creates missing files."""
     from importlib.resources import files as pkg_files
