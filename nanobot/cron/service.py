@@ -226,6 +226,7 @@ class CronService:
 
     async def _on_timer(self) -> None:
         """Handle timer tick - run due jobs."""
+        self._load_store()
         if not self._store:
             return
 
