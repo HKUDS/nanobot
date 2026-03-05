@@ -492,11 +492,21 @@ def agent(
         console.print(f"  [dim]↳ {content}[/dim]")
 
     if message:
-        # Single message mode — direct call, no bus needed
+        # Single message mode with streaming
         async def run_once():
+            streamed_content = []
+            def stream_callback(chunk: str) -> None:
+                console.print(chunk, end="")
+                streamed_content.append(chunk)
+
             with _thinking_ctx():
-                response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
-            _print_agent_response(response, render_markdown=markdown)
+                response = await agent_loop.process_direct(
+                    message, session_id, on_progress=_cli_progress, stream_callback=stream_callback
+                )
+            if streamed_content:
+                console.print()  # newline after streaming
+            else:
+                _print_agent_response(response, render_markdown=markdown)
             await agent_loop.close_mcp()
 
         asyncio.run(run_once())

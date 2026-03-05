@@ -1,8 +1,12 @@
 """Async message queue for decoupled channel-agent communication."""
 
 import asyncio
+from typing import Any, Callable
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
+
+# Type alias for stream callbacks
+StreamCallback = Callable[[str], Any]
 
 
 class MessageBus:
@@ -16,6 +20,35 @@ class MessageBus:
     def __init__(self):
         self.inbound: asyncio.Queue[InboundMessage] = asyncio.Queue()
         self.outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue()
+        self._stream_callbacks: dict[str, StreamCallback] = {}
+        self._stream_done_events: dict[str, asyncio.Event] = {}
+
+    def register_stream_callback(self, stream_id: str, callback: StreamCallback) -> None:
+        """Register a streaming callback for a message."""
+        self._stream_callbacks[stream_id] = callback
+        self._stream_done_events[stream_id] = asyncio.Event()
+
+    def get_stream_callback(self, stream_id: str) -> StreamCallback | None:
+        """Get and remove a streaming callback (one-time use)."""
+        return self._stream_callbacks.pop(stream_id, None)
+
+    def mark_stream_done(self, stream_id: str) -> None:
+        """Mark a stream as done (agent loop finished processing)."""
+        if stream_id in self._stream_done_events:
+            self._stream_done_events[stream_id].set()
+
+    async def wait_stream_done(self, stream_id: str, timeout: float = 300) -> bool:
+        """Wait for a stream to complete. Returns True if done, False if timeout."""
+        event = self._stream_done_events.get(stream_id)
+        if not event:
+            return True
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+        finally:
+            self._stream_done_events.pop(stream_id, None)
 
     async def publish_inbound(self, msg: InboundMessage) -> None:
         """Publish a message from a channel to the agent."""

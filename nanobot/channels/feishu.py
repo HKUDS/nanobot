@@ -5,13 +5,15 @@ import json
 import os
 import re
 import threading
+import time
+import uuid
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import FeishuConfig
@@ -19,6 +21,7 @@ from nanobot.config.schema import FeishuConfig
 import importlib.util
 
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
+CARDKIT_AVAILABLE = FEISHU_AVAILABLE and importlib.util.find_spec("lark_oapi.api.cardkit") is not None
 
 # Message type display mapping
 MSG_TYPE_MAP = {
@@ -27,6 +30,123 @@ MSG_TYPE_MAP = {
     "file": "[file]",
     "sticker": "[sticker]",
 }
+
+
+class FeishuStreamingSession:
+    """Manages a streaming card session using CardKit streaming API."""
+
+    ELEMENT_ID = "streaming_content"
+
+    def __init__(self, client: Any, chat_id: str, receive_id_type: str):
+        self.client = client
+        self.chat_id = chat_id
+        self.receive_id_type = receive_id_type
+        self.card_id: str | None = None
+        self.current_text = ""
+        self.closed = False
+        self.last_update_time = 0.0
+        self.pending_text: str | None = None
+        self._sequence = 0
+        self._lock = threading.Lock()
+
+    def _build_streaming_card_json(self) -> str:
+        """Build Card JSON 2.0 with streaming mode enabled."""
+        card = {
+            "schema": "2.0",
+            "config": {
+                "streaming_mode": True,
+                "summary": {"content": "[生成中...]"},
+                "streaming_config": {
+                    "print_frequency_ms": {"default": 50},
+                    "print_step": {"default": 2},
+                    "print_strategy": "fast",
+                },
+            },
+            "body": {
+                "elements": [{"tag": "markdown", "content": "...", "element_id": self.ELEMENT_ID}]
+            },
+        }
+        return json.dumps(card, ensure_ascii=False)
+
+    def start_sync(self) -> bool:
+        """Create card entity and send it."""
+        if self.card_id or not CARDKIT_AVAILABLE:
+            return bool(self.card_id)
+        from lark_oapi.api.cardkit.v1 import (
+            CreateCardRequest, CreateCardRequestBody,
+        )
+        from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+        try:
+            create_req = CreateCardRequest.builder().request_body(
+                CreateCardRequestBody.builder().type("card_json").data(self._build_streaming_card_json()).build()
+            ).build()
+            create_resp = self.client.cardkit.v1.card.create(create_req)
+            if not create_resp.success():
+                logger.warning("Failed to create card: {}", create_resp.msg)
+                return False
+            self.card_id = create_resp.data.card_id
+
+            msg_content = json.dumps({"type": "card", "data": {"card_id": self.card_id}}, ensure_ascii=False)
+            send_req = CreateMessageRequest.builder().receive_id_type(self.receive_id_type).request_body(
+                CreateMessageRequestBody.builder().receive_id(self.chat_id).msg_type("interactive").content(msg_content).build()
+            ).build()
+            send_resp = self.client.im.v1.message.create(send_req)
+            return send_resp.success()
+        except Exception as e:
+            logger.error("Error starting streaming session: {}", e)
+            return False
+
+    def update_sync(self, text: str) -> bool:
+        """Update card content with throttling."""
+        if self.closed or not self.card_id:
+            return False
+        from lark_oapi.api.cardkit.v1 import ContentCardElementRequest, ContentCardElementRequestBody
+        with self._lock:
+            now = time.time() * 1000
+            if now - self.last_update_time < 100:
+                self.pending_text = text
+                return True
+            self.pending_text = text
+            self._sequence += 1
+            seq = self._sequence
+            self.current_text = text
+            self.last_update_time = now
+        try:
+            req = ContentCardElementRequest.builder().card_id(self.card_id).element_id(self.ELEMENT_ID).request_body(
+                ContentCardElementRequestBody.builder().content(text).uuid(str(uuid.uuid4())).sequence(seq).build()
+            ).build()
+            return self.client.cardkit.v1.card_element.content(req).success()
+        except Exception:
+            return False
+
+    def close_sync(self, final_text: str | None = None) -> bool:
+        """Close streaming mode and finalize card."""
+        if self.closed:
+            return True
+        self.closed = True
+        if not self.card_id:
+            return False
+        from lark_oapi.api.cardkit.v1 import (
+            ContentCardElementRequest, ContentCardElementRequestBody,
+            SettingsCardRequest, SettingsCardRequestBody,
+        )
+        text = final_text or self.pending_text or self.current_text or "Done."
+        try:
+            with self._lock:
+                self._sequence += 1
+                seq = self._sequence
+            content_req = ContentCardElementRequest.builder().card_id(self.card_id).element_id(self.ELEMENT_ID).request_body(
+                ContentCardElementRequestBody.builder().content(text).uuid(str(uuid.uuid4())).sequence(seq).build()
+            ).build()
+            self.client.cardkit.v1.card_element.content(content_req)
+            settings = {"config": {"streaming_mode": False, "summary": {"content": ""}}}
+            settings_req = SettingsCardRequest.builder().card_id(self.card_id).request_body(
+                SettingsCardRequestBody.builder().settings(json.dumps(settings, ensure_ascii=False)).uuid(str(uuid.uuid4())).sequence(seq + 1).build()
+            ).build()
+            return self.client.cardkit.v1.card.settings(settings_req).success()
+        except Exception as e:
+            logger.error("Error closing streaming session: {}", e)
+            return False
 
 
 def _extract_share_card_content(content_json: dict, msg_type: str) -> str:
@@ -252,6 +372,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._active_streams: dict[str, FeishuStreamingSession] = {}  # chat_id → active session
 
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
@@ -617,6 +738,14 @@ class FeishuChannel(BaseChannel):
             logger.error("Error sending Feishu {} message: {}", msg_type, e)
             return False
 
+    @staticmethod
+    def _stream_append(session: FeishuStreamingSession, text: str) -> None:
+        """Append text to a streaming card and push an update."""
+        with session._lock:
+            session.accumulated_text += text
+            snapshot = session.accumulated_text
+        session.update_sync(snapshot)
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu, including media (images/files) if present."""
         if not self._client:
@@ -626,6 +755,7 @@ class FeishuChannel(BaseChannel):
         try:
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
             loop = asyncio.get_running_loop()
+            session = self._active_streams.get(msg.chat_id)
 
             for file_path in msg.media:
                 if not os.path.isfile(file_path):
@@ -634,7 +764,11 @@ class FeishuChannel(BaseChannel):
                 ext = os.path.splitext(file_path)[1].lower()
                 if ext in self._IMAGE_EXTS:
                     key = await loop.run_in_executor(None, self._upload_image_sync, file_path)
-                    if key:
+                    if not key:
+                        continue
+                    if session:
+                        self._stream_append(session, f"\n![image]({key})\n")
+                    else:
                         await loop.run_in_executor(
                             None, self._send_message_sync,
                             receive_id_type, msg.chat_id, "image", json.dumps({"image_key": key}, ensure_ascii=False),
@@ -649,11 +783,14 @@ class FeishuChannel(BaseChannel):
                         )
 
             if msg.content and msg.content.strip():
-                card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
-                await loop.run_in_executor(
-                    None, self._send_message_sync,
-                    receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
-                )
+                if session:
+                    self._stream_append(session, f"\n\n{msg.content}")
+                else:
+                    card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
+                    await loop.run_in_executor(
+                        None, self._send_message_sync,
+                        receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
+                    )
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
@@ -742,19 +879,68 @@ class FeishuChannel(BaseChannel):
             if not content and not media_paths:
                 return
 
-            # Forward to message bus
+            # Check permission
+            if not self.is_allowed(sender_id):
+                logger.warning("Access denied for sender {} on channel {}", sender_id, self.name)
+                return
+
             reply_to = chat_id if chat_type == "group" else sender_id
-            await self._handle_message(
-                sender_id=sender_id,
-                chat_id=reply_to,
+            receive_id_type = "chat_id" if reply_to.startswith("oc_") else "open_id"
+            loop = asyncio.get_running_loop()
+
+            # Try to create streaming session
+            stream_id = str(uuid.uuid4())
+            streaming_session: FeishuStreamingSession | None = None
+            use_streaming = False
+
+            if self.config.streaming and CARDKIT_AVAILABLE:
+                streaming_session = FeishuStreamingSession(
+                    client=self._client, chat_id=reply_to, receive_id_type=receive_id_type
+                )
+                use_streaming = await loop.run_in_executor(None, streaming_session.start_sync)
+                if not use_streaming:
+                    streaming_session = None
+
+            if use_streaming and streaming_session:
+                streaming_session.accumulated_text = ""
+                self._active_streams[reply_to] = streaming_session
+
+                def stream_callback(chunk: str) -> None:
+                    with streaming_session._lock:
+                        streaming_session.accumulated_text += chunk
+                        text_snapshot = streaming_session.accumulated_text
+                    try:
+                        loop.run_in_executor(None, streaming_session.update_sync, text_snapshot)
+                    except RuntimeError:
+                        pass
+
+                self.bus.register_stream_callback(stream_id, stream_callback)
+
+            # Create and publish inbound message
+            msg = InboundMessage(
+                channel=self.name,
+                sender_id=str(sender_id),
+                chat_id=str(reply_to),
                 content=content,
                 media=media_paths,
-                metadata={
-                    "message_id": message_id,
-                    "chat_type": chat_type,
-                    "msg_type": msg_type,
-                }
+                metadata={"message_id": message_id, "chat_type": chat_type, "msg_type": msg_type},
+                stream_id=stream_id if use_streaming else None,
             )
+            await self.bus.publish_inbound(msg)
+
+            # Wait for response and close streaming session
+            if use_streaming and streaming_session:
+                await self._wait_and_close_stream(streaming_session, stream_id)
+                self._active_streams.pop(reply_to, None)
 
         except Exception as e:
             logger.error("Error processing Feishu message: {}", e)
+
+    async def _wait_and_close_stream(self, session: FeishuStreamingSession, stream_id: str) -> None:
+        """Wait for agent loop to finish, then close streaming session."""
+        loop = asyncio.get_running_loop()
+        await self.bus.wait_stream_done(stream_id, timeout=300)
+        await asyncio.sleep(2)  # drain pending outbound (e.g. media from tool calls)
+        if not session.closed:
+            final_text = getattr(session, "accumulated_text", None) or session.current_text
+            await loop.run_in_executor(None, session.close_sync, final_text)

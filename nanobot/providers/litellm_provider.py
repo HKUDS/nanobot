@@ -3,6 +3,7 @@
 import os
 import secrets
 import string
+from collections.abc import AsyncIterator
 from typing import Any
 
 import json_repair
@@ -250,6 +251,82 @@ class LiteLLMProvider(LLMProvider):
                 content=f"Error calling LLM: {str(e)}",
                 finish_reason="error",
             )
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> AsyncIterator[LLMResponse]:
+        """Stream a chat completion request via LiteLLM."""
+        model_name = self._resolve_model(model or self.default_model)
+        max_tokens = max(1, max_tokens)
+
+        kwargs: dict[str, Any] = {
+            "model": model_name,
+            "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": True,
+        }
+
+        self._apply_model_overrides(model_name, kwargs)
+
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        if self.extra_headers:
+            kwargs["extra_headers"] = self.extra_headers
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+
+        try:
+            stream = await acompletion(**kwargs)
+            tool_calls_map: dict[int, dict[str, Any]] = {}
+
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+
+                reasoning = getattr(delta, "reasoning_content", None)
+                if reasoning:
+                    yield LLMResponse(content=None, reasoning_content=reasoning)
+
+                content = getattr(delta, "content", None)
+                if content:
+                    yield LLMResponse(content=content)
+
+                if hasattr(delta, "tool_calls") and delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in tool_calls_map:
+                            tool_calls_map[idx] = {
+                                "id": tc_delta.id,
+                                "name": tc_delta.function.name if tc_delta.function else "",
+                                "arguments": "",
+                            }
+                        if tc_delta.function and tc_delta.function.arguments:
+                            tool_calls_map[idx]["arguments"] += tc_delta.function.arguments
+
+            if tool_calls_map:
+                final_tool_calls = []
+                for tc in tool_calls_map.values():
+                    try:
+                        args = json_repair.loads(tc["arguments"])
+                    except Exception:
+                        args = {"raw": tc["arguments"]}
+                    final_tool_calls.append(
+                        ToolCallRequest(id=tc["id"], name=tc["name"], arguments=args)
+                    )
+                yield LLMResponse(content=None, tool_calls=final_tool_calls)
+
+        except Exception as e:
+            yield LLMResponse(content=f"Error (stream): {e}", finish_reason="error")
 
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
