@@ -58,7 +58,6 @@ class AgentLoop:
         memory_window: int = 100,
         reasoning_effort: str | None = None,
         brave_api_key: str | None = None,
-        web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
@@ -78,7 +77,6 @@ class AgentLoop:
         self.memory_window = memory_window
         self.reasoning_effort = reasoning_effort
         self.brave_api_key = brave_api_key
-        self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -95,7 +93,6 @@ class AgentLoop:
             max_tokens=self.max_tokens,
             reasoning_effort=reasoning_effort,
             brave_api_key=brave_api_key,
-            web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
@@ -123,8 +120,8 @@ class AgentLoop:
             restrict_to_workspace=self.restrict_to_workspace,
             path_append=self.exec_config.path_append,
         ))
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
-        self.tools.register(WebFetchTool(proxy=self.web_proxy))
+        self.tools.register(WebSearchTool(api_key=self.brave_api_key))
+        self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
@@ -345,7 +342,7 @@ class AgentLoop:
             history = session.get_history(max_messages=self.memory_window)
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=msg.content, channel=channel, chat_id=chat_id, sender_id=msg.sender_id,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
@@ -421,7 +418,7 @@ class AgentLoop:
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
+            channel=msg.channel, chat_id=msg.chat_id, sender_id=msg.sender_id,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -464,25 +461,14 @@ class AgentLoop:
                 entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
             elif role == "user":
                 if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                    # Strip the runtime-context prefix, keep only the user text.
-                    parts = content.split("\n\n", 1)
-                    if len(parts) > 1 and parts[1].strip():
-                        entry["content"] = parts[1]
-                    else:
-                        continue
+                    continue
                 if isinstance(content, list):
-                    filtered = []
-                    for c in content:
-                        if c.get("type") == "text" and isinstance(c.get("text"), str) and c["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                            continue  # Strip runtime context from multimodal messages
-                        if (c.get("type") == "image_url"
-                                and c.get("image_url", {}).get("url", "").startswith("data:image/")):
-                            filtered.append({"type": "text", "text": "[image]"})
-                        else:
-                            filtered.append(c)
-                    if not filtered:
-                        continue
-                    entry["content"] = filtered
+                    entry["content"] = [
+                        {"type": "text", "text": "[image]"} if (
+                            c.get("type") == "image_url"
+                            and c.get("image_url", {}).get("url", "").startswith("data:image/")
+                        ) else c for c in content
+                    ]
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now()
