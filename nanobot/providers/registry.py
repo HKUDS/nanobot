@@ -272,6 +272,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 
+    # Vertex: Google Cloud Vertex AI with ADC authentication (no API key needed).
+    ProviderSpec(
+        name="vertex",
+        keywords=("vertex", "vertex_ai"),
+        env_key="",
+        display_name="Vertex",
+        litellm_prefix="vertex_ai",
+        skip_prefixes=("vertex_ai/",),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+        allow_missing_api_key=True,
+    ),
+
     # Zhipu: LiteLLM uses "zai/" prefix.
     # Also mirrors key to ZHIPUAI_API_KEY (some LiteLLM paths check that).
     # skip_prefixes: don't add "zai/" when already routed via gateway.
