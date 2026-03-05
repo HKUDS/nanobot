@@ -62,12 +62,21 @@ class DiscordChannel(BaseChannel):
             return
 
         self._running = True
-        self._http = httpx.AsyncClient(timeout=30.0)
+        # Configure HTTP client with proxy if provided
+        http_kwargs: dict[str, Any] = {"timeout": 30.0}
+        if self.config.proxy:
+            http_kwargs["proxy"] = self.config.proxy
+        self._http = httpx.AsyncClient(**http_kwargs)
+
+        # Configure WebSocket connection with proxy if provided
+        ws_kwargs: dict[str, Any] = {}
+        if self.config.proxy:
+            ws_kwargs["proxy"] = self.config.proxy
 
         while self._running:
             try:
                 logger.info("Connecting to Discord gateway...")
-                async with websockets.connect(self.config.gateway_url) as ws:
+                async with websockets.connect(self.config.gateway_url, **ws_kwargs) as ws:
                     self._ws = ws
                     await self._gateway_loop()
             except asyncio.CancelledError:
