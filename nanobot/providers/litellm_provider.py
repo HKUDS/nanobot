@@ -244,8 +244,21 @@ class LiteLLMProvider(LLMProvider):
         try:
             response = await acompletion(**kwargs)
             return self._parse_response(response)
+        except (
+            litellm.Timeout,
+            litellm.ServiceUnavailableError,
+            litellm.InternalServerError,
+            litellm.APIConnectionError,
+            litellm.RateLimitError,
+            litellm.BadGatewayError,
+        ) as e:
+            # Retriable errors — signal the agent loop to try fallback models
+            return LLMResponse(
+                content=f"Error calling LLM: {str(e)}",
+                finish_reason="retriable_error",
+            )
         except Exception as e:
-            # Return error as content for graceful handling
+            # Non-retriable errors (auth, bad request, etc.)
             return LLMResponse(
                 content=f"Error calling LLM: {str(e)}",
                 finish_reason="error",

@@ -24,7 +24,7 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -52,6 +52,7 @@ class AgentLoop:
         provider: LLMProvider,
         workspace: Path,
         model: str | None = None,
+        fallbacks: list[str] | None = None,
         max_iterations: int = 40,
         temperature: float = 0.1,
         max_tokens: int = 4096,
@@ -72,6 +73,7 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self.fallbacks = fallbacks or []
         self.max_iterations = max_iterations
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -177,6 +179,46 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    async def _call_with_fallback(
+        self,
+        messages: list[dict],
+    ) -> LLMResponse:
+        """Call the primary model; on retriable errors, try fallback models in order."""
+        response = await self.provider.chat(
+            messages=messages,
+            tools=self.tools.get_definitions(),
+            model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+
+        if response.finish_reason != "retriable_error" or not self.fallbacks:
+            return response
+
+        primary_error = response.content
+        logger.warning("Primary model {} failed: {}. Trying fallbacks...", self.model, primary_error)
+
+        for fallback_model in self.fallbacks:
+            logger.info("Trying fallback model: {}", fallback_model)
+            response = await self.provider.chat(
+                messages=messages,
+                tools=self.tools.get_definitions(),
+                model=fallback_model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+            if response.finish_reason != "retriable_error":
+                logger.info("Fallback model {} succeeded", fallback_model)
+                return response
+            logger.warning("Fallback model {} also failed: {}", fallback_model, response.content)
+
+        # All fallbacks exhausted — return the original error
+        logger.error("All fallback models exhausted. Returning primary error.")
+        return LLMResponse(
+            content=primary_error,
+            finish_reason="error",
+        )
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -191,14 +233,7 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                reasoning_effort=self.reasoning_effort,
-            )
+            response = await self._call_with_fallback(messages)
 
             if response.has_tool_calls:
                 if on_progress:
