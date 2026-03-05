@@ -84,7 +84,7 @@ Your workspace is at: {workspace_path}
 {personality_guidance}
 
 ## Guidelines
-- State intent before tool calls, but NEVER predict or claim results before receiving them.
+- When calling tools, do so immediately — do not narrate or announce them to the user first. Report results naturally after the tool returns.
 - Before modifying a file, read it first. Do not assume files or directories exist.
 - After writing or editing a file, re-read it if accuracy matters.
 - If a tool call fails, analyze the error before retrying with a different approach.
