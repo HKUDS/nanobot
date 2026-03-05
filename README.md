@@ -670,6 +670,7 @@ Config file: `~/.nanobot/config.json`
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `minimax` | LLM (MiniMax direct) | [platform.minimaxi.com](https://platform.minimaxi.com) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
+| `synthetic` | Open-source model gateway (DeepSeek, Kimi, Qwen, Llama, etc.) | [synthetic.new](https://synthetic.new) |
 | `siliconflow` | LLM (SiliconFlow/硅基流动) | [siliconflow.cn](https://siliconflow.cn) |
 | `volcengine` | LLM (VolcEngine/火山引擎) | [volcengine.com](https://www.volcengine.com) |
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
@@ -731,6 +732,30 @@ Connects directly to any OpenAI-compatible endpoint — LM Studio, llama.cpp, To
 ```
 
 > For local servers that don't require a key, set `apiKey` to any non-empty string (e.g. `"no-key"`).
+
+</details>
+
+<details>
+<summary><b>Synthetic (Open-Source Model Gateway)</b></summary>
+
+[Synthetic](https://synthetic.new) provides access to open-source models (DeepSeek, Kimi, Qwen, Llama, GLM, MiniMax, etc.) via a single API key. Model IDs use the `hf:` prefix format.
+
+```json
+{
+  "providers": {
+    "synthetic": {
+      "apiKey": "your-synthetic-api-key"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "synthetic/hf:moonshotai/Kimi-K2.5"
+    }
+  }
+}
+```
+
+> Model names follow HuggingFace conventions: `hf:org/model-name`. See [synthetic.new](https://synthetic.new) for the full list of available models.
 
 </details>
 
