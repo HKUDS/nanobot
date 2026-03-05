@@ -57,7 +57,8 @@ class Tool(ABC):
     def cast_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """
         Attempt to cast parameters to match schema types.
-        Returns modified params dict. Raises ValueError if casting is impossible.
+        Returns modified params dict. If casting fails, returns original value
+        and logs a debug message, allowing validation to catch the error.
         """
         schema = self.parameters or {}
         if schema.get("type", "object") != "object":
@@ -107,7 +108,7 @@ class Tool(ABC):
             if target_type == "integer":
                 if isinstance(val, bool):
                     # Don't silently convert bool to int
-                    raise ValueError(f"Cannot cast bool to integer")
+                    raise ValueError("Cannot cast bool to integer")
                 if isinstance(val, str):
                     return int(val)
                 if isinstance(val, (int, float)):
@@ -116,7 +117,7 @@ class Tool(ABC):
             elif target_type == "number":
                 if isinstance(val, bool):
                     # Don't silently convert bool to number
-                    raise ValueError(f"Cannot cast bool to number")
+                    raise ValueError("Cannot cast bool to number")
                 if isinstance(val, str):
                     return float(val)
                 if isinstance(val, (int, float)):
@@ -130,7 +131,13 @@ class Tool(ABC):
 
             elif target_type == "boolean":
                 if isinstance(val, str):
-                    return val.lower() in ("true", "1", "yes")
+                    val_lower = val.lower()
+                    if val_lower in ("true", "1", "yes"):
+                        return True
+                    elif val_lower in ("false", "0", "no"):
+                        return False
+                    # For other strings, raise error to let validation handle it
+                    raise ValueError(f"Cannot convert string '{val}' to boolean")
                 return bool(val)
 
             elif target_type == "array":
@@ -142,10 +149,11 @@ class Tool(ABC):
                 # Preserve None vs empty array distinction
                 if val is None:
                     return val
-                # Try to convert single value to array
+                # Empty string → empty array
                 if val == "":
                     return []
-                return [val]
+                # Don't auto-wrap single values, let validation catch the error
+                raise ValueError(f"Cannot convert {type(val).__name__} to array")
 
             elif target_type == "object":
                 if isinstance(val, dict):
