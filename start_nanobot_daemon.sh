@@ -1,33 +1,53 @@
 #!/bin/bash
 
-# nanobot 守护进程启动脚本
-# 用法: ./start_nanobot_daemon.sh
+# nanobot Multi-Instance Daemon Startup Script
+# Usage: ./start_nanobot_daemon.sh [config_path] [pid_file]
+# Example: ./start_nanobot_daemon.sh ~/.nanobot-instance2/config.json ~/.nanobot-instance2/nanobot.pid
+
+CONFIG_PATH="${1:-$HOME/.nanobot/config.json}"
+PID_FILE="${2:-$HOME/.nanobot/nanobot.pid}"
+LOG_FILE="${3:-/tmp/nanobot_$(basename $(dirname $CONFIG_PATH)).log}"
 
 cd "$(dirname "$0")"
 
-echo "🐈 启动 nanobot (守护进程模式)..."
-echo "配置文件: ~/.nanobot/config.json"
-echo "模型: Claude Sonnet 4.6"
+echo "🐈 Starting nanobot (daemon mode)..."
+echo "Config: $CONFIG_PATH"
+echo "PID file: $PID_FILE"
+echo "Log file: $LOG_FILE"
 echo ""
 
-# 检查是否已经在运行
-if pgrep -f "nanobot gateway" > /dev/null; then
-    echo "⚠️  nanobot 已经在运行中"
-    ps aux | grep "nanobot gateway" | grep -v grep
+# Check if config exists
+if [ ! -f "$CONFIG_PATH" ]; then
+    echo "❌ Config file not found: $CONFIG_PATH"
     exit 1
 fi
 
-# 激活虚拟环境
-source venv/bin/activate
+# Check if already running
+if [ -f "$PID_FILE" ]; then
+    OLD_PID=$(cat "$PID_FILE")
+    if ps -p $OLD_PID > /dev/null 2>&1; then
+        echo "⚠️  nanobot is already running (PID: $OLD_PID)"
+        exit 1
+    else
+        echo "⚠️  Removing stale PID file"
+        rm -f "$PID_FILE"
+    fi
+fi
 
-# 使用 nohup 启动网关，输出到日志文件
-echo "🐈 Starting nanobot gateway on port 18790..."
-nohup nanobot gateway > /tmp/nanobot_startup.log 2>&1 &
+# Activate virtual environment if exists
+if [ -d "venv" ]; then
+    source venv/bin/activate
+fi
 
-# 获取进程 ID
+# Start gateway with nohup
+nohup nanobot gateway --config "$CONFIG_PATH" > "$LOG_FILE" 2>&1 &
+
+# Save PID
 NANOBOT_PID=$!
-echo "✓ Nanobot 已启动 (PID: $NANOBOT_PID)"
-echo "✓ 日志文件: /tmp/nanobot_startup.log"
+echo $NANOBOT_PID > "$PID_FILE"
+
+echo "✓ Nanobot started (PID: $NANOBOT_PID)"
+echo "✓ Log file: $LOG_FILE"
 echo ""
-echo "查看日志: tail -f /tmp/nanobot_startup.log"
-echo "停止服务: pkill -f 'nanobot gateway'"
+echo "View logs: tail -f $LOG_FILE"
+echo "Stop service: kill \$(cat $PID_FILE)"

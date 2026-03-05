@@ -1,17 +1,27 @@
 #!/bin/bash
 
-# nanobot 启动脚本
-# 用法: ./start_nanobot.sh
+# nanobot Multi-Instance Startup Script
+# Usage: ./start_nanobot.sh [config_path]
+# Example: ./start_nanobot.sh ~/.nanobot-instance2/config.json
+
+CONFIG_PATH="${1:-$HOME/.nanobot/config.json}"
 
 cd "$(dirname "$0")"
 
-echo "🐈 启动 nanobot..."
-echo "配置文件: ~/.nanobot/config.json"
-echo "模型: Claude Sonnet 4.6"
+echo "🐈 Starting nanobot..."
+echo "Config: $CONFIG_PATH"
 echo ""
 
-# 激活虚拟环境
-source venv/bin/activate
+# Activate virtual environment if exists
+if [ -d "venv" ]; then
+    source venv/bin/activate
+fi
 
-# 启动网关
-nanobot gateway
+# Start gateway with specified config
+if [ -f "$CONFIG_PATH" ]; then
+    nanobot gateway --config "$CONFIG_PATH"
+else
+    echo "❌ Config file not found: $CONFIG_PATH"
+    echo "Usage: $0 [config_path]"
+    exit 1
+fi

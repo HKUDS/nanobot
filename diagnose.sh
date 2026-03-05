@@ -1,75 +1,98 @@
 #!/bin/bash
 
-echo "🔍 nanobot 飞书连接诊断"
+# nanobot Multi-Instance Diagnostic Tool
+# Usage: ./diagnose.sh [config_path]
+# Example: ./diagnose.sh ~/.nanobot-instance2/config.json
+
+CONFIG_PATH="${1:-$HOME/.nanobot/config.json}"
+DATA_DIR=$(dirname "$CONFIG_PATH")
+
+echo "🔍 nanobot Multi-Instance Diagnostic"
 echo "================================"
+echo "Config: $CONFIG_PATH"
+echo "Data Dir: $DATA_DIR"
 echo ""
 
-# 检查进程
-echo "1. 检查 nanobot 进程状态："
-if ps aux | grep -E "nanobot gateway" | grep -v grep > /dev/null; then
-    echo "   ✅ nanobot gateway 正在运行"
-    ps aux | grep -E "nanobot gateway" | grep -v grep | awk '{print "   进程 ID:", $2, "运行时间:", $10}'
+# Check if config exists
+if [ ! -f "$CONFIG_PATH" ]; then
+    echo "❌ Config file not found: $CONFIG_PATH"
+    exit 1
+fi
+
+# Check process
+echo "1. Process Status:"
+if ps aux | grep -E "nanobot gateway.*--config.*$(basename $CONFIG_PATH)" | grep -v grep > /dev/null; then
+    echo "   ✅ nanobot gateway is running"
+    ps aux | grep -E "nanobot gateway.*--config.*$(basename $CONFIG_PATH)" | grep -v grep | awk '{print "   PID:", $2, "Runtime:", $10}'
 else
-    echo "   ❌ nanobot gateway 未运行"
+    echo "   ❌ nanobot gateway is not running"
 fi
 echo ""
 
-# 检查配置
-echo "2. 检查飞书配置："
-if grep -q '"enabled": true' ~/.nanobot/config.json | grep -A 5 feishu; then
-    echo "   ✅ 飞书频道已启用"
+# Check configuration
+echo "2. Feishu Configuration:"
+if grep -q '"enabled": true' "$CONFIG_PATH" | grep -A 5 feishu; then
+    echo "   ✅ Feishu channel enabled"
 else
-    echo "   ❌ 飞书频道未启用"
+    echo "   ❌ Feishu channel disabled"
 fi
 
-APP_ID=$(grep -A 5 '"feishu"' ~/.nanobot/config.json | grep appId | cut -d'"' -f4)
+APP_ID=$(grep -A 5 '"feishu"' "$CONFIG_PATH" | grep appId | cut -d'"' -f4)
 if [ ! -z "$APP_ID" ]; then
     echo "   ✅ App ID: $APP_ID"
 else
-    echo "   ❌ App ID 未配置"
+    echo "   ❌ App ID not configured"
 fi
 echo ""
 
-# 检查端口
-echo "3. 检查网关端口："
-if lsof -i :18790 > /dev/null 2>&1; then
-    echo "   ✅ 端口 18790 正在监听"
+# Check port
+echo "3. Gateway Port:"
+PORT=$(grep -A 2 '"gateway"' "$CONFIG_PATH" | grep port | grep -o '[0-9]*')
+if [ ! -z "$PORT" ]; then
+    if lsof -i :$PORT > /dev/null 2>&1; then
+        echo "   ✅ Port $PORT is listening"
+    else
+        echo "   ⚠️  Port $PORT is not listening (normal for WebSocket mode)"
+    fi
 else
-    echo "   ⚠️  端口 18790 未监听（WebSocket 模式不需要）"
+    echo "   ⚠️  Port not configured"
 fi
 echo ""
 
-# 检查网络连接
-echo "4. 检查飞书 WebSocket 连接："
+# Check network connections
+echo "4. Feishu WebSocket Connection:"
 if lsof -i -n | grep -i python | grep -i established | grep -q feishu; then
-    echo "   ✅ 已建立到飞书服务器的连接"
+    echo "   ✅ Connected to Feishu servers"
 else
-    echo "   ⚠️  未检测到活跃的飞书连接"
+    echo "   ⚠️  No active Feishu connection detected"
 fi
 echo ""
 
-# 检查最近的日志
-echo "5. 最近的活动（最后 10 行进程输出）："
-echo "   提示：如果看不到日志，请在终端中直接运行 'nanobot gateway' 查看实时输出"
+# Check logs
+echo "5. Log Files:"
+if [ -d "$DATA_DIR/logs" ]; then
+    echo "   ✅ Log directory: $DATA_DIR/logs"
+    ls -lh "$DATA_DIR/logs" | tail -5
+else
+    echo "   ⚠️  No log directory found"
+fi
 echo ""
 
 echo "================================"
-echo "💡 故障排查建议："
+echo "💡 Troubleshooting Tips:"
 echo ""
-echo "1. 如果 nanobot 未运行，执行："
-echo "   cd /Users/samsonchoi/AI_Workspace2/nanobot"
-echo "   source venv/bin/activate"
-echo "   nanobot gateway"
+echo "1. Start the instance:"
+echo "   nanobot gateway --config $CONFIG_PATH"
 echo ""
-echo "2. 在飞书中测试："
-echo "   - 搜索你的机器人名称"
-echo "   - 发送一条消息"
-echo "   - 查看终端输出是否有收到消息的日志"
+echo "2. Test in Feishu:"
+echo "   - Search for your bot name"
+echo "   - Send a message"
+echo "   - Check terminal output for logs"
 echo ""
-echo "3. 检查飞书应用配置："
-echo "   - 确认应用已发布"
-echo "   - 确认添加了权限：im:message, im:message.p2p_msg:readonly"
-echo "   - 确认事件订阅：im.message.receive_v1（长连接模式）"
+echo "3. Verify Feishu app configuration:"
+echo "   - App is published"
+echo "   - Permissions: im:message, im:message.p2p_msg:readonly"
+echo "   - Event subscription: im.message.receive_v1 (WebSocket mode)"
 echo ""
-echo "4. 查看实时日志："
-echo "   在新终端窗口运行 'nanobot gateway' 可以看到详细的调试信息"
+echo "4. View real-time logs:"
+echo "   Run 'nanobot gateway --config $CONFIG_PATH' in a terminal"
