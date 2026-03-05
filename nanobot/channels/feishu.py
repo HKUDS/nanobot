@@ -269,6 +269,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._bot_open_id: str | None = None  # Bot's own open_id for mention detection
 
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
@@ -289,6 +290,9 @@ class FeishuChannel(BaseChannel):
             .app_secret(self.config.app_secret) \
             .log_level(lark.LogLevel.INFO) \
             .build()
+
+        # Fetch bot's own open_id for mention detection
+        await self._fetch_bot_info()
 
         # Create event handler (only register message receive, ignore other events)
         event_handler = lark.EventDispatcherHandler.builder(
@@ -337,6 +341,64 @@ class FeishuChannel(BaseChannel):
         """
         self._running = False
         logger.info("Feishu bot stopped")
+
+    # --- Group chat mention filtering ---
+
+    GROUP_MENTION_REQUIRED_TYPES = {"text", "audio", "sticker"}
+
+    async def _fetch_bot_info(self) -> None:
+        """Fetch bot's own open_id via /open-apis/bot/v3/info."""
+        try:
+            loop = asyncio.get_event_loop()
+
+            def _get_bot_info():
+                req = lark.BaseRequest()
+                req.http_method = lark.HttpMethod.GET
+                req.uri = "/open-apis/bot/v3/info"
+                req.token_types = {lark.AccessTokenType.TENANT}
+                return self._client.request(req)
+
+            response = await loop.run_in_executor(None, _get_bot_info)
+            if response.success():
+                data = json.loads(response.raw.content)
+                bot_info = data.get("bot", {})
+                self._bot_open_id = bot_info.get("open_id")
+                if self._bot_open_id:
+                    logger.info("Feishu bot open_id: {}", self._bot_open_id)
+                else:
+                    logger.warning("Feishu bot open_id not found in response")
+            else:
+                logger.warning("Failed to fetch bot info: code={}, msg={}", response.code, response.msg)
+        except Exception as e:
+            logger.warning("Error fetching bot info: {}", e)
+
+    def _is_bot_mentioned(self, message) -> bool:
+        """Check if the bot is mentioned in the message."""
+        if not self._bot_open_id:
+            logger.warning("Bot open_id not available, cannot check mentions")
+            return False
+        mentions = message.mentions or []
+        for mention in mentions:
+            if mention.id and mention.id.open_id == self._bot_open_id:
+                return True
+        return False
+
+    def _should_respond_in_group(self, message, msg_type: str) -> bool:
+        """Check if the bot should respond to a group message based on group_policy."""
+        policy = self.config.group_policy
+
+        if policy == "open":
+            return True
+
+        if policy == "mention":
+            if msg_type in self.GROUP_MENTION_REQUIRED_TYPES:
+                return self._is_bot_mentioned(message)
+            return True
+
+        if policy == "allowlist":
+            return message.chat_id in self.config.group_allow_from
+
+        return False
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
@@ -695,6 +757,15 @@ class FeishuChannel(BaseChannel):
             chat_id = message.chat_id
             chat_type = message.chat_type
             msg_type = message.message_type
+
+            logger.info("Message received: chat_type={}, chat_id={}, msg_type={}, mentions={}, bot_open_id={}",
+                       chat_type, chat_id, msg_type, message.mentions, self._bot_open_id)
+
+            # Group chat policy check
+            if chat_type == "group" and not self._should_respond_in_group(message, msg_type):
+                logger.debug("Skipping group message (policy={}, type={}): chat={}, sender={}",
+                           self.config.group_policy, msg_type, chat_id, sender_id)
+                return
 
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
