@@ -7,6 +7,45 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.errors import ToolPermissionError, ToolTimeoutError
+
+# Default deny patterns — designed to catch common destructive commands
+# even through basic shell quoting / escaping tricks.
+_DEFAULT_DENY_PATTERNS: list[str] = [
+    r"\brm\s+-[rf]{1,2}\b",              # rm -r, rm -rf, rm -fr
+    r"\bdel\s+/[fq]\b",                  # del /f, del /q
+    r"\brmdir\s+/s\b",                   # rmdir /s
+    r"(?:^|[;&|]\s*)format\b",           # format (as standalone command only)
+    r"\b(mkfs|diskpart)\b",              # disk operations
+    r"\bdd\s+if=",                       # dd
+    r">\s*/dev/sd",                      # write to disk
+    r"\b(shutdown|reboot|poweroff)\b",   # system power
+    r":\(\)\s*\{.*\};\s*:",             # fork bomb
+    # Hardened: catch variable-expansion / hex-escape / base64 bypass attempts
+    r"\$['\"]\\x[0-9a-f]{2}",           # $'\x72\x6d' hex escape
+    r"\bbase64\s.*\|\s*(sh|bash|zsh)\b", # base64 decode | sh
+    r"\beval\s+.*\$",                    # eval with variable expansion
+    r"\bchmod\s+[0-7]*777\b",           # chmod 777
+    r"\bchown\s+-r\s+root\b",           # chown -R root (pattern lowercase; guard lowercases input)
+    r"\bcurl\s+.*\|\s*(sh|bash|zsh)\b",  # curl | sh
+    r"\bwget\s+.*\|\s*(sh|bash|zsh)\b",  # wget | sh
+]
+
+# Default allowlist (only used when shell_mode == "allowlist")
+_DEFAULT_ALLOW_PATTERNS: list[str] = [
+    r"^(ls|cat|head|tail|grep|awk|sed|wc|sort|uniq|find|file|stat|du|df|which|whereis|type)\b",
+    r"^(echo|printf|date|cal|uname|hostname|whoami|env|printenv)\b",
+    r"^(cd|pwd|pushd|popd|mkdir|touch|cp|mv|ln|readlink)\b",
+    r"^(git|gh)\b",
+    r"^(python|python3|pip|pip3|node|npm|npx|bun|deno|cargo|go|ruby|java|javac)\b",
+    r"^(curl|wget|ssh|scp|rsync)\b",
+    r"^(docker|docker-compose|podman)\b",
+    r"^(make|cmake|ninja|gcc|g\+\+|clang)\b",
+    r"^(tar|gzip|gunzip|zip|unzip|xz|bzip2)\b",
+    r"^(systemctl|journalctl|service)\b",
+    r"^(apt|apt-get|brew|yum|dnf|pacman|apk)\b",
+    r"^(jq|yq|tree|less|more|diff|patch|tee|xargs)\b",
+]
 
 
 class ExecTool(Tool):
@@ -21,21 +60,15 @@ class ExecTool(Tool):
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
+        shell_mode: str = "denylist",
     ):
         self.timeout = timeout
         self.working_dir = working_dir
-        self.deny_patterns = deny_patterns or [
-            r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
-            r"\bdel\s+/[fq]\b",              # del /f, del /q
-            r"\brmdir\s+/s\b",               # rmdir /s
-            r"(?:^|[;&|]\s*)format\b",       # format (as standalone command only)
-            r"\b(mkfs|diskpart)\b",          # disk operations
-            r"\bdd\s+if=",                   # dd
-            r">\s*/dev/sd",                  # write to disk
-            r"\b(shutdown|reboot|poweroff)\b",  # system power
-            r":\(\)\s*\{.*\};\s*:",          # fork bomb
-        ]
-        self.allow_patterns = allow_patterns or []
+        self.shell_mode = shell_mode  # "allowlist" | "denylist"
+        self.deny_patterns = deny_patterns or list(_DEFAULT_DENY_PATTERNS)
+        self.allow_patterns = allow_patterns or (
+            list(_DEFAULT_ALLOW_PATTERNS) if shell_mode == "allowlist" else []
+        )
         self.restrict_to_workspace = restrict_to_workspace
     
     @property
@@ -71,7 +104,7 @@ class ExecTool(Tool):
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
         if guard_error:
-            return ToolResult.fail(guard_error)
+            raise ToolPermissionError("exec", guard_error)
 
         env = os.environ.copy()
         self._inject_node_ca_bundle(env)
@@ -93,13 +126,11 @@ class ExecTool(Tool):
                 )
             except asyncio.TimeoutError:
                 process.kill()
-                # Wait for the process to fully terminate so pipes are
-                # drained and file descriptors are released.
                 try:
                     await asyncio.wait_for(process.wait(), timeout=5.0)
                 except asyncio.TimeoutError:
                     pass
-                return ToolResult.fail(f"Error: Command timed out after {self.timeout} seconds")
+                raise ToolTimeoutError("exec", self.timeout)
             
             output_parts = []
             
@@ -159,13 +190,28 @@ class ExecTool(Tool):
         cmd = command.strip()
         lower = cmd.lower()
 
+        # Normalize common evasion tricks for pattern matching
+        # Decode \\xHH hex sequences to their characters
+        normalized = re.sub(
+            r"\\x([0-9a-fA-F]{2})",
+            lambda m: chr(int(m.group(1), 16)),
+            lower,
+        )
+
         for pattern in self.deny_patterns:
-            if re.search(pattern, lower):
+            if re.search(pattern, lower) or re.search(pattern, normalized):
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
 
         if self.allow_patterns:
-            if not any(re.search(p, lower) for p in self.allow_patterns):
-                return "Error: Command blocked by safety guard (not in allowlist)"
+            # In allowlist mode, the first "word" of each command in a pipeline / chain
+            # must match at least one allow pattern.
+            segments = re.split(r"[;&|]+", lower)
+            for segment in segments:
+                segment = segment.strip()
+                if not segment:
+                    continue
+                if not any(re.search(p, segment) for p in self.allow_patterns):
+                    return "Error: Command blocked by safety guard (not in allowlist)"
 
         if self.restrict_to_workspace:
             if "..\\" in cmd or "../" in cmd:

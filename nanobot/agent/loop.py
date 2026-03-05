@@ -12,7 +12,12 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
-from nanobot.agent.context import ContextBuilder, compress_context, estimate_messages_tokens
+from nanobot.agent.context import (
+    ContextBuilder,
+    compress_context,
+    estimate_messages_tokens,
+    summarize_and_compress,
+)
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.cron import CronTool
@@ -24,6 +29,7 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import AgentConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
@@ -48,97 +54,74 @@ class AgentLoop:
         self,
         bus: MessageBus,
         provider: LLMProvider,
-        workspace: Path,
-        model: str | None = None,
-        max_iterations: int = 40,
-        temperature: float = 0.1,
-        max_tokens: int = 4096,
-        memory_window: int = 100,
-        memory_retrieval_k: int = 6,
-        memory_token_budget: int = 900,
-        memory_uncertainty_threshold: float = 0.6,
-        memory_enable_contradiction_check: bool = True,
-        memory_rollout_mode: str = "enabled",
-        memory_type_separation_enabled: bool = True,
-        memory_router_enabled: bool = True,
-        memory_reflection_enabled: bool = True,
-        memory_shadow_mode: bool = False,
-        memory_shadow_sample_rate: float = 0.2,
-        memory_vector_health_enabled: bool = True,
-        memory_auto_reindex_on_empty_vector: bool = True,
-        memory_history_fallback_enabled: bool = False,
-        memory_fallback_allowed_sources: list[str] | None = None,
-        memory_fallback_max_summary_chars: int = 280,
-        memory_rollout_gate_min_recall_at_k: float = 0.55,
-        memory_rollout_gate_min_precision_at_k: float = 0.25,
-        memory_rollout_gate_max_avg_memory_context_tokens: float = 1400.0,
-        memory_rollout_gate_max_history_fallback_ratio: float = 0.05,
+        config: AgentConfig,
+        *,
         brave_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
-        restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
-        context_window_tokens: int = 128_000,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
-        self.workspace = workspace
-        self.model = model or provider.get_default_model()
-        self.max_iterations = max_iterations
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.context_window_tokens = context_window_tokens
-        self.memory_window = memory_window
-        self.memory_retrieval_k = memory_retrieval_k
-        self.memory_token_budget = memory_token_budget
-        self.memory_uncertainty_threshold = memory_uncertainty_threshold
-        self.memory_enable_contradiction_check = memory_enable_contradiction_check
+        self.config = config
+        self.workspace = config.workspace_path
+        self.model = config.model or provider.get_default_model()
+        self.max_iterations = config.max_iterations
+        self.temperature = config.temperature
+        self.max_tokens = config.max_tokens
+        self.context_window_tokens = config.context_window_tokens
+        self.memory_window = config.memory_window
+        self.memory_retrieval_k = config.memory_retrieval_k
+        self.memory_token_budget = config.memory_token_budget
+        self.memory_uncertainty_threshold = config.memory_uncertainty_threshold
+        self.memory_enable_contradiction_check = config.memory_enable_contradiction_check
         self.memory_rollout_overrides = {
-            "memory_rollout_mode": memory_rollout_mode,
-            "memory_type_separation_enabled": memory_type_separation_enabled,
-            "memory_router_enabled": memory_router_enabled,
-            "memory_reflection_enabled": memory_reflection_enabled,
-            "memory_shadow_mode": memory_shadow_mode,
-            "memory_shadow_sample_rate": memory_shadow_sample_rate,
-            "memory_vector_health_enabled": memory_vector_health_enabled,
-            "memory_auto_reindex_on_empty_vector": memory_auto_reindex_on_empty_vector,
-            "memory_history_fallback_enabled": memory_history_fallback_enabled,
-            "memory_fallback_allowed_sources": memory_fallback_allowed_sources or ["profile", "events", "mem0_get_all"],
-            "memory_fallback_max_summary_chars": memory_fallback_max_summary_chars,
+            "memory_rollout_mode": config.memory_rollout_mode,
+            "memory_type_separation_enabled": config.memory_type_separation_enabled,
+            "memory_router_enabled": config.memory_router_enabled,
+            "memory_reflection_enabled": config.memory_reflection_enabled,
+            "memory_shadow_mode": config.memory_shadow_mode,
+            "memory_shadow_sample_rate": config.memory_shadow_sample_rate,
+            "memory_vector_health_enabled": config.memory_vector_health_enabled,
+            "memory_auto_reindex_on_empty_vector": config.memory_auto_reindex_on_empty_vector,
+            "memory_history_fallback_enabled": config.memory_history_fallback_enabled,
+            "memory_fallback_allowed_sources": config.memory_fallback_allowed_sources or ["profile", "events", "mem0_get_all"],
+            "memory_fallback_max_summary_chars": config.memory_fallback_max_summary_chars,
             "rollout_gates": {
-                "min_recall_at_k": memory_rollout_gate_min_recall_at_k,
-                "min_precision_at_k": memory_rollout_gate_min_precision_at_k,
-                "max_avg_memory_context_tokens": memory_rollout_gate_max_avg_memory_context_tokens,
-                "max_history_fallback_ratio": memory_rollout_gate_max_history_fallback_ratio,
+                "min_recall_at_k": config.memory_rollout_gate_min_recall_at_k,
+                "min_precision_at_k": config.memory_rollout_gate_min_precision_at_k,
+                "max_avg_memory_context_tokens": config.memory_rollout_gate_max_avg_memory_context_tokens,
+                "max_history_fallback_ratio": config.memory_rollout_gate_max_history_fallback_ratio,
             },
         }
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
-        self.restrict_to_workspace = restrict_to_workspace
+        self.restrict_to_workspace = config.restrict_to_workspace
 
         self.context = ContextBuilder(
-            workspace,
+            self.workspace,
             memory_retrieval_k=self.memory_retrieval_k,
             memory_token_budget=self.memory_token_budget,
+            memory_md_token_cap=config.memory_md_token_cap,
             memory_rollout_overrides=self.memory_rollout_overrides,
         )
-        self.sessions = session_manager or SessionManager(workspace)
+        self.sessions = session_manager or SessionManager(self.workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
             provider=provider,
-            workspace=workspace,
+            workspace=self.workspace,
             bus=bus,
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
-            restrict_to_workspace=restrict_to_workspace,
+            restrict_to_workspace=self.restrict_to_workspace,
         )
 
         self._running = False
@@ -160,6 +143,7 @@ class AgentLoop:
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
+            shell_mode=self.config.shell_mode,
         ))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
@@ -281,12 +265,58 @@ class AgentLoop:
     # ------------------------------------------------------------------
     # Agent loop (Plan → Act → Observe → Reflect)
     # ------------------------------------------------------------------
+    # Planning & Reflection prompts
+    # ------------------------------------------------------------------
+
+    _PLAN_PROMPT = (
+        "Before taking action, briefly outline a numbered plan (3-7 steps) "
+        "for how you will accomplish the user's request using available tools. "
+        "Keep each step to one sentence. Then begin executing step 1."
+    )
+
+    _PROGRESS_PROMPT = (
+        "Briefly reflect on progress: which steps of your plan are complete, "
+        "which remain? Did the tool results achieve the current step's goal? "
+        "If not, adjust your plan. If all steps are done, produce the final answer."
+    )
+
+    _FAILURE_STRATEGY_PROMPT = (
+        "The previous tool call failed. Before retrying:\n"
+        "1. Analyze what went wrong.\n"
+        "2. Propose an alternative approach.\n"
+        "3. Execute the alternative, or skip this step if it's non-essential."
+    )
 
     _REFLECT_PROMPT = (
         "Briefly reflect: did the tool results above achieve your goal? "
         "If not, state what went wrong and what you will try next. "
         "If yes, produce the final answer for the user."
     )
+
+    @staticmethod
+    def _needs_planning(text: str) -> bool:
+        """Heuristic: does this message benefit from explicit planning?
+
+        Short greetings, simple questions, or single-action requests don't
+        need a plan. Multi-step tasks, research queries, and complex
+        instructions do.
+        """
+        if not text:
+            return False
+        text_lower = text.strip().lower()
+        # Very short messages (< 20 chars) are usually greetings or simple Qs
+        if len(text_lower) < 20:
+            return False
+        # Explicit multi-step indicators
+        multi_step_signals = (
+            " and ", " then ", " after that", " also ", " steps",
+            " first ", " second ", " finally ",
+            "\n-", "\n*", "\n1.", "\n2.",
+            " research ", " analyze ", " compare ", " investigate ",
+            " create ", " build ", " implement ", " set up ", " configure ",
+            " plan ", " schedule ", " organize ",
+        )
+        return any(signal in text_lower for signal in multi_step_signals)
 
     async def _run_agent_loop(
         self,
@@ -304,15 +334,44 @@ class AgentLoop:
         turn_tool_calls = 0
         nudged_for_final = False
         consecutive_errors = 0
+        has_plan = False
 
         # Reserve ~20% of context window for the model's response
         context_budget = int(self.context_window_tokens * 0.80)
+
+        # Extract the last user message (used by planning + verification)
+        user_text = ""
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                content = m.get("content", "")
+                if isinstance(content, str):
+                    user_text = content
+                elif isinstance(content, list):
+                    user_text = " ".join(
+                        p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"
+                    )
+                break
+
+        # --- PLAN phase: inject planning prompt for complex tasks ----------
+        if self.config.planning_enabled:
+            if self._needs_planning(user_text):
+                messages.append({
+                    "role": "system",
+                    "content": self._PLAN_PROMPT,
+                })
+                has_plan = True
+                logger.debug("Planning prompt injected for: {}...", user_text[:60])
 
         while iteration < self.max_iterations:
             iteration += 1
 
             # --- Context compression: keep messages within budget ----------
-            messages = compress_context(messages, context_budget)
+            summary_model = self.config.summary_model or self.model
+            messages = await summarize_and_compress(
+                messages, context_budget,
+                provider=self.provider,
+                model=summary_model,
+            )
 
             tools_def = self.tools.get_definitions()
             response = await self.provider.chat(
@@ -380,9 +439,21 @@ class AgentLoop:
                     if not result.success:
                         any_failed = True
 
-                # --- REFLECT: after tool execution, nudge the model to
-                # evaluate results (only when there were failures or many calls)
-                if any_failed or len(response.tool_calls) >= 3:
+                # --- REFLECT: after tool execution, evaluate progress ------
+                if any_failed:
+                    # Failure-aware: prompt alternative strategy
+                    messages.append({
+                        "role": "system",
+                        "content": self._FAILURE_STRATEGY_PROMPT,
+                    })
+                elif has_plan and len(response.tool_calls) >= 1:
+                    # Plan-aware progress check (every tool round when planning)
+                    messages.append({
+                        "role": "system",
+                        "content": self._PROGRESS_PROMPT,
+                    })
+                elif len(response.tool_calls) >= 3:
+                    # Fallback: general reflection for many concurrent calls
                     messages.append({
                         "role": "system",
                         "content": self._REFLECT_PROMPT,
@@ -420,7 +491,113 @@ class AgentLoop:
             )
             messages = self.context.add_assistant_message(messages, final_content)
 
+        # --- Verification pass ---------------------------------------------
+        if final_content is not None:
+            final_content, messages = await self._verify_answer(
+                user_text, final_content, messages,
+            )
+
         return final_content, tools_used, messages
+
+    # ------------------------------------------------------------------
+    # Self-critique / verification (Step 2)
+    # ------------------------------------------------------------------
+
+    _CRITIQUE_SYSTEM_PROMPT = (
+        "You are a fact-checker reviewing an AI assistant's answer. "
+        "Given the user's question and the assistant's candidate answer, respond with ONLY "
+        "a JSON object (no markdown fencing): "
+        '{"confidence": <1-5>, "issues": ["issue1", ...]}. '
+        "confidence 5 = fully supported, 1 = likely wrong. "
+        "List any unsupported claims, factual errors, or missing caveats in issues. "
+        "If the answer is solid, return an empty issues list."
+    )
+
+    async def _verify_answer(
+        self,
+        user_text: str,
+        candidate: str,
+        messages: list[dict],
+    ) -> tuple[str, list[dict]]:
+        """Run a verification pass on the candidate answer.
+
+        Returns (possibly_revised_content, updated_messages).
+        If verification passes or is disabled, returns the candidate as-is.
+        """
+        mode = self.config.verification_mode
+        if mode == "off":
+            return candidate, messages
+
+        # "on_uncertainty" — only verify questions with low memory grounding
+        if mode == "on_uncertainty" and not self._should_force_verification(user_text):
+            return candidate, messages
+
+        logger.debug("Running verification pass (mode={})", mode)
+
+        critique_messages = [
+            {"role": "system", "content": self._CRITIQUE_SYSTEM_PROMPT},
+            {"role": "user", "content": (
+                f"User's question: {user_text}\n\n"
+                f"Assistant's answer: {candidate}"
+            )},
+        ]
+
+        try:
+            critique_response = await self.provider.chat(
+                messages=critique_messages,
+                tools=None,
+                model=self.model,
+                temperature=0.0,
+                max_tokens=512,
+            )
+            raw = (critique_response.content or "").strip()
+            # Parse the JSON critique
+            parsed = json.loads(raw)
+            confidence = int(parsed.get("confidence", 5))
+            issues = parsed.get("issues", [])
+
+            if confidence >= 3 and not issues:
+                logger.debug("Verification passed (confidence={})", confidence)
+                return candidate, messages
+
+            # Low confidence or issues found — retry with critique injected
+            logger.info(
+                "Verification flagged issues (confidence={}): {}",
+                confidence, issues,
+            )
+            issue_text = "\n".join(f"- {i}" for i in issues) if issues else "Low confidence"
+            messages.append({
+                "role": "system",
+                "content": (
+                    f"Self-check found potential issues with your answer:\n{issue_text}\n\n"
+                    "Please revise your answer addressing these concerns. "
+                    "If you're uncertain about a claim, say so explicitly."
+                ),
+            })
+
+            # One retry pass (no tools, just revision)
+            revision = await self.provider.chat(
+                messages=messages,
+                tools=None,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+            revised = self._strip_think(revision.content) or candidate
+            # Replace the last assistant message with the revised one
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i].get("role") == "assistant":
+                    messages[i]["content"] = revised
+                    break
+            logger.info("Answer revised after verification")
+            return revised, messages
+
+        except (json.JSONDecodeError, KeyError, ValueError):
+            logger.debug("Verification response not parseable, skipping")
+            return candidate, messages
+        except Exception:
+            logger.debug("Verification call failed, returning original answer")
+            return candidate, messages
 
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""

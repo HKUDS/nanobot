@@ -211,6 +211,96 @@ class AgentDefaults(Base):
     memory_rollout_gate_max_history_fallback_ratio: float = 0.05
 
 
+class AgentConfig(Base):
+    """Unified agent runtime configuration.
+
+    Passed directly to ``AgentLoop.__init__`` so that callers no longer need
+    to forward 30+ keyword arguments individually.  Build one from an
+    ``AgentDefaults`` instance with ``AgentConfig.from_defaults()``.
+    """
+
+    workspace: str = "~/.nanobot/workspace"
+    model: str = "anthropic/claude-opus-4-5"
+    max_tokens: int = 8192
+    temperature: float = 0.1
+    max_iterations: int = 40
+    context_window_tokens: int = 128_000
+
+    # Memory
+    memory_window: int = 100
+    memory_retrieval_k: int = 6
+    memory_token_budget: int = 900
+    memory_md_token_cap: int = 1500  # max tokens for MEMORY.md injection; 0 = unlimited
+    memory_uncertainty_threshold: float = 0.6
+    memory_enable_contradiction_check: bool = True
+    memory_rollout_mode: str = "enabled"
+    memory_type_separation_enabled: bool = True
+    memory_router_enabled: bool = True
+    memory_reflection_enabled: bool = True
+    memory_shadow_mode: bool = False
+    memory_shadow_sample_rate: float = 0.2
+    memory_vector_health_enabled: bool = True
+    memory_auto_reindex_on_empty_vector: bool = True
+    memory_history_fallback_enabled: bool = False
+    memory_fallback_allowed_sources: list[str] = Field(default_factory=lambda: ["profile", "events", "mem0_get_all"])
+    memory_fallback_max_summary_chars: int = 280
+    memory_rollout_gate_min_recall_at_k: float = 0.55
+    memory_rollout_gate_min_precision_at_k: float = 0.25
+    memory_rollout_gate_max_avg_memory_context_tokens: float = 1400.0
+    memory_rollout_gate_max_history_fallback_ratio: float = 0.05
+
+    # Planning & verification (Step 1 & 2)
+    planning_enabled: bool = True
+    verification_mode: str = "on_uncertainty"  # always | on_uncertainty | off
+
+    # Summarization-based compression (Step 3)
+    summary_model: str | None = None  # None = use main model; set e.g. "gpt-4o-mini" for cheaper compression
+
+    # Shell security (Step 11)
+    shell_mode: str = "denylist"  # allowlist | denylist
+
+    # Tools
+    restrict_to_workspace: bool = False
+
+    @classmethod
+    def from_defaults(cls, defaults: "AgentDefaults", **overrides) -> "AgentConfig":
+        """Build an ``AgentConfig`` from the ``AgentDefaults`` section of the config file."""
+        data = {
+            "workspace": defaults.workspace,
+            "model": defaults.model,
+            "max_tokens": defaults.max_tokens,
+            "temperature": defaults.temperature,
+            "max_iterations": defaults.max_tool_iterations,
+            "memory_window": defaults.memory_window,
+            "memory_retrieval_k": defaults.memory_retrieval_k,
+            "memory_token_budget": defaults.memory_token_budget,
+            "memory_uncertainty_threshold": defaults.memory_uncertainty_threshold,
+            "memory_enable_contradiction_check": defaults.memory_enable_contradiction_check,
+            "memory_rollout_mode": defaults.memory_rollout_mode,
+            "memory_type_separation_enabled": defaults.memory_type_separation_enabled,
+            "memory_router_enabled": defaults.memory_router_enabled,
+            "memory_reflection_enabled": defaults.memory_reflection_enabled,
+            "memory_shadow_mode": defaults.memory_shadow_mode,
+            "memory_shadow_sample_rate": defaults.memory_shadow_sample_rate,
+            "memory_vector_health_enabled": defaults.memory_vector_health_enabled,
+            "memory_auto_reindex_on_empty_vector": defaults.memory_auto_reindex_on_empty_vector,
+            "memory_history_fallback_enabled": defaults.memory_history_fallback_enabled,
+            "memory_fallback_allowed_sources": defaults.memory_fallback_allowed_sources,
+            "memory_fallback_max_summary_chars": defaults.memory_fallback_max_summary_chars,
+            "memory_rollout_gate_min_recall_at_k": defaults.memory_rollout_gate_min_recall_at_k,
+            "memory_rollout_gate_min_precision_at_k": defaults.memory_rollout_gate_min_precision_at_k,
+            "memory_rollout_gate_max_avg_memory_context_tokens": defaults.memory_rollout_gate_max_avg_memory_context_tokens,
+            "memory_rollout_gate_max_history_fallback_ratio": defaults.memory_rollout_gate_max_history_fallback_ratio,
+        }
+        data.update(overrides)
+        return cls(**data)
+
+    @property
+    def workspace_path(self) -> "Path":
+        from pathlib import Path
+        return Path(self.workspace).expanduser()
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 

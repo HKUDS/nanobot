@@ -5,6 +5,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.errors import ToolExecutionError, ToolNotFoundError, ToolValidationError
 
 
 class ToolRegistry:
@@ -47,15 +48,14 @@ class ToolRegistry:
         """
         tool = self._tools.get(name)
         if not tool:
-            return ToolResult.fail(
-                f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
-            )
+            err = ToolNotFoundError(name, self.tool_names)
+            return ToolResult.fail(str(err), error_type="not_found")
 
         try:
             errors = tool.validate_params(params)
             if errors:
-                msg = f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
-                return ToolResult.fail(msg + self._HINT)
+                err = ToolValidationError(name, errors)
+                return ToolResult.fail(str(err) + self._HINT, error_type="validation")
 
             raw = await tool.execute(**params)
 
@@ -78,9 +78,12 @@ class ToolRegistry:
 
             return result
 
+        except ToolExecutionError as e:
+            logger.opt(exception=True).debug("Tool '{}' raised {}", name, e.error_type)
+            return ToolResult.fail(str(e) + self._HINT, error_type=e.error_type)
         except Exception as e:
             logger.opt(exception=True).debug("Tool '{}' raised", name)
-            return ToolResult.fail(f"Error executing {name}: {str(e)}" + self._HINT)
+            return ToolResult.fail(f"Error executing {name}: {str(e)}" + self._HINT, error_type="unknown")
     
     @property
     def tool_names(self) -> list[str]:

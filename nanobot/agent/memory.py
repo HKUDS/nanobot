@@ -1325,6 +1325,14 @@ class MemoryStore:
             self._apply_rollout_overrides(rollout_overrides)
         self._ensure_vector_health()
 
+        # In-memory metrics collector (Step 9)
+        from nanobot.agent.metrics import MetricsCollector
+        self._metrics = MetricsCollector(
+            self.metrics_file,
+            flush_interval_s=60.0,
+            defaults=self._default_metrics(),
+        )
+
     @staticmethod
     def _utc_now_iso() -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -1895,11 +1903,11 @@ class MemoryStore:
         return writes
 
     def _load_metrics(self) -> dict[str, Any]:
-        data = self.persistence.read_json(self.metrics_file)
-        if isinstance(data, dict):
-            return data
-        if self.metrics_file.exists():
-            logger.warning("Failed to parse memory metrics, resetting")
+        return self._metrics.snapshot()
+
+    @classmethod
+    def _default_metrics(cls) -> dict[str, int | str]:
+        """Default/initial counters for a fresh metrics file."""
         return {
             "consolidations": 0,
             "events_extracted": 0,
@@ -1972,32 +1980,25 @@ class MemoryStore:
             "memory_context_intent_constraints_lookup": 0,
             "memory_context_intent_conflict_review": 0,
             "memory_context_intent_rollout_status": 0,
-            "last_updated": self._utc_now_iso(),
         }
 
     def _record_metric(self, key: str, delta: int = 1) -> None:
-        self._record_metrics({key: delta})
+        self._metrics.record(key, delta)
 
     def _persist_metrics(self, metrics: dict[str, Any]) -> None:
-        """Best-effort metrics write; never fail the runtime path."""
-        try:
-            self.persistence.write_json(self.metrics_file, metrics)
-        except Exception as exc:
-            logger.warning("Failed to persist memory metrics: {}", exc)
+        """Sync-update the in-memory collector and mark dirty.
+
+        For backward compatibility with callers that build a full dict and
+        pass it in.  The MetricsCollector will flush to disk on its own
+        schedule.
+        """
+        self._metrics.set_fields(metrics)
 
     def _record_metrics(self, deltas: dict[str, int]) -> None:
-        metrics = self._load_metrics()
-        for key, delta in deltas.items():
-            metrics[key] = int(metrics.get(key, 0)) + int(delta)
-        metrics["last_updated"] = self._utc_now_iso()
-        self._persist_metrics(metrics)
+        self._metrics.record_many(deltas)
 
     def _set_metric_fields(self, fields: dict[str, Any]) -> None:
-        metrics = self._load_metrics()
-        for key, value in fields.items():
-            metrics[key] = value
-        metrics["last_updated"] = self._utc_now_iso()
-        self._persist_metrics(metrics)
+        self._metrics.set_fields(fields)
 
     @staticmethod
     def _looks_blob_like_summary(summary: str) -> bool:
@@ -4025,6 +4026,96 @@ class MemoryStore:
             f"[sem={reason.get('semantic', 0):.2f}, rec={reason.get('recency', 0):.2f}, src={reason.get('provider', 'mem0')}]"
         )
 
+    # ------------------------------------------------------------------
+    # MEMORY.md capping (Step 5)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _split_md_sections(text: str) -> list[tuple[str, str]]:
+        """Split markdown text into (heading, body) pairs.
+
+        Sections are delimited by ``## `` headings.  Text before the first
+        heading is returned with heading ``""``.
+        """
+        import re
+        parts = re.split(r"(?m)^(## .+)$", text)
+        sections: list[tuple[str, str]] = []
+        if parts and not parts[0].startswith("## "):
+            preamble = parts.pop(0).strip()
+            if preamble:
+                sections.append(("", preamble))
+        while parts:
+            heading = parts.pop(0).strip()
+            body = parts.pop(0).strip() if parts else ""
+            sections.append((heading, body))
+        return sections
+
+    def _cap_long_term_text(
+        self,
+        long_term_text: str,
+        token_cap: int,
+        query: str,
+    ) -> str:
+        """Return *long_term_text* capped to *token_cap* tokens.
+
+        When the full text exceeds the cap, sections are ranked by a simple
+        keyword-overlap score against *query* and the top sections that fit
+        within the budget are selected (most relevant first).
+        """
+        if token_cap <= 0 or not long_term_text:
+            return long_term_text
+
+        if self._estimate_tokens(long_term_text) <= token_cap:
+            return long_term_text
+
+        sections = self._split_md_sections(long_term_text)
+        if not sections:
+            # No headings — hard-truncate
+            chars = token_cap * 4
+            return long_term_text[:chars].rsplit("\n", 1)[0] + "\n(long-term memory truncated)"
+
+        # Score each section by keyword overlap with the query
+        query_words = set(query.lower().split()) if query else set()
+
+        def _score(heading: str, body: str) -> float:
+            text_words = set((heading + " " + body).lower().split())
+            overlap = len(query_words & text_words)
+            # Boost: shorter sections cost less budget and are proportionally more valuable
+            brevity = 1.0 / max(1, self._estimate_tokens(body) / 100)
+            return overlap + brevity * 0.5
+
+        scored = sorted(
+            sections,
+            key=lambda s: _score(s[0], s[1]),
+            reverse=True,
+        )
+
+        selected: list[tuple[str, str]] = []
+        used = 0
+        for heading, body in scored:
+            section_text = f"{heading}\n{body}" if heading else body
+            section_tokens = self._estimate_tokens(section_text)
+            if used + section_tokens > token_cap and selected:
+                break
+            selected.append((heading, body))
+            used += section_tokens
+
+        # Preserve original ordering
+        original_order = {id(s): i for i, s in enumerate(sections)}
+        selected.sort(key=lambda s: original_order.get(id(s), 0))
+
+        out_parts = []
+        for heading, body in selected:
+            if heading:
+                out_parts.append(f"{heading}\n{body}")
+            else:
+                out_parts.append(body)
+
+        result = "\n\n".join(out_parts)
+        if len(selected) < len(sections):
+            result += "\n(some long-term memory sections omitted to fit context budget)"
+        return result
+
     def _fit_lines_to_token_cap(self, lines: list[str], *, token_cap: int) -> list[str]:
         if token_cap <= 0 or not lines:
             return []
@@ -4045,6 +4136,7 @@ class MemoryStore:
         query: str | None = None,
         retrieval_k: int = 6,
         token_budget: int = 900,
+        memory_md_token_cap: int = 1500,
         mode: str | None = None,
         recency_half_life_days: float | None = None,
         embedding_provider: str | None = None,
@@ -4098,7 +4190,9 @@ class MemoryStore:
 
         lines: list[str] = ["## Long-term Memory"]
         long_term_text = long_term.strip() if long_term else ""
-        if long_term:
+        if long_term_text and memory_md_token_cap > 0:
+            long_term_text = self._cap_long_term_text(long_term_text, memory_md_token_cap, query or "")
+        if long_term_text:
             lines.append(long_term_text)
 
         profile_lines = self._profile_section_lines(profile)
@@ -4149,28 +4243,21 @@ class MemoryStore:
             text = text[:max_chars].rsplit("\n", 1)[0] + "\n- ... (memory context truncated to token budget)"
 
         est_tokens = max(1, len(text) // 4) if text else 0
-        metrics = self._load_metrics()
-        metrics["memory_context_calls"] = int(metrics.get("memory_context_calls", 0)) + 1
-        metrics["memory_context_tokens_total"] = int(metrics.get("memory_context_tokens_total", 0)) + est_tokens
-        metrics["memory_context_tokens_max"] = max(int(metrics.get("memory_context_tokens_max", 0)), est_tokens)
-        metrics["memory_context_tokens_long_term_total"] = (
-            int(metrics.get("memory_context_tokens_long_term_total", 0)) + self._estimate_tokens(long_term_text)
-        )
-        metrics["memory_context_tokens_profile_total"] = (
-            int(metrics.get("memory_context_tokens_profile_total", 0)) + self._estimate_tokens(profile_text)
-        )
-        metrics["memory_context_tokens_semantic_total"] = int(metrics.get("memory_context_tokens_semantic_total", 0)) + self._estimate_tokens(
-            "\n".join(semantic_lines)
-        )
-        metrics["memory_context_tokens_episodic_total"] = int(metrics.get("memory_context_tokens_episodic_total", 0)) + self._estimate_tokens(
-            "\n".join(episodic_lines if include_episodic else [])
-        )
-        metrics["memory_context_tokens_reflection_total"] = int(
-            metrics.get("memory_context_tokens_reflection_total", 0)
-        ) + self._estimate_tokens("\n".join(reflection_lines if include_reflection else []))
-        metrics[f"memory_context_intent_{intent}"] = int(metrics.get(f"memory_context_intent_{intent}", 0)) + 1
-        metrics["last_updated"] = self._utc_now_iso()
-        self._persist_metrics(metrics)
+        self._metrics.record_many({
+            "memory_context_calls": 1,
+            "memory_context_tokens_total": est_tokens,
+            "memory_context_tokens_long_term_total": self._estimate_tokens(long_term_text),
+            "memory_context_tokens_profile_total": self._estimate_tokens(profile_text),
+            "memory_context_tokens_semantic_total": self._estimate_tokens("\n".join(semantic_lines)),
+            "memory_context_tokens_episodic_total": self._estimate_tokens(
+                "\n".join(episodic_lines if include_episodic else [])
+            ),
+            "memory_context_tokens_reflection_total": self._estimate_tokens(
+                "\n".join(reflection_lines if include_reflection else [])
+            ),
+            f"memory_context_intent_{intent}": 1,
+        })
+        self._metrics.set_max("memory_context_tokens_max", est_tokens)
         return text
 
     def _conflict_pair(self, old_value: str, new_value: str) -> bool:
@@ -4655,6 +4742,8 @@ class MemoryStore:
     def _finalize_consolidation(self, session: Session, *, archive_all: bool, keep_count: int) -> None:
         session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
         self._record_metric("consolidations", 1)
+        # Flush metrics to disk at this natural checkpoint
+        self._metrics.flush_sync()
         logger.debug("Memory KPI snapshot: {}", self.get_observability_report().get("kpis", {}))
         logger.info(
             "Memory consolidation done: {} messages, last_consolidated={}",

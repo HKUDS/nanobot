@@ -32,9 +32,9 @@ class ToolResult:
         return cls(output=output, success=True, truncated=truncated, metadata=meta)
 
     @classmethod
-    def fail(cls, error: str, *, output: str = "", **meta: Any) -> ToolResult:
+    def fail(cls, error: str, *, output: str = "", error_type: str = "unknown", **meta: Any) -> ToolResult:
         """Create a failed result."""
-        return cls(output=output or error, success=False, error=error, metadata=meta)
+        return cls(output=output or error, success=False, error=error, metadata={**meta, "error_type": error_type})
 
     # Serialize for the LLM context (backward-compatible string)
     def to_llm_string(self) -> str:
