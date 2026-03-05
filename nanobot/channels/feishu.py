@@ -292,14 +292,27 @@ class FeishuChannel(BaseChannel):
 
         # Start WebSocket client in a separate thread with reconnect loop
         def run_ws():
-            while self._running:
-                try:
-                    self._ws_client.start()
-                except Exception as e:
-                    logger.warning("Feishu WebSocket error: {}", e)
-                if self._running:
-                    import time
-                    time.sleep(5)
+            import asyncio
+            import lark_oapi.ws.client as _lark_ws
+            # lark_oapi.ws.client uses a module-level `loop` captured at import
+            # time. If the main asyncio loop was already running at import time,
+            # that loop is stored there and run_until_complete() will raise
+            # "This event loop is already running". Fix: replace the module-level
+            # variable with a fresh loop owned by this thread.
+            _loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(_loop)
+            _lark_ws.loop = _loop
+            try:
+                while self._running:
+                    try:
+                        self._ws_client.start()
+                    except Exception as e:
+                        logger.warning("Feishu WebSocket error: {}", e)
+                    if self._running:
+                        import time
+                        time.sleep(5)
+            finally:
+                _loop.close()
 
         self._ws_thread = threading.Thread(target=run_ws, daemon=True)
         self._ws_thread.start()
