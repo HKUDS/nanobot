@@ -76,7 +76,7 @@ class DiscordChannel(BaseChannel):
             self._http = None
 
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Discord REST API."""
+        """Send a message through Discord REST API, with optional file attachments."""
         if not self._http:
             logger.warning("Discord HTTP client not initialized")
             return
@@ -86,21 +86,71 @@ class DiscordChannel(BaseChannel):
 
         try:
             chunks = split_message(msg.content or "", MAX_MESSAGE_LEN)
-            if not chunks:
+            media_paths = msg.media or []
+            if not chunks and not media_paths:
                 return
+            if not chunks:
+                chunks = [""]
 
             for i, chunk in enumerate(chunks):
                 payload: dict[str, Any] = {"content": chunk}
 
-                # Only set reply reference on the first chunk
                 if i == 0 and msg.reply_to:
                     payload["message_reference"] = {"message_id": msg.reply_to}
                     payload["allowed_mentions"] = {"replied_user": False}
 
-                if not await self._send_payload(url, headers, payload):
-                    break  # Abort remaining chunks on failure
+                # Attach media only on the first chunk
+                if i == 0 and media_paths:
+                    if not await self._send_with_attachments(url, headers, payload, media_paths):
+                        break
+                else:
+                    if not await self._send_payload(url, headers, payload):
+                        break
         finally:
             await self._stop_typing(msg.chat_id)
+
+    async def _send_with_attachments(
+        self, url: str, headers: dict[str, str],
+        payload: dict[str, Any], media_paths: list[str],
+    ) -> bool:
+        """Send a Discord message with file attachments via multipart/form-data."""
+        import mimetypes as mt
+
+        files: dict[str, tuple[str, bytes, str]] = {}
+        attachments_meta: list[dict[str, Any]] = []
+        for i, path in enumerate(media_paths):
+            p = Path(path)
+            if not p.is_file():
+                continue
+            if p.stat().st_size > MAX_ATTACHMENT_BYTES:
+                continue
+            filename = p.name
+            mime = mt.guess_type(filename)[0] or "application/octet-stream"
+            files[f"files[{i}]"] = (filename, p.read_bytes(), mime)
+            attachments_meta.append({"id": i, "filename": filename})
+
+        if not files:
+            return await self._send_payload(url, headers, payload)
+
+        payload["attachments"] = attachments_meta
+        data = {"payload_json": json.dumps(payload)}
+
+        for attempt in range(3):
+            try:
+                response = await self._http.post(url, headers=headers, data=data, files=files)
+                if response.status_code == 429:
+                    retry_after = float(response.json().get("retry_after", 1.0))
+                    logger.warning("Discord rate limited, retrying in {}s", retry_after)
+                    await asyncio.sleep(retry_after)
+                    continue
+                response.raise_for_status()
+                return True
+            except Exception as e:
+                if attempt == 2:
+                    logger.error("Error sending Discord message with attachments: {}", e)
+                else:
+                    await asyncio.sleep(1)
+        return False
 
     async def _send_payload(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]

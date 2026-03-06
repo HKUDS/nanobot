@@ -515,6 +515,9 @@ class AgentLoop:
                         if (c.get("type") == "image_url"
                                 and c.get("image_url", {}).get("url", "").startswith("data:image/")):
                             filtered.append({"type": "text", "text": "[image]"})
+                        elif (c.get("type") == "input_audio"
+                                and isinstance(c.get("input_audio", {}).get("data"), str)):
+                            filtered.append({"type": "text", "text": "[audio]"})
                         else:
                             filtered.append(c)
                     if not filtered:
