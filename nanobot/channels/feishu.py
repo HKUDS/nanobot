@@ -290,16 +290,28 @@ class FeishuChannel(BaseChannel):
             log_level=lark.LogLevel.INFO
         )
 
-        # Start WebSocket client in a separate thread with reconnect loop
+        # Start WebSocket client in a separate thread with reconnect loop.
+        # A dedicated event loop is created for this thread so that lark_oapi's
+        # module-level `loop = asyncio.get_event_loop()` picks up an idle loop
+        # instead of the already-running main asyncio loop, which would cause
+        # "This event loop is already running" errors.
         def run_ws():
-            while self._running:
-                try:
-                    self._ws_client.start()
-                except Exception as e:
-                    logger.warning("Feishu WebSocket error: {}", e)
-                if self._running:
-                    import time
-                    time.sleep(5)
+            import time
+            import lark_oapi.ws.client as _lark_ws_client
+            ws_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(ws_loop)
+            # Patch the module-level loop used by lark's ws Client.start()
+            _lark_ws_client.loop = ws_loop
+            try:
+                while self._running:
+                    try:
+                        self._ws_client.start()
+                    except Exception as e:
+                        logger.warning("Feishu WebSocket error: {}", e)
+                    if self._running:
+                        time.sleep(5)
+            finally:
+                ws_loop.close()
 
         self._ws_thread = threading.Thread(target=run_ws, daemon=True)
         self._ws_thread.start()
@@ -397,6 +409,34 @@ class FeishuChannel(BaseChannel):
         if remaining.strip():
             elements.extend(self._split_headings(remaining))
         return elements or [{"tag": "markdown", "content": content}]
+
+    @staticmethod
+    def _split_elements_by_table_limit(elements: list[dict], max_tables: int = 1) -> list[list[dict]]:
+        """Split card elements into groups with at most *max_tables* table elements each.
+
+        Feishu cards have a hard limit of one table per card (API error 11310).
+        When the rendered content contains multiple markdown tables each table is
+        placed in a separate card message so every table reaches the user.
+        """
+        if not elements:
+            return [[]]
+        groups: list[list[dict]] = []
+        current: list[dict] = []
+        table_count = 0
+        for el in elements:
+            if el.get("tag") == "table":
+                if table_count >= max_tables:
+                    if current:
+                        groups.append(current)
+                    current = []
+                    table_count = 0
+                current.append(el)
+                table_count += 1
+            else:
+                current.append(el)
+        if current:
+            groups.append(current)
+        return groups or [[]]
 
     def _split_headings(self, content: str) -> list[dict]:
         """Split content by headings, converting headings to div elements."""
@@ -649,11 +689,13 @@ class FeishuChannel(BaseChannel):
                         )
 
             if msg.content and msg.content.strip():
-                card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
-                await loop.run_in_executor(
-                    None, self._send_message_sync,
-                    receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
-                )
+                elements = self._build_card_elements(msg.content)
+                for chunk in self._split_elements_by_table_limit(elements):
+                    card = {"config": {"wide_screen_mode": True}, "elements": chunk}
+                    await loop.run_in_executor(
+                        None, self._send_message_sync,
+                        receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
+                    )
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
