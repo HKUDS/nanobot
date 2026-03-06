@@ -2,7 +2,7 @@
 
 import asyncio
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 from nanobot.providers.base import LLMResponse
@@ -89,11 +89,11 @@ def test_prepare_request_payload():
     )
     
     messages = [{"role": "user", "content": "Hello"}]
-    payload = provider._prepare_request_payload(messages, max_tokens=1500, temperature=0.8)
+    payload = provider._prepare_request_payload(messages, max_tokens=1500)
     
     assert payload["messages"] == messages
     assert payload["max_completion_tokens"] == 1500  # Azure API 2024-10-21 uses max_completion_tokens
-    assert payload["temperature"] == 0.8
+    assert "temperature" not in payload  # Temperature not included in payload
     assert "tools" not in payload
     
     # Test with tools
@@ -135,7 +135,7 @@ async def test_chat_success():
     with patch("httpx.AsyncClient") as mock_client:
         mock_response = AsyncMock()
         mock_response.status_code = 200
-        mock_response.json = AsyncMock(return_value=mock_response_data)
+        mock_response.json = Mock(return_value=mock_response_data)
         
         mock_context = AsyncMock()
         mock_context.post = AsyncMock(return_value=mock_response)
@@ -178,7 +178,7 @@ async def test_chat_uses_default_model_when_no_model_provided():
     with patch("httpx.AsyncClient") as mock_client:
         mock_response = AsyncMock()
         mock_response.status_code = 200
-        mock_response.json = AsyncMock(return_value=mock_response_data)
+        mock_response.json = Mock(return_value=mock_response_data)
         
         mock_context = AsyncMock()
         mock_context.post = AsyncMock(return_value=mock_response)
@@ -228,7 +228,7 @@ async def test_chat_with_tool_calls():
     with patch("httpx.AsyncClient") as mock_client:
         mock_response = AsyncMock()
         mock_response.status_code = 200
-        mock_response.json = AsyncMock(return_value=mock_response_data)
+        mock_response.json = Mock(return_value=mock_response_data)
         
         mock_context = AsyncMock()
         mock_context.post = AsyncMock(return_value=mock_response)

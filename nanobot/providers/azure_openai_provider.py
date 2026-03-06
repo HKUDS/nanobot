@@ -71,16 +71,13 @@ class AzureOpenAIProvider(LLMProvider):
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        model: str | None = None,
         max_tokens: int = 4096,
-        temperature: float = 0.7,
         reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         """Prepare the request payload with Azure OpenAI 2024-10-21 compliance."""
         payload: dict[str, Any] = {
             "messages": self._sanitize_empty_content(messages),
             "max_completion_tokens": max(1, max_tokens),  # Azure API 2024-10-21 uses max_completion_tokens
-            "temperature": 1,
         }
 
         if reasoning_effort:
@@ -119,7 +116,7 @@ class AzureOpenAIProvider(LLMProvider):
         url = self._build_chat_url(deployment_name)
         headers = self._build_headers()
         payload = self._prepare_request_payload(
-            messages, tools, model, max_tokens, temperature, reasoning_effort
+            messages, tools, max_tokens, reasoning_effort
         )
 
         try:
@@ -131,7 +128,7 @@ class AzureOpenAIProvider(LLMProvider):
                         finish_reason="error",
                     )
                 
-                response_data = await response.json()
+                response_data = response.json()
                 return self._parse_response(response_data)
 
         except Exception as e:
