@@ -24,7 +24,7 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -177,10 +177,42 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    async def _call_llm(
+        self,
+        messages: list[dict],
+        on_stream: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        """Call the LLM, optionally streaming text deltas via on_stream callback."""
+        if not on_stream:
+            return await self.provider.chat(
+                messages=messages,
+                tools=self.tools.get_definitions(),
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+
+        response: LLMResponse | None = None
+        async for item in self.provider.chat_stream(
+            messages=messages,
+            tools=self.tools.get_definitions(),
+            model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        ):
+            if isinstance(item, LLMResponse):
+                response = item
+            else:
+                await on_stream(item)
+
+        assert response is not None
+        return response
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_stream: Callable[[str], Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
@@ -191,14 +223,7 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                reasoning_effort=self.reasoning_effort,
-            )
+            response = await self._call_llm(messages, on_stream=on_stream)
 
             if response.has_tool_calls:
                 if on_progress:
@@ -304,7 +329,8 @@ class AgentLoop:
         """Process a message under the global lock."""
         async with self._processing_lock:
             try:
-                response = await self._process_message(msg)
+                on_stream = msg.metadata.get("_on_stream")
+                response = await self._process_message(msg, on_stream=on_stream)
                 if response is not None:
                     await self.bus.publish_outbound(response)
                 elif msg.channel == "cli":
@@ -341,6 +367,7 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_stream: Callable[[str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -443,6 +470,7 @@ class AgentLoop:
 
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
+            on_stream=on_stream,
         )
 
         if final_content is None:

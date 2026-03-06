@@ -33,6 +33,8 @@ class TelegramConfig(Base):
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )
     reply_to_message: bool = False  # If true, bot replies quote the original message
+    stream_drafts: bool = True  # Stream LLM tokens via sendMessageDraft (private chats only)
+    draft_throttle_ms: int = 300  # Minimum interval between draft updates (milliseconds)
 
 
 class FeishuConfig(Base):

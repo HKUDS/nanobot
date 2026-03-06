@@ -1,6 +1,7 @@
 """Base LLM provider interface."""
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -111,6 +112,28 @@ class LLMProvider(ABC):
             LLMResponse with content and/or tool calls.
         """
         pass
+    
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> AsyncGenerator[str | LLMResponse, None]:
+        """
+        Stream a chat completion, yielding text deltas followed by a final LLMResponse.
+
+        Yields:
+            str: Text token deltas as they arrive.
+            LLMResponse: Final response (always the last item yielded).
+
+        Default implementation falls back to non-streaming chat().
+        """
+        response = await self.chat(messages, tools, model, max_tokens, temperature)
+        if response.content:
+            yield response.content
+        yield response
 
     @abstractmethod
     def get_default_model(self) -> str:

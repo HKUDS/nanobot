@@ -3,6 +3,7 @@
 import os
 import secrets
 import string
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import json_repair
@@ -179,6 +180,44 @@ class LiteLLMProvider(LLMProvider):
             sanitized.append(clean)
         return sanitized
 
+    def _build_kwargs(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        model: str | None,
+        max_tokens: int,
+        temperature: float,
+    ) -> tuple[dict[str, Any], str]:
+        """Build kwargs dict for acompletion. Returns (kwargs, original_model)."""
+        original_model = model or self.default_model
+        resolved = self._resolve_model(original_model)
+
+        if self._supports_cache_control(original_model):
+            messages, tools = self._apply_cache_control(messages, tools)
+
+        max_tokens = max(1, max_tokens)
+
+        kwargs: dict[str, Any] = {
+            "model": resolved,
+            "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+
+        self._apply_model_overrides(resolved, kwargs)
+
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        if self.extra_headers:
+            kwargs["extra_headers"] = self.extra_headers
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+
+        return kwargs, original_model
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -186,7 +225,6 @@ class LiteLLMProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
-        reasoning_effort: str | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -201,57 +239,108 @@ class LiteLLMProvider(LLMProvider):
         Returns:
             LLMResponse with content and/or tool calls.
         """
-        original_model = model or self.default_model
-        model = self._resolve_model(original_model)
-        extra_msg_keys = self._extra_msg_keys(original_model, model)
-
-        if self._supports_cache_control(original_model):
-            messages, tools = self._apply_cache_control(messages, tools)
-
-        # Clamp max_tokens to at least 1 — negative or zero values cause
-        # LiteLLM to reject the request with "max_tokens must be at least 1".
-        max_tokens = max(1, max_tokens)
-
-        kwargs: dict[str, Any] = {
-            "model": model,
-            "messages": self._sanitize_messages(self._sanitize_empty_content(messages), extra_keys=extra_msg_keys),
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-
-        # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
-        self._apply_model_overrides(model, kwargs)
-
-        # Pass api_key directly — more reliable than env vars alone
-        if self.api_key:
-            kwargs["api_key"] = self.api_key
-
-        # Pass api_base for custom endpoints
-        if self.api_base:
-            kwargs["api_base"] = self.api_base
-
-        # Pass extra headers (e.g. APP-Code for AiHubMix)
-        if self.extra_headers:
-            kwargs["extra_headers"] = self.extra_headers
-        
-        if reasoning_effort:
-            kwargs["reasoning_effort"] = reasoning_effort
-            kwargs["drop_params"] = True
-        
-        if tools:
-            kwargs["tools"] = tools
-            kwargs["tool_choice"] = "auto"
+        kwargs, _ = self._build_kwargs(messages, tools, model, max_tokens, temperature)
 
         try:
             response = await acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
-            # Return error as content for graceful handling
             return LLMResponse(
                 content=f"Error calling LLM: {str(e)}",
                 finish_reason="error",
             )
 
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> AsyncGenerator[str | LLMResponse, None]:
+        """
+        Stream a chat completion via LiteLLM.
+
+        Yields str text deltas as they arrive, then a final LLMResponse.
+        """
+        kwargs, _ = self._build_kwargs(messages, tools, model, max_tokens, temperature)
+        kwargs["stream"] = True
+
+        try:
+            stream = await acompletion(**kwargs)
+        except Exception as e:
+            yield LLMResponse(content=f"Error calling LLM: {str(e)}", finish_reason="error")
+            return
+
+        content_parts: list[str] = []
+        # Accumulate tool call deltas: index -> {id, name, arguments_parts}
+        tc_buffers: dict[int, dict[str, Any]] = {}
+        finish_reason = "stop"
+        reasoning_parts: list[str] = []
+
+        try:
+            async for chunk in stream:
+                choice = chunk.choices[0] if chunk.choices else None
+                if not choice:
+                    continue
+
+                delta = choice.delta
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+
+                # Text content delta
+                if delta and getattr(delta, "content", None):
+                    content_parts.append(delta.content)
+                    yield delta.content
+
+                # Reasoning content delta (DeepSeek-R1, Kimi, etc.)
+                if delta and getattr(delta, "reasoning_content", None):
+                    reasoning_parts.append(delta.reasoning_content)
+
+                # Tool call deltas
+                if delta and getattr(delta, "tool_calls", None):
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index if hasattr(tc_delta, "index") else 0
+                        if idx not in tc_buffers:
+                            tc_buffers[idx] = {
+                                "id": getattr(tc_delta, "id", None) or "",
+                                "name": "",
+                                "arguments_parts": [],
+                            }
+                        buf = tc_buffers[idx]
+                        if tc_delta.id:
+                            buf["id"] = tc_delta.id
+                        if hasattr(tc_delta, "function") and tc_delta.function:
+                            if tc_delta.function.name:
+                                buf["name"] = tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                buf["arguments_parts"].append(tc_delta.function.arguments)
+        except Exception as e:
+            yield LLMResponse(content=f"Error during streaming: {str(e)}", finish_reason="error")
+            return
+
+        # Build final tool calls from accumulated deltas
+        tool_calls = []
+        for idx in sorted(tc_buffers):
+            buf = tc_buffers[idx]
+            args_str = "".join(buf["arguments_parts"])
+            args = json_repair.loads(args_str) if args_str else {}
+            tool_calls.append(ToolCallRequest(
+                id=buf["id"] or _short_tool_id(),
+                name=buf["name"],
+                arguments=args,
+            ))
+
+        full_content = "".join(content_parts) or None
+        reasoning = "".join(reasoning_parts) or None
+
+        yield LLMResponse(
+            content=full_content,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            reasoning_content=reasoning,
+        )
+    
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
         choice = response.choices[0]
