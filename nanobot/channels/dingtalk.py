@@ -315,7 +315,7 @@ class DingTalkChannel(BaseChannel):
             payload = {
                 "robotCode": self.config.client_id,
                 "openConversationId": chat_id[6:],  # Remove "group:" prefix,
-                "msgKey": "msg_key",
+                "msgKey": msg_key,
                 "msgParam": json.dumps(msg_param, ensure_ascii=False),
             }
         else:
