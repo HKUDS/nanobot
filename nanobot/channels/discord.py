@@ -338,6 +338,25 @@ class DiscordChannel(BaseChannel):
 
         return False
 
+    def _should_respond_in_group(self, payload: dict[str, Any], content: str) -> bool:
+        """Check if bot should respond in a group channel based on policy."""
+        if self.config.group_policy == "open":
+            return True
+
+        if self.config.group_policy == "mention":
+            # Check if bot was mentioned in the message
+            if self._bot_user_id:
+                # Check mentions array
+                mentions = payload.get("mentions") or []
+                for mention in mentions:
+                    if str(mention.get("id")) == self._bot_user_id:
+                        return True
+                # Also check content for mention format <@USER_ID>
+                if f"<@{self._bot_user_id}>" in content or f"<@!{self._bot_user_id}>" in content:
+                    return True
+
+        return True
+
     async def _start_typing(self, channel_id: str) -> None:
         """Start periodic typing indicator for a channel."""
         await self._stop_typing(channel_id)
