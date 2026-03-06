@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
+from collections.abc import Awaitable, Callable
+from typing import Any
 from loguru import logger
 from telegram import BotCommand, Update, ReplyParameters
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -288,6 +291,48 @@ class TelegramChannel(BaseChannel):
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
     
+    async def send_draft(self, chat_id: int, text: str, draft_id: int) -> None:
+        """Send a streaming draft message via sendMessageDraft (private chats only)."""
+        if not self._app:
+            return
+        try:
+            await self._app.bot.send_message_draft(
+                chat_id=chat_id,
+                draft_id=draft_id,
+                text=text,
+            )
+        except Exception as e:
+            logger.debug("sendMessageDraft failed (chat_id={}): {}", chat_id, e)
+
+    def make_stream_callback(self, chat_id: str) -> Callable[[str], Awaitable[None]]:
+        """Create a throttled streaming callback for a private chat.
+
+        Returns an async callable that accumulates text deltas and pushes
+        draft updates to Telegram at most every ``draft_throttle_ms`` ms.
+        """
+        int_chat_id = int(chat_id)
+        draft_id = int(time.time() * 1000) % (2**31 - 1)  # Unique positive int32
+        throttle_s = self.config.draft_throttle_ms / 1000.0
+        buf: list[str] = []
+        last_send: float = 0.0
+        send_lock = asyncio.Lock()
+
+        async def _on_stream(delta: str) -> None:
+            nonlocal last_send
+            buf.append(delta)
+            now = time.monotonic()
+            if now - last_send < throttle_s:
+                return
+            async with send_lock:
+                if now - last_send < throttle_s:
+                    return  # Lost the race
+                text = "".join(buf)
+                if text.strip():
+                    await self.send_draft(int_chat_id, text, draft_id)
+                last_send = time.monotonic()
+
+        return _on_stream
+
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
         if not update.message or not update.effective_user:
@@ -431,20 +476,27 @@ class TelegramChannel(BaseChannel):
         
         # Start typing indicator before processing
         self._start_typing(str_chat_id)
-        
+
+        is_group = message.chat.type != "private"
+        metadata: dict[str, Any] = {
+            "message_id": message.message_id,
+            "user_id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "is_group": is_group,
+        }
+
+        # Attach streaming callback for private chats when drafts are enabled
+        if not is_group and self.config.stream_drafts:
+            metadata["_on_stream"] = self.make_stream_callback(str_chat_id)
+
         # Forward to the message bus
         await self._handle_message(
             sender_id=sender_id,
             chat_id=str_chat_id,
             content=content,
             media=media_paths,
-            metadata={
-                "message_id": message.message_id,
-                "user_id": user.id,
-                "username": user.username,
-                "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
-            }
+            metadata=metadata,
         )
     
     async def _flush_media_group(self, key: str) -> None:

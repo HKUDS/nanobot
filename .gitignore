@@ -20,3 +20,5 @@ poetry.lock
 .pytest_cache/
 botpy.log
 tests/
+CODEBASE_GUIDE.md
+uv.lock
