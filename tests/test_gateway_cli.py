@@ -125,6 +125,7 @@ def test_gateway_auto_mode_falls_back_to_legacy_when_daemon_start_fails(monkeypa
     result = runner.invoke(app, ["gateway"])
 
     assert result.exit_code == 0
+    assert "preferred_mode=background_managed" in result.stdout.lower()
     assert calls["foreground"] == 1
 
 

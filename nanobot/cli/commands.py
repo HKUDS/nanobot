@@ -599,7 +599,7 @@ def gateway(
     )
     console.print(
         "[dim]"
-        f"Gateway runtime policy: mode={policy.mode.value} "
+        f"Gateway runtime request: preferred_mode={policy.mode.value} "
         f"reason={policy.reason} platform={policy.platform}"
         "[/dim]"
     )

@@ -230,7 +230,7 @@ nanobot will automatically register, configure `~/.nanobot/config.json`, and con
 **2. Restart gateway**
 
 ```bash
-nanobot gateway
+nanobot gateway restart
 ```
 
 That's it — nanobot handles the rest!
@@ -917,6 +917,21 @@ Each instance has its own:
 - Cron jobs storage (`workspace/cron/jobs.json`)
 - Configuration (if using `--config`)
 
+Control a specific instance by repeating the same selectors on subcommands:
+
+```bash
+# Check instance A status
+nanobot gateway status --workspace ~/.nanobot/botA
+
+# Tail logs for instance B
+nanobot gateway logs --workspace ~/.nanobot/botB --tail 50 --no-follow
+
+# Restart instance C with both workspace + config selectors
+nanobot gateway restart --workspace ~/.nanobot/botC --config ~/.nanobot/botC/config.json
+```
+
+> For `restart`, `status`, and `logs`, put `--workspace` / `--config` after the subcommand.
+
 
 ## CLI Reference
 
@@ -946,6 +961,24 @@ Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 - `NANOBOT_GATEWAY_KILL_SWITCH=1` force-enables legacy foreground mode for emergency rollback.
 - On macOS auto mode (`nanobot gateway`), daemon bootstrap failure falls back to legacy foreground with an explainable reason.
 - When explicitly requesting daemon mode (`nanobot gateway --background`), startup failures are surfaced as errors (no silent fallback).
+- Use `--workspace/-w` and `--config/-c` to target an instance consistently across `gateway`, `gateway restart`, `gateway status`, and `gateway logs`.
+- For `restart/status/logs`, pass control flags after the subcommand, for example `nanobot gateway status --workspace ~/.nanobot/botA`.
+
+Examples:
+
+```bash
+# Start instance A
+nanobot gateway --workspace ~/.nanobot/botA --port 18791
+
+# Show instance A status
+nanobot gateway status --workspace ~/.nanobot/botA
+
+# Read instance B logs
+nanobot gateway logs --workspace ~/.nanobot/botB --tail 50 --no-follow
+
+# Restart instance C
+nanobot gateway restart --workspace ~/.nanobot/botC --config ~/.nanobot/botC/config.json
+```
 
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>
