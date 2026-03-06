@@ -16,27 +16,9 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import FeishuConfig
 
-try:
-    import lark_oapi as lark
-    from lark_oapi.api.im.v1 import (
-        CreateFileRequest,
-        CreateFileRequestBody,
-        CreateImageRequest,
-        CreateImageRequestBody,
-        CreateMessageRequest,
-        CreateMessageRequestBody,
-        CreateMessageReactionRequest,
-        CreateMessageReactionRequestBody,
-        Emoji,
-        GetFileRequest,
-        GetMessageResourceRequest,
-        P2ImMessageReceiveV1,
-    )
-    FEISHU_AVAILABLE = True
-except ImportError:
-    FEISHU_AVAILABLE = False
-    lark = None
-    Emoji = None
+import importlib.util
+
+FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 
 # Message type display mapping
 MSG_TYPE_MAP = {
@@ -70,7 +52,7 @@ def _extract_share_card_content(content_json: dict, msg_type: str) -> str:
 def _extract_interactive_content(content: dict) -> list[str]:
     """Recursively extract text and links from interactive card content."""
     parts = []
-    
+
     if isinstance(content, str):
         try:
             content = json.loads(content)
@@ -104,19 +86,19 @@ def _extract_interactive_content(content: dict) -> list[str]:
             header_text = header_title.get("content", "") or header_title.get("text", "")
             if header_text:
                 parts.append(f"title: {header_text}")
-    
+
     return parts
 
 
 def _extract_element_content(element: dict) -> list[str]:
     """Extract content from a single card element."""
     parts = []
-    
+
     if not isinstance(element, dict):
         return parts
-    
+
     tag = element.get("tag", "")
-    
+
     if tag in ("markdown", "lark_md"):
         content = element.get("content", "")
         if content:
@@ -177,69 +159,71 @@ def _extract_element_content(element: dict) -> list[str]:
     else:
         for ne in element.get("elements", []):
             parts.extend(_extract_element_content(ne))
-    
+
     return parts
 
 
 def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
-    """Extract text and image keys from Feishu post (rich text) message content.
-    
-    Supports two formats:
-    1. Direct format: {"title": "...", "content": [...]}
-    2. Localized format: {"zh_cn": {"title": "...", "content": [...]}}
-    
-    Returns:
-        (text, image_keys) - extracted text and list of image keys
+    """Extract text and image keys from Feishu post (rich text) message.
+
+    Handles three payload shapes:
+    - Direct:    {"title": "...", "content": [[...]]}
+    - Localized: {"zh_cn": {"title": "...", "content": [...]}}
+    - Wrapped:   {"post": {"zh_cn": {"title": "...", "content": [...]}}}
     """
-    def extract_from_lang(lang_content: dict) -> tuple[str | None, list[str]]:
-        if not isinstance(lang_content, dict):
+
+    def _parse_block(block: dict) -> tuple[str | None, list[str]]:
+        if not isinstance(block, dict) or not isinstance(block.get("content"), list):
             return None, []
-        title = lang_content.get("title", "")
-        content_blocks = lang_content.get("content", [])
-        if not isinstance(content_blocks, list):
-            return None, []
-        text_parts = []
-        image_keys = []
-        if title:
-            text_parts.append(title)
-        for block in content_blocks:
-            if not isinstance(block, list):
+        texts, images = [], []
+        if title := block.get("title"):
+            texts.append(title)
+        for row in block["content"]:
+            if not isinstance(row, list):
                 continue
-            for element in block:
-                if isinstance(element, dict):
-                    tag = element.get("tag")
-                    if tag == "text":
-                        text_parts.append(element.get("text", ""))
-                    elif tag == "a":
-                        text_parts.append(element.get("text", ""))
-                    elif tag == "at":
-                        text_parts.append(f"@{element.get('user_name', 'user')}")
-                    elif tag == "img":
-                        img_key = element.get("image_key")
-                        if img_key:
-                            image_keys.append(img_key)
-        text = " ".join(text_parts).strip() if text_parts else None
-        return text, image_keys
-    
-    # Try direct format first
-    if "content" in content_json:
-        text, images = extract_from_lang(content_json)
-        if text or images:
-            return text or "", images
-    
-    # Try localized format
-    for lang_key in ("zh_cn", "en_us", "ja_jp"):
-        lang_content = content_json.get(lang_key)
-        text, images = extract_from_lang(lang_content)
-        if text or images:
-            return text or "", images
-    
+            for el in row:
+                if not isinstance(el, dict):
+                    continue
+                tag = el.get("tag")
+                if tag in ("text", "a"):
+                    texts.append(el.get("text", ""))
+                elif tag == "at":
+                    texts.append(f"@{el.get('user_name', 'user')}")
+                elif tag == "img" and (key := el.get("image_key")):
+                    images.append(key)
+        return (" ".join(texts).strip() or None), images
+
+    # Unwrap optional {"post": ...} envelope
+    root = content_json
+    if isinstance(root, dict) and isinstance(root.get("post"), dict):
+        root = root["post"]
+    if not isinstance(root, dict):
+        return "", []
+
+    # Direct format
+    if "content" in root:
+        text, imgs = _parse_block(root)
+        if text or imgs:
+            return text or "", imgs
+
+    # Localized: prefer known locales, then fall back to any dict child
+    for key in ("zh_cn", "en_us", "ja_jp"):
+        if key in root:
+            text, imgs = _parse_block(root[key])
+            if text or imgs:
+                return text or "", imgs
+    for val in root.values():
+        if isinstance(val, dict):
+            text, imgs = _parse_block(val)
+            if text or imgs:
+                return text or "", imgs
+
     return "", []
 
 
 def _extract_post_text(content_json: dict) -> str:
     """Extract plain text from Feishu post (rich text) message content.
-    
+
     Legacy wrapper for _extract_post_content, returns only text.
     """
     text, _ = _extract_post_content(content_json)
@@ -249,17 +233,17 @@ def _extract_post_text(content_json: dict) -> str:
 class FeishuChannel(BaseChannel):
     """
     Feishu/Lark channel using WebSocket long connection.
-    
+
     Uses WebSocket to receive events - no public IP or webhook required.
-    
+
     Requires:
     - App ID and App Secret from Feishu Open Platform
     - Bot capability enabled
     - Event subscription enabled (im.message.receive_v1)
     """
-    
+
     name = "feishu"
-    
+
     def __init__(self, config: FeishuConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: FeishuConfig = config
@@ -268,27 +252,28 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
-    
+
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
         if not FEISHU_AVAILABLE:
             logger.error("Feishu SDK not installed. Run: pip install lark-oapi")
             return
-        
+
         if not self.config.app_id or not self.config.app_secret:
             logger.error("Feishu app_id and app_secret not configured")
             return
-        
+
+        import lark_oapi as lark
         self._running = True
         self._loop = asyncio.get_running_loop()
-        
+
         # Create Lark client for sending messages
         self._client = lark.Client.builder() \
             .app_id(self.config.app_id) \
             .app_secret(self.config.app_secret) \
             .log_level(lark.LogLevel.INFO) \
             .build()
-        
+
         # Create event handler (only register message receive, ignore other events)
         event_handler = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
@@ -296,7 +281,7 @@ class FeishuChannel(BaseChannel):
         ).register_p2_im_message_receive_v1(
             self._on_message_sync
         ).build()
-        
+
         # Create WebSocket client for long connection
         self._ws_client = lark.ws.Client(
             self.config.app_id,
@@ -304,39 +289,54 @@ class FeishuChannel(BaseChannel):
             event_handler=event_handler,
             log_level=lark.LogLevel.INFO
         )
-        
-        # Start WebSocket client in a separate thread with reconnect loop
+
+        # Start WebSocket client in a separate thread with reconnect loop.
+        # A dedicated event loop is created for this thread so that lark_oapi's
+        # module-level `loop = asyncio.get_event_loop()` picks up an idle loop
+        # instead of the already-running main asyncio loop, which would cause
+        # "This event loop is already running" errors.
         def run_ws():
-            while self._running:
-                try:
-                    self._ws_client.start()
-                except Exception as e:
-                    logger.warning("Feishu WebSocket error: {}", e)
-                if self._running:
-                    import time; time.sleep(5)
-        
+            import time
+            import lark_oapi.ws.client as _lark_ws_client
+            ws_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(ws_loop)
+            # Patch the module-level loop used by lark's ws Client.start()
+            _lark_ws_client.loop = ws_loop
+            try:
+                while self._running:
+                    try:
+                        self._ws_client.start()
+                    except Exception as e:
+                        logger.warning("Feishu WebSocket error: {}", e)
+                    if self._running:
+                        time.sleep(5)
+            finally:
+                ws_loop.close()
+
         self._ws_thread = threading.Thread(target=run_ws, daemon=True)
         self._ws_thread.start()
-        
+
         logger.info("Feishu bot started with WebSocket long connection")
         logger.info("No public IP required - using WebSocket to receive events")
-        
+
         # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
-    
+
     async def stop(self) -> None:
-        """Stop the Feishu bot."""
+        """
+        Stop the Feishu bot.
+
+        Notice: lark.ws.Client does not expose stop method， simply exiting the program will close the client.
+
+        Reference: https://github.com/larksuite/oapi-sdk-python/blob/v2_main/lark_oapi/ws/client.py#L86
+        """
         self._running = False
-        if self._ws_client:
-            try:
-                self._ws_client.stop()
-            except Exception as e:
-                logger.warning("Error stopping WebSocket client: {}", e)
         logger.info("Feishu bot stopped")
-    
+
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
+        from lark_oapi.api.im.v1 import CreateMessageReactionRequest, CreateMessageReactionRequestBody, Emoji
         try:
             request = CreateMessageReactionRequest.builder() \
                 .message_id(message_id) \
@@ -345,9 +345,9 @@ class FeishuChannel(BaseChannel):
                     .reaction_type(Emoji.builder().emoji_type(emoji_type).build())
                     .build()
                 ).build()
-            
+
             response = self._client.im.v1.message_reaction.create(request)
-            
+
             if not response.success():
                 logger.warning("Failed to add reaction: code={}, msg={}", response.code, response.msg)
             else:
@@ -358,15 +358,15 @@ class FeishuChannel(BaseChannel):
     async def _add_reaction(self, message_id: str, emoji_type: str = "THUMBSUP") -> None:
         """
         Add a reaction emoji to a message (non-blocking).
-        
+
         Common emoji types: THUMBSUP, OK, EYES, DONE, OnIt, HEART
         """
-        if not self._client or not Emoji:
+        if not self._client:
             return
-        
+
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
-    
+
     # Regex to match markdown tables (header + separator + data rows)
     _TABLE_RE = re.compile(
         r"((?:^[ \t]*\|.+\|[ \t]*\n)(?:^[ \t]*\|[-:\s|]+\|[ \t]*\n)(?:^[ \t]*\|.+\|[ \t]*\n?)+)",
@@ -380,12 +380,13 @@ class FeishuChannel(BaseChannel):
     @staticmethod
     def _parse_md_table(table_text: str) -> dict | None:
         """Parse a markdown table into a Feishu table element."""
-        lines = [l.strip() for l in table_text.strip().split("\n") if l.strip()]
+        lines = [_line.strip() for _line in table_text.strip().split("\n") if _line.strip()]
         if len(lines) < 3:
             return None
-        split = lambda l: [c.strip() for c in l.strip("|").split("|")]
+        def split(_line: str) -> list[str]:
+            return [c.strip() for c in _line.strip("|").split("|")]
         headers = split(lines[0])
-        rows = [split(l) for l in lines[2:]]
+        rows = [split(_line) for _line in lines[2:]]
         columns = [{"tag": "column", "name": f"c{i}", "display_name": h, "width": "auto"}
                    for i, h in enumerate(headers)]
         return {
@@ -408,6 +409,34 @@ class FeishuChannel(BaseChannel):
         if remaining.strip():
             elements.extend(self._split_headings(remaining))
         return elements or [{"tag": "markdown", "content": content}]
+
+    @staticmethod
+    def _split_elements_by_table_limit(elements: list[dict], max_tables: int = 1) -> list[list[dict]]:
+        """Split card elements into groups with at most *max_tables* table elements each.
+
+        Feishu cards have a hard limit of one table per card (API error 11310).
+        When the rendered content contains multiple markdown tables each table is
+        placed in a separate card message so every table reaches the user.
+        """
+        if not elements:
+            return [[]]
+        groups: list[list[dict]] = []
+        current: list[dict] = []
+        table_count = 0
+        for el in elements:
+            if el.get("tag") == "table":
+                if table_count >= max_tables:
+                    if current:
+                        groups.append(current)
+                    current = []
+                    table_count = 0
+                current.append(el)
+                table_count += 1
+            else:
+                current.append(el)
+        if current:
+            groups.append(current)
+        return groups or [[]]
 
     def _split_headings(self, content: str) -> list[dict]:
         """Split content by headings, converting headings to div elements."""
@@ -452,6 +481,7 @@ class FeishuChannel(BaseChannel):
 
     def _upload_image_sync(self, file_path: str) -> str | None:
         """Upload an image to Feishu and return the image_key."""
+        from lark_oapi.api.im.v1 import CreateImageRequest, CreateImageRequestBody
         try:
             with open(file_path, "rb") as f:
                 request = CreateImageRequest.builder() \
@@ -475,6 +505,7 @@ class FeishuChannel(BaseChannel):
 
     def _upload_file_sync(self, file_path: str) -> str | None:
         """Upload a file to Feishu and return the file_key."""
+        from lark_oapi.api.im.v1 import CreateFileRequest, CreateFileRequestBody
         ext = os.path.splitext(file_path)[1].lower()
         file_type = self._FILE_TYPE_MAP.get(ext, "stream")
         file_name = os.path.basename(file_path)
@@ -502,6 +533,7 @@ class FeishuChannel(BaseChannel):
 
     def _download_image_sync(self, message_id: str, image_key: str) -> tuple[bytes | None, str | None]:
         """Download an image from Feishu message by message_id and image_key."""
+        from lark_oapi.api.im.v1 import GetMessageResourceRequest
         try:
             request = GetMessageResourceRequest.builder() \
                 .message_id(message_id) \
@@ -526,6 +558,13 @@ class FeishuChannel(BaseChannel):
         self, message_id: str, file_key: str, resource_type: str = "file"
     ) -> tuple[bytes | None, str | None]:
         """Download a file/audio/media from a Feishu message by message_id and file_key."""
+        from lark_oapi.api.im.v1 import GetMessageResourceRequest
+
+        # Feishu API only accepts 'image' or 'file' as type parameter
+        # Convert 'audio' to 'file' for API compatibility
+        if resource_type == "audio":
+            resource_type = "file"
+
         try:
             request = (
                 GetMessageResourceRequest.builder()
@@ -594,6 +633,7 @@ class FeishuChannel(BaseChannel):
 
     def _send_message_sync(self, receive_id_type: str, receive_id: str, msg_type: str, content: str) -> bool:
         """Send a single message (text/image/file/interactive) synchronously."""
+        from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
         try:
             request = CreateMessageRequest.builder() \
                 .receive_id_type(receive_id_type) \
@@ -649,15 +689,17 @@ class FeishuChannel(BaseChannel):
                         )
 
             if msg.content and msg.content.strip():
-                card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
-                await loop.run_in_executor(
-                    None, self._send_message_sync,
-                    receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
-                )
+                elements = self._build_card_elements(msg.content)
+                for chunk in self._split_elements_by_table_limit(elements):
+                    card = {"config": {"wide_screen_mode": True}, "elements": chunk}
+                    await loop.run_in_executor(
+                        None, self._send_message_sync,
+                        receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
+                    )
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
-    
+
     def _on_message_sync(self, data: "P2ImMessageReceiveV1") -> None:
         """
         Sync handler for incoming messages (called from WebSocket thread).
@@ -665,7 +707,7 @@ class FeishuChannel(BaseChannel):
         """
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self._on_message(data), self._loop)
-    
+
     async def _on_message(self, data: "P2ImMessageReceiveV1") -> None:
         """Handle incoming message from Feishu."""
         try:

@@ -1,23 +1,21 @@
 """LiteLLM provider implementation for multi-provider support."""
 
-import json
-import json_repair
 import os
 import secrets
 import string
 from collections.abc import AsyncGenerator
 from typing import Any
 
+import json_repair
 import litellm
 from litellm import acompletion
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
 
-
-# Standard OpenAI chat-completion message keys plus reasoning_content for
-# thinking-enabled models (Kimi k2.5, DeepSeek-R1, etc.).
+# Standard chat-completion message keys.
 _ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
+_ANTHROPIC_EXTRA_KEYS = frozenset({"thinking_blocks"})
 _ALNUM = string.ascii_letters + string.digits
 
 def _short_tool_id() -> str:
@@ -33,10 +31,10 @@ class LiteLLMProvider(LLMProvider):
     a unified interface.  Provider-specific logic is driven by the registry
     (see providers/registry.py) — no if-elif chains needed here.
     """
-    
+
     def __init__(
-        self, 
-        api_key: str | None = None, 
+        self,
+        api_key: str | None = None,
         api_base: str | None = None,
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
@@ -45,24 +43,24 @@ class LiteLLMProvider(LLMProvider):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
-        
+
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
         # api_key / api_base are fallback for auto-detection.
         self._gateway = find_gateway(provider_name, api_key, api_base)
-        
+
         # Configure environment variables
         if api_key:
             self._setup_env(api_key, api_base, default_model)
-        
+
         if api_base:
             litellm.api_base = api_base
-        
+
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
         # Drop unsupported parameters for providers (e.g., gpt-5 rejects some params)
         litellm.drop_params = True
-    
+
     def _setup_env(self, api_key: str, api_base: str | None, model: str) -> None:
         """Set environment variables based on detected provider."""
         spec = self._gateway or find_by_model(model)
@@ -86,7 +84,7 @@ class LiteLLMProvider(LLMProvider):
             resolved = env_val.replace("{api_key}", api_key)
             resolved = resolved.replace("{api_base}", effective_base)
             os.environ.setdefault(env_name, resolved)
-    
+
     def _resolve_model(self, model: str) -> str:
         """Resolve model name by applying provider/gateway prefixes."""
         if self._gateway:
@@ -97,7 +95,7 @@ class LiteLLMProvider(LLMProvider):
             if prefix and not model.startswith(f"{prefix}/"):
                 model = f"{prefix}/{model}"
             return model
-        
+
         # Standard mode: auto-prefix for known providers
         spec = find_by_model(model)
         if spec and spec.litellm_prefix:
@@ -116,7 +114,7 @@ class LiteLLMProvider(LLMProvider):
         if prefix.lower().replace("-", "_") != spec_name:
             return model
         return f"{canonical_prefix}/{remainder}"
-    
+
     def _supports_cache_control(self, model: str) -> bool:
         """Return True when the provider supports cache_control on content blocks."""
         if self._gateway is not None:
@@ -159,13 +157,22 @@ class LiteLLMProvider(LLMProvider):
                 if pattern in model_lower:
                     kwargs.update(overrides)
                     return
-    
+
     @staticmethod
-    def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _extra_msg_keys(original_model: str, resolved_model: str) -> frozenset[str]:
+        """Return provider-specific extra keys to preserve in request messages."""
+        spec = find_by_model(original_model) or find_by_model(resolved_model)
+        if (spec and spec.name == "anthropic") or "claude" in original_model.lower() or resolved_model.startswith("anthropic/"):
+            return _ANTHROPIC_EXTRA_KEYS
+        return frozenset()
+
+    @staticmethod
+    def _sanitize_messages(messages: list[dict[str, Any]], extra_keys: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
         """Strip non-standard keys and ensure assistant messages have a content key."""
+        allowed = _ALLOWED_MSG_KEYS | extra_keys
         sanitized = []
         for msg in messages:
-            clean = {k: v for k, v in msg.items() if k in _ALLOWED_MSG_KEYS}
+            clean = {k: v for k, v in msg.items() if k in allowed}
             # Strict providers require "content" even when assistant only has tool_calls
             if clean.get("role") == "assistant" and "content" not in clean:
                 clean["content"] = None
@@ -337,7 +344,7 @@ class LiteLLMProvider(LLMProvider):
         """Parse LiteLLM response into our standard format."""
         choice = response.choices[0]
         message = choice.message
-        
+
         tool_calls = []
         if hasattr(message, "tool_calls") and message.tool_calls:
             for tc in message.tool_calls:
@@ -345,13 +352,13 @@ class LiteLLMProvider(LLMProvider):
                 args = tc.function.arguments
                 if isinstance(args, str):
                     args = json_repair.loads(args)
-                
+
                 tool_calls.append(ToolCallRequest(
                     id=_short_tool_id(),
                     name=tc.function.name,
                     arguments=args,
                 ))
-        
+
         usage = {}
         if hasattr(response, "usage") and response.usage:
             usage = {
@@ -359,8 +366,9 @@ class LiteLLMProvider(LLMProvider):
                 "completion_tokens": response.usage.completion_tokens,
                 "total_tokens": response.usage.total_tokens,
             }
-        
+
         reasoning_content = getattr(message, "reasoning_content", None) or None
+        thinking_blocks = getattr(message, "thinking_blocks", None) or None
         
         return LLMResponse(
             content=message.content,
@@ -368,8 +376,9 @@ class LiteLLMProvider(LLMProvider):
             finish_reason=choice.finish_reason or "stop",
             usage=usage,
             reasoning_content=reasoning_content,
+            thinking_blocks=thinking_blocks,
         )
-    
+
     def get_default_model(self) -> str:
         """Get the default model."""
         return self.default_model

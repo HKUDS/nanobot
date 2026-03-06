@@ -1,3 +1,4 @@
+.worktrees/
 .assets
 .env
 *.pyc
@@ -22,3 +23,4 @@ botpy.log
 tests/
 CODEBASE_GUIDE.md
 uv.lock
+
