@@ -133,7 +133,7 @@ class MemoryStore:
                 if args and isinstance(args[0], dict):
                     args = args[0]
                 else:
-                    logger.warning("Memory consolidation: unexpected arguments type list with non-dict content")
+                    logger.warning("Memory consolidation: unexpected arguments as empty or non-dict list")
                     return False
             if not isinstance(args, dict):
                 logger.warning("Memory consolidation: unexpected arguments type {}", type(args).__name__)
