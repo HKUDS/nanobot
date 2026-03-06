@@ -368,26 +368,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
-    # === Coding Plan Gateway Providers =====================================
-    # Alibaba Cloud Coding Plan: OpenAI-compatible gateway for coding assistance.
-    # Uses special API key format starting with "sk-sp-" to distinguish it
-    # from regular dashscope keys. Uses the OpenAI-compatible endpoint.
-    ProviderSpec(
-        name="dashscope_coding_plan",
-        keywords=("dashscope-coding-plan", "coding-plan", "aliyun-coding", "bailian-coding"),
-        env_key="DASHSCOPE_CODING_PLAN_API_KEY",
-        display_name="Alibaba Cloud Coding Plan",
-        litellm_prefix="openai",  # → openai/{model} (uses OpenAI-compatible endpoint)
-        skip_prefixes=("openai/", "dashscope/", "openrouter/"),
-        env_extras=(),
-        is_gateway=True,
-        is_local=False,
-        detect_by_key_prefix="sk-sp-",  # coding plan API keys start with "sk-sp-"
-        detect_by_base_keyword="coding.dashscope",
-        default_api_base="https://coding.dashscope.aliyuncs.com/v1",
-        strip_model_prefix=True,  # Strip "dashscope_coding_plan/" prefix
-        model_overrides=(),
-    ),
     # === Auxiliary (not a primary LLM provider) ============================
     # Groq: mainly used for Whisper voice transcription, also usable for LLM.
     # Needs "groq/" prefix for LiteLLM routing. Placed last — it rarely wins fallback.

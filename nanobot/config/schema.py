@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 
 class Base(BaseModel):
@@ -257,20 +257,13 @@ class ProvidersConfig(Base):
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     dashscope: ProviderConfig = Field(default_factory=ProviderConfig)  # 阿里云通义千问
-    dashscope_coding_plan: ProviderConfig = Field(
-        default_factory=ProviderConfig
-    )  # 阿里云百炼Coding Plan
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
-    siliconflow: ProviderConfig = Field(
-        default_factory=ProviderConfig
-    )  # SiliconFlow (硅基流动) API gateway
-    volcengine: ProviderConfig = Field(
-        default_factory=ProviderConfig
-    )  # VolcEngine (火山引擎) API gateway
+    siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
+    volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
 
@@ -325,20 +318,6 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
 
 
-class TTSConfig(Base):
-    """Text-to-Speech configuration."""
-
-    provider: str = "edge_tts"  # Default TTS provider
-    voice: str = "en-US-ChristopherNeural"  # Default voice
-    speed: float = 1.0  # Voice speed multiplier
-
-
-class AudioConfig(Base):
-    """Audio configuration."""
-
-    tts: TTSConfig = Field(default_factory=TTSConfig)
-
-
 class ToolsConfig(Base):
     """Tools configuration."""
 
@@ -356,7 +335,6 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
-    audio: AudioConfig = Field(default_factory=AudioConfig)
 
     @property
     def workspace_path(self) -> Path:
