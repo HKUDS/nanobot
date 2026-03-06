@@ -9,9 +9,9 @@ import pytest
 
 
 def _make_loop():
-    """Create a minimal AdkAgentLoop with mocked dependencies."""
-    from scorpion.adk.loop import AdkAgentLoop
-    from scorpion.bus.queue import MessageBus
+    """Create a minimal AgentLoop with mocked dependencies."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
     provider = MagicMock()
@@ -19,18 +19,18 @@ def _make_loop():
     workspace = MagicMock()
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
 
-    with patch("scorpion.adk.loop.ContextBuilder"), \
-         patch("scorpion.adk.loop.SessionManager"), \
-         patch("scorpion.adk.loop.SubagentManager") as MockSubMgr:
+    with patch("nanobot.agent.loop.ContextBuilder"), \
+         patch("nanobot.agent.loop.SessionManager"), \
+         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
         MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
-        loop = AdkAgentLoop(bus=bus, provider=provider, workspace=workspace)
+        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
     return loop, bus
 
 
 class TestHandleStop:
     @pytest.mark.asyncio
     async def test_stop_no_active_task(self):
-        from scorpion.bus.events import InboundMessage
+        from nanobot.bus.events import InboundMessage
 
         loop, bus = _make_loop()
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
@@ -40,7 +40,7 @@ class TestHandleStop:
 
     @pytest.mark.asyncio
     async def test_stop_cancels_active_task(self):
-        from scorpion.bus.events import InboundMessage
+        from nanobot.bus.events import InboundMessage
 
         loop, bus = _make_loop()
         cancelled = asyncio.Event()
@@ -65,7 +65,7 @@ class TestHandleStop:
 
     @pytest.mark.asyncio
     async def test_stop_cancels_multiple_tasks(self):
-        from scorpion.bus.events import InboundMessage
+        from nanobot.bus.events import InboundMessage
 
         loop, bus = _make_loop()
         events = [asyncio.Event(), asyncio.Event()]
@@ -92,7 +92,7 @@ class TestHandleStop:
 class TestDispatch:
     @pytest.mark.asyncio
     async def test_dispatch_processes_and_publishes(self):
-        from scorpion.bus.events import InboundMessage, OutboundMessage
+        from nanobot.bus.events import InboundMessage, OutboundMessage
 
         loop, bus = _make_loop()
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="hello")
@@ -105,7 +105,7 @@ class TestDispatch:
 
     @pytest.mark.asyncio
     async def test_processing_lock_serializes(self):
-        from scorpion.bus.events import InboundMessage, OutboundMessage
+        from nanobot.bus.events import InboundMessage, OutboundMessage
 
         loop, bus = _make_loop()
         order = []
@@ -129,8 +129,8 @@ class TestDispatch:
 class TestSubagentCancellation:
     @pytest.mark.asyncio
     async def test_cancel_by_session(self):
-        from scorpion.agent.subagent import SubagentManager
-        from scorpion.bus.queue import MessageBus
+        from nanobot.agent.subagent import SubagentManager
+        from nanobot.bus.queue import MessageBus
 
         bus = MessageBus()
         provider = MagicMock()
@@ -157,8 +157,8 @@ class TestSubagentCancellation:
 
     @pytest.mark.asyncio
     async def test_cancel_by_session_no_tasks(self):
-        from scorpion.agent.subagent import SubagentManager
-        from scorpion.bus.queue import MessageBus
+        from nanobot.agent.subagent import SubagentManager
+        from nanobot.bus.queue import MessageBus
 
         bus = MessageBus()
         provider = MagicMock()

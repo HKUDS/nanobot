@@ -12,11 +12,11 @@
   </p>
 </div>
 
-🐈 **scorpion** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw) 
+🐈 **scorpion** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw).
 
-⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
+⚡️ Delivers core agent functionality with **99% fewer lines of code** than OpenClaw.
 
-📏 Real-time line count: **3,935 lines** (run `bash core_agent_lines.sh` to verify anytime)
+📏 Real-time line count: run `bash core_agent_lines.sh` to verify anytime.
 
 ## 📢 News
 
@@ -279,11 +279,20 @@ If you prefer to configure manually, add the following to `~/.scorpion/config.js
     "discord": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
+      "allowFrom": ["YOUR_USER_ID"],
+      "groupPolicy": "mention",
+      "allowBotMessages": true
     }
   }
 }
 ```
+
+> `groupPolicy` controls how the bot responds in group channels:
+> - `"mention"` (default) — Only respond when @mentioned
+> - `"open"` — Respond to all messages
+> DMs always respond when the sender is in `allowFrom`.
+>
+> `allowBotMessages` defaults to `true`. In this mode, Discord replies only when the bot is pinged (`@bot`) by any sender (human or bot). Set it to `false` to disable bot-authored messages and allow normal non-mention flow for human senders.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator
@@ -333,7 +342,7 @@ pip install scorpion-ai[matrix]
       "accessToken": "syt_xxx",
       "deviceId": "NANOBOT01",
       "e2eeEnabled": true,
-      "allowFrom": [],
+      "allowFrom": ["@your_user:matrix.org"],
       "groupPolicy": "open",
       "groupAllowFrom": [],
       "allowRoomMentions": false,
@@ -427,14 +436,14 @@ Uses **WebSocket** long connection — no public IP required.
       "appSecret": "xxx",
       "encryptKey": "",
       "verificationToken": "",
-      "allowFrom": []
+      "allowFrom": ["ou_YOUR_OPEN_ID"]
     }
   }
 }
 ```
 
 > `encryptKey` and `verificationToken` are optional for Long Connection mode.
-> `allowFrom`: Leave empty to allow all users, or add `["ou_xxx"]` to restrict access.
+> `allowFrom`: Add your open_id (find it in nanobot logs when you message the bot). Use `["*"]` to allow all users.
 
 **3. Run**
 
@@ -474,7 +483,7 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
       "enabled": true,
       "appId": "YOUR_APP_ID",
       "secret": "YOUR_APP_SECRET",
-      "allowFrom": []
+      "allowFrom": ["YOUR_OPENID"]
     }
   }
 }
@@ -513,13 +522,13 @@ Uses **Stream Mode** — no public IP required.
       "enabled": true,
       "clientId": "YOUR_APP_KEY",
       "clientSecret": "YOUR_APP_SECRET",
-      "allowFrom": []
+      "allowFrom": ["YOUR_STAFF_ID"]
     }
   }
 }
 ```
 
-> `allowFrom`: Leave empty to allow all users, or add `["staffId"]` to restrict access.
+> `allowFrom`: Add your staff ID. Use `["*"]` to allow all users.
 
 **3. Run**
 
@@ -554,6 +563,7 @@ Uses **Socket Mode** — no public URL required.
       "enabled": true,
       "botToken": "xoxb-...",
       "appToken": "xapp-...",
+      "allowFrom": ["YOUR_SLACK_USER_ID"],
       "groupPolicy": "mention"
     }
   }
@@ -587,7 +597,7 @@ Give scorpion its own email account. It polls **IMAP** for incoming mail and rep
 **2. Configure**
 
 > - `consentGranted` must be `true` to allow mailbox access. This is a safety gate — set `false` to fully disable.
-> - `allowFrom`: Leave empty to accept emails from anyone, or restrict to specific senders.
+> - `allowFrom`: Add your email address. Use `["*"]` to accept emails from anyone.
 > - `smtpUseTls` and `smtpUseSsl` default to `true` / `false` respectively, which is correct for Gmail (port 587 + STARTTLS). No need to set them explicitly.
 > - Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
 
@@ -638,7 +648,12 @@ Config file: `~/.scorpion/config.json`
 
 ### Provider
 
-Scorpion uses **Google Gemini** exclusively via the `google-genai` SDK.
+> [!TIP]
+> - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
+> - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
+> - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
+> - **VolcEngine Coding Plan**: If you're on VolcEngine's coding plan, set `"apiBase": "https://ark.cn-beijing.volces.com/api/coding/v3"` in your volcengine provider config.
+> - **Alibaba Cloud Coding Plan**: If you're on the Alibaba Cloud Coding Plan (BaiLian), set `"apiBase": "https://coding.dashscope.aliyuncs.com/v1"` in your dashscope provider config.
 
 | Provider | Model | Get API Key |
 |----------|-------|-------------|
@@ -716,12 +731,40 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 > [!TIP]
 > For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
+> **Change in source / post-`v0.1.4.post3`:** In `v0.1.4.post3` and earlier, an empty `allowFrom` means "allow all senders". In newer versions (including building from source), **empty `allowFrom` denies all access by default**. To allow all senders, set `"allowFrom": ["*"]`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
+
+
+## Multiple Instances
+
+Run multiple nanobot instances simultaneously, each with its own workspace and configuration.
+
+```bash
+# Instance A - Telegram bot
+nanobot gateway -w ~/.nanobot/botA -p 18791
+
+# Instance B - Discord bot
+nanobot gateway -w ~/.nanobot/botB -p 18792
+
+# Instance C - Using custom config file
+nanobot gateway -w ~/.nanobot/botC -c ~/.nanobot/botC/config.json -p 18793
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--workspace` | `-w` | Workspace directory (default: `~/.nanobot/workspace`) |
+| `--config` | `-c` | Config file path (default: `~/.nanobot/config.json`) |
+| `--port` | `-p` | Gateway port (default: `18790`) |
+
+Each instance has its own:
+- Workspace directory (MEMORY.md, HEARTBEAT.md, session files)
+- Cron jobs storage (`workspace/cron/jobs.json`)
+- Configuration (if using `--config`)
 
 
 ## CLI Reference

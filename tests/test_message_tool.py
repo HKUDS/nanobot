@@ -1,6 +1,6 @@
 import pytest
 
-from scorpion.agent.tools.message import MessageTool
+from nanobot.agent.tools.message import MessageTool
 
 
 @pytest.mark.asyncio
