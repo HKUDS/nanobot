@@ -36,10 +36,15 @@ class OpenVikingCompactHook(Hook):
         if not session or not hasattr(session, "messages"):
             return {"success": False, "error": "no session"}
 
+        messages = session.messages
+        if not messages:
+            return {"success": True, "message": "no messages to commit"}
+
         try:
             client = await self._get_client()
             session_id = context.session_id or context.session_key or "default"
-            result = await client.commit(session_id, session.messages)
+            sender_id = context.sender_id or ""
+            result = await client.commit(session_id, messages, sender_id=sender_id)
             return result
         except Exception as e:
             logger.exception("OpenViking compact hook failed")

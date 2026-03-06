@@ -15,6 +15,8 @@ class HookContext:
     event_type: str
     session_id: Optional[str] = None
     session_key: Optional[str] = None
+    sender_id: Optional[str] = None
+    channel: Optional[str] = None
     metadata: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
 

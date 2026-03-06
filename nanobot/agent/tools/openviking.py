@@ -270,14 +270,18 @@ class OVUserMemorySearchTool(_OVTool):
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "The search query"},
+                "sender_id": {
+                    "type": "string",
+                    "description": "Optional user ID to scope memory search. Defaults to the configured user.",
+                },
             },
             "required": ["query"],
         }
 
-    async def execute(self, query: str, **kwargs: Any) -> str:
+    async def execute(self, query: str, sender_id: str = "", **kwargs: Any) -> str:
         try:
             client = await self._client()
-            results = await client.search_user_memory(query)
+            results = await client.search_user_memory(query, sender_id=sender_id)
             if not results:
                 return f"No user memories found for: {query}"
             return str(results)
@@ -317,15 +321,19 @@ class OVMemoryCommitTool(_OVTool):
                         "required": ["role", "content"],
                     },
                 },
+                "sender_id": {
+                    "type": "string",
+                    "description": "Optional user ID for per-user memory isolation.",
+                },
             },
             "required": ["messages"],
         }
 
-    async def execute(self, messages: list[dict[str, Any]], **kwargs: Any) -> str:
+    async def execute(self, messages: list[dict[str, Any]], sender_id: str = "", **kwargs: Any) -> str:
         try:
             client = await self._client()
             session_id = self._session_key_fn() if self._session_key_fn else "default"
-            await client.commit(session_id, messages)
+            await client.commit(session_id, messages, sender_id=sender_id)
             return f"Successfully committed {len(messages)} messages to OpenViking session."
         except Exception as e:
             logger.exception("Error committing to OpenViking")
@@ -348,6 +356,10 @@ class OVAddResourceTool(_OVTool):
             "properties": {
                 "local_path": {"type": "string", "description": "Path to the local file"},
                 "description": {"type": "string", "description": "Description of the resource"},
+                "target_path": {
+                    "type": "string",
+                    "description": "Optional target path in OpenViking to store the resource",
+                },
                 "wait": {
                     "type": "boolean",
                     "description": "Whether to wait for processing to complete",
@@ -357,7 +369,7 @@ class OVAddResourceTool(_OVTool):
         }
 
     async def execute(
-        self, local_path: str, description: str, wait: bool = False, **kwargs: Any
+        self, local_path: str, description: str, target_path: str = "", wait: bool = False, **kwargs: Any
     ) -> str:
         try:
             path = Path(local_path).expanduser().resolve()
@@ -367,7 +379,7 @@ class OVAddResourceTool(_OVTool):
                 return f"Error: Not a file: {local_path}"
 
             client = await self._client()
-            result = await client.add_resource(str(path), description, wait=wait)
+            result = await client.add_resource(str(path), description, target_path=target_path, wait=wait)
             if result:
                 root_uri = result.get("result", {}).get("root_uri", result.get("root_uri", "unknown"))
                 return f"Successfully added resource: {root_uri}"

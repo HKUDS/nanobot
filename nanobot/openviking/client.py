@@ -216,8 +216,9 @@ class VikingClient:
             "target_uri": target_uri,
         }
 
-    async def search_user_memory(self, query: str) -> list[dict[str, Any]]:
-        uri = f"viking://user/{self.user_id}/memories/"
+    async def search_user_memory(self, query: str, sender_id: str = "") -> list[dict[str, Any]]:
+        uid = sender_id or self.user_id
+        uri = f"viking://user/{uid}/memories/"
         result = await self.client.search(query, target_uri=uri)
         return [self._matched_to_dict(m) for m in getattr(result, "memories", [])]
 
@@ -239,9 +240,11 @@ class VikingClient:
     # ------------------------------------------------------------------
 
     async def add_resource(
-        self, local_path: str, desc: str, wait: bool = False,
+        self, local_path: str, desc: str, target_path: str = "", wait: bool = False,
     ) -> dict[str, Any] | None:
-        result = await self.client.add_resource(path=local_path, reason=desc, wait=wait)
+        result = await self.client.add_resource(
+            path=local_path, reason=desc, target_path=target_path or None, wait=wait,
+        )
         return result
 
     async def list_resources(self, path: str | None = None, recursive: bool = False) -> list:
@@ -275,8 +278,16 @@ class VikingClient:
     # Session commit
     # ------------------------------------------------------------------
 
-    async def commit(self, session_id: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
-        """Commit conversation messages to OpenViking."""
+    async def commit(
+        self, session_id: str, messages: list[dict[str, Any]], sender_id: str = "",
+    ) -> dict[str, Any]:
+        """Commit conversation messages to OpenViking.
+
+        Args:
+            session_id: Session identifier.
+            messages: List of message dicts with role/content.
+            sender_id: Optional user identifier for per-user memory isolation.
+        """
         session = self.client.session(session_id)
 
         if self.mode == "local":

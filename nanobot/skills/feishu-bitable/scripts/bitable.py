@@ -6,6 +6,7 @@ Feishu Bitable CLI - 飞书多维表命令行工具
 
 import argparse
 import json
+import os
 import sys
 import requests
 from datetime import datetime, timedelta
@@ -14,8 +15,8 @@ from datetime import datetime, timedelta
 # ============================================================
 # 配置常量
 # ============================================================
-APP_ID = "cli_a92a93eb6ff99cc4"
-APP_SECRET = "MaOLLFe9Nc7FxVTNCg1xlbkikhtG3Qiy"
+APP_ID = os.environ.get('NANOBOT_CHANNELS__FEISHU__APP_ID', '')
+APP_SECRET = os.environ.get('NANOBOT_CHANNELS__FEISHU__APP_SECRET', '')
 APP_TOKEN = "JXdtbkkchaSXmksx6eFc2Eatn45"
 BASE_URL = "https://open.feishu.cn/open-apis"
 
@@ -31,6 +32,8 @@ PROJECT_TABLE_ID = "tblvcGZsmzHcCF"       # 项目表
 
 def get_tenant_access_token():
     """获取飞书 tenant_access_token，有效期 2 小时"""
+    if not APP_ID or not APP_SECRET:
+        raise Exception("缺少飞书凭据，请设置环境变量 NANOBOT_CHANNELS__FEISHU__APP_ID / NANOBOT_CHANNELS__FEISHU__APP_SECRET")
     url = f"{BASE_URL}/auth/v3/tenant_access_token/internal"
     payload = {"app_id": APP_ID, "app_secret": APP_SECRET}
     resp = requests.post(url, json=payload)

@@ -174,13 +174,14 @@ python3 scripts/bitable.py fields --table tblH6xn2dp6E1UtD
 
 ## 配置
 
-配置存储在 `~/.nanobot/.env`：
+通过系统环境变量配置飞书应用凭据（与其他飞书 skill 共用）：
 
 ```bash
-FEISHU_APP_ID=cli_a92a93eb6ff99cc4
-FEISHU_APP_SECRET=MaOLLFe9Nc7FxVTNCg1xlbkikhtG3Qiy
-FEISHU_APP_TOKEN=JXdtbkkchaSXmksx6eFc2Eatn45
+export NANOBOT_CHANNELS__FEISHU__APP_ID=cli_xxx
+export NANOBOT_CHANNELS__FEISHU__APP_SECRET=xxx
 ```
+
+多维表 App Token 已内置（`JXdtbkkchaSXmksx6eFc2Eatn45`）。
 
 ## 数据表结构
 

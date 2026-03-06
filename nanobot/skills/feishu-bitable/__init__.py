@@ -5,9 +5,9 @@ Feishu Bitable API - 飞书多维表 Python API
 支持日报和任务的增删改查操作
 """
 
+import os
 import json
 import requests
-from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 
@@ -15,13 +15,6 @@ from datetime import datetime, timedelta
 # ============================================================
 # 配置
 # ============================================================
-
-DEFAULT_CONFIG = {
-    "APP_ID": "cli_a92a93eb6ff99cc4",
-    "APP_SECRET": "MaOLLFe9Nc7FxVTNCg1xlbkikhtG3Qiy",
-    "APP_TOKEN": "JXdtbkkchaSXmksx6eFc2Eatn45",
-    "BASE_URL": "https://open.feishu.cn/open-apis",
-}
 
 # 表 ID
 DAILY_TABLE_ID = "tblYWOnDxGsVSfDN"
@@ -35,19 +28,19 @@ DEFAULT_PROJECT_RECORD = "recvcGZsmzHcCF"  # HiperOne
 # 工具函数
 # ============================================================
 
+APP_TOKEN = "JXdtbkkchaSXmksx6eFc2Eatn45"
+
+
 def load_config() -> Dict:
-    """加载配置（优先从环境变量文件，其次使用默认）"""
-    config_path = Path.home() / '.nanobot' / '.env'
-    config = DEFAULT_CONFIG.copy()
-    
-    if config_path.exists():
-        with open(config_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    config[key.strip()] = value.strip().strip('"\'')
-    
+    """从系统环境变量加载飞书凭据"""
+    config = {
+        "APP_ID": os.environ.get('NANOBOT_CHANNELS__FEISHU__APP_ID', ''),
+        "APP_SECRET": os.environ.get('NANOBOT_CHANNELS__FEISHU__APP_SECRET', ''),
+        "APP_TOKEN": APP_TOKEN,
+        "BASE_URL": "https://open.feishu.cn/open-apis",
+    }
+    if not config['APP_ID'] or not config['APP_SECRET']:
+        raise Exception("缺少飞书凭据，请设置环境变量 NANOBOT_CHANNELS__FEISHU__APP_ID / NANOBOT_CHANNELS__FEISHU__APP_SECRET")
     return config
 
 

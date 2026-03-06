@@ -105,6 +105,8 @@ class AgentLoop:
 
         self.openviking_config = openviking_config
         self._current_session_key: str = "default"
+        self._current_sender_id: str = ""
+        self._current_channel: str = ""
         self._viking_client_initialized = False
         self.hook_manager = HookManager()
         if openviking_config and openviking_config.enabled:
@@ -313,6 +315,8 @@ class AgentLoop:
                         ctx = HookContext(
                             event_type="tool.post_call",
                             session_key=self._current_session_key,
+                            sender_id=self._current_sender_id,
+                            channel=self._current_channel,
                         )
                         hook_results = await self.hook_manager.fire(
                             "tool.post_call", ctx,
@@ -454,6 +458,8 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         self._current_session_key = key
+        self._current_sender_id = msg.sender_id
+        self._current_channel = msg.channel
         session = self.sessions.get_or_create(key)
 
         # Slash commands
@@ -598,6 +604,8 @@ class AgentLoop:
                 event_type="message.compact",
                 session_id=session.key,
                 session_key=self._current_session_key,
+                sender_id=self._current_sender_id,
+                channel=self._current_channel,
             )
             await self.hook_manager.fire("message.compact", ctx, session=session)
 
