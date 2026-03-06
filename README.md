@@ -410,7 +410,10 @@ pip install slixmpp
       "rooms": ["room1@conference.example.com", "room2@conference.example.com"],
       "allowFrom": [],
       "groupPolicy": "open",
-      "groupAllowFrom": []
+      "groupAllowFrom": [],
+      "fileTransferEnabled": true,
+      "maxFileSizeMb": 50,
+      "allowedFileTypes": ["image/*", "video/*", "audio/*", "text/*", "application/pdf"]
     }
   }
 }
@@ -425,6 +428,9 @@ pip install slixmpp
 | `allowFrom` | Allowed JIDs. Empty = allow everyone. |
 | `groupPolicy` | MUC behavior: `open`, `mention`, or `allowlist`. |
 | `groupAllowFrom` | Room JID allowlist when policy is `allowlist`. |
+| `fileTransferEnabled` | Enable XEP-0065 and XEP-0363 file transfers (default: `true`). |
+| `maxFileSizeMb` | Maximum file size in MB to accept (default: `50`). |
+| `allowedFileTypes` | Allowed MIME type patterns (e.g., `["image/*", "video/*"]`). |
 
 > **Group Policy Options:**
 > - `open` — Respond to all messages in rooms

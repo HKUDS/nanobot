@@ -198,6 +198,10 @@ class XmppConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed JIDs
     group_policy: Literal["open", "mention", "allowlist"] = "open"
     group_allow_from: list[str] = Field(default_factory=list)  # Allowed MUC room JIDs
+    # File transfer settings
+    file_transfer_enabled: bool = True  # Enable XEP-0065 and XEP-0363 file transfers
+    max_file_size_mb: int = 50  # Maximum file size in MB to accept
+    allowed_file_types: list[str] = Field(default_factory=lambda: ["image/*", "video/*", "audio/*", "text/*", "application/pdf"])
 
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
