@@ -124,6 +124,7 @@ class TelegramChannel(BaseChannel):
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
         self._app: Application | None = None
+        self._bot_username: str = ""
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
     
@@ -165,6 +166,7 @@ class TelegramChannel(BaseChannel):
         
         # Get bot info and register command menu
         bot_info = await self._app.bot.get_me()
+        self._bot_username = bot_info.username or ""
         logger.info("Telegram bot @{} connected", bot_info.username)
         
         try:
@@ -394,12 +396,19 @@ class TelegramChannel(BaseChannel):
         
         content = "\n".join(content_parts) if content_parts else "[empty message]"
         
+        is_group = message.chat.type != "private"
+        observe_only = False
+
+        if is_group and self.config.mention.require_in_groups and self._bot_username:
+            observe_only, content = self._process_group_mention(content, message)
+
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
         
         str_chat_id = str(chat_id)
         
-        # Start typing indicator before processing
-        self._start_typing(str_chat_id)
+        # Only start typing when we intend to reply
+        if not observe_only:
+            self._start_typing(str_chat_id)
         
         # Forward to the message bus
         await self._handle_message(
@@ -412,10 +421,56 @@ class TelegramChannel(BaseChannel):
                 "user_id": user.id,
                 "username": user.username,
                 "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
-            }
+                "is_group": is_group,
+            },
+            observe_only=observe_only,
         )
     
+    def _process_group_mention(self, content: str, message) -> tuple[bool, str]:
+        """Check for bot @mention (or configured trigger keywords) in a group message.
+
+        Returns (observe_only, content):
+        - observe_only=True  → record in session, skip LLM (not triggered, or only trigger with nothing else)
+        - observe_only=False → strip matched trigger(s) and pass the remainder to the agent
+        """
+        mention_tag = f"@{self._bot_username}"
+        extra_keywords: list[str] = self.config.mention.trigger_keywords or []
+
+        # Check message entities for @mention (most reliable)
+        mentioned = False
+        matched_trigger: str | None = None
+        entities = list(message.entities or []) + list(message.caption_entities or [])
+        for entity in entities:
+            if entity.type == "mention":
+                text = message.text or message.caption or ""
+                entity_text = text[entity.offset:entity.offset + entity.length]
+                if entity_text.lower() == mention_tag.lower():
+                    mentioned = True
+                    matched_trigger = mention_tag
+                    break
+
+        # Fallback: plain-text scan for @username and extra trigger keywords
+        if not mentioned:
+            for trigger in [mention_tag] + extra_keywords:
+                if trigger.lower() in content.lower():
+                    mentioned = True
+                    matched_trigger = trigger
+                    break
+
+        if not mentioned:
+            return True, content  # not triggered → observe only
+
+        # Strip all configured triggers from content
+        stripped = content
+        for trigger in [mention_tag] + extra_keywords:
+            stripped = re.sub(re.escape(trigger), "", stripped, flags=re.IGNORECASE)
+        stripped = stripped.strip()
+
+        if not stripped:
+            return True, content  # nothing left after stripping triggers → skip LLM
+
+        return False, stripped
+
     def _start_typing(self, chat_id: str) -> None:
         """Start sending 'typing...' indicator for a chat."""
         # Cancel any existing typing task for this chat
