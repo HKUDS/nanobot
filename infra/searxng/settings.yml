@@ -1,0 +1,17 @@
+use_default_settings: true
+
+server:
+  secret_key: "${SEARXNG_SECRET}"
+  bind_address: "0.0.0.0"
+  port: 8080
+  limiter: false
+  public_instance: false
+  image_proxy: true
+  method: "GET"
+
+search:
+  safe_search: 0
+  formats:
+    - json
+  autocomplete: ""
+  favicon_resolver: ""

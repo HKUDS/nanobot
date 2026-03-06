@@ -1,0 +1,43 @@
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080
+      - SEARXNG_SECRET=${SEARXNG_SECRET}
+    networks:
+      - nanobot-net
+    mem_limit: 512m
+    cpus: "0.5"
+
+  playwright-mcp:
+    image: mcr.microsoft.com/playwright/mcp:latest
+    container_name: playwright-mcp
+    restart: "no"
+    ports:
+      - "127.0.0.1:8931:8931"
+    command:
+      - "--headless"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8931"
+      - "--no-sandbox"
+    volumes:
+      - playwright-storage:/home/pwuser/.config/playwright
+    networks:
+      - nanobot-net
+    mem_limit: 1g
+    cpus: "1.0"
+
+networks:
+  nanobot-net:
+    external: true
+
+volumes:
+  playwright-storage:

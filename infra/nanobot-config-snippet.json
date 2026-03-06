@@ -1,0 +1,10 @@
+{
+  "_comment": "Merge this 'tools' block into your ~/.nanobot/config.json",
+  "tools": {
+    "mcpServers": {
+      "playwright": {
+        "url": "http://127.0.0.1:8931/mcp"
+      }
+    }
+  }
+}
