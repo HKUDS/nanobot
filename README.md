@@ -294,7 +294,8 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
       "allowFrom": ["YOUR_USER_ID"],
-      "groupPolicy": "mention"
+      "groupPolicy": "mention",
+      "allowBotMessages": true
     }
   }
 }
@@ -304,6 +305,8 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 > - `"mention"` (default) — Only respond when @mentioned
 > - `"open"` — Respond to all messages
 > DMs always respond when the sender is in `allowFrom`.
+>
+> `allowBotMessages` defaults to `true`. In this mode, Discord replies only when the bot is pinged (`@bot`) by any sender (human or bot). Set it to `false` to disable bot-authored messages and allow normal non-mention flow for human senders.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator

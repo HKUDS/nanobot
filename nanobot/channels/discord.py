@@ -51,6 +51,7 @@ class DiscordChannel(BaseChannel):
         self.config: DiscordConfig = config
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._seq: int | None = None
+        self._bot_user_id: str | None = None
         self._heartbeat_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
@@ -170,6 +171,7 @@ class DiscordChannel(BaseChannel):
                 await self._start_heartbeat(interval_ms / 1000)
                 await self._identify()
             elif op == 0 and event_type == "READY":
+                self._bot_user_id = str((payload.get("user") or {}).get("id") or "") or None
                 logger.info("Discord gateway READY")
                 # Capture bot user ID for mention detection
                 user_data = payload.get("user") or {}
@@ -225,10 +227,19 @@ class DiscordChannel(BaseChannel):
     async def _handle_message_create(self, payload: dict[str, Any]) -> None:
         """Handle incoming Discord messages."""
         author = payload.get("author") or {}
-        if author.get("bot"):
-            return
-
         sender_id = str(author.get("id", ""))
+
+        is_bot_author = bool(author.get("bot"))
+        if is_bot_author:
+            # Ignore our own messages, and all bot messages before READY has set our ID
+            if not self._bot_user_id or sender_id == self._bot_user_id:
+                return
+            if not self.config.allow_bot_messages:
+                return
+            # Require explicit ping for bot-authored messages to prevent ping loops
+            if not self._is_ping_for_bot(payload):
+                return
+
         channel_id = str(payload.get("channel_id", ""))
         content = payload.get("content") or ""
         guild_id = payload.get("guild_id")
@@ -285,26 +296,25 @@ class DiscordChannel(BaseChannel):
             },
         )
 
-    def _should_respond_in_group(self, payload: dict[str, Any], content: str) -> bool:
-        """Check if bot should respond in a group channel based on policy."""
-        if self.config.group_policy == "open":
+<<<<<<< HEAD
+    def _is_ping_for_bot(self, payload: dict[str, Any]) -> bool:
+        """Return True when this message explicitly pings the bot."""
+        if payload.get("mention_everyone"):
             return True
 
-        if self.config.group_policy == "mention":
-            # Check if bot was mentioned in the message
-            if self._bot_user_id:
-                # Check mentions array
-                mentions = payload.get("mentions") or []
-                for mention in mentions:
-                    if str(mention.get("id")) == self._bot_user_id:
-                        return True
-                # Also check content for mention format <@USER_ID>
-                if f"<@{self._bot_user_id}>" in content or f"<@!{self._bot_user_id}>" in content:
-                    return True
-            logger.debug("Discord message in {} ignored (bot not mentioned)", payload.get("channel_id"))
+        mentions = payload.get("mentions") or []
+        if not isinstance(mentions, list):
             return False
 
-        return True
+        bot_id = self._bot_user_id
+        if bot_id:
+            for mention in mentions:
+                if str((mention or {}).get("id", "")) == bot_id:
+                    return True
+            content = payload.get("content") or ""
+            return f"<@{bot_id}>" in content or f"<@!{bot_id}>" in content
+
+        return any(bool((mention or {}).get("bot")) for mention in mentions)
 
     async def _start_typing(self, channel_id: str) -> None:
         """Start periodic typing indicator for a channel."""
