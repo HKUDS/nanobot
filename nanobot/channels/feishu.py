@@ -419,6 +419,34 @@ class FeishuChannel(BaseChannel):
             elements.extend(self._split_headings(remaining))
         return elements or [{"tag": "markdown", "content": content}]
 
+    @staticmethod
+    def _split_elements_by_table_limit(elements: list[dict], max_tables: int = 1) -> list[list[dict]]:
+        """Split card elements into groups with at most *max_tables* table elements each.
+
+        Feishu cards have a hard limit of one table per card (API error 11310).
+        When the rendered content contains multiple markdown tables each table is
+        placed in a separate card message so every table reaches the user.
+        """
+        if not elements:
+            return [[]]
+        groups: list[list[dict]] = []
+        current: list[dict] = []
+        table_count = 0
+        for el in elements:
+            if el.get("tag") == "table":
+                if table_count >= max_tables:
+                    if current:
+                        groups.append(current)
+                    current = []
+                    table_count = 0
+                current.append(el)
+                table_count += 1
+            else:
+                current.append(el)
+        if current:
+            groups.append(current)
+        return groups or [[]]
+
     def _split_headings(self, content: str) -> list[dict]:
         """Split content by headings, converting headings to div elements."""
         protected = content
@@ -725,11 +753,13 @@ class FeishuChannel(BaseChannel):
                         )
 
             if msg.content and msg.content.strip():
-                card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
-                await loop.run_in_executor(
-                    None, self._send_message_sync,
-                    receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
-                )
+                elements = self._build_card_elements(msg.content)
+                for chunk in self._split_elements_by_table_limit(elements):
+                    card = {"config": {"wide_screen_mode": True}, "elements": chunk}
+                    await loop.run_in_executor(
+                        None, self._send_message_sync,
+                        receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
+                    )
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)

@@ -272,9 +272,18 @@ class AgentLoop:
 
             if response.has_tool_calls:
                 if on_progress:
-                    clean = self._strip_think(response.content)
-                    if clean:
-                        await on_progress(clean)
+                    thoughts = [
+                        self._strip_think(response.content),
+                        response.reasoning_content,
+                        *(
+                            f"Thinking [{b.get('signature', '...')}]:\n{b.get('thought', '...')}"
+                            for b in (response.thinking_blocks or [])
+                            if isinstance(b, dict) and "signature" in b
+                        ),
+                    ]
+                    combined_thoughts = "\n\n".join(filter(None, thoughts))
+                    if combined_thoughts:
+                        await on_progress(combined_thoughts)
                     await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
                 tool_call_dicts = [
