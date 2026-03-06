@@ -298,6 +298,12 @@ class CronService:
         _validate_schedule_for_add(schedule)
         now = _now_ms()
 
+        # Validate cron expression can compute next run
+        if schedule.kind == "cron" and schedule.expr:
+            next_run = _compute_next_run(schedule, now)
+            if next_run is None:
+                raise ValueError(f"Invalid cron expression: {schedule.expr}")
+
         job = CronJob(
             id=str(uuid.uuid4())[:8],
             name=name,
