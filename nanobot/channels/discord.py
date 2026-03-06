@@ -30,6 +30,7 @@ class DiscordChannel(BaseChannel):
         self.config: DiscordConfig = config
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._seq: int | None = None
+        self._bot_user_id: str | None = None
         self._heartbeat_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
@@ -149,6 +150,7 @@ class DiscordChannel(BaseChannel):
                 await self._start_heartbeat(interval_ms / 1000)
                 await self._identify()
             elif op == 0 and event_type == "READY":
+                self._bot_user_id = str((payload.get("user") or {}).get("id") or "") or None
                 logger.info("Discord gateway READY")
                 # Capture bot user ID for mention detection
                 user_data = payload.get("user") or {}
@@ -204,10 +206,19 @@ class DiscordChannel(BaseChannel):
     async def _handle_message_create(self, payload: dict[str, Any]) -> None:
         """Handle incoming Discord messages."""
         author = payload.get("author") or {}
-        if author.get("bot"):
-            return
-
         sender_id = str(author.get("id", ""))
+
+        is_bot_author = bool(author.get("bot"))
+        if is_bot_author:
+            # Ignore our own messages, and all bot messages before READY has set our ID
+            if not self._bot_user_id or sender_id == self._bot_user_id:
+                return
+            if not self.config.allow_bot_messages:
+                return
+            # Require explicit ping for bot-authored messages to prevent ping loops
+            if not self._is_ping_for_bot(payload):
+                return
+
         channel_id = str(payload.get("channel_id", ""))
         content = payload.get("content") or ""
         guild_id = payload.get("guild_id")
@@ -220,7 +231,7 @@ class DiscordChannel(BaseChannel):
 
         # Check group channel policy (DMs always respond if is_allowed passes)
         if guild_id is not None:
-            if not self._should_respond_in_group(payload, content):
+            if not self._is_ping_for_bot(payload):
                 return
 
         content_parts = [content] if content else []
@@ -264,6 +275,69 @@ class DiscordChannel(BaseChannel):
             },
         )
 
+    def _is_ping_for_bot(self, payload: dict[str, Any]) -> bool:
+        """Return True when this message explicitly pings the bot.
+
+        Checks:
+        - @everyone mention (always triggers)
+        - Bot ID ping (always for humans, controlled by allowBots for other bots)
+        - Bot role ping (if respond_to_role_mentions is enabled)
+
+        Behavior:
+        - Humans always can ping this bot
+        - Other bots can ping only if allow_bots is True
+        - Bot never responds to itself
+        """
+        author = payload.get("author") or {}
+        author_id = str(author.get("id", ""))
+        is_bot_author = bool(author.get("bot"))
+
+        # Never respond to self - if sender is this bot, return False
+        bot_user_id = self._bot_user_id
+        if bot_user_id and author_id == bot_user_id:
+            return False
+
+        # If bot is pinging and allowBots is disabled, reject
+        if is_bot_author and not self.config.allow_bots:
+            return False
+
+        # If not a bot author (human), always allow to proceed
+        # @everyone always pings
+        if payload.get("mention_everyone"):
+            return True
+
+        mentions = payload.get("mentions") or []
+        role_mentions = payload.get("mention_roles") or []
+
+        if not isinstance(mentions, list):
+            mentions = []
+        if not isinstance(role_mentions, list):
+            role_mentions = []
+
+        # Check for bot ID ping (explicit mention)
+        bot_id = self._bot_user_id
+        if bot_id:
+            # Check user mentions array
+            for mention in mentions:
+                if str((mention or {}).get("id", "")) == bot_id:
+                    return True
+            # Check content for mention format <@USER_ID> or <@!USER_ID>
+            content = payload.get("content") or ""
+            if f"<@{bot_id}>" in content or f"<@!{bot_id}>" in content:
+                return True
+
+        # Check for role mentions (if enabled)
+        if self.config.respond_to_role_mentions and self.config.bot_role_ids:
+            for role_id in self.config.bot_role_ids:
+                if str(role_id) in role_mentions:
+                    return True
+                # Also check content for role mention format <@&ROLE_ID>
+                content = payload.get("content") or ""
+                if f"<@&{role_id}>" in content:
+                    return True
+
+        return False
+
     def _should_respond_in_group(self, payload: dict[str, Any], content: str) -> bool:
         """Check if bot should respond in a group channel based on policy."""
         if self.config.group_policy == "open":
@@ -280,8 +354,6 @@ class DiscordChannel(BaseChannel):
                 # Also check content for mention format <@USER_ID>
                 if f"<@{self._bot_user_id}>" in content or f"<@!{self._bot_user_id}>" in content:
                     return True
-            logger.debug("Discord message in {} ignored (bot not mentioned)", payload.get("channel_id"))
-            return False
 
         return True
 

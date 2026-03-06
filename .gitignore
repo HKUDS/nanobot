@@ -4,7 +4,7 @@
 *.pyc
 dist/
 build/
-docs/
+
 *.egg-info/
 *.egg
 *.pyc
@@ -16,8 +16,9 @@ docs/
 *.pyzz
 .venv/
 venv/
+scorpion-env/
 __pycache__/
 poetry.lock
 .pytest_cache/
 botpy.log
-
+.idea/

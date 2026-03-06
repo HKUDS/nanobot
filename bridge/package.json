@@ -1,7 +1,7 @@
 {
-  "name": "nanobot-whatsapp-bridge",
+  "name": "scorpion-whatsapp-bridge",
   "version": "0.1.0",
-  "description": "WhatsApp bridge for nanobot using Baileys",
+  "description": "WhatsApp bridge for scorpion using Baileys",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
