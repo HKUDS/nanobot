@@ -291,7 +291,7 @@ async def test_chat_connection_error():
         result = await provider.chat(messages)
         
         assert isinstance(result, LLMResponse)
-        assert "Error calling Azure OpenAI: Connection failed" in result.content
+        assert "Error calling Azure OpenAI: Exception('Connection failed')" in result.content
         assert result.finish_reason == "error"
 
 
