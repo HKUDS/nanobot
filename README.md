@@ -892,30 +892,224 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 ## Multiple Instances
 
-Run multiple nanobot instances simultaneously, each with its own workspace and configuration.
+Run multiple nanobot instances simultaneously with complete isolation. Each instance has its own configuration, workspace, cron jobs, logs, and media storage.
+
+### Quick Start
 
 ```bash
 # Instance A - Telegram bot
-nanobot gateway -w ~/.nanobot/botA -p 18791
+nanobot gateway --config ~/.nanobot-telegram/config.json
 
-# Instance B - Discord bot
-nanobot gateway -w ~/.nanobot/botB -p 18792
+# Instance B - Discord bot  
+nanobot gateway --config ~/.nanobot-discord/config.json
 
-# Instance C - Using custom config file
-nanobot gateway -w ~/.nanobot/botC -c ~/.nanobot/botC/config.json -p 18793
+# Instance C - Feishu bot with custom port
+nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
 ```
 
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--workspace` | `-w` | Workspace directory (default: `~/.nanobot/workspace`) |
-| `--config` | `-c` | Config file path (default: `~/.nanobot/config.json`) |
-| `--port` | `-p` | Gateway port (default: `18790`) |
+### Complete Isolation
 
-Each instance has its own:
-- Workspace directory (MEMORY.md, HEARTBEAT.md, session files)
-- Cron jobs storage (`workspace/cron/jobs.json`)
-- Configuration (if using `--config`)
+When using `--config` parameter, nanobot automatically derives the data directory from the config file path, ensuring complete isolation:
 
+| Component | Isolation | Example |
+|-----------|-----------|---------|
+| **Config** | Separate config files | `~/.nanobot-A/config.json`, `~/.nanobot-B/config.json` |
+| **Workspace** | Independent memory, sessions, skills | `~/.nanobot-A/workspace/`, `~/.nanobot-B/workspace/` |
+| **Cron Jobs** | Separate job storage | `~/.nanobot-A/cron/`, `~/.nanobot-B/cron/` |
+| **Logs** | Independent log files | `~/.nanobot-A/logs/`, `~/.nanobot-B/logs/` |
+| **Media** | Separate media storage | `~/.nanobot-A/media/`, `~/.nanobot-B/media/` |
+
+### Setup Example
+
+**1. Create directory structure for each instance:**
+
+```bash
+# Instance A
+mkdir -p ~/.nanobot-telegram/{workspace,cron,logs,media}
+cp ~/.nanobot/config.json ~/.nanobot-telegram/config.json
+
+# Instance B
+mkdir -p ~/.nanobot-discord/{workspace,cron,logs,media}
+cp ~/.nanobot/config.json ~/.nanobot-discord/config.json
+```
+
+**2. Configure each instance:**
+
+Edit `~/.nanobot-telegram/config.json`:
+```json
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.nanobot-telegram/workspace",
+      "model": "anthropic/claude-sonnet-4-6"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "YOUR_TELEGRAM_BOT_TOKEN"
+    }
+  },
+  "gateway": {
+    "port": 18790
+  }
+}
+```
+
+Edit `~/.nanobot-discord/config.json`:
+```json
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.nanobot-discord/workspace",
+      "model": "anthropic/claude-opus-4"
+    }
+  },
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "token": "YOUR_DISCORD_BOT_TOKEN"
+    }
+  },
+  "gateway": {
+    "port": 18791
+  }
+}
+```
+
+**3. Start instances:**
+
+```bash
+# Terminal 1
+nanobot gateway --config ~/.nanobot-telegram/config.json
+
+# Terminal 2
+nanobot gateway --config ~/.nanobot-discord/config.json
+```
+
+### Use Cases
+
+- **Multiple Chat Platforms**: Run separate bots for Telegram, Discord, Feishu, etc.
+- **Different Models**: Test different LLM models (Claude, GPT, DeepSeek) simultaneously
+- **Role Separation**: Dedicated instances for different purposes (personal assistant, work bot, research agent)
+- **Multi-Tenant**: Serve multiple users/teams with isolated configurations
+
+### Management Scripts
+
+For production deployments, create management scripts for each instance:
+
+```bash
+#!/bin/bash
+# manage-telegram.sh
+
+INSTANCE_NAME="telegram"
+CONFIG_FILE="$HOME/.nanobot-telegram/config.json"
+LOG_FILE="$HOME/.nanobot-telegram/logs/stderr.log"
+
+case "$1" in
+    start)
+        nohup nanobot gateway --config "$CONFIG_FILE" >> "$LOG_FILE" 2>&1 &
+        echo "Started $INSTANCE_NAME instance (PID: $!)"
+        ;;
+    stop)
+        pkill -f "nanobot gateway.*$CONFIG_FILE"
+        echo "Stopped $INSTANCE_NAME instance"
+        ;;
+    restart)
+        $0 stop
+        sleep 2
+        $0 start
+        ;;
+    status)
+        pgrep -f "nanobot gateway.*$CONFIG_FILE" > /dev/null
+        if [ $? -eq 0 ]; then
+            echo "$INSTANCE_NAME instance is running"
+        else
+            echo "$INSTANCE_NAME instance is not running"
+        fi
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
+```
+
+### systemd Service (Linux)
+
+For automatic startup and crash recovery, create a systemd service for each instance:
+
+```ini
+# ~/.config/systemd/user/nanobot-telegram.service
+[Unit]
+Description=Nanobot Telegram Instance
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/nanobot gateway --config %h/.nanobot-telegram/config.json
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+```
+
+Enable and start:
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now nanobot-telegram
+systemctl --user enable --now nanobot-discord
+```
+
+### launchd Service (macOS)
+
+Create a plist file for each instance:
+
+```xml
+<!-- ~/Library/LaunchAgents/com.nanobot.telegram.plist -->
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nanobot.telegram</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>/path/to/nanobot</string>
+        <string>gateway</string>
+        <string>--config</string>
+        <string>/Users/yourname/.nanobot-telegram/config.json</string>
+    </array>
+    
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <key>KeepAlive</key>
+    <true/>
+    
+    <key>StandardOutPath</key>
+    <string>/Users/yourname/.nanobot-telegram/logs/stdout.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>/Users/yourname/.nanobot-telegram/logs/stderr.log</string>
+</dict>
+</plist>
+```
+
+Load the service:
+```bash
+launchctl load ~/Library/LaunchAgents/com.nanobot.telegram.plist
+launchctl load ~/Library/LaunchAgents/com.nanobot.discord.plist
+```
+
+### Notes
+
+- Each instance must use a different port (default: 18790)
+- Instances are completely independent — no shared state or cross-talk
+- You can run different LLM models, providers, and channel configurations per instance
+- Memory, sessions, and cron jobs are fully isolated between instances
 
 ## CLI Reference
 
