@@ -13,32 +13,11 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import DiscordConfig
+from nanobot.utils.helpers import split_message
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
-
-
-def _split_message(content: str, max_len: int = MAX_MESSAGE_LEN) -> list[str]:
-    """Split content into chunks within max_len, preferring line breaks."""
-    if not content:
-        return []
-    if len(content) <= max_len:
-        return [content]
-    chunks: list[str] = []
-    while content:
-        if len(content) <= max_len:
-            chunks.append(content)
-            break
-        cut = content[:max_len]
-        pos = cut.rfind('\n')
-        if pos <= 0:
-            pos = cut.rfind(' ')
-        if pos <= 0:
-            pos = max_len
-        chunks.append(content[:pos])
-        content = content[pos:].lstrip()
-    return chunks
 
 
 class DiscordChannel(BaseChannel):
@@ -106,7 +85,7 @@ class DiscordChannel(BaseChannel):
         headers = {"Authorization": f"Bot {self.config.token}"}
 
         try:
-            chunks = _split_message(msg.content or "")
+            chunks = split_message(msg.content or "", MAX_MESSAGE_LEN)
             if not chunks:
                 return
 
