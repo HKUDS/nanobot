@@ -3,6 +3,7 @@
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+from nanobot.agent.tool_ranker import ToolRanker
 
 
 class ToolRegistry:
@@ -14,6 +15,7 @@ class ToolRegistry:
 
     def __init__(self):
         self._tools: dict[str, Tool] = {}
+        self._ranker = ToolRanker()
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
@@ -31,9 +33,23 @@ class ToolRegistry:
         """Check if a tool is registered."""
         return name in self._tools
 
-    def get_definitions(self) -> list[dict[str, Any]]:
-        """Get all tool definitions in OpenAI format."""
-        return [tool.to_schema() for tool in self._tools.values()]
+    def get_definitions(self, user_query: str | None = None, top_k: int = 0) -> list[dict[str, Any]]:
+        """
+        Get tool definitions in OpenAI format.
+
+        Args:
+            user_query: Optional user query for smart tool injection
+            top_k: Number of top tools to return (0 = all tools)
+
+        Returns:
+            List of tool definitions, optionally ranked by relevance
+        """
+        all_definitions = [tool.to_schema() for tool in self._tools.values()]
+        
+        if user_query and top_k > 0:
+            return self._ranker.rank_tools(user_query, all_definitions, top_k)
+        
+        return all_definitions
 
     async def execute(self, name: str, params: dict[str, Any]) -> str:
         """Execute a tool by name with given parameters."""
