@@ -1,8 +1,11 @@
 """WhatsApp channel implementation using Node.js bridge."""
 
 import asyncio
+import base64
+import hashlib
 import json
 from collections import OrderedDict
+from pathlib import Path
 
 from loguru import logger
 
@@ -41,7 +44,7 @@ class WhatsAppChannel(BaseChannel):
 
         while self._running:
             try:
-                async with websockets.connect(bridge_url) as ws:
+                async with websockets.connect(bridge_url, max_size=10 * 1024 * 1024) as ws:
                     self._ws = ws
                     # Send auth token if configured
                     if self.config.bridge_token:
@@ -128,10 +131,32 @@ class WhatsAppChannel(BaseChannel):
                 logger.info("Voice message received from {}, but direct download from bridge is not yet supported.", sender_id)
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
 
+            # Process inline media (base64-encoded images from bridge)
+            media_paths: list[str] = []
+            for item in data.get("media") or []:
+                try:
+                    b64_data = item.get("data", "")
+                    mimetype = item.get("mimetype", "image/jpeg")
+                    if not b64_data or not mimetype.startswith("image/"):
+                        continue
+                    image_bytes = base64.b64decode(b64_data)
+                    ext_map = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+                    ext = ext_map.get(mimetype, ".jpg")
+                    media_dir = Path.home() / ".nanobot" / "media"
+                    media_dir.mkdir(parents=True, exist_ok=True)
+                    file_hash = hashlib.md5(image_bytes[:1024]).hexdigest()[:12]
+                    file_path = media_dir / f"wa-{file_hash}{ext}"
+                    file_path.write_bytes(image_bytes)
+                    media_paths.append(str(file_path))
+                    logger.info("Saved WhatsApp image to {}", file_path)
+                except Exception as e:
+                    logger.error("Failed to process WhatsApp media: {}", e)
+
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=sender,  # Use full LID for replies
                 content=content,
+                media=media_paths or None,
                 metadata={
                     "message_id": message_id,
                     "timestamp": data.get("timestamp"),
