@@ -1,3 +1,14 @@
+## Fork Changes
+
+This fork replaces **Brave Search** with **[Exa AI](https://exa.ai)** for both web search and content fetching:
+
+- **Web search** (`web_search` tool): Uses Exa's search API instead of Brave Search
+- **Web fetch** (`web_fetch` tool): Uses Exa's `get_contents` API instead of local httpx + readability-lxml extraction
+- **Configuration**: Set your Exa API key via `EXA_API_KEY` environment variable or in `~/.nanobot/config.json` under `tools.web.search.apiKey`
+- **Dependency change**: `readability-lxml` replaced with `exa_py`
+
+---
+
 <div align="center">
   <img src="nanobot_logo.png" alt="nanobot" width="500">
   <h1>nanobot: Ultra-Lightweight Personal AI Assistant</h1>
