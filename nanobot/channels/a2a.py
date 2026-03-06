@@ -96,16 +96,56 @@ class A2ARequestHandler(RequestHandler):
     ) -> TaskType:
         """Handle message/send - create task and route to bus.
 
-        Authorization note: sender_id is derived from message.role.value which is
-        client-controlled. ServerCallContext does not provide authenticated identity.
-        For stronger auth, deploy behind an authenticating proxy.
+        Identity resolution order (highest trust first):
+        1. HTTP headers set by an auth proxy (X-User-Id, X-Forwarded-User,
+           X-Remote-User) — verified by the proxy, not client-controlled.
+        2. message.metadata["caller_id"] — client-supplied, unverified fallback.
+        3. "a2a-client" — anonymous sentinel when no identity is present.
+
+        allow_from semantics (same as all other channels):
+        - Empty list → deny all (require explicit entries or "*")
+        - ["*"]      → allow all callers
+        - ["alice"]  → allow only "alice"
+        Deploy behind an authenticating proxy for production use.
+
+        Session key resolution order (highest priority first):
+        1. message.context_id provided by client → used verbatim as session key.
+           This is the A2A-spec mechanism for multi-threaded conversations; clients
+           SHOULD echo the context_id returned in each Task response.
+        2. No context_id → derive a stable fallback from (sender_id, source_ip):
+           - source_ip from X-Real-IP or the first hop of X-Forwarded-For.
+           - Key: "a2a:{sender_id}:{source_ip}" — one session per identity+IP pair.
+           - If no IP is available: "a2a:{sender_id}" — one session per identity.
+           In OpenFaaS the gateway sets X-Forwarded-For on every invocation, so
+           the (sender_id, source_ip) key is stable across function restarts.
         """
         if not A2A_AVAILABLE:
             raise RuntimeError("a2a-sdk not installed")
 
         message = params.message
 
-        sender_id = message.role.value if message else "a2a-client"
+        headers: dict = (
+            (getattr(context, "state", None) or {}).get("headers", {})
+            if context is not None
+            else {}
+        )
+
+        sender_id: str | None = (
+            headers.get("x-user-id")
+            or headers.get("x-forwarded-user")
+            or headers.get("x-remote-user")
+        )
+        if sender_id:
+            logger.debug("A2A caller identity from HTTP header: {}", sender_id)
+
+        if not sender_id and message:
+            metadata = getattr(message, "metadata", None) or {}
+            sender_id = metadata.get("caller_id")
+            if sender_id:
+                logger.debug("A2A caller identity from message.metadata: {}", sender_id)
+
+        if not sender_id:
+            sender_id = "a2a-client"
 
         if not self._channel.is_allowed(sender_id):
             logger.warning("A2A request from unauthorized sender: {}", sender_id)
@@ -113,9 +153,21 @@ class A2ARequestHandler(RequestHandler):
 
         async with self._context_lock:
             if message and message.context_id:
+                # Client explicitly provided a context_id — use it verbatim.
+                # This supports multi-threaded conversations and is the preferred
+                # path: clients SHOULD echo the context_id from each Task response.
                 context_id = message.context_id
             else:
-                context_id = f"a2a:{uuid.uuid4().hex[:ID_LENGTH]}"
+                # No context_id: derive a stable fallback so the same caller
+                # always maps to the same session without requiring client changes.
+                # X-Real-IP (set by nginx/envoy) takes priority over the first hop
+                # of X-Forwarded-For (set by the OpenFaaS gateway or any proxy).
+                source_ip = (
+                    headers.get("x-real-ip")
+                    or (headers.get("x-forwarded-for", "").split(",")[0].strip())
+                    or ""
+                )
+                context_id = f"a2a:{sender_id}:{source_ip}" if source_ip else f"a2a:{sender_id}"
 
             content = self._extract_content(message)
             task_id = uuid.uuid4().hex[:ID_LENGTH]
