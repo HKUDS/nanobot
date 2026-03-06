@@ -109,13 +109,16 @@ def _init_prompt_session() -> None:
     )
 
 
-def _print_agent_response(response: str, render_markdown: bool) -> None:
+def _print_agent_response(response: str, render_markdown: bool, media: list[str] | None = None) -> None:
     """Render assistant response with consistent terminal styling."""
     content = response or ""
     body = Markdown(content) if render_markdown else Text(content)
     console.print()
     console.print(f"[cyan]{__logo__} nanobot[/cyan]")
     console.print(body)
+    if media:
+        for path in media:
+            console.print(f"  [green]Media:[/green] {path}")
     console.print()
 
 

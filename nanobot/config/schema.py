@@ -8,6 +8,12 @@ from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
 
+# Media generation model constants
+IMAGEN_MODEL = "imagen-4.0-generate-001"
+VEO_MODEL = "veo-3.1-generate-preview"
+LYRIA_MODEL = "models/lyria-realtime-exp"
+
+
 class Base(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
 
