@@ -539,7 +539,12 @@ Uses **Stream Mode** — no public IP required.
 }
 ```
 
+<<<<<<< Updated upstream
 > `allowFrom`: Add your staff ID. Use `["*"]` to allow all users.
+=======
+> - `allowFrom`: Leave empty to allow all users, or add `["staffId"]` to restrict access.
+> - Group chat behavior is **mention-only**: the bot replies when explicitly `@` mentioned.
+>>>>>>> Stashed changes
 
 **3. Run**
 
