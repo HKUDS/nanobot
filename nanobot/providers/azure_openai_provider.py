@@ -80,7 +80,7 @@ class AzureOpenAIProvider(LLMProvider):
         payload: dict[str, Any] = {
             "messages": self._sanitize_empty_content(messages),
             "max_completion_tokens": max(1, max_tokens),  # Azure API 2024-10-21 uses max_completion_tokens
-            "temperature": temperature,
+            "temperature": 1,
         }
 
         if reasoning_effort:
