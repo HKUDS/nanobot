@@ -1,8 +1,8 @@
 from typing import Any
 
-from scorpion.agent.tools.base import Tool
-from scorpion.agent.tools.registry import ToolRegistry
-from scorpion.agent.tools.shell import ExecTool
+from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.shell import ExecTool
 
 
 class SampleTool(Tool):

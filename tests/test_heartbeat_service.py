@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-from scorpion.heartbeat.service import HeartbeatService
-from scorpion.providers.base import LLMResponse, ToolCallRequest
+from nanobot.heartbeat.service import HeartbeatService
+from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
 class DummyProvider:
