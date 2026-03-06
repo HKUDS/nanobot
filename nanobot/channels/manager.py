@@ -149,6 +149,18 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
 
+        # P2P channel
+        if self.config.channels.p2p.enabled:
+            try:
+                from nanobot.channels.p2p import P2PChannel
+                self.channels["p2p"] = P2PChannel(
+                    self.config.channels.p2p,
+                    self.bus,
+                )
+                logger.info("P2P channel enabled")
+            except ImportError as e:
+                logger.warning("P2P channel not available: {}", e)
+
         self._validate_allow_from()
 
     def _validate_allow_from(self) -> None:

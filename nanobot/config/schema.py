@@ -199,6 +199,19 @@ class QQConfig(Base):
     )  # Allowed user openids (empty = public access)
 
 
+
+class P2PConfig(Base):
+    """P2P channel configuration for peer-to-peer communication."""
+
+    enabled: bool = False
+    host: str = "0.0.0.0"  # Host to bind for P2P connections
+    port: int = 18791  # Port for P2P HTTP server
+    peer_id: str = ""  # Unique identifier for this peer
+    bootstrap_peers: list[str] = Field(default_factory=list)  # Initial peers to connect to
+    gossip_interval: int = 30  # Seconds between gossip protocol exchanges
+    max_queue_size: int = 100  # Maximum message queue size
+    allow_from: list[str] = Field(default_factory=list)  # Allowed peer IDs (empty = deny all)
+
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
 
@@ -231,6 +244,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    p2p: P2PConfig = Field(default_factory=P2PConfig)
 
 
 class AgentDefaults(Base):
