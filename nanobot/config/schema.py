@@ -283,7 +283,10 @@ class ProvidersConfig(Base):
     )  # SiliconFlow (硅基流动) API gateway
     volcengine: ProviderConfig = Field(
         default_factory=ProviderConfig
-    )  # VolcEngine (火山引擎) API gateway
+    )  # VolcEngine (火山引擎) pay-per-use
+    volcengine_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine Coding Plan
+    byteplus: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus (火山引擎海外版) pay-per-use
+    byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
 
