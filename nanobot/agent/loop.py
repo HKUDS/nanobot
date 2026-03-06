@@ -16,7 +16,8 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
-from nanobot.agent.tools.creative import GenerateImageTool, GenerateMusicTool, GenerateVideoTool, GenerateVoiceTool
+from nanobot.agent.tools.creative import GenerateImageTool, GenerateMusicTool, GenerateVideoTool
+from nanobot.agent.tools.voice import GenerateVoiceTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
