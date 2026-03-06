@@ -145,3 +145,78 @@ class TestMemoryConsolidationTypeHandling:
 
         assert result is True
         provider.chat.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_list_arguments_extracts_first_dict(self, tmp_path: Path) -> None:
+        """Some providers return arguments as a list - extract first element if it's a dict."""
+        store = MemoryStore(tmp_path)
+        provider = AsyncMock()
+
+        # Simulate arguments being a list containing a dict
+        response = LLMResponse(
+            content=None,
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_1",
+                    name="save_memory",
+                    arguments=[{
+                        "history_entry": "[2026-01-01] User discussed testing.",
+                        "memory_update": "# Memory\nUser likes testing.",
+                    }],
+                )
+            ],
+        )
+        provider.chat = AsyncMock(return_value=response)
+        session = _make_session(message_count=60)
+
+        result = await store.consolidate(session, provider, "test-model", memory_window=50)
+
+        assert result is True
+        assert "User discussed testing." in store.history_file.read_text()
+        assert "User likes testing." in store.memory_file.read_text()
+
+    @pytest.mark.asyncio
+    async def test_list_arguments_empty_list_returns_false(self, tmp_path: Path) -> None:
+        """Empty list arguments should return False."""
+        store = MemoryStore(tmp_path)
+        provider = AsyncMock()
+
+        response = LLMResponse(
+            content=None,
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_1",
+                    name="save_memory",
+                    arguments=[],
+                )
+            ],
+        )
+        provider.chat = AsyncMock(return_value=response)
+        session = _make_session(message_count=60)
+
+        result = await store.consolidate(session, provider, "test-model", memory_window=50)
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_list_arguments_non_dict_content_returns_false(self, tmp_path: Path) -> None:
+        """List with non-dict content should return False."""
+        store = MemoryStore(tmp_path)
+        provider = AsyncMock()
+
+        response = LLMResponse(
+            content=None,
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_1",
+                    name="save_memory",
+                    arguments=["string", "content"],
+                )
+            ],
+        )
+        provider.chat = AsyncMock(return_value=response)
+        session = _make_session(message_count=60)
+
+        result = await store.consolidate(session, provider, "test-model", memory_window=50)
+
+        assert result is False

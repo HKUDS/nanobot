@@ -7,6 +7,18 @@ import signal
 import sys
 from pathlib import Path
 
+# Force UTF-8 encoding for Windows console
+if sys.platform == "win32":
+    import locale
+    if sys.stdout.encoding != "utf-8":
+        os.environ["PYTHONIOENCODING"] = "utf-8"
+        # Re-open stdout/stderr with UTF-8 encoding
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 import typer
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
@@ -494,9 +506,13 @@ def agent(
 
         signal.signal(signal.SIGINT, _handle_signal)
         signal.signal(signal.SIGTERM, _handle_signal)
-        signal.signal(signal.SIGHUP, _handle_signal)
+        # SIGHUP is not available on Windows
+        if hasattr(signal, 'SIGHUP'):
+            signal.signal(signal.SIGHUP, _handle_signal)
         # Ignore SIGPIPE to prevent silent process termination when writing to closed pipes
-        signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+        # SIGPIPE is not available on Windows
+        if hasattr(signal, 'SIGPIPE'):
+            signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         async def run_interactive():
             bus_task = asyncio.create_task(agent_loop.run())
