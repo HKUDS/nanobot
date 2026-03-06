@@ -70,9 +70,7 @@ class DiscordConfig(Base):
     group_policy: Literal["mention", "open"] = "mention"
     respond_to_role_mentions: bool = False  # Respond when the bot's role is mentioned
     bot_role_ids: list[str] = Field(default_factory=list)  # Role IDs to respond to (if respond_to_role_mentions is True)
-    respond_to_bot_id_ping: bool = True  # Respond when bot is explicitly pinged by ID
-    respond_to_non_bot_ping: bool = True  # Respond to pings from non-bot users
-    respond_to_self_bot_ping: bool = False  # Respond when pinged by other bots
+    allow_bots: bool = False  # Allow other bots to ping this bot (humans always can)
 
 
 class MatrixConfig(Base):

@@ -301,19 +301,21 @@ class DiscordChannel(BaseChannel):
 
         Checks:
         - @everyone mention (always triggers)
-        - Bot ID ping (if respond_to_bot_id_ping is enabled)
+        - Bot ID ping (always for humans, controlled by allowBots for other bots)
         - Bot role ping (if respond_to_role_mentions is enabled)
-        - Author type restrictions (non-bot, non-self-bot based on config)
+
+        Behavior:
+        - Humans always can ping this bot
+        - Other bots can ping only if allow_bots is True
         """
         author = payload.get("author") or {}
         is_bot_author = bool(author.get("bot"))
 
-        # Check author type restrictions
-        if is_bot_author and not self.config.respond_to_self_bot_ping:
-            return False
-        if not is_bot_author and not self.config.respond_to_non_bot_ping:
+        # If bot is pinging and allowBots is disabled, reject
+        if is_bot_author and not self.config.allow_bots:
             return False
 
+        # If not a bot author (human), always allow to proceed
         # @everyone always pings
         if payload.get("mention_everyone"):
             return True
@@ -326,18 +328,17 @@ class DiscordChannel(BaseChannel):
         if not isinstance(role_mentions, list):
             role_mentions = []
 
-        # Check for bot ID ping (if enabled)
-        if self.config.respond_to_bot_id_ping:
-            bot_id = self._bot_user_id
-            if bot_id:
-                # Check user mentions
-                for mention in mentions:
-                    if str((mention or {}).get("id", "")) == bot_id:
-                        return True
-                # Check content for mention format <@USER_ID>
-                content = payload.get("content") or ""
-                if f"<@{bot_id}>" in content or f"<@!{bot_id}>" in content:
+        # Check for bot ID ping (explicit mention)
+        bot_id = self._bot_user_id
+        if bot_id:
+            # Check user mentions array
+            for mention in mentions:
+                if str((mention or {}).get("id", "")) == bot_id:
                     return True
+            # Check content for mention format <@USER_ID> or <@!USER_ID>
+            content = payload.get("content") or ""
+            if f"<@{bot_id}>" in content or f"<@!{bot_id}>" in content:
+                return True
 
         # Check for role mentions (if enabled)
         if self.config.respond_to_role_mentions and self.config.bot_role_ids:
