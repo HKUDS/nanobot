@@ -413,3 +413,116 @@ class GenerateMusicTool(Tool):
         except Exception as e:
             logger.error("Music generation failed: {}", e)
             return f"Error generating music: {e}"
+
+
+# ── Voice / Text-to-Speech ───────────────────────────────────────────────────
+
+_TTS_SAMPLE_RATE = 24000
+_TTS_CHANNELS = 1
+_TTS_SAMPLE_WIDTH = 2
+
+_TTS_VOICES = [
+    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
+    "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
+    "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
+    "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird",
+    "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+]
+
+
+class GenerateVoiceTool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "generate_voice"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Generate speech audio from text using Google Gemini TTS. "
+            "Choose from 30 different voices. "
+            "Returns the file path of the generated audio (WAV). "
+            "Use the message tool with media=[path] to send the audio to the user."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "The text to speak aloud",
+                },
+                "voice": {
+                    "type": "string",
+                    "enum": _TTS_VOICES,
+                    "description": (
+                        "Voice to use. Pick a different voice each time for variety. "
+                        "Examples: Kore (warm female), Puck (bright), Charon (deep male), "
+                        "Fenrir (strong), Aoede (melodic), Zephyr (soft)"
+                    ),
+                },
+            },
+            "required": ["text"],
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        text = kwargs.get("text", "")
+        voice = kwargs.get("voice", "Kore")
+
+        if voice not in _TTS_VOICES:
+            voice = "Kore"
+
+        api_key = _get_gemini_key()
+        if not api_key:
+            return (
+                "Error: Gemini API key not configured. "
+                "Set it in ~/.nanobot/config.json under providers.gemini.apiKey"
+            )
+
+        out_dir = _MEDIA_ROOT / "voice"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            from google import genai
+            from google.genai import types
+
+            client = genai.Client(api_key=api_key)
+
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: client.models.generate_content(
+                    model="gemini-2.5-flash-preview-tts",
+                    contents=text,
+                    config=types.GenerateContentConfig(
+                        response_modalities=["AUDIO"],
+                        speech_config=types.SpeechConfig(
+                            voice_config=types.VoiceConfig(
+                                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                    voice_name=voice,
+                                )
+                            )
+                        ),
+                    ),
+                ),
+            )
+
+            audio_data = response.candidates[0].content.parts[0].inline_data.data
+
+            ts = _ts()
+            out_path = out_dir / f"voice_{ts}_{voice.lower()}.wav"
+
+            with wave.open(str(out_path), "wb") as wf:
+                wf.setnchannels(_TTS_CHANNELS)
+                wf.setsampwidth(_TTS_SAMPLE_WIDTH)
+                wf.setframerate(_TTS_SAMPLE_RATE)
+                wf.writeframes(audio_data)
+
+            duration = len(audio_data) / (_TTS_SAMPLE_RATE * _TTS_CHANNELS * _TTS_SAMPLE_WIDTH)
+            logger.info("Generated voice: {} ({:.1f}s, voice={})", out_path, duration, voice)
+            return str(out_path)
+
+        except Exception as e:
+            logger.error("Voice generation failed: {}", e)
+            return f"Error generating voice: {e}"
