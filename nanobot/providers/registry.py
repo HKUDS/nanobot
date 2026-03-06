@@ -103,6 +103,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         supports_prompt_caching=True,
     ),
 
+    # OpenCode Zen: global gateway, keys start with "sk-Y"
+    ProviderSpec(
+        name="opencode",
+        keywords=("opencode",),
+        env_key="OPENCODE_API_KEY",
+        display_name="OpenCode Zen",
+        litellm_prefix="openai",            # opencode/big-pickle → openai/big-pickle (OpenAI-compatible)
+        skip_prefixes=("openai/", "opencode/"),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="sk-Y",
+        detect_by_base_keyword="opencode.ai",
+        default_api_base="https://opencode.ai/zen/v1",
+        strip_model_prefix=True,            # opencode/big-pickle → big-pickle → openai/big-pickle
+        model_overrides=(),
+    ),
+
     # AiHubMix: global gateway, OpenAI-compatible interface.
     # strip_model_prefix=True: it doesn't understand "anthropic/claude-3",
     # so we strip to bare "claude-3" then re-prefix as "openai/claude-3".
