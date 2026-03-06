@@ -14,6 +14,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.feishu_streaming import FeishuStreamingCard
 from nanobot.config.schema import FeishuConfig
 
 import importlib.util
@@ -252,6 +253,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._streaming_cards: dict[str, FeishuStreamingCard] = {}  # chat_id -> active streaming card
 
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
@@ -658,7 +660,11 @@ class FeishuChannel(BaseChannel):
             return False
 
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Feishu, including media (images/files) if present."""
+        """Send a message through Feishu, including media (images/files) if present.
+
+        Supports streaming card mode: progress messages are streamed into a
+        single updating card, and the final message closes the card.
+        """
         if not self._client:
             logger.warning("Feishu client not initialized")
             return
@@ -666,27 +672,43 @@ class FeishuChannel(BaseChannel):
         try:
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
             loop = asyncio.get_running_loop()
+            is_progress = msg.metadata.get("_progress", False)
 
+            # --- Streaming card handling ---
+            if is_progress and msg.content and msg.content.strip():
+                # Start or update a streaming card for this chat
+                card = self._streaming_cards.get(msg.chat_id)
+                if card is None:
+                    card = FeishuStreamingCard(
+                        self.config.app_id, self.config.app_secret, self._client
+                    )
+                    started = await loop.run_in_executor(
+                        None, card.start_sync, msg.chat_id, receive_id_type
+                    )
+                    if started:
+                        self._streaming_cards[msg.chat_id] = card
+                    else:
+                        # Fallback: send as regular card message
+                        card = None
+
+                if card and card.is_active:
+                    await loop.run_in_executor(None, card.update_sync, msg.content)
+                    return  # Don't send as separate message
+
+            # --- Final message: close streaming card if active ---
+            active_card = self._streaming_cards.pop(msg.chat_id, None)
+            if active_card and active_card.is_active and msg.content and msg.content.strip():
+                # Close the streaming card with final content
+                await loop.run_in_executor(None, active_card.close_sync, msg.content)
+
+                # Still send media files if any
+                for file_path in msg.media:
+                    await self._send_media_file(loop, receive_id_type, msg.chat_id, file_path)
+                return
+
+            # --- Regular (non-streaming) send ---
             for file_path in msg.media:
-                if not os.path.isfile(file_path):
-                    logger.warning("Media file not found: {}", file_path)
-                    continue
-                ext = os.path.splitext(file_path)[1].lower()
-                if ext in self._IMAGE_EXTS:
-                    key = await loop.run_in_executor(None, self._upload_image_sync, file_path)
-                    if key:
-                        await loop.run_in_executor(
-                            None, self._send_message_sync,
-                            receive_id_type, msg.chat_id, "image", json.dumps({"image_key": key}, ensure_ascii=False),
-                        )
-                else:
-                    key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
-                    if key:
-                        media_type = "audio" if ext in self._AUDIO_EXTS else "file"
-                        await loop.run_in_executor(
-                            None, self._send_message_sync,
-                            receive_id_type, msg.chat_id, media_type, json.dumps({"file_key": key}, ensure_ascii=False),
-                        )
+                await self._send_media_file(loop, receive_id_type, msg.chat_id, file_path)
 
             if msg.content and msg.content.strip():
                 elements = self._build_card_elements(msg.content)
@@ -699,6 +721,30 @@ class FeishuChannel(BaseChannel):
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
+
+    async def _send_media_file(
+        self, loop: asyncio.AbstractEventLoop, receive_id_type: str, chat_id: str, file_path: str
+    ) -> None:
+        """Upload and send a single media file."""
+        if not os.path.isfile(file_path):
+            logger.warning("Media file not found: {}", file_path)
+            return
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in self._IMAGE_EXTS:
+            key = await loop.run_in_executor(None, self._upload_image_sync, file_path)
+            if key:
+                await loop.run_in_executor(
+                    None, self._send_message_sync,
+                    receive_id_type, chat_id, "image", json.dumps({"image_key": key}, ensure_ascii=False),
+                )
+        else:
+            key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
+            if key:
+                media_type = "audio" if ext in self._AUDIO_EXTS else "file"
+                await loop.run_in_executor(
+                    None, self._send_message_sync,
+                    receive_id_type, chat_id, media_type, json.dumps({"file_key": key}, ensure_ascii=False),
+                )
 
     def _on_message_sync(self, data: "P2ImMessageReceiveV1") -> None:
         """
