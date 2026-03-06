@@ -1,7 +1,9 @@
 """Configuration schema using Pydantic."""
 
+import copy
+import os
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -199,17 +201,15 @@ class QQConfig(Base):
     )  # Allowed user openids (empty = public access)
 
 
-
-
 class A2AChannelConfig(Base):
     """A2A protocol channel configuration.
-    
+
     Security note: By default, only the running_user is allowed to access the A2A endpoint.
     For production, deploy behind an authenticating proxy and configure allow_from appropriately.
     """
 
     enabled: bool = False
-    agent_name: str = "Nanobot"
+    agent_name: str | None = None
     agent_url: str = "http://localhost:8000"
     agent_description: str = "Nanobot AI Agent"
     skills: list[dict] = Field(
@@ -218,7 +218,7 @@ class A2AChannelConfig(Base):
     running_user: str = ""  # Username of the running user (default: current OS user)
     allow_from: list[str] = Field(default_factory=list)  # Empty = running_user only
     task_retention_days: float = 14.0  # How long to keep completed tasks in memory
-
+    summarize_progress: bool = True  # Use LLM to summarize progress events before streaming them
 
 
 class ChannelsConfig(Base):
@@ -272,7 +272,9 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
-    azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
+    azure_openai: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -353,6 +355,7 @@ class ToolsConfig(Base):
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
+    name: str = "nanobot"
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
@@ -439,4 +442,96 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
+    @classmethod
+    def model_validate(  # type: ignore[override]
+        cls,
+        obj: Any,
+        *,
+        strict: bool | None = None,
+        from_attributes: bool | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> Config:
+        """Override to ensure NANOBOT_* env vars always beat config-file values.
+
+        pydantic-settings priority (highest → lowest):
+            init kwargs  >  env vars  >  dotenv  >  secrets  >  defaults
+
+        Since init kwargs have the highest priority, we deep-merge any
+        ``NANOBOT_*`` environment variable overrides **into** the file
+        data dict before passing it as kwargs.  This way the merged dict
+        already contains the env-var values, and pydantic-settings treats
+        them as explicit init values that win over everything.
+        """
+        if isinstance(obj, dict):
+            merged = _deep_merge_env_overrides(copy.deepcopy(obj))
+            return cls(**merged)
+        return super().model_validate(
+            obj,
+            strict=strict,
+            from_attributes=from_attributes,
+            context=context,
+        )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: Any,
+        env_settings: Any,
+        dotenv_settings: Any,
+        file_secret_settings: Any,
+    ) -> tuple[Any, ...]:
+        """Disable the built-in env-settings source.
+
+        ``_deep_merge_env_overrides`` already injects ``NANOBOT_*`` env
+        vars into the init-kwargs dict with correct deep-merge semantics.
+        The built-in env source would also process the same vars but
+        replace entire nested sub-models (losing sibling fields), so we
+        remove it from the source chain.
+        """
+        return (init_settings,)
+
     model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+
+
+def _deep_merge_env_overrides(data: dict[str, Any]) -> dict[str, Any]:
+    """Deep-merge ``NANOBOT_*`` env vars into *data* so they win over file values.
+
+    Scans ``os.environ`` for keys starting with ``NANOBOT_`` and containing
+    ``__`` (the nested delimiter).  Each matching key is split on ``__``
+    (after stripping the prefix) and the value is injected into the
+    corresponding nested dict path.
+
+    The leaf key is matched against existing dict keys using both
+    snake_case and camelCase forms so that env-var overrides work
+    regardless of whether the config file uses aliases.
+
+    Example::
+
+        NANOBOT_CHANNELS__A2A__AGENT_URL=https://new-url
+
+    overrides ``data["channels"]["a2a"]["agentUrl"]`` (camelCase alias)
+    or creates ``data["channels"]["a2a"]["agent_url"]`` if no alias key
+    exists.
+    """
+    prefix = "NANOBOT_"
+    for key, value in os.environ.items():
+        if not key.startswith(prefix):
+            continue
+        rest = key[len(prefix) :]  # e.g. "CHANNELS__A2A__AGENT_URL"
+        parts = [p.lower() for p in rest.split("__")]
+        # Walk into the nested dict, creating sub-dicts as needed
+        target = data
+        for part in parts[:-1]:
+            if part not in target or not isinstance(target[part], dict):
+                target[part] = {}
+            target = target[part]
+        # Use the camelCase alias if the dict already has it,
+        # otherwise fall back to the snake_case field name.
+        leaf = parts[-1]
+        camel = to_camel(leaf)
+        if camel in target:
+            target[camel] = value
+        else:
+            target[leaf] = value
+    return data
