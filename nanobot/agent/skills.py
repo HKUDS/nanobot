@@ -259,11 +259,12 @@ class SkillsLoader:
 
         from nanobot.cron.types import CronSchedule
 
-        existing_names = {job.name for job in cron_service.list_jobs()}
+        existing_names = {job.name for job in cron_service.list_jobs(include_disabled=True)}
 
         for skill in self.get_cron_skills():
             job_name = skill["name"]
             if job_name in existing_names:
+                logger.debug(f"{job_name} has registered")
                 continue
 
             schedule = CronSchedule(kind="cron", expr=skill["cron"], tz=None)
