@@ -10,7 +10,7 @@ from typing import Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
-from nanobot.utils.helpers import detect_image_mime
+from nanobot.utils.helpers import detect_audio_mime, detect_image_mime, detect_video_mime, extract_video_frames
 
 
 class ContextBuilder:
@@ -129,27 +129,62 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             {"role": "user", "content": merged},
         ]
 
+    _MAX_MEDIA_ENCODE_BYTES = 25 * 1024 * 1024  # 25 MB
+
+    _AUDIO_FORMAT_MAP: dict[str, str] = {
+        "audio/wav": "wav",
+        "audio/x-wav": "wav",
+        "audio/mpeg": "mp3",
+        "audio/mp3": "mp3",
+        "audio/ogg": "ogg",
+        "audio/flac": "flac",
+        "audio/mp4": "m4a",
+        "audio/x-m4a": "m4a",
+        "audio/aac": "aac",
+    }
+
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
+        """Build user message content with optional base64-encoded images, audio, and video frames."""
         if not media:
             return text
 
-        images = []
+        parts: list[dict[str, Any]] = []
         for path in media:
             p = Path(path)
             if not p.is_file():
                 continue
-            raw = p.read_bytes()
-            # Detect real MIME type from magic bytes; fallback to filename guess
-            mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
-            if not mime or not mime.startswith("image/"):
+            if p.stat().st_size > self._MAX_MEDIA_ENCODE_BYTES:
                 continue
-            b64 = base64.b64encode(raw).decode()
-            images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
 
-        if not images:
+            raw = p.read_bytes()
+            mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
+
+            # Image
+            if mime and mime.startswith("image/"):
+                b64 = base64.b64encode(raw).decode()
+                parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+                continue
+
+            # Audio — encode as input_audio for models that support it
+            audio_mime = detect_audio_mime(raw) or (mime if mime and mime.startswith("audio/") else None)
+            audio_fmt = self._AUDIO_FORMAT_MAP.get(audio_mime or "")
+            if audio_fmt:
+                b64 = base64.b64encode(raw).decode()
+                parts.append({"type": "input_audio", "input_audio": {"data": b64, "format": audio_fmt}})
+                continue
+
+            # Video — extract keyframes and send as images
+            video_mime = detect_video_mime(raw) or (mime if mime and mime.startswith("video/") else None)
+            if video_mime:
+                frames = extract_video_frames(p, max_frames=4)
+                for frame_bytes in frames:
+                    b64 = base64.b64encode(frame_bytes).decode()
+                    parts.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
+                continue
+
+        if not parts:
             return text
-        return images + [{"type": "text", "text": text}]
+        return parts + [{"type": "text", "text": text}]
 
     def add_tool_result(
         self, messages: list[dict[str, Any]],

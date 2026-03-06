@@ -17,6 +17,7 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.creative import GenerateImageTool, GenerateMusicTool, GenerateVideoTool
+from nanobot.agent.tools.voice import GenerateVoiceTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -146,6 +147,7 @@ class AgentLoop:
         self.tools.register(GenerateImageTool())
         self.tools.register(GenerateVideoTool())
         self.tools.register(GenerateMusicTool())
+        self.tools.register(GenerateVoiceTool())
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -181,6 +183,7 @@ class AgentLoop:
         "generate_image": "images",
         "generate_video": "videos",
         "generate_music": "music",
+        "generate_voice": "voice",
     }
 
     def _save_prompt(self, tool_name: str, arguments: dict) -> None:
@@ -527,6 +530,9 @@ class AgentLoop:
                         if (c.get("type") == "image_url"
                                 and c.get("image_url", {}).get("url", "").startswith("data:image/")):
                             filtered.append({"type": "text", "text": "[image]"})
+                        elif (c.get("type") == "input_audio"
+                                and isinstance(c.get("input_audio", {}).get("data"), str)):
+                            filtered.append({"type": "text", "text": "[audio]"})
                         else:
                             filtered.append(c)
                     if not filtered:
