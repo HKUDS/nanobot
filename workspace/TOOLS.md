@@ -44,24 +44,26 @@ exec(command: str, working_dir: str = None) -> str
 
 ## Web Access
 
-### web_search
-Search the web using Brave Search API.
-```
-web_search(query: str, count: int = 5) -> str
-```
-
-Returns search results with titles, URLs, and snippets. Requires `tools.web.search.apiKey` in config.
-
 ### web_fetch
-Fetch and extract main content from a URL.
+Fetch and extract main content from a URL, or call a JSON API.
 ```
 web_fetch(url: str, extractMode: str = "markdown", maxChars: int = 50000) -> str
 ```
 
 **Notes:**
-- Content is extracted using readability
+- Content is extracted using readability for HTML pages
 - Supports markdown or plain text extraction
 - Output is truncated at 50,000 characters by default
+
+### Web Search (via SearXNG)
+
+Use `web_fetch` against the local SearXNG instance for web searches:
+```
+web_fetch("http://127.0.0.1:8080/search?q=YOUR+QUERY&format=json")
+```
+
+The response is JSON. Results are in the `results` array, each with `title`, `url`, and `content` fields.
+Example: `web_fetch("http://127.0.0.1:8080/search?q=python+asyncio&format=json")`
 
 ## Communication
 
