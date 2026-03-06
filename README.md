@@ -177,6 +177,7 @@ Connect nanobot to your favorite chat platform.
 | **Slack** | Bot token + App-Level token |
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
+| **MQTT** | MQTT broker (localhost or remote) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -639,6 +640,92 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 ```bash
 nanobot gateway
 ```
+
+</details>
+
+<details>
+<summary><b>MQTT</b></summary>
+
+Connect nanobot to any MQTT broker for IoT device communication, custom integrations, or low-bandwidth environments.
+
+**1. Set up an MQTT broker**
+
+You need an MQTT broker. Options:
+- **Local**: `docker run -it -p 1883:1883 eclipse-mosquitto`
+- **Cloud**: [Mosquitto](https://mosquitto.org/), [EMQX](https://www.emqx.io/), [HiveMQ](https://www.hivemq.com/), or any public broker
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "mqtt": {
+      "enabled": true,
+      "host": "localhost",
+      "port": 1883,
+      "username": "",
+      "password": "",
+      "useTls": false,
+      "subscribeTopics": [
+        {"topic": "nanobot/+/inbox", "qos": 1}
+      ],
+      "publishTopicTemplate": "nanobot/{chat_id}/outbox",
+      "payloadFormat": "json",
+      "allowFrom": ["*"]
+    }
+  }
+}
+```
+
+**3. Test**
+
+```bash
+# Terminal 1: Subscribe to responses
+mosquitto_sub -h localhost -t "nanobot/+/outbox" -v
+
+# Terminal 2: Send a message
+mosquitto_pub -h localhost -t "nanobot/user123/inbox" -m '{"content": "Hello!"}'
+
+# Terminal 3: Run nanobot
+nanobot gateway
+```
+
+**Configuration options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `host` | `localhost` | MQTT broker hostname |
+| `port` | `1883` | MQTT broker port (use `8883` for TLS) |
+| `username` | `""` | MQTT username (optional) |
+| `password` | `""` | MQTT password (optional) |
+| `useTls` | `false` | Enable TLS/SSL |
+| `tlsInsecure` | `false` | Skip certificate verification (dev only) |
+| `subscribeTopics` | `[{"topic": "nanobot/+/inbox", "qos": 1}]` | Topics to subscribe (supports `+` and `#` wildcards) |
+| `publishTopicTemplate` | `nanobot/{chat_id}/outbox` | Outbound topic template (`{chat_id}` replaced with sender) |
+| `payloadFormat` | `json` | Message format: `json` or `text` |
+| `will.enabled` | `true` | Enable Last Will Testament (LWT) |
+| `will.topic` | `nanobot/status` | LWT topic |
+| `will.payload` | `offline` | LWT message on disconnect |
+| `birthEnabled` | `true` | Publish birth message on connect |
+| `birthTopic` | `nanobot/status` | Birth message topic |
+| `birthPayload` | `online` | Birth message content |
+| `reconnectMinDelay` | `1.0` | Minimum reconnection delay (seconds) |
+| `reconnectMaxDelay` | `60.0` | Maximum reconnection delay (seconds) |
+
+**Message format (JSON):**
+```json
+{
+  "content": "Your message here",
+  "metadata": {
+    "custom_field": "value"
+  }
+}
+```
+
+**Topic patterns:**
+- Inbound: `nanobot/{sender_id}/inbox` — the `{sender_id}` is extracted and used as `chat_id`
+- Outbound: `nanobot/{chat_id}/outbox` — responses are published here
+- Wildcards: `+` matches single level, `#` matches multiple levels
 
 </details>
 

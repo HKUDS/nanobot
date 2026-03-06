@@ -149,6 +149,18 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
 
+        # MQTT channel
+        if self.config.channels.mqtt.enabled:
+            try:
+                from nanobot.channels.mqtt import MQTTChannel
+                self.channels["mqtt"] = MQTTChannel(
+                    self.config.channels.mqtt,
+                    self.bus,
+                )
+                logger.info("MQTT channel enabled")
+            except ImportError as e:
+                logger.warning("MQTT channel not available: {}", e)
+
         self._validate_allow_from()
 
     def _validate_allow_from(self) -> None:
