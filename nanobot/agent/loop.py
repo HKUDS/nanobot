@@ -269,6 +269,7 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
+        await self.context.skills.run_init_hooks(self)
         logger.info("Agent loop started")
 
         while self._running:

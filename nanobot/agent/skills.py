@@ -1,10 +1,13 @@
 """Skills loader for agent capabilities."""
 
+import importlib.util
 import json
 import os
 import re
 import shutil
 from pathlib import Path
+
+from loguru import logger
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
@@ -226,3 +229,57 @@ class SkillsLoader:
                 return metadata
 
         return None
+
+    def get_cron_skills(self) -> list[dict]:
+        """
+        Get skills that have cron schedules defined in frontmatter.
+
+        Returns:
+            List of dicts with 'name' and 'cron' (schedule expression).
+        """
+        result = []
+        for s in self.list_skills(filter_unavailable=True):
+            meta = self.get_skill_metadata(s["name"])
+            if meta and meta.get("cron"):
+                result.append({
+                    "name": s["name"],
+                    "cron": meta["cron"],
+                })
+        return result
+
+    def register_cron_jobs(self, cron_service) -> None:
+        """
+        Register cron jobs for skills with cron in frontmatter.
+
+        Args:
+            cron_service: The CronService instance.
+        """
+        if not cron_service:
+            return
+
+        from nanobot.cron.types import CronSchedule
+
+        existing_names = {job.name for job in cron_service.list_jobs()}
+
+        for skill in self.get_cron_skills():
+            job_name = skill["name"]
+            if job_name in existing_names:
+                continue
+
+            schedule = CronSchedule(kind="cron", expr=skill["cron"], tz=None)
+            cron_service.add_job(
+                name=job_name,
+                schedule=schedule,
+                message=f"Run skill '{job_name}' scheduled task",
+            )
+            logger.info(f"Registered cron job for skill '{job_name}': {skill['cron']}")
+
+    async def run_init_hooks(self, agent_loop) -> None:
+        """
+        Run initialization for skills (register cron jobs, etc).
+
+        Args:
+            agent_loop: The AgentLoop instance.
+        """
+        # Register cron jobs from skill frontmatter
+        self.register_cron_jobs(agent_loop.cron_service)
