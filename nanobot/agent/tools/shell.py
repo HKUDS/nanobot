@@ -3,6 +3,8 @@
 import asyncio
 import os
 import re
+import signal
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -74,23 +76,34 @@ class ExecTool(Tool):
             env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
 
         try:
-            process = await asyncio.create_subprocess_shell(
-                command,
+            kwargs: dict = dict(
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
                 env=env,
             )
-            
+            # Create a new session so all child processes share a process group
+            # that we can kill atomically on timeout.
+            if sys.platform != "win32":
+                kwargs["start_new_session"] = True
+
+            process = await asyncio.create_subprocess_shell(command, **kwargs)
+
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
                     timeout=self.timeout
                 )
             except asyncio.TimeoutError:
-                process.kill()
-                # Wait for the process to fully terminate so pipes are
-                # drained and file descriptors are released.
+                # Kill the entire process group to ensure child processes
+                # (e.g. npx, node) are also terminated.
+                if sys.platform != "win32":
+                    try:
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    except ProcessLookupError:
+                        process.kill()
+                else:
+                    process.kill()
                 try:
                     await asyncio.wait_for(process.wait(), timeout=5.0)
                 except asyncio.TimeoutError:
