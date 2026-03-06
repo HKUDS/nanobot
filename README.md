@@ -893,13 +893,25 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `nanobot agent` | Interactive chat mode |
 | `nanobot agent --no-markdown` | Show plain-text replies |
 | `nanobot agent --logs` | Show runtime logs during chat |
-| `nanobot gateway` | Start the gateway |
+| `nanobot gateway` | Start gateway via runtime facade (macOS default managed background; Linux/Windows legacy foreground) |
+| `nanobot gateway restart` | Unified restart entry (legacy mode returns non-destructive hint) |
+| `nanobot gateway status` | Show gateway runtime mode/reason/platform/status |
+| `nanobot gateway logs` | Show gateway logs or legacy-mode hint |
 | `nanobot status` | Show status |
 | `nanobot provider login openai-codex` | OAuth login for providers |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
+
+### Gateway runtime compatibility (framework phase)
+
+- Unified gateway control semantics are available via `gateway`, `gateway restart`, `gateway status`, and `gateway logs`.
+- Current rollout keeps **Darwin in `background_managed` by default**, while Linux/Windows remain `foreground_legacy`.
+- `NANOBOT_GATEWAY_MODE=foreground|background` is supported as a runtime mode hint.
+- `NANOBOT_GATEWAY_KILL_SWITCH=1` force-enables legacy foreground mode for emergency rollback.
+- On macOS auto mode (`nanobot gateway`), daemon bootstrap failure falls back to legacy foreground with an explainable reason.
+- When explicitly requesting daemon mode (`nanobot gateway --background`), startup failures are surfaced as errors (no silent fallback).
 
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>

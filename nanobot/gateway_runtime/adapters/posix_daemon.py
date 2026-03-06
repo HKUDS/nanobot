@@ -55,6 +55,10 @@ class PosixDaemonAdapter:
             )
 
         pid = int(process.pid)  # type: ignore[attr-defined]
+        if not self._wait_for_stable_start(pid, timeout_s=0.5):
+            self._cleanup_failed_start(pid)
+            raise RuntimeError("background_process_exited_during_startup")
+
         started_at = _utc_now()
         try:
             self._state_store.write_pid(pid)
@@ -198,6 +202,14 @@ class PosixDaemonAdapter:
             os.kill(pid, signal.SIGKILL)
         except OSError:
             pass
+
+    def _wait_for_stable_start(self, pid: int, timeout_s: float) -> bool:
+        deadline = self._time.monotonic() + max(timeout_s, 0.0)
+        while self._time.monotonic() < deadline:
+            if not self._is_pid_running(pid):
+                return False
+            self._time.sleep(0.1)
+        return self._is_pid_running(pid)
 
     def _build_child_command(self, options: GatewayStartOptions) -> list[str]:
         command = [
