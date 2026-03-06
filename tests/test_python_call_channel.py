@@ -385,6 +385,54 @@ async def test_metadata_passed_through(channel, bus):
 
 
 @pytest.mark.asyncio
+async def test_media_passed_through(channel, bus):
+    """Media URLs are forwarded to the bus message."""
+    await channel.start()
+
+    async def fake_agent():
+        msg = await asyncio.wait_for(bus.consume_inbound(), timeout=2)
+        assert msg.media == ["https://example.com/image.png"]
+        await bus.publish_outbound(
+            OutboundMessage(
+                channel="python_call",
+                chat_id=msg.chat_id,
+                content="got media",
+            )
+        )
+
+    async def dispatch_outbound():
+        msg = await asyncio.wait_for(bus.consume_outbound(), timeout=2)
+        await channel.send(msg)
+
+    agent_task = asyncio.create_task(fake_agent())
+    dispatch_task = asyncio.create_task(dispatch_outbound())
+
+    result = await asyncio.wait_for(
+        channel.call("check this", media=["https://example.com/image.png"]),
+        timeout=3,
+    )
+    assert result == "got media"
+
+    await agent_task
+    await dispatch_task
+    await channel.stop()
+
+
+@pytest.mark.asyncio
+async def test_call_negative_timeout(channel):
+    """call() raises ValueError for non-positive timeout."""
+    await channel.start()
+
+    with pytest.raises(ValueError, match="timeout must be positive"):
+        await channel.call("hello", timeout=-1)
+
+    with pytest.raises(ValueError, match="timeout must be positive"):
+        await channel.call("hello", timeout=0)
+
+    await channel.stop()
+
+
+@pytest.mark.asyncio
 async def test_explicit_session_id_overrides_default(bus):
     """Explicit session_id takes precedence over config default_session_id."""
     config = PythonCallConfig(

@@ -34,8 +34,16 @@ class PythonCallChannel(BaseChannel):
             metadata={"system_prompt": "You are a translator."},
         )
 
+        # With timeout (raises asyncio.TimeoutError if agent doesn't reply)
+        response = await channel.call("Hello", timeout=30.0)
+
     Each ``call()`` publishes an inbound message to the bus, then waits for
     the corresponding outbound reply (matched by ``chat_id``).
+
+    .. warning::
+        When *timeout* is not set (the default), ``call()`` blocks
+        indefinitely until the agent replies.  Always consider setting a
+        timeout in production code.
     """
 
     name = "python_call"
@@ -128,6 +136,9 @@ class PythonCallChannel(BaseChannel):
         if chat_id is not None and session_id is not None:
             raise ValueError("chat_id and session_id are mutually exclusive")
 
+        if timeout is not None and timeout <= 0:
+            raise ValueError(f"timeout must be positive, got {timeout}")
+
         # Resolve the effective chat_id
         if session_id is not None:
             effective_chat_id = f"session-{session_id}"
@@ -137,6 +148,13 @@ class PythonCallChannel(BaseChannel):
             effective_chat_id = f"session-{self.config.default_session_id}"
         else:
             effective_chat_id = f"pycall-{uuid.uuid4().hex[:12]}"
+
+        logger.debug(
+            "python_call: call from {} chat_id={} content={}...",
+            sender_id,
+            effective_chat_id,
+            content[:50],
+        )
 
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[str] = loop.create_future()
@@ -153,7 +171,15 @@ class PythonCallChannel(BaseChannel):
             )
 
             if timeout is not None:
-                return await asyncio.wait_for(fut, timeout=timeout)
-            return await fut
+                result = await asyncio.wait_for(fut, timeout=timeout)
+            else:
+                result = await fut
+
+            logger.debug(
+                "python_call: response for chat_id={} len={}",
+                effective_chat_id,
+                len(result),
+            )
+            return result
         finally:
             self._pending.pop(effective_chat_id, None)
