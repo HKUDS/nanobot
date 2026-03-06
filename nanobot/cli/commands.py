@@ -235,8 +235,6 @@ def onboard():
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
-    from nanobot.providers.custom_provider import CustomProvider
-    from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
     model = config.agents.defaults.model
@@ -248,6 +246,7 @@ def _make_provider(config: Config):
         return OpenAICodexProvider(default_model=model)
 
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
+    from nanobot.providers.custom_provider import CustomProvider
     if provider_name == "custom":
         return CustomProvider(
             api_key=p.api_key if p else "no-key",
@@ -255,6 +254,7 @@ def _make_provider(config: Config):
             default_model=model,
         )
 
+    from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.registry import find_by_name
     spec = find_by_name(provider_name)
     if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
