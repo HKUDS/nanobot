@@ -16,7 +16,7 @@ import makeWASocket, {
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
 import pino from 'pino';
-import { writeFile, mkdir, readFile } from 'fs/promises';
+import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
 import { randomBytes } from 'crypto';
@@ -215,18 +215,6 @@ export class WhatsAppClient {
     }
 
     await this.sock.sendMessage(to, { text });
-  }
-
-  async sendImage(to: string, imagePath: string, caption?: string): Promise<void> {
-    if (!this.sock) {
-      throw new Error('Not connected');
-    }
-
-    const buffer = await readFile(imagePath);
-    await this.sock.sendMessage(to, {
-      image: buffer,
-      caption: caption || undefined,
-    });
   }
 
   async disconnect(): Promise<void> {

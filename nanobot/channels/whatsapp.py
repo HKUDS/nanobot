@@ -83,26 +83,12 @@ class WhatsAppChannel(BaseChannel):
             return
 
         try:
-            # Send media files first
-            for media_path in (msg.media or []):
-                try:
-                    payload = {
-                        "type": "send_image",
-                        "to": msg.chat_id,
-                        "imagePath": media_path,
-                    }
-                    await self._ws.send(json.dumps(payload, ensure_ascii=False))
-                except Exception as e:
-                    logger.error("Error sending WhatsApp media {}: {}", media_path, e)
-
-            # Send text message if there's content
-            if msg.content:
-                payload = {
-                    "type": "send",
-                    "to": msg.chat_id,
-                    "text": msg.content
-                }
-                await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            payload = {
+                "type": "send",
+                "to": msg.chat_id,
+                "text": msg.content
+            }
+            await self._ws.send(json.dumps(payload, ensure_ascii=False))
         except Exception as e:
             logger.error("Error sending WhatsApp message: {}", e)
 
