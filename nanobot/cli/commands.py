@@ -437,6 +437,104 @@ def gateway(
     asyncio.run(run())
 
 
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Transport gateway host"),
+    port: int = typer.Option(18791, "--port", "-p", help="Transport gateway port"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """Start WebSocket transport gateway for external app adapters."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.tools.message import MessageTool
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.loader import get_data_dir, load_config
+    from nanobot.cron.service import CronService
+    from nanobot.cron.types import CronJob
+    from nanobot.session.manager import SessionManager
+    from nanobot.transport.ws_gateway import WebSocketGateway
+
+    if verbose:
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+
+    console.print(f"{__logo__} Starting transport gateway on ws://{host}:{port}...")
+
+    config = load_config()
+    sync_workspace_templates(config.workspace_path)
+    bus = MessageBus()
+    provider = _make_provider(config)
+    session_manager = SessionManager(config.workspace_path)
+
+    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    cron = CronService(cron_store_path)
+
+    agent = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=config.workspace_path,
+        model=config.agents.defaults.model,
+        temperature=config.agents.defaults.temperature,
+        max_tokens=config.agents.defaults.max_tokens,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        memory_window=config.agents.defaults.memory_window,
+        reasoning_effort=config.agents.defaults.reasoning_effort,
+        brave_api_key=config.tools.web.search.api_key or None,
+        web_proxy=config.tools.web.proxy or None,
+        exec_config=config.tools.exec,
+        cron_service=cron,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        session_manager=session_manager,
+        mcp_servers=config.tools.mcp_servers,
+        channels_config=config.channels,
+    )
+
+    async def on_cron_job(job: CronJob) -> str | None:
+        reminder_note = (
+            "[Scheduled Task] Timer finished.\n\n"
+            f"Task '{job.name}' has been triggered.\n"
+            f"Scheduled instruction: {job.payload.message}"
+        )
+
+        response = await agent.process_direct(
+            reminder_note,
+            session_key=f"cron:{job.id}",
+            channel=job.payload.channel or "transport",
+            chat_id=job.payload.to or "direct",
+        )
+
+        message_tool = agent.tools.get("message")
+        if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+            return response
+
+        if job.payload.deliver and job.payload.to and response:
+            await bus.publish_outbound(OutboundMessage(
+                channel=job.payload.channel or "transport",
+                chat_id=job.payload.to,
+                content=response,
+            ))
+        return response
+
+    cron.on_job = on_cron_job
+
+    ws_gateway = WebSocketGateway(bus=bus, host=host, port=port)
+
+    async def run():
+        try:
+            await cron.start()
+            await ws_gateway.start()
+            await agent.run()
+        except KeyboardInterrupt:
+            console.print("\nShutting down...")
+        finally:
+            await agent.close_mcp()
+            cron.stop()
+            await ws_gateway.stop()
+            agent.stop()
+
+    asyncio.run(run())
+
+
 
 
 # ============================================================================
