@@ -11,18 +11,25 @@ def test_darwin_rollout_defaults_to_background_managed() -> None:
     assert policy.platform == "Darwin"
 
 
-@pytest.mark.parametrize("platform_name", ["Linux", "Windows"])
-def test_linux_windows_rollout_defaults_to_foreground_legacy(platform_name: str) -> None:
-    policy = resolve_runtime_policy(platform_name=platform_name)
+def test_linux_rollout_defaults_to_background_managed() -> None:
+    policy = resolve_runtime_policy(platform_name="Linux")
+
+    assert policy.mode is RuntimeMode.BACKGROUND_MANAGED
+    assert policy.rollout_stage == "default_on"
+    assert policy.platform == "Linux"
+
+
+def test_windows_rollout_defaults_to_foreground_legacy() -> None:
+    policy = resolve_runtime_policy(platform_name="Windows")
 
     assert policy.mode is RuntimeMode.FOREGROUND_LEGACY
     assert policy.rollout_stage == "off"
-    assert policy.platform == platform_name
+    assert policy.platform == "Windows"
 
 
 def test_env_background_falls_back_to_legacy_when_rollout_is_off() -> None:
     policy = resolve_runtime_policy(
-        platform_name="Linux",
+        platform_name="Windows",
         env={"NANOBOT_GATEWAY_MODE": "background"},
     )
 
@@ -43,6 +50,16 @@ def test_kill_switch_forces_foreground_when_cli_not_set() -> None:
     assert policy.reason == "kill_switch_enabled"
 
 
+def test_linux_kill_switch_forces_foreground_when_cli_not_set() -> None:
+    policy = resolve_runtime_policy(
+        platform_name="Linux",
+        env={"NANOBOT_GATEWAY_KILL_SWITCH": "1"},
+    )
+
+    assert policy.mode is RuntimeMode.FOREGROUND_LEGACY
+    assert policy.reason == "kill_switch_enabled"
+
+
 def test_cli_mode_has_highest_priority_over_kill_switch_and_env() -> None:
     policy = resolve_runtime_policy(
         platform_name="Linux",
@@ -53,8 +70,8 @@ def test_cli_mode_has_highest_priority_over_kill_switch_and_env() -> None:
         },
     )
 
-    assert policy.mode is RuntimeMode.FOREGROUND_LEGACY
-    assert policy.reason == "fallback_to_legacy_foreground"
+    assert policy.mode is RuntimeMode.BACKGROUND_MANAGED
+    assert policy.reason == "cli_override_background"
 
 
 def test_cli_foreground_forces_legacy_mode() -> None:
@@ -73,7 +90,7 @@ def test_empty_env_mapping_does_not_fallback_to_process_environment(monkeypatch)
     monkeypatch.setenv("NANOBOT_GATEWAY_KILL_SWITCH", "1")
 
     policy = resolve_runtime_policy(
-        platform_name="Linux",
+        platform_name="Windows",
         env={},
     )
 

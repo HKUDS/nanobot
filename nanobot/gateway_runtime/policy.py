@@ -12,7 +12,7 @@ KILL_SWITCH_ENV_KEY = "NANOBOT_GATEWAY_KILL_SWITCH"
 # Framework phase: keep all platforms in legacy foreground mode.
 ROLLOUT_BY_PLATFORM: dict[str, str] = {
     "Darwin": "default_on",
-    "Linux": "off",
+    "Linux": "default_on",
     "Windows": "off",
 }
 

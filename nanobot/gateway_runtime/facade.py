@@ -6,6 +6,7 @@ from typing import Callable
 
 from nanobot.gateway_runtime.adapters.base import RuntimeAdapter
 from nanobot.gateway_runtime.adapters.foreground_legacy import ForegroundLegacyAdapter
+from nanobot.gateway_runtime.adapters.linux_daemon import LinuxDaemonAdapter
 from nanobot.gateway_runtime.adapters.posix_daemon import PosixDaemonAdapter
 from nanobot.gateway_runtime.models import (
     GatewayStartOptions,
@@ -79,6 +80,12 @@ class GatewayRuntimeFacade:
                 state_store=self._state_store,
             )
 
+        if self._policy.platform == "Linux":
+            return LinuxDaemonAdapter(
+                policy=self._policy,
+                state_store=self._state_store,
+            )
+
         fallback_policy = RuntimePolicy(
             mode=RuntimeMode.FOREGROUND_LEGACY,
             reason="fallback_to_legacy_foreground",
@@ -97,7 +104,7 @@ class GatewayRuntimeFacade:
     def _should_auto_fallback(self, options: GatewayStartOptions) -> bool:
         if self._policy.mode is not RuntimeMode.BACKGROUND_MANAGED:
             return False
-        if self._policy.platform != "Darwin":
+        if self._policy.platform not in {"Darwin", "Linux"}:
             return False
         # auto mode: no explicit CLI override; keep command resilient on default path.
         return options.cli_mode is None

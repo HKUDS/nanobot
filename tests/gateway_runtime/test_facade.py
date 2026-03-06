@@ -142,7 +142,55 @@ def test_facade_uses_daemon_adapter_for_darwin_background_policy(tmp_path, monke
     assert daemon_called["count"] == 1
 
 
-def test_facade_auto_mode_falls_back_to_legacy_on_daemon_start_failure(tmp_path, monkeypatch) -> None:
+def test_facade_uses_linux_daemon_adapter_for_linux_background_policy(tmp_path, monkeypatch) -> None:
+    daemon_called = {"count": 0}
+
+    class StubLinuxDaemonAdapter:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def start(self, _options: GatewayStartOptions) -> StartResult:
+            daemon_called["count"] += 1
+            return StartResult(
+                started=True,
+                message="gateway_started_background_managed",
+                mode=RuntimeMode.BACKGROUND_MANAGED,
+            )
+
+        def stop(self, timeout_s: int = 20):
+            raise NotImplementedError
+
+        def restart(self, options: GatewayStartOptions, timeout_s: int = 20) -> RestartResult:
+            raise NotImplementedError
+
+        def status(self) -> GatewayStatus:
+            raise NotImplementedError
+
+        def logs(self, follow: bool = True, tail: int = 200) -> int:
+            raise NotImplementedError
+
+    monkeypatch.setattr(
+        "nanobot.gateway_runtime.facade.LinuxDaemonAdapter",
+        StubLinuxDaemonAdapter,
+        raising=False,
+    )
+    facade = GatewayRuntimeFacade(
+        policy=RuntimePolicy(
+            mode=RuntimeMode.BACKGROUND_MANAGED,
+            reason="rollout_default_on",
+            platform="Linux",
+            rollout_stage="default_on",
+        ),
+        state_store=GatewayStateStore(data_dir=tmp_path),
+    )
+
+    result = facade.start(GatewayStartOptions())
+
+    assert result.mode is RuntimeMode.BACKGROUND_MANAGED
+    assert daemon_called["count"] == 1
+
+
+def test_facade_auto_mode_falls_back_to_legacy_on_linux_daemon_start_failure(tmp_path, monkeypatch) -> None:
     calls = {"legacy_start": 0}
 
     class FailingDaemonAdapter:
@@ -189,7 +237,7 @@ def test_facade_auto_mode_falls_back_to_legacy_on_daemon_start_failure(tmp_path,
             raise NotImplementedError
 
     monkeypatch.setattr(
-        "nanobot.gateway_runtime.facade.PosixDaemonAdapter",
+        "nanobot.gateway_runtime.facade.LinuxDaemonAdapter",
         FailingDaemonAdapter,
         raising=False,
     )
@@ -199,7 +247,7 @@ def test_facade_auto_mode_falls_back_to_legacy_on_daemon_start_failure(tmp_path,
         policy=RuntimePolicy(
             mode=RuntimeMode.BACKGROUND_MANAGED,
             reason="rollout_default_on",
-            platform="Darwin",
+            platform="Linux",
             rollout_stage="default_on",
         ),
         state_store=GatewayStateStore(data_dir=tmp_path),
@@ -211,7 +259,7 @@ def test_facade_auto_mode_falls_back_to_legacy_on_daemon_start_failure(tmp_path,
     assert calls["legacy_start"] == 1
 
 
-def test_facade_explicit_background_does_not_silently_fallback(tmp_path, monkeypatch) -> None:
+def test_facade_explicit_background_does_not_silently_fallback_on_linux(tmp_path, monkeypatch) -> None:
     class FailingDaemonAdapter:
         def __init__(self, **_kwargs) -> None:
             pass
@@ -232,7 +280,7 @@ def test_facade_explicit_background_does_not_silently_fallback(tmp_path, monkeyp
             raise NotImplementedError
 
     monkeypatch.setattr(
-        "nanobot.gateway_runtime.facade.PosixDaemonAdapter",
+        "nanobot.gateway_runtime.facade.LinuxDaemonAdapter",
         FailingDaemonAdapter,
         raising=False,
     )
@@ -241,7 +289,7 @@ def test_facade_explicit_background_does_not_silently_fallback(tmp_path, monkeyp
         policy=RuntimePolicy(
             mode=RuntimeMode.BACKGROUND_MANAGED,
             reason="cli_override_background",
-            platform="Darwin",
+            platform="Linux",
             rollout_stage="default_on",
         ),
         state_store=GatewayStateStore(data_dir=tmp_path),

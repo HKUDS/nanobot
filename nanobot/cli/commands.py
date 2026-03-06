@@ -684,6 +684,8 @@ def gateway_status(
     console.print(f"Running: {'yes' if status.running else 'no'}")
     if status.pid is not None:
         console.print(f"PID: {status.pid}")
+    if status.pgid is not None:
+        console.print(f"PGID: {status.pgid}")
     if status.started_at is not None:
         console.print(f"Started At: {status.started_at}")
     if status.log_path is not None:

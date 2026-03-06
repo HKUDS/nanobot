@@ -1,4 +1,5 @@
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from nanobot.cli.commands import app
@@ -14,6 +15,93 @@ from nanobot.gateway_runtime.state_store import (
 )
 
 runner = CliRunner()
+
+
+class _BackgroundStatusAdapter:
+    def __init__(self, *, state_store=None, **_kwargs) -> None:
+        self._state_store = state_store
+
+    def start(self, _options) -> StartResult:
+        return StartResult(
+            started=True,
+            message="gateway_started_background_managed",
+            mode=RuntimeMode.BACKGROUND_MANAGED,
+        )
+
+    def stop(self, timeout_s: int = 20):
+        raise NotImplementedError
+
+    def restart(self, _options, timeout_s: int = 20) -> RestartResult:
+        return RestartResult(
+            restarted=True,
+            message="gateway_restarted_background_managed",
+            mode=RuntimeMode.BACKGROUND_MANAGED,
+        )
+
+    def status(self) -> GatewayStatus:
+        log_path = None
+        if self._state_store is not None:
+            log_path = self._state_store.resolve_log_path()
+        return GatewayStatus(
+            running=True,
+            mode=RuntimeMode.BACKGROUND_MANAGED,
+            reason="rollout_default_on",
+            platform="Linux",
+            rollout_stage="default_on",
+            pid=4321,
+            pgid=9876,
+            log_path=log_path,
+            started_at="2026-03-03T00:00:00Z",
+        )
+
+    def logs(self, follow: bool = True, tail: int = 200) -> int:
+        typer.echo(f"log tail={tail} follow={follow}")
+        return 0
+
+
+class _RecordingLinuxAdapter:
+    def __init__(self, *, state_store=None, **_kwargs) -> None:
+        self._state_store = state_store
+
+    def start(self, options) -> StartResult:
+        assert self._state_store is not None
+        log_path = self._state_store.resolve_log_path()
+        self._state_store.write_pid(6000 + options.port)
+        self._state_store.write_state(
+            {
+                "mode": RuntimeMode.BACKGROUND_MANAGED.value,
+                "reason": "rollout_default_on",
+                "platform": "Linux",
+                "rollout_stage": "default_on",
+                "pid": 6000 + options.port,
+                "pgid": 7000 + options.port,
+                "workspace": options.workspace,
+                "config_path": options.config_path,
+                "log_path": str(log_path),
+            }
+        )
+        return StartResult(
+            started=True,
+            message="gateway_started_background_managed",
+            mode=RuntimeMode.BACKGROUND_MANAGED,
+        )
+
+    def stop(self, timeout_s: int = 20):
+        raise NotImplementedError
+
+    def restart(self, _options, timeout_s: int = 20) -> RestartResult:
+        return RestartResult(
+            restarted=True,
+            message="gateway_restarted_background_managed",
+            mode=RuntimeMode.BACKGROUND_MANAGED,
+        )
+
+    def status(self) -> GatewayStatus:
+        raise NotImplementedError
+
+    def logs(self, follow: bool = True, tail: int = 200) -> int:
+        return 0
+
 
 
 def test_gateway_defaults_to_daemon_on_darwin(monkeypatch, tmp_path) -> None:
@@ -45,7 +133,11 @@ def test_gateway_defaults_to_daemon_on_darwin(monkeypatch, tmp_path) -> None:
         def logs(self, follow: bool = True, tail: int = 200) -> int:
             raise NotImplementedError
 
-    monkeypatch.setattr("nanobot.gateway_runtime.facade.PosixDaemonAdapter", StubDaemonAdapter, raising=False)
+    monkeypatch.setattr(
+        "nanobot.gateway_runtime.facade.PosixDaemonAdapter",
+        StubDaemonAdapter,
+        raising=False,
+    )
     monkeypatch.setattr(
         "nanobot.cli.commands.run_gateway_foreground_loop",
         lambda _p, _v, _w, _c: calls.__setitem__("foreground", calls["foreground"] + 1),
@@ -59,9 +151,55 @@ def test_gateway_defaults_to_daemon_on_darwin(monkeypatch, tmp_path) -> None:
     assert calls["foreground"] == 0
 
 
-@pytest.mark.parametrize("platform_name", ["Linux", "Windows"])
-def test_gateway_defaults_to_legacy_on_linux_and_windows(monkeypatch, tmp_path, platform_name: str) -> None:
-    monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: platform_name)
+def test_gateway_defaults_to_daemon_on_linux(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: "Linux")
+    monkeypatch.setattr("nanobot.gateway_runtime.state_store.get_data_dir", lambda: tmp_path)
+    calls = {"daemon": 0, "foreground": 0}
+
+    class StubLinuxDaemonAdapter:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def start(self, _options) -> StartResult:
+            calls["daemon"] += 1
+            return StartResult(
+                started=True,
+                message="gateway_started_background_managed",
+                mode=RuntimeMode.BACKGROUND_MANAGED,
+            )
+
+        def stop(self, timeout_s: int = 20):
+            raise NotImplementedError
+
+        def restart(self, options, timeout_s: int = 20) -> RestartResult:
+            raise NotImplementedError
+
+        def status(self) -> GatewayStatus:
+            raise NotImplementedError
+
+        def logs(self, follow: bool = True, tail: int = 200) -> int:
+            raise NotImplementedError
+
+    monkeypatch.setattr(
+        "nanobot.gateway_runtime.facade.LinuxDaemonAdapter",
+        StubLinuxDaemonAdapter,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.commands.run_gateway_foreground_loop",
+        lambda _p, _v, _w, _c: calls.__setitem__("foreground", calls["foreground"] + 1),
+    )
+
+    result = runner.invoke(app, ["gateway"])
+
+    assert result.exit_code == 0
+    assert "mode=background_managed" in result.stdout
+    assert calls["daemon"] == 1
+    assert calls["foreground"] == 0
+
+
+def test_gateway_defaults_to_legacy_on_windows(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: "Windows")
     monkeypatch.setattr("nanobot.gateway_runtime.state_store.get_data_dir", lambda: tmp_path)
     calls = {"foreground": 0}
     monkeypatch.setattr(
@@ -76,7 +214,7 @@ def test_gateway_defaults_to_legacy_on_linux_and_windows(monkeypatch, tmp_path, 
     assert calls["foreground"] == 1
 
 
-def test_gateway_foreground_flag_overrides_env_mode(monkeypatch, tmp_path) -> None:
+def test_gateway_foreground_flag_overrides_env_mode_on_linux(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: "Linux")
     monkeypatch.setattr("nanobot.gateway_runtime.state_store.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr("nanobot.cli.commands.run_gateway_foreground_loop", lambda _p, _v, _w, _c: None)
@@ -88,8 +226,26 @@ def test_gateway_foreground_flag_overrides_env_mode(monkeypatch, tmp_path) -> No
     assert "reason=cli_override_foreground" in result.stdout
 
 
-def test_gateway_auto_mode_falls_back_to_legacy_when_daemon_start_fails(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: "Darwin")
+def test_gateway_kill_switch_forces_legacy_on_linux(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: "Linux")
+    monkeypatch.setattr("nanobot.gateway_runtime.state_store.get_data_dir", lambda: tmp_path)
+    calls = {"foreground": 0}
+    monkeypatch.setenv("NANOBOT_GATEWAY_KILL_SWITCH", "1")
+    monkeypatch.setattr(
+        "nanobot.cli.commands.run_gateway_foreground_loop",
+        lambda _p, _v, _w, _c: calls.__setitem__("foreground", calls["foreground"] + 1),
+    )
+
+    result = runner.invoke(app, ["gateway"])
+
+    assert result.exit_code == 0
+    assert "reason=kill_switch_enabled" in result.stdout
+    assert "mode=foreground_legacy" in result.stdout
+    assert calls["foreground"] == 1
+
+
+def test_gateway_auto_mode_falls_back_to_legacy_when_linux_daemon_start_fails(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: "Linux")
     monkeypatch.setattr("nanobot.gateway_runtime.state_store.get_data_dir", lambda: tmp_path)
     calls = {"foreground": 0}
 
@@ -113,7 +269,7 @@ def test_gateway_auto_mode_falls_back_to_legacy_when_daemon_start_fails(monkeypa
             raise NotImplementedError
 
     monkeypatch.setattr(
-        "nanobot.gateway_runtime.facade.PosixDaemonAdapter",
+        "nanobot.gateway_runtime.facade.LinuxDaemonAdapter",
         FailingDaemonAdapter,
         raising=False,
     )
@@ -129,8 +285,8 @@ def test_gateway_auto_mode_falls_back_to_legacy_when_daemon_start_fails(monkeypa
     assert calls["foreground"] == 1
 
 
-def test_gateway_explicit_background_fails_when_daemon_start_fails(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: "Darwin")
+def test_gateway_explicit_background_fails_when_linux_daemon_start_fails(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: "Linux")
     monkeypatch.setattr("nanobot.gateway_runtime.state_store.get_data_dir", lambda: tmp_path)
     calls = {"foreground": 0}
 
@@ -154,7 +310,7 @@ def test_gateway_explicit_background_fails_when_daemon_start_fails(monkeypatch, 
             raise NotImplementedError
 
     monkeypatch.setattr(
-        "nanobot.gateway_runtime.facade.PosixDaemonAdapter",
+        "nanobot.gateway_runtime.facade.LinuxDaemonAdapter",
         FailingDaemonAdapter,
         raising=False,
     )
@@ -171,22 +327,30 @@ def test_gateway_explicit_background_fails_when_daemon_start_fails(monkeypatch, 
     assert calls["foreground"] == 0
 
 
-def test_gateway_restart_status_logs_commands_are_available(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: "Windows")
+def test_gateway_restart_status_logs_commands_show_linux_background_info(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: "Linux")
     monkeypatch.setattr("nanobot.gateway_runtime.state_store.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "nanobot.gateway_runtime.facade.LinuxDaemonAdapter",
+        _BackgroundStatusAdapter,
+        raising=False,
+    )
 
     restart_result = runner.invoke(app, ["gateway", "restart"])
     status_result = runner.invoke(app, ["gateway", "status"])
     logs_result = runner.invoke(app, ["gateway", "logs", "--no-follow", "--tail", "5"])
 
     assert restart_result.exit_code == 0
-    assert "legacy" in restart_result.stdout.lower()
+    assert "background_managed" in restart_result.stdout.lower()
 
     assert status_result.exit_code == 0
-    assert "mode: foreground_legacy" in status_result.stdout.lower()
+    assert "mode: background_managed" in status_result.stdout.lower()
+    assert "platform: linux" in status_result.stdout.lower()
+    assert "pid: 4321" in status_result.stdout.lower()
+    assert "pgid: 9876" in status_result.stdout.lower()
 
     assert logs_result.exit_code == 0
-    assert "foreground mode" in logs_result.stdout.lower()
+    assert "log tail=5 follow=false" in logs_result.stdout.lower()
 
 
 def test_gateway_rejects_group_background_flag_for_subcommand(monkeypatch, tmp_path) -> None:
@@ -219,7 +383,7 @@ def test_gateway_rejects_group_default_port_flag_for_subcommand(monkeypatch, tmp
     assert "pass options after the subcommand" in result.stdout.lower()
 
 
-def test_gateway_start_passes_workspace_and_config_to_foreground_runner(monkeypatch, tmp_path) -> None:
+def test_gateway_foreground_start_passes_workspace_and_config_to_foreground_runner(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: "Linux")
     monkeypatch.setattr("nanobot.gateway_runtime.state_store.get_data_dir", lambda: tmp_path)
     captured: dict[str, object] = {}
@@ -241,6 +405,7 @@ def test_gateway_start_passes_workspace_and_config_to_foreground_runner(monkeypa
         app,
         [
             "gateway",
+            "--foreground",
             "--port",
             "19100",
             "--workspace",
@@ -262,6 +427,11 @@ def test_gateway_start_passes_workspace_and_config_to_foreground_runner(monkeypa
 def test_gateway_restart_accepts_workspace_and_config_after_subcommand(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: "Linux")
     monkeypatch.setattr("nanobot.gateway_runtime.state_store.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "nanobot.gateway_runtime.facade.LinuxDaemonAdapter",
+        _BackgroundStatusAdapter,
+        raising=False,
+    )
 
     result = runner.invoke(
         app,
@@ -302,6 +472,11 @@ def test_gateway_rejects_group_config_flag_for_subcommand(monkeypatch, tmp_path)
 def test_gateway_status_targets_instance_scoped_runtime_files(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: "Linux")
     monkeypatch.setattr("nanobot.gateway_runtime.state_store.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "nanobot.gateway_runtime.adapters.linux_daemon.LinuxDaemonAdapter._is_pid_running",
+        lambda self, _pid: True,
+        raising=False,
+    )
 
     key_a = build_gateway_instance_key(workspace="/tmp/work-a", config_path="/tmp/cfg-a.json")
     key_b = build_gateway_instance_key(workspace="/tmp/work-b", config_path="/tmp/cfg-b.json")
@@ -311,6 +486,16 @@ def test_gateway_status_targets_instance_scoped_runtime_files(monkeypatch, tmp_p
     store_a = GatewayStateStore(data_dir=tmp_path, instance_key=key_a)
     store_b = GatewayStateStore(data_dir=tmp_path, instance_key=key_b)
     store_a.write_pid(4444)
+    store_a.write_state(
+        {
+            "mode": RuntimeMode.BACKGROUND_MANAGED.value,
+            "reason": "rollout_default_on",
+            "platform": "Linux",
+            "rollout_stage": "default_on",
+            "pid": 4444,
+            "pgid": 5555,
+        }
+    )
     store_b.clear_pid()
 
     result_a = runner.invoke(
@@ -325,15 +510,20 @@ def test_gateway_status_targets_instance_scoped_runtime_files(monkeypatch, tmp_p
     assert result_a.exit_code == 0
     assert "running: yes" in result_a.stdout.lower()
     assert "pid: 4444" in result_a.stdout.lower()
+    assert "pgid: 5555" in result_a.stdout.lower()
 
     assert result_b.exit_code == 0
     assert "running: no" in result_b.stdout.lower()
 
 
-def test_gateway_start_writes_instance_scoped_state_files(monkeypatch, tmp_path) -> None:
+def test_gateway_start_writes_instance_scoped_state_files_in_linux_background_mode(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("nanobot.cli.commands.platform.system", lambda: "Linux")
     monkeypatch.setattr("nanobot.gateway_runtime.state_store.get_data_dir", lambda: tmp_path)
-    monkeypatch.setattr("nanobot.cli.commands.run_gateway_foreground_loop", lambda _p, _v, _w, _c: None)
+    monkeypatch.setattr(
+        "nanobot.gateway_runtime.facade.LinuxDaemonAdapter",
+        _RecordingLinuxAdapter,
+        raising=False,
+    )
 
     result_a = runner.invoke(
         app,
@@ -356,5 +546,7 @@ def test_gateway_start_writes_instance_scoped_state_files(monkeypatch, tmp_path)
     state_b = GatewayStateStore(data_dir=tmp_path, instance_key=key_b).read_state()
     assert state_a is not None
     assert state_b is not None
-    assert state_a["mode"] == "foreground_legacy"
-    assert state_b["mode"] == "foreground_legacy"
+    assert state_a["mode"] == "background_managed"
+    assert state_b["mode"] == "background_managed"
+    assert state_a["workspace"] == "/tmp/work-a"
+    assert state_b["workspace"] == "/tmp/work-b"
