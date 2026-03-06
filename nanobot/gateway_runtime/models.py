@@ -45,6 +45,9 @@ class GatewayStartOptions:
 
     port: int = 18790
     verbose: bool = False
+    # Optional instance selectors for config/workspace aware runtime wiring.
+    workspace: str | None = None
+    config_path: str | None = None
     cli_mode: str | None = None
 
 

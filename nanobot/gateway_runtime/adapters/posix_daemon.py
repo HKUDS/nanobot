@@ -224,6 +224,10 @@ class PosixDaemonAdapter:
         ]
         if options.verbose:
             command.append("--verbose")
+        if options.workspace:
+            command.extend(["--workspace", options.workspace])
+        if options.config_path:
+            command.extend(["--config", options.config_path])
         return command
 
     def _wait_for_exit(self, pid: int, timeout_s: int) -> bool:

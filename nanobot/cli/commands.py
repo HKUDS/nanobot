@@ -256,18 +256,11 @@ def _make_provider(config: Config):
 # ============================================================================
 
 
-<<<<<<< HEAD
 def run_gateway_foreground_loop(
     port: int = 18790,
     verbose: bool = False,
-=======
-@app.command()
-def gateway(
-    port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
->>>>>>> upstream/HEAD
+    workspace: str | None = None,
+    config_path: str | None = None,
 ):
     """Run gateway using the legacy foreground execution path.
 
@@ -288,8 +281,8 @@ def gateway(
         import logging
         logging.basicConfig(level=logging.DEBUG)
 
-    config_path = Path(config) if config else None
-    config = load_config(config_path)
+    resolved_config_path = Path(config_path).expanduser() if config_path else None
+    config = load_config(resolved_config_path)
     if workspace:
         config.agents.defaults.workspace = workspace
 
@@ -479,19 +472,31 @@ def _resolve_gateway_cli_mode(*, foreground: bool, background: bool) -> str | No
 def _build_gateway_runtime_facade(
     *,
     cli_mode: str | None,
-    run_foreground_loop: Callable[[int, bool], None] | None = None,
+    workspace: str | None = None,
+    config_path: str | None = None,
+    run_foreground_loop: Callable[[int, bool, str | None, str | None], None] | None = None,
 ):
     """Create runtime facade and resolved policy for current invocation."""
     from nanobot.gateway_runtime.facade import GatewayRuntimeFacade
     from nanobot.gateway_runtime.policy import resolve_runtime_policy
+    from nanobot.gateway_runtime.state_store import (
+        GatewayStateStore,
+        build_gateway_instance_key,
+    )
 
     resolved_policy = resolve_runtime_policy(
         cli_mode=cli_mode,
         platform_name=platform.system(),
     )
+    instance_key = build_gateway_instance_key(
+        workspace=workspace,
+        config_path=config_path,
+    )
+    state_store = GatewayStateStore(instance_key=instance_key)
     facade = GatewayRuntimeFacade(
         run_foreground_loop=run_foreground_loop,
         policy=resolved_policy,
+        state_store=state_store,
     )
     return facade, resolved_policy
 
@@ -501,6 +506,8 @@ def _validate_gateway_group_options_for_subcommand(
     ctx: typer.Context,
     port: int,
     verbose: bool,
+    workspace: str | None,
+    config: str | None,
     foreground: bool,
     background: bool,
 ) -> None:
@@ -518,6 +525,10 @@ def _validate_gateway_group_options_for_subcommand(
         invalid_options.append("--port/-p")
     if _from_commandline("verbose") or (not has_source_api and verbose):
         invalid_options.append("--verbose/-v")
+    if _from_commandline("workspace") or (not has_source_api and workspace is not None):
+        invalid_options.append("--workspace/-w")
+    if _from_commandline("config") or (not has_source_api and config is not None):
+        invalid_options.append("--config/-c")
     if _from_commandline("foreground") or (not has_source_api and foreground):
         invalid_options.append("--foreground")
     if _from_commandline("background") or (not has_source_api and background):
@@ -541,6 +552,8 @@ def _validate_gateway_group_options_for_subcommand(
 def gateway(
     ctx: typer.Context,
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     foreground: bool = typer.Option(False, "--foreground", help="Force foreground legacy mode"),
     background: bool = typer.Option(False, "--background", help="Request background managed mode"),
@@ -553,7 +566,12 @@ def gateway(
 ):
     """Start the nanobot gateway."""
     if runtime_child:
-        run_gateway_foreground_loop(port, verbose)
+        run_gateway_foreground_loop(
+            port=port,
+            verbose=verbose,
+            workspace=workspace,
+            config_path=config,
+        )
         return
 
     # If a subcommand was specified (restart/status/logs), do not run start().
@@ -562,6 +580,8 @@ def gateway(
             ctx=ctx,
             port=port,
             verbose=verbose,
+            workspace=workspace,
+            config=config,
             foreground=foreground,
             background=background,
         )
@@ -573,6 +593,8 @@ def gateway(
     cli_mode = _resolve_gateway_cli_mode(foreground=foreground, background=background)
     facade, policy = _build_gateway_runtime_facade(
         cli_mode=cli_mode,
+        workspace=workspace,
+        config_path=config,
         run_foreground_loop=run_gateway_foreground_loop,
     )
     console.print(
@@ -586,6 +608,8 @@ def gateway(
             GatewayStartOptions(
                 port=port,
                 verbose=verbose,
+                workspace=workspace,
+                config_path=config,
                 cli_mode=cli_mode,
             )
         )
@@ -601,6 +625,8 @@ def gateway(
 @gateway_app.command("restart")
 def gateway_restart(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     timeout_s: int = typer.Option(20, "--timeout", help="Restart timeout in seconds"),
     foreground: bool = typer.Option(False, "--foreground", help="Force foreground legacy mode"),
@@ -614,12 +640,16 @@ def gateway_restart(
     cli_mode = _resolve_gateway_cli_mode(foreground=foreground, background=background)
     facade, policy = _build_gateway_runtime_facade(
         cli_mode=cli_mode,
+        workspace=workspace,
+        config_path=config,
         run_foreground_loop=run_gateway_foreground_loop,
     )
     result = facade.restart(
         GatewayStartOptions(
             port=port,
             verbose=verbose,
+            workspace=workspace,
+            config_path=config,
             cli_mode=cli_mode,
         ),
         timeout_s=timeout_s,
@@ -632,13 +662,19 @@ def gateway_restart(
 
 @gateway_app.command("status")
 def gateway_status(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     foreground: bool = typer.Option(False, "--foreground", help="Force foreground legacy mode"),
     background: bool = typer.Option(False, "--background", help="Request background managed mode"),
 ):
     """Show gateway runtime status."""
     # Status is designed to be always callable regardless of runtime mode.
     cli_mode = _resolve_gateway_cli_mode(foreground=foreground, background=background)
-    facade, _ = _build_gateway_runtime_facade(cli_mode=cli_mode)
+    facade, _ = _build_gateway_runtime_facade(
+        cli_mode=cli_mode,
+        workspace=workspace,
+        config_path=config,
+    )
     status = facade.status()
 
     console.print(f"Mode: {status.mode.value}")
@@ -658,6 +694,8 @@ def gateway_status(
 def gateway_logs(
     follow: bool = typer.Option(True, "--follow/--no-follow", help="Follow gateway log output"),
     tail: int = typer.Option(200, "--tail", help="Number of recent lines to show"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     foreground: bool = typer.Option(False, "--foreground", help="Force foreground legacy mode"),
     background: bool = typer.Option(False, "--background", help="Request background managed mode"),
 ):
@@ -665,7 +703,11 @@ def gateway_logs(
     # Even in legacy mode, this command should stay available and explain why
     # no managed background stream is present.
     cli_mode = _resolve_gateway_cli_mode(foreground=foreground, background=background)
-    facade, _ = _build_gateway_runtime_facade(cli_mode=cli_mode)
+    facade, _ = _build_gateway_runtime_facade(
+        cli_mode=cli_mode,
+        workspace=workspace,
+        config_path=config,
+    )
     code = facade.logs(follow=follow, tail=tail)
     if code != 0:
         raise typer.Exit(code)

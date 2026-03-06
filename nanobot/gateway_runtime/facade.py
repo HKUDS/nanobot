@@ -28,7 +28,7 @@ class GatewayRuntimeFacade:
     def __init__(
         self,
         *,
-        run_foreground_loop: Callable[[int, bool], None] | None = None,
+        run_foreground_loop: Callable[[int, bool, str | None, str | None], None] | None = None,
         policy: RuntimePolicy | None = None,
         state_store: GatewayStateStore | None = None,
         adapter: RuntimeAdapter | None = None,

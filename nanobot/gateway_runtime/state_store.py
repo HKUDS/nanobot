@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -14,18 +15,20 @@ from nanobot.gateway_runtime.models import GatewayRuntimeState
 class GatewayStateStore:
     """Read and write gateway runtime files under ~/.nanobot."""
 
-    def __init__(self, data_dir: Path | None = None):
+    def __init__(self, data_dir: Path | None = None, instance_key: str | None = None):
         # Runtime filesystem layout:
-        #   <data>/run/gateway.pid
-        #   <data>/run/gateway.state.json
-        #   <data>/run/gateway.lock   (reserved for future single-instance lock)
-        #   <data>/logs/gateway.log
+        #   <data>/run/gateway[.<instance>].pid
+        #   <data>/run/gateway[.<instance>].state.json
+        #   <data>/run/gateway[.<instance>].lock   (reserved for future lock)
+        #   <data>/logs/gateway[.<instance>].log
         base_dir = data_dir or get_data_dir()
         self.run_dir = base_dir / "run"
         self.logs_dir = base_dir / "logs"
-        self.pid_path = self.run_dir / "gateway.pid"
-        self.state_path = self.run_dir / "gateway.state.json"
-        self.lock_path = self.run_dir / "gateway.lock"
+        suffix = f".{_safe_instance_suffix(instance_key)}" if instance_key else ""
+        self.pid_path = self.run_dir / f"gateway{suffix}.pid"
+        self.state_path = self.run_dir / f"gateway{suffix}.state.json"
+        self.lock_path = self.run_dir / f"gateway{suffix}.lock"
+        self.log_path = self.logs_dir / f"gateway{suffix}.log"
 
     def write_state(self, payload: GatewayRuntimeState) -> None:
         """Persist structured runtime metadata (mode/reason/timestamps, etc.)."""
@@ -80,7 +83,7 @@ class GatewayStateStore:
     def resolve_log_path(self) -> Path:
         """Return standard gateway log path, creating log directory if needed."""
         self.logs_dir.mkdir(parents=True, exist_ok=True)
-        return self.logs_dir / "gateway.log"
+        return self.log_path
 
     def read_log_tail(self, tail: int = 200) -> list[str]:
         """Read last N lines from gateway log file."""
@@ -94,3 +97,28 @@ class GatewayStateStore:
         except OSError:
             return []
         return lines[-tail:]
+
+
+def build_gateway_instance_key(
+    *,
+    workspace: str | None = None,
+    config_path: str | None = None,
+) -> str | None:
+    """Build a deterministic instance key from gateway-scoping CLI inputs."""
+    if not workspace and not config_path:
+        return None
+    ws = _normalize_optional_path(workspace)
+    cfg = _normalize_optional_path(config_path)
+    raw = f"workspace={ws}|config={cfg}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _normalize_optional_path(raw: str | None) -> str:
+    if raw is None:
+        return ""
+    return str(Path(raw).expanduser())
+
+
+def _safe_instance_suffix(raw: str) -> str:
+    # Instance keys are expected to be hex-ish; keep filenames safe regardless.
+    return "".join(ch for ch in raw if ch.isalnum() or ch in {"-", "_", "."}) or "default"

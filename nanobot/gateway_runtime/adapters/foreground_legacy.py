@@ -30,7 +30,7 @@ class ForegroundLegacyAdapter:
     def __init__(
         self,
         *,
-        run_foreground_loop: Callable[[int, bool], None] | None,
+        run_foreground_loop: Callable[[int, bool, str | None, str | None], None] | None,
         policy: RuntimePolicy,
         state_store: GatewayStateStore | None = None,
     ):
@@ -56,7 +56,12 @@ class ForegroundLegacyAdapter:
                 "rollout_stage": self._policy.rollout_stage,
             }
         )
-        self._run_foreground_loop(options.port, options.verbose)
+        self._run_foreground_loop(
+            options.port,
+            options.verbose,
+            options.workspace,
+            options.config_path,
+        )
         return StartResult(
             started=True,
             message="gateway_started_foreground_legacy",
