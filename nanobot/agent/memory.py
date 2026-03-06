@@ -15,12 +15,12 @@ if TYPE_CHECKING:
     from nanobot.session.manager import Session
 
 
-_SAVE_MEMORY_TOOL = [
+_SAVE_HISTORY_TOOL = [
     {
         "type": "function",
         "function": {
-            "name": "save_memory",
-            "description": "Save the memory consolidation result to persistent storage.",
+            "name": "save_history",
+            "description": "Save a summary of the conversation to HISTORY.md for grep-searchable logs.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -29,13 +29,8 @@ _SAVE_MEMORY_TOOL = [
                         "description": "A paragraph (2-5 sentences) summarizing key events/decisions/topics. "
                         "Start with [YYYY-MM-DD HH:MM]. Include detail useful for grep search.",
                     },
-                    "memory_update": {
-                        "type": "string",
-                        "description": "Full updated long-term memory as markdown. Include all existing "
-                        "facts plus new ones. Return unchanged if nothing new.",
-                    },
                 },
-                "required": ["history_entry", "memory_update"],
+                "required": ["history_entry"],
             },
         },
     }
@@ -43,7 +38,11 @@ _SAVE_MEMORY_TOOL = [
 
 
 class MemoryStore:
-    """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
+    """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log).
+
+    MEMORY.md is maintained by the dream skill (scheduled task).
+    consolidate() only writes to HISTORY.md to avoid output truncation issues.
+    """
 
     def __init__(self, workspace: Path):
         self.memory_dir = ensure_dir(workspace / "memory")
@@ -74,15 +73,14 @@ class MemoryStore:
         *,
         archive_all: bool = False,
         memory_window: int = 50,
-        max_tokens: int = 16384,
     ) -> bool:
-        """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
+        """Consolidate old messages into HISTORY.md via LLM tool call.
+
+        Only writes to HISTORY.md. MEMORY.md is maintained by the dream skill
+        which runs as a scheduled task and can use file editing tools to
+        incrementally update without output truncation issues.
 
         Returns True on success (including no-op), False on failure.
-
-        Args:
-            max_tokens: Maximum tokens for LLM response. Default 16384 to accommodate
-                        large memory_update output (existing memory + new content).
         """
         if archive_all:
             old_messages = session.messages
@@ -106,11 +104,7 @@ class MemoryStore:
             tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
             lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
 
-        current_memory = self.read_long_term()
-        prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
-
-## Current Long-term Memory
-{current_memory or "(empty)"}
+        prompt = f"""Summarize this conversation and call the save_history tool.
 
 ## Conversation to Process
 {chr(10).join(lines)}"""
@@ -118,25 +112,22 @@ class MemoryStore:
         try:
             response = await provider.chat(
                 messages=[
-                    {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+                    {"role": "system", "content": "You are a memory consolidation agent. Call the save_history tool with a brief summary of the conversation."},
                     {"role": "user", "content": prompt},
                 ],
-                tools=_SAVE_MEMORY_TOOL,
+                tools=_SAVE_HISTORY_TOOL,
                 model=model,
-                max_tokens=max_tokens,
             )
 
             # Safety check: reject if LLM response was truncated due to token limit
-            # This prevents memory corruption from incomplete tool call arguments
             if response.finish_reason == "length":
                 logger.warning(
-                    "Memory consolidation rejected: LLM response truncated (finish_reason='length'). "
-                    f"Current max_tokens={max_tokens}. Consider increasing it further."
+                    "Memory consolidation rejected: LLM response truncated (finish_reason='length')."
                 )
                 return False
 
             if not response.has_tool_calls:
-                logger.warning("Memory consolidation: LLM did not call save_memory, skipping")
+                logger.warning("Memory consolidation: LLM did not call save_history, skipping")
                 return False
 
             args = response.tool_calls[0].arguments
@@ -158,11 +149,6 @@ class MemoryStore:
                 if not isinstance(entry, str):
                     entry = json.dumps(entry, ensure_ascii=False)
                 self.append_history(entry)
-            if update := args.get("memory_update"):
-                if not isinstance(update, str):
-                    update = json.dumps(update, ensure_ascii=False)
-                if update != current_memory:
-                    self.write_long_term(update)
 
             session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
             logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)
