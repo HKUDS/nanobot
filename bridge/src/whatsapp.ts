@@ -110,8 +110,7 @@ export class WhatsAppClient {
       if (type !== 'notify') return;
 
       for (const msg of messages) {
-        // Skip own messages
-        if (msg.key.fromMe) continue;
+        console.log(`[DEBUG] msg: fromMe=${msg.key.fromMe}, jid=${msg.key.remoteJid}, hasMessage=${!!msg.message}`);
 
         // Skip status updates
         if (msg.key.remoteJid === 'status@broadcast') continue;
