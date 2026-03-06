@@ -410,6 +410,34 @@ class FeishuChannel(BaseChannel):
             elements.extend(self._split_headings(remaining))
         return elements or [{"tag": "markdown", "content": content}]
 
+    @staticmethod
+    def _split_elements_by_table_limit(elements: list[dict], max_tables: int = 1) -> list[list[dict]]:
+        """Split card elements into groups with at most *max_tables* table elements each.
+
+        Feishu cards have a hard limit of one table per card (API error 11310).
+        When the rendered content contains multiple markdown tables each table is
+        placed in a separate card message so every table reaches the user.
+        """
+        if not elements:
+            return [[]]
+        groups: list[list[dict]] = []
+        current: list[dict] = []
+        table_count = 0
+        for el in elements:
+            if el.get("tag") == "table":
+                if table_count >= max_tables:
+                    if current:
+                        groups.append(current)
+                    current = []
+                    table_count = 0
+                current.append(el)
+                table_count += 1
+            else:
+                current.append(el)
+        if current:
+            groups.append(current)
+        return groups or [[]]
+
     def _split_headings(self, content: str) -> list[dict]:
         """Split content by headings, converting headings to div elements."""
         protected = content
@@ -444,8 +472,124 @@ class FeishuChannel(BaseChannel):
 
         return elements or [{"tag": "markdown", "content": content}]
 
+    # ── Smart format detection ──────────────────────────────────────────
+    # Patterns that indicate "complex" markdown needing card rendering
+    _COMPLEX_MD_RE = re.compile(
+        r"```"                        # fenced code block
+        r"|^\|.+\|.*\n\s*\|[-:\s|]+\|"  # markdown table (header + separator)
+        r"|^#{1,6}\s+"                # headings
+        , re.MULTILINE,
+    )
+
+    # Simple markdown patterns (bold, italic, strikethrough)
+    _SIMPLE_MD_RE = re.compile(
+        r"\*\*.+?\*\*"               # **bold**
+        r"|__.+?__"                   # __bold__
+        r"|(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)"  # *italic* (single *)
+        r"|~~.+?~~"                   # ~~strikethrough~~
+        , re.DOTALL,
+    )
+
+    # Markdown link: [text](url)
+    _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\)]+)\)")
+
+    # Unordered list items
+    _LIST_RE = re.compile(r"^[\s]*[-*+]\s+", re.MULTILINE)
+
+    # Ordered list items
+    _OLIST_RE = re.compile(r"^[\s]*\d+\.\s+", re.MULTILINE)
+
+    # Max length for plain text format
+    _TEXT_MAX_LEN = 200
+
+    # Max length for post (rich text) format; beyond this, use card
+    _POST_MAX_LEN = 2000
+
+    @classmethod
+    def _detect_msg_format(cls, content: str) -> str:
+        """Determine the optimal Feishu message format for *content*.
+
+        Returns one of:
+        - ``"text"``        – plain text, short and no markdown
+        - ``"post"``        – rich text (links only, moderate length)
+        - ``"interactive"`` – card with full markdown rendering
+        """
+        stripped = content.strip()
+
+        # Complex markdown (code blocks, tables, headings) → always card
+        if cls._COMPLEX_MD_RE.search(stripped):
+            return "interactive"
+
+        # Long content → card (better readability with card layout)
+        if len(stripped) > cls._POST_MAX_LEN:
+            return "interactive"
+
+        # Has bold/italic/strikethrough → card (post format can't render these)
+        if cls._SIMPLE_MD_RE.search(stripped):
+            return "interactive"
+
+        # Has list items → card (post format can't render list bullets well)
+        if cls._LIST_RE.search(stripped) or cls._OLIST_RE.search(stripped):
+            return "interactive"
+
+        # Has links → post format (supports <a> tags)
+        if cls._MD_LINK_RE.search(stripped):
+            return "post"
+
+        # Short plain text → text format
+        if len(stripped) <= cls._TEXT_MAX_LEN:
+            return "text"
+
+        # Medium plain text without any formatting → post format
+        return "post"
+
+    @classmethod
+    def _markdown_to_post(cls, content: str) -> str:
+        """Convert markdown content to Feishu post message JSON.
+
+        Handles links ``[text](url)`` as ``a`` tags; everything else as ``text`` tags.
+        Each line becomes a paragraph (row) in the post body.
+        """
+        lines = content.strip().split("\n")
+        paragraphs: list[list[dict]] = []
+
+        for line in lines:
+            elements: list[dict] = []
+            last_end = 0
+
+            for m in cls._MD_LINK_RE.finditer(line):
+                # Text before this link
+                before = line[last_end:m.start()]
+                if before:
+                    elements.append({"tag": "text", "text": before})
+                elements.append({
+                    "tag": "a",
+                    "text": m.group(1),
+                    "href": m.group(2),
+                })
+                last_end = m.end()
+
+            # Remaining text after last link
+            remaining = line[last_end:]
+            if remaining:
+                elements.append({"tag": "text", "text": remaining})
+
+            # Empty line → empty paragraph for spacing
+            if not elements:
+                elements.append({"tag": "text", "text": ""})
+
+            paragraphs.append(elements)
+
+        post_body = {
+            "zh_cn": {
+                "content": paragraphs,
+            }
+        }
+        return json.dumps(post_body, ensure_ascii=False)
+
     _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif"}
     _AUDIO_EXTS = {".opus"}
+    _VIDEO_EXTS = {".mp4", ".mov", ".avi"}
     _FILE_TYPE_MAP = {
         ".opus": "opus", ".mp4": "mp4", ".pdf": "pdf", ".doc": "doc", ".docx": "doc",
         ".xls": "xls", ".xlsx": "xls", ".ppt": "ppt", ".pptx": "ppt",
@@ -654,18 +798,45 @@ class FeishuChannel(BaseChannel):
                 else:
                     key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
                     if key:
-                        media_type = "audio" if ext in self._AUDIO_EXTS else "file"
+                        # Use msg_type "media" for audio/video so users can play inline;
+                        # "file" for everything else (documents, archives, etc.)
+                        if ext in self._AUDIO_EXTS or ext in self._VIDEO_EXTS:
+                            media_type = "media"
+                        else:
+                            media_type = "file"
                         await loop.run_in_executor(
                             None, self._send_message_sync,
                             receive_id_type, msg.chat_id, media_type, json.dumps({"file_key": key}, ensure_ascii=False),
                         )
 
             if msg.content and msg.content.strip():
-                card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
-                await loop.run_in_executor(
-                    None, self._send_message_sync,
-                    receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
-                )
+                fmt = self._detect_msg_format(msg.content)
+
+                if fmt == "text":
+                    # Short plain text – send as simple text message
+                    text_body = json.dumps({"text": msg.content.strip()}, ensure_ascii=False)
+                    await loop.run_in_executor(
+                        None, self._send_message_sync,
+                        receive_id_type, msg.chat_id, "text", text_body,
+                    )
+
+                elif fmt == "post":
+                    # Medium content with links – send as rich-text post
+                    post_body = self._markdown_to_post(msg.content)
+                    await loop.run_in_executor(
+                        None, self._send_message_sync,
+                        receive_id_type, msg.chat_id, "post", post_body,
+                    )
+
+                else:
+                    # Complex / long content – send as interactive card
+                    elements = self._build_card_elements(msg.content)
+                    for chunk in self._split_elements_by_table_limit(elements):
+                        card = {"config": {"wide_screen_mode": True}, "elements": chunk}
+                        await loop.run_in_executor(
+                            None, self._send_message_sync,
+                            receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
+                        )
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)

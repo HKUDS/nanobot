@@ -14,6 +14,9 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
+from nanobot.utils.helpers import split_message
+
+TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -77,26 +80,6 @@ def _markdown_to_telegram_html(text: str) -> str:
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
 
     return text
-
-
-def _split_message(content: str, max_len: int = 4000) -> list[str]:
-    """Split content into chunks within max_len, preferring line breaks."""
-    if len(content) <= max_len:
-        return [content]
-    chunks: list[str] = []
-    while content:
-        if len(content) <= max_len:
-            chunks.append(content)
-            break
-        cut = content[:max_len]
-        pos = cut.rfind('\n')
-        if pos == -1:
-            pos = cut.rfind(' ')
-        if pos == -1:
-            pos = max_len
-        chunks.append(content[:pos])
-        content = content[pos:].lstrip()
-    return chunks
 
 
 class TelegramChannel(BaseChannel):
@@ -225,7 +208,9 @@ class TelegramChannel(BaseChannel):
             logger.warning("Telegram bot not running")
             return
 
-        self._stop_typing(msg.chat_id)
+        # Only stop typing indicator for final responses
+        if not msg.metadata.get("_progress", False):
+            self._stop_typing(msg.chat_id)
 
         try:
             chat_id = int(msg.chat_id)
@@ -269,23 +254,41 @@ class TelegramChannel(BaseChannel):
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
-            for chunk in _split_message(msg.content):
+            is_progress = msg.metadata.get("_progress", False)
+            draft_id = msg.metadata.get("message_id")
+
+            for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
                 try:
                     html = _markdown_to_telegram_html(chunk)
-                    await self._app.bot.send_message(
-                        chat_id=chat_id,
-                        text=html,
-                        parse_mode="HTML",
-                        reply_parameters=reply_params
-                    )
+                    if is_progress and draft_id:
+                        await self._app.bot.send_message_draft(
+                            chat_id=chat_id,
+                            draft_id=draft_id,
+                            text=html,
+                            parse_mode="HTML"
+                        )
+                    else:
+                        await self._app.bot.send_message(
+                            chat_id=chat_id,
+                            text=html,
+                            parse_mode="HTML",
+                            reply_parameters=reply_params
+                        )
                 except Exception as e:
                     logger.warning("HTML parse failed, falling back to plain text: {}", e)
                     try:
-                        await self._app.bot.send_message(
-                            chat_id=chat_id,
-                            text=chunk,
-                            reply_parameters=reply_params
-                        )
+                        if is_progress and draft_id:
+                            await self._app.bot.send_message_draft(
+                                chat_id=chat_id,
+                                draft_id=draft_id,
+                                text=chunk
+                            )
+                        else:
+                            await self._app.bot.send_message(
+                                chat_id=chat_id,
+                                text=chunk,
+                                reply_parameters=reply_params
+                            )
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
 
