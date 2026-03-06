@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import weakref
+import signal
+import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from loguru import logger
 
@@ -56,6 +57,7 @@ class AgentLoop:
         temperature: float = 0.1,
         max_tokens: int = 4096,
         memory_window: int = 100,
+        context_limit: int = 0,  # 0 = no limit, positive value = max messages before trimming
         reasoning_effort: str | None = None,
         brave_api_key: str | None = None,
         web_proxy: str | None = None,
@@ -76,6 +78,7 @@ class AgentLoop:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.memory_window = memory_window
+        self.context_limit = context_limit  # Context window management
         self.reasoning_effort = reasoning_effort
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
@@ -107,10 +110,17 @@ class AgentLoop:
         self._mcp_connecting = False
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
-        self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+        self._consolidation_locks: dict[str, asyncio.Lock] = {}  # Strong refs to locks
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
+        self._task_cleanup_lock = asyncio.Lock()  # Prevents race conditions in task cleanup
         self._processing_lock = asyncio.Lock()
+        
+        # Graceful shutdown support
+        self._shutdown_event = asyncio.Event()
+        self._graceful_shutdown = False
+        
         self._register_default_tools()
+        self._setup_signal_handlers()
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -129,6 +139,35 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+    def _setup_signal_handlers(self) -> None:
+        """
+        Setup signal handlers for graceful shutdown.
+        
+        Handles SIGTERM and SIGINT to ensure clean shutdown of:
+        - Active message processing tasks
+        - Subagents and their resources  
+        - Memory consolidation
+        - MCP server connections
+        """
+        if sys.platform != "win32":
+            # Unix-like systems support signal handling
+            def signal_handler(signum: int) -> None:
+                signal_name = signal.Signals(signum).name
+                logger.info("Received signal {}, initiating graceful shutdown...", signal_name)
+                self._graceful_shutdown = True
+                self._shutdown_event.set()
+            
+            # Register signal handlers in event loop
+            try:
+                loop = asyncio.get_event_loop()
+                for sig in (signal.SIGTERM, signal.SIGINT):
+                    loop.add_signal_handler(sig, lambda s=sig: signal_handler(s))
+                logger.debug("Signal handlers registered for SIGTERM and SIGINT")
+            except (RuntimeError, NotImplementedError) as e:
+                logger.warning("Could not register signal handlers: {}", e)
+        else:
+            logger.debug("Signal handling not available on Windows")
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -190,6 +229,16 @@ class AgentLoop:
 
         while iteration < self.max_iterations:
             iteration += 1
+            
+            # Implement sliding-window context trimming before API call
+            if hasattr(self, 'context_limit') and self.context_limit and self.context_limit > 0:
+                trimmed_messages = self._trim_context_window(messages, self.context_limit)
+                if len(trimmed_messages) < len(messages):
+                    logger.info(
+                        "Context window trimmed: {} -> {} messages (limit: {})",
+                        len(messages), len(trimmed_messages), self.context_limit
+                    )
+                messages = trimmed_messages
 
             response = await self.provider.chat(
                 messages=messages,
@@ -264,25 +313,186 @@ class AgentLoop:
             )
 
         return final_content, tools_used, messages
+    
+    def _trim_context_window(self, messages: list[dict], context_limit: int) -> list[dict]:
+        """
+        Implement sliding-window trimming to keep messages within context limits.
+        
+        Preserves system message and recent conversation while removing older messages
+        to stay within the specified token/message limit.
+        
+        Args:
+            messages: Current message history
+            context_limit: Maximum number of messages to retain
+            
+        Returns:
+            Trimmed message list within context limit
+        """
+        if len(messages) <= context_limit:
+            return messages
+            
+        # Always preserve system message (typically first message)
+        system_messages = [msg for msg in messages if msg.get('role') == 'system']
+        non_system_messages = [msg for msg in messages if msg.get('role') != 'system']
+        
+        # Reserve space for system messages
+        available_space = context_limit - len(system_messages)
+        
+        if available_space <= 0:
+            # If system messages exceed limit, just return first system message
+            return system_messages[:1] if system_messages else messages[:context_limit]
+        
+        # Keep the most recent N non-system messages
+        recent_messages = non_system_messages[-available_space:] if available_space < len(non_system_messages) else non_system_messages
+        
+        # Reconstruct: system messages + recent conversation
+        trimmed = system_messages + recent_messages
+        
+        logger.debug(
+            "Context trimming: kept {} system + {} recent messages (total: {})",
+            len(system_messages), len(recent_messages), len(trimmed)
+        )
+        
+        return trimmed
 
     async def run(self) -> None:
-        """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
+        """Run the agent loop with signal handling for graceful shutdown."""
         self._running = True
+        self._shutdown_event.clear()
         await self._connect_mcp()
         logger.info("Agent loop started")
 
-        while self._running:
+        try:
+            # Main processing loop with signal handling
+            while self._running and not self._graceful_shutdown:
+                try:
+                    # Check for shutdown signal
+                    shutdown_task = asyncio.create_task(self._shutdown_event.wait())
+                    consume_task = asyncio.create_task(self.bus.consume_inbound())
+                    
+                    # Wait for either message or shutdown signal
+                    done, pending = await asyncio.wait(
+                        [shutdown_task, consume_task],
+                        timeout=1.0,
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+                    
+                    # Cancel pending tasks
+                    for task in pending:
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                    
+                    # Handle shutdown signal
+                    if shutdown_task in done:
+                        logger.info("Shutdown signal received, stopping gracefully...")
+                        break
+                        
+                    # Handle message if available
+                    if consume_task in done:
+                        msg = await consume_task
+                        
+                        if msg.content.strip().lower() == "/stop":
+                            await self._handle_stop(msg)
+                        else:
+                            task = asyncio.create_task(self._dispatch(msg))
+                            self._active_tasks.setdefault(msg.session_key, []).append(task)
+                            task.add_done_callback(
+                                lambda t, key=msg.session_key: asyncio.create_task(
+                                    self._cleanup_task(t, key)
+                                )
+                            )
+                        
+                except asyncio.TimeoutError:
+                    # Timeout is expected, continue loop
+                    continue
+                    
+        except Exception as e:
+            logger.exception("Unexpected error in agent loop: {}", e)
+        finally:
+            await self._shutdown_gracefully()
+            
+    async def _shutdown_gracefully(self) -> None:
+        """
+        Perform graceful shutdown of all agent components.
+        
+        This ensures:
+        - All active tasks are cancelled and awaited
+        - Memory is consolidated and saved
+        - Subagents are properly closed
+        - MCP connections are terminated cleanly
+        """
+        logger.info("Beginning graceful shutdown...")
+        self._running = False
+        
+        # Cancel and wait for all active tasks
+        all_tasks = []
+        for session_tasks in self._active_tasks.values():
+            all_tasks.extend(session_tasks)
+            
+        if all_tasks:
+            logger.info("Cancelling {} active tasks...", len(all_tasks))
+            for task in all_tasks:
+                if not task.done():
+                    task.cancel()
+                    
+            # Wait for all tasks to complete with timeout
             try:
-                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
+                await asyncio.wait_for(
+                    asyncio.gather(*all_tasks, return_exceptions=True),
+                    timeout=10.0
+                )
+                logger.info("All active tasks cancelled successfully")
             except asyncio.TimeoutError:
-                continue
-
-            if msg.content.strip().lower() == "/stop":
-                await self._handle_stop(msg)
-            else:
-                task = asyncio.create_task(self._dispatch(msg))
-                self._active_tasks.setdefault(msg.session_key, []).append(task)
-                task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
+                logger.warning("Some tasks did not shutdown within timeout")
+        
+        # Close subagents and their resources
+        try:
+            await self.subagents.close_all()
+            logger.debug("Subagents closed successfully")
+        except Exception as e:
+            logger.warning("Error closing subagents: {}", e)
+            
+        # Consolidate and save memory
+        try:
+            if hasattr(self, 'memory') and self.memory:
+                await self.memory.consolidate_and_save()
+                logger.debug("Memory consolidated and saved")
+        except Exception as e:
+            logger.warning("Error saving memory: {}", e)
+            
+        # Close MCP connections
+        try:
+            await self.close_mcp()
+            logger.debug("MCP connections closed")
+        except Exception as e:
+            logger.warning("Error closing MCP connections: {}", e)
+            
+        logger.info("Graceful shutdown completed")
+        
+    def stop(self) -> None:
+        """
+        Signal the agent loop to stop gracefully.
+        
+        This is a synchronous method that can be called from signal handlers
+        or other contexts to initiate shutdown.
+        """
+        logger.info("Stop requested")
+        self._graceful_shutdown = True
+        self._shutdown_event.set()
+        
+    def stop(self) -> None:
+        """
+        Signal the agent loop to stop gracefully.
+        
+        This is a synchronous method that can be called from signal handlers
+        or other contexts to initiate shutdown.
+        """
+        logger.info("Stop requested")
+        self._graceful_shutdown = True
+        self._shutdown_event.set()
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
@@ -299,7 +509,27 @@ class AgentLoop:
         await self.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
-
+    async def _cleanup_task(self, task: asyncio.Task[None], session_key: str) -> None:
+        """Thread-safe cleanup of completed tasks.
+        
+        Args:
+            task: The completed asyncio task to clean up.
+            session_key: The session key associated with the task.
+        
+        Note:
+            This method ensures thread-safe removal of completed tasks
+            from the active tasks dictionary and cleans up empty lists.
+        """
+        async with self._task_cleanup_lock:
+            if session_key in self._active_tasks:
+                try:
+                    self._active_tasks[session_key].remove(task)
+                    # Clean up empty lists
+                    if not self._active_tasks[session_key]:
+                        del self._active_tasks[session_key]
+                except ValueError:
+                    # Task was already removed, ignore
+                    pass
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message under the global lock."""
         async with self._processing_lock:
@@ -373,18 +603,40 @@ class AgentLoop:
         if cmd == "/new":
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
             self._consolidating.add(session.key)
+            
+            # Create atomic transaction for session clearing
+            session_backup = None
             try:
                 async with lock:
+                    # Create backup before modification for rollback capability
+                    session_backup = {
+                        'messages': session.messages[:],
+                        'last_consolidated': session.last_consolidated
+                    }
+                    
                     snapshot = session.messages[session.last_consolidated:]
                     if snapshot:
                         temp = Session(key=session.key)
                         temp.messages = list(snapshot)
+                        
+                        # Archive memory with rollback on failure
                         if not await self._consolidate_memory(temp, archive_all=True):
                             return OutboundMessage(
                                 channel=msg.channel, chat_id=msg.chat_id,
                                 content="Memory archival failed, session not cleared. Please try again.",
                             )
-            except Exception:
+                    
+                    # Atomic session state update - only clear if archival succeeded
+                    session.clear()
+                    self.sessions.save(session)
+                    self.sessions.invalidate(session.key)
+                    
+            except Exception as e:
+                # Rollback session state if backup exists
+                if session_backup:
+                    session.messages[:] = session_backup['messages']
+                    session.last_consolidated = session_backup['last_consolidated']
+                    
                 logger.exception("/new archival failed for {}", session.key)
                 return OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
@@ -393,9 +645,6 @@ class AgentLoop:
             finally:
                 self._consolidating.discard(session.key)
 
-            session.clear()
-            self.sessions.save(session)
-            self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
         if cmd == "/help":

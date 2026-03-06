@@ -2,16 +2,32 @@
 
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
 
 class Base(BaseModel):
-    """Base model that accepts both camelCase and snake_case keys."""
+    """Base model with enhanced validation and backward compatibility."""
 
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="ignore",  # Ignore unknown fields for backward compatibility
+        str_strip_whitespace=True,  # Auto-trim string fields
+        validate_assignment=True  # Validate on field assignment
+    )
+
+
+class BackpressureConfig(Base):
+    """Message bus backpressure handling configuration."""
+    
+    max_retries: int = 3  # Maximum retry attempts for queue full scenarios
+    timeout_seconds: float = 5.0  # Timeout per publish attempt
+    base_retry_delay: float = 1.0  # Base delay between retries (with exponential backoff)
+    max_retry_delay: float = 30.0  # Maximum delay cap for exponential backoff
 
 
 class WhatsAppConfig(Base):
@@ -33,6 +49,7 @@ class TelegramConfig(Base):
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )
     reply_to_message: bool = False  # If true, bot replies quote the original message
+    backpressure: BackpressureConfig = Field(default_factory=BackpressureConfig)  # Message handling backpressure
 
 
 class FeishuConfig(Base):
@@ -67,6 +84,7 @@ class DiscordConfig(Base):
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
     group_policy: Literal["mention", "open"] = "mention"
+    backpressure: BackpressureConfig = Field(default_factory=BackpressureConfig)  # Message handling backpressure
 
 
 class MatrixConfig(Base):
@@ -137,7 +155,7 @@ class MochatGroupRule(Base):
 
 
 class MochatConfig(Base):
-    """Mochat channel configuration."""
+    """Mochat channel configuration with strict validation."""
 
     enabled: bool = False
     base_url: str = "https://mochat.io"
@@ -161,6 +179,55 @@ class MochatConfig(Base):
     groups: dict[str, MochatGroupRule] = Field(default_factory=dict)
     reply_delay_mode: str = "non-mention"  # off | non-mention
     reply_delay_ms: int = 120000
+    max_seen_message_ids: int = 10000  # Deduplication cache size for high-volume scenarios
+    circuit_breaker_failure_threshold: int = 5  # Circuit breaker failure count before opening
+    circuit_breaker_recovery_timeout: float = 60.0  # Seconds before attempting recovery
+    backpressure: BackpressureConfig = Field(default_factory=BackpressureConfig)  # Message handling backpressure
+    
+    @field_validator('base_url', 'socket_url')
+    @classmethod
+    def validate_url_format(cls, v: str) -> str:
+        """Validate URL format for base_url and socket_url."""
+        if v and v.strip():
+            try:
+                parsed = urlparse(v)
+                if not parsed.scheme or not parsed.netloc:
+                    raise ValueError(f"Invalid URL format: {v}")
+            except Exception as e:
+                raise ValueError(f"Invalid URL format: {v}") from e
+        return v
+    
+    @field_validator('refresh_interval_ms', 'watch_timeout_ms', 'socket_reconnect_delay_ms', 
+                     'socket_max_reconnect_delay_ms', 'socket_connect_timeout_ms', 
+                     'retry_delay_ms', 'reply_delay_ms')
+    @classmethod
+    def validate_millisecond_range(cls, v: int) -> int:
+        """Validate millisecond values are in reasonable range."""
+        if v < 0:
+            raise ValueError("Millisecond values must be non-negative")
+        if v > 3600000:  # 1 hour max
+            raise ValueError("Millisecond values must be <= 3600000 (1 hour)")
+        return v
+    
+    @field_validator('watch_limit', 'max_seen_message_ids')
+    @classmethod 
+    def validate_positive_limits(cls, v: int) -> int:
+        """Validate positive integer limits."""
+        if v <= 0:
+            raise ValueError("Limit values must be positive integers")
+        if v > 1000000:
+            raise ValueError("Limit values must be <= 1000000 for performance")
+        return v
+    
+    @field_validator('circuit_breaker_failure_threshold')
+    @classmethod
+    def validate_failure_threshold(cls, v: int) -> int:
+        """Validate circuit breaker failure threshold."""
+        if v < 1:
+            raise ValueError("Circuit breaker failure threshold must be >= 1")
+        if v > 100:
+            raise ValueError("Circuit breaker failure threshold must be <= 100")
+        return v
 
 
 class SlackDMConfig(Base):

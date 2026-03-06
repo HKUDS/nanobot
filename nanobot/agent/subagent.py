@@ -3,6 +3,8 @@
 import asyncio
 import json
 import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,28 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig
 from nanobot.providers.base import LLMProvider
+
+
+@dataclass
+class ToolCallRecord:
+    """Record of a tool call for convergence detection."""
+    name: str
+    arguments: dict[str, Any]
+    result: str
+    timestamp: float = field(default_factory=lambda: datetime.now(UTC).timestamp())
+
+
+@dataclass
+class PendingSubagentTask:
+    """Persistent record of a running subagent task."""
+    task_id: str
+    task: str
+    label: str
+    origin: dict[str, str]
+    started_at: float
+    status: str = "running"  # running, completed, failed
+    result: str | None = None
+    completed_at: float | None = None
 
 
 class SubagentManager:
@@ -48,6 +72,11 @@ class SubagentManager:
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        
+        # Persistent task tracking
+        self._pending_tasks_file = workspace / ".nanobot" / "pending_subagent_tasks.json"
+        self._pending_tasks_file.parent.mkdir(parents=True, exist_ok=True)
+        self._pending_tasks: dict[str, PendingSubagentTask] = self._load_pending_tasks()
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
     async def spawn(
@@ -89,8 +118,19 @@ class SubagentManager:
         label: str,
         origin: dict[str, str],
     ) -> None:
-        """Execute the subagent task and announce the result."""
+        """Execute the subagent task with self-correction limits and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
+
+        # Create pending task record for persistence
+        pending_task = PendingSubagentTask(
+            task_id=task_id,
+            task=task,
+            label=label,
+            origin=origin,
+            started_at=datetime.now(UTC).timestamp(),
+        )
+        self._pending_tasks[task_id] = pending_task
+        self._save_pending_tasks()
 
         try:
             # Build subagent tools (no message tool, no spawn tool)
@@ -115,10 +155,12 @@ class SubagentManager:
                 {"role": "user", "content": task},
             ]
 
-            # Run agent loop (limited iterations)
+            # Run agent loop with convergence detection
             max_iterations = 15
+            convergence_threshold = 5  # More lenient to avoid false positives
             iteration = 0
             final_result: str | None = None
+            tool_call_history: list[ToolCallRecord] = []
 
             while iteration < max_iterations:
                 iteration += 1
@@ -133,6 +175,15 @@ class SubagentManager:
                 )
 
                 if response.has_tool_calls:
+                    # Check for convergence issues before executing tools
+                    convergence_error = self._check_convergence(
+                        response.tool_calls, tool_call_history, convergence_threshold
+                    )
+                    if convergence_error:
+                        final_result = convergence_error
+                        logger.warning("Subagent [{}] stopped due to convergence: {}", task_id, convergence_error)
+                        break
+
                     # Add assistant message with tool calls
                     tool_call_dicts = [
                         {
@@ -151,11 +202,21 @@ class SubagentManager:
                         "tool_calls": tool_call_dicts,
                     })
 
-                    # Execute tools
+                    # Execute tools and record for convergence detection
                     for tool_call in response.tool_calls:
                         args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                         logger.debug("Subagent [{}] executing: {} with arguments: {}", task_id, tool_call.name, args_str)
+                        
                         result = await tools.execute(tool_call.name, tool_call.arguments)
+                        
+                        # Record tool call for convergence detection
+                        tool_record = ToolCallRecord(
+                            name=tool_call.name,
+                            arguments=tool_call.arguments,
+                            result=result
+                        )
+                        tool_call_history.append(tool_record)
+                        
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
@@ -171,11 +232,16 @@ class SubagentManager:
 
             logger.info("Subagent [{}] completed successfully", task_id)
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
+            self._complete_pending_task(task_id, "completed", final_result)
 
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
+            self._complete_pending_task(task_id, "failed", error_msg)
+        finally:
+            # Clean up running task reference
+            self._running_tasks.pop(task_id, None)
 
     async def _announce_result(
         self,
@@ -230,6 +296,100 @@ Stay focused on the assigned task. Your final response will be reported back to 
             parts.append(f"## Skills\n\nRead SKILL.md with read_file to use a skill.\n\n{skills_summary}")
 
         return "\n\n".join(parts)
+    
+    def _check_convergence(
+        self, 
+        current_tool_calls, 
+        history: list[ToolCallRecord], 
+        threshold: int
+    ) -> str | None:
+        """Check if the subagent is stuck in a convergence loop.
+        
+        Returns error message if convergence detected, None otherwise.
+        """
+        if len(history) < threshold:
+            return None
+            
+        # Check each current tool call against recent history
+        for tool_call in current_tool_calls:
+            recent_identical = 0
+            
+            # Count recent identical calls (same name + arguments)
+            for record in reversed(history[-10:]):  # Check last 10 calls
+                if (record.name == tool_call.name and 
+                    record.arguments == tool_call.arguments):
+                    recent_identical += 1
+                    
+                    # If we've seen this exact call multiple times recently
+                    if recent_identical >= threshold - 1:  # -1 because we're about to execute it again
+                        return (
+                            f"Convergence detected: Tool '{tool_call.name}' called {threshold} times "
+                            f"with identical arguments. This suggests the subagent is stuck in a loop. "
+                            f"Task terminated to prevent unnecessary token usage."
+                        )
+        
+        return None
+
+    def _complete_pending_task(self, task_id: str, status: str, result: str | None) -> None:
+        """Mark a pending task as completed and persist the result."""
+        if hasattr(self, '_pending_tasks') and task_id in self._pending_tasks:
+            task = self._pending_tasks[task_id]
+            task.status = status
+            task.result = result
+            task.completed_at = datetime.now(UTC).timestamp()
+            
+            # Persist to file for recovery after restart
+            self._save_pending_tasks()
+            logger.debug("Subagent task [{}] marked as {}: {}", task_id, status, result)
+
+    def _load_pending_tasks(self) -> dict[str, PendingSubagentTask]:
+        """Load pending tasks from persistent storage."""
+        if not self._pending_tasks_file.exists():
+            return {}
+        
+        try:
+            with open(self._pending_tasks_file) as f:
+                data = json.load(f)
+            
+            tasks = {}
+            for task_id, task_data in data.items():
+                tasks[task_id] = PendingSubagentTask(
+                    task_id=task_data["task_id"],
+                    task=task_data["task"],
+                    label=task_data["label"],
+                    origin=task_data["origin"],
+                    started_at=task_data["started_at"],
+                    status=task_data["status"],
+                    result=task_data.get("result"),
+                    completed_at=task_data.get("completed_at"),
+                )
+            
+            logger.debug("Loaded {} pending subagent tasks from file", len(tasks))
+            return tasks
+        except Exception as e:
+            logger.warning("Failed to load pending tasks: {}", e)
+            return {}
+
+    def _save_pending_tasks(self) -> None:
+        """Save pending tasks to persistent storage."""
+        try:
+            data = {}
+            for task_id, task in self._pending_tasks.items():
+                data[task_id] = {
+                    "task_id": task.task_id,
+                    "task": task.task,
+                    "label": task.label,
+                    "origin": task.origin,
+                    "started_at": task.started_at,
+                    "status": task.status,
+                    "result": task.result,
+                    "completed_at": task.completed_at,
+                }
+            
+            with open(self._pending_tasks_file, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.warning("Failed to save pending tasks: {}", e)
     
     async def cancel_by_session(self, session_key: str) -> int:
         """Cancel all subagents for the given session. Returns count cancelled."""
