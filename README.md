@@ -710,6 +710,9 @@ nanobot provider login openai-codex
 **3. Chat:**
 ```bash
 nanobot agent -m "Hello!"
+
+# Target a specific workspace/config locally
+nanobot agent -w ~/.nanobot/botA -c ~/.nanobot/botA/config.json -m "Hello!"
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
@@ -917,6 +920,15 @@ Each instance has its own:
 - Cron jobs storage (`workspace/cron/jobs.json`)
 - Configuration (if using `--config`)
 
+To open a CLI session against one of these instances locally:
+
+```bash
+nanobot agent -w ~/.nanobot/botA -m "Hello from botA"
+nanobot agent -w ~/.nanobot/botC -c ~/.nanobot/botC/config.json
+```
+
+> `nanobot agent` starts a local CLI agent using the selected workspace/config. It does not attach to or proxy through an already running `nanobot gateway` process.
+
 
 ## CLI Reference
 
@@ -924,6 +936,8 @@ Each instance has its own:
 |---------|-------------|
 | `nanobot onboard` | Initialize config & workspace |
 | `nanobot agent -m "..."` | Chat with the agent |
+| `nanobot agent -w <workspace>` | Chat against a specific workspace |
+| `nanobot agent -w <workspace> -c <config>` | Chat against a specific workspace/config |
 | `nanobot agent` | Interactive chat mode |
 | `nanobot agent --no-markdown` | Show plain-text replies |
 | `nanobot agent --logs` | Show runtime logs during chat |

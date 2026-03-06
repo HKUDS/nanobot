@@ -1,6 +1,6 @@
 import shutil
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -19,7 +19,7 @@ def mock_paths():
     """Mock config/workspace paths for test isolation."""
     with patch("nanobot.config.loader.get_config_path") as mock_cp, \
          patch("nanobot.config.loader.save_config") as mock_sc, \
-         patch("nanobot.config.loader.load_config") as mock_lc, \
+         patch("nanobot.config.loader.load_config"), \
          patch("nanobot.utils.helpers.get_workspace_path") as mock_ws:
 
         base_dir = Path("./test_onboard_data")
@@ -128,3 +128,96 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+@pytest.fixture
+def mock_agent_runtime(tmp_path):
+    """Mock agent command dependencies for focused CLI tests."""
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "default-workspace")
+    data_dir = tmp_path / "data"
+
+    with patch("nanobot.config.loader.load_config", return_value=config) as mock_load_config, \
+         patch("nanobot.config.loader.get_data_dir", return_value=data_dir), \
+         patch("nanobot.cli.commands.sync_workspace_templates") as mock_sync_templates, \
+         patch("nanobot.cli.commands._make_provider", return_value=object()), \
+         patch("nanobot.cli.commands._print_agent_response") as mock_print_response, \
+         patch("nanobot.bus.queue.MessageBus"), \
+         patch("nanobot.cron.service.CronService"), \
+         patch("nanobot.agent.loop.AgentLoop") as mock_agent_loop_cls:
+
+        agent_loop = MagicMock()
+        agent_loop.channels_config = None
+        agent_loop.process_direct = AsyncMock(return_value="mock-response")
+        agent_loop.close_mcp = AsyncMock(return_value=None)
+        mock_agent_loop_cls.return_value = agent_loop
+
+        yield {
+            "config": config,
+            "load_config": mock_load_config,
+            "sync_templates": mock_sync_templates,
+            "agent_loop_cls": mock_agent_loop_cls,
+            "agent_loop": agent_loop,
+            "print_response": mock_print_response,
+        }
+
+
+def test_agent_help_shows_workspace_and_config_options():
+    result = runner.invoke(app, ["agent", "--help"])
+
+    assert result.exit_code == 0
+    assert "--workspace" in result.stdout
+    assert "-w" in result.stdout
+    assert "--config" in result.stdout
+    assert "-c" in result.stdout
+
+
+def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_runtime):
+    result = runner.invoke(app, ["agent", "-m", "hello"])
+
+    assert result.exit_code == 0
+    assert mock_agent_runtime["load_config"].call_args.args == (None,)
+    assert mock_agent_runtime["sync_templates"].call_args.args == (
+        mock_agent_runtime["config"].workspace_path,
+    )
+    assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == (
+        mock_agent_runtime["config"].workspace_path
+    )
+    mock_agent_runtime["agent_loop"].process_direct.assert_awaited_once()
+    mock_agent_runtime["print_response"].assert_called_once_with("mock-response", render_markdown=True)
+
+
+def test_agent_uses_explicit_config_path(mock_agent_runtime):
+    config_path = Path("/tmp/agent-config.json")
+
+    result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_path)])
+
+    assert result.exit_code == 0
+    assert mock_agent_runtime["load_config"].call_args.args == (config_path,)
+
+
+def test_agent_overrides_workspace_path(mock_agent_runtime):
+    workspace_path = Path("/tmp/agent-workspace")
+
+    result = runner.invoke(app, ["agent", "-m", "hello", "-w", str(workspace_path)])
+
+    assert result.exit_code == 0
+    assert mock_agent_runtime["config"].agents.defaults.workspace == str(workspace_path)
+    assert mock_agent_runtime["sync_templates"].call_args.args == (workspace_path,)
+    assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == workspace_path
+
+
+def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime):
+    config_path = Path("/tmp/agent-config.json")
+    workspace_path = Path("/tmp/agent-workspace")
+
+    result = runner.invoke(
+        app,
+        ["agent", "-m", "hello", "-c", str(config_path), "-w", str(workspace_path)],
+    )
+
+    assert result.exit_code == 0
+    assert mock_agent_runtime["load_config"].call_args.args == (config_path,)
+    assert mock_agent_runtime["config"].agents.defaults.workspace == str(workspace_path)
+    assert mock_agent_runtime["sync_templates"].call_args.args == (workspace_path,)
+    assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == workspace_path
