@@ -246,6 +246,8 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    smart_skill_injection: bool = True  # Enable TF-IDF based skill ranking
+    top_k_skills: int = 5  # Number of top relevant skills to inject per turn
 
 
 class AgentsConfig(Base):

@@ -65,6 +65,8 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        smart_skill_injection: bool = True,
+        top_k_skills: int = 5,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -82,6 +84,8 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.smart_skill_injection = smart_skill_injection
+        self.top_k_skills = top_k_skills
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -431,6 +435,7 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            top_k_skills=self.top_k_skills if self.smart_skill_injection else 0,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
