@@ -16,26 +16,9 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import FeishuConfig
 
-try:
-    import lark_oapi as lark
-    from lark_oapi.api.im.v1 import (
-        CreateFileRequest,
-        CreateFileRequestBody,
-        CreateImageRequest,
-        CreateImageRequestBody,
-        CreateMessageReactionRequest,
-        CreateMessageReactionRequestBody,
-        CreateMessageRequest,
-        CreateMessageRequestBody,
-        Emoji,
-        GetMessageResourceRequest,
-        P2ImMessageReceiveV1,
-    )
-    FEISHU_AVAILABLE = True
-except ImportError:
-    FEISHU_AVAILABLE = False
-    lark = None
-    Emoji = None
+import importlib.util
+
+FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 
 # Message type display mapping
 MSG_TYPE_MAP = {
@@ -281,6 +264,7 @@ class FeishuChannel(BaseChannel):
             logger.error("Feishu app_id and app_secret not configured")
             return
 
+        import lark_oapi as lark
         self._running = True
         self._loop = asyncio.get_running_loop()
 
@@ -290,9 +274,6 @@ class FeishuChannel(BaseChannel):
             .app_secret(self.config.app_secret) \
             .log_level(lark.LogLevel.INFO) \
             .build()
-
-        # Fetch bot's own open_id for mention detection
-        await self._fetch_bot_info()
 
         # Create event handler (only register message receive, ignore other events)
         event_handler = lark.EventDispatcherHandler.builder(
@@ -310,22 +291,37 @@ class FeishuChannel(BaseChannel):
             log_level=lark.LogLevel.INFO
         )
 
-        # Start WebSocket client in a separate thread with reconnect loop
+        # Start WebSocket client in a separate thread with reconnect loop.
+        # A dedicated event loop is created for this thread so that lark_oapi's
+        # module-level `loop = asyncio.get_event_loop()` picks up an idle loop
+        # instead of the already-running main asyncio loop, which would cause
+        # "This event loop is already running" errors.
         def run_ws():
-            while self._running:
-                try:
-                    self._ws_client.start()
-                except Exception as e:
-                    logger.warning("Feishu WebSocket error: {}", e)
-                if self._running:
-                    import time
-                    time.sleep(5)
+            import time
+            import lark_oapi.ws.client as _lark_ws_client
+            ws_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(ws_loop)
+            # Patch the module-level loop used by lark's ws Client.start()
+            _lark_ws_client.loop = ws_loop
+            try:
+                while self._running:
+                    try:
+                        self._ws_client.start()
+                    except Exception as e:
+                        logger.warning("Feishu WebSocket error: {}", e)
+                    if self._running:
+                        time.sleep(5)
+            finally:
+                ws_loop.close()
 
         self._ws_thread = threading.Thread(target=run_ws, daemon=True)
         self._ws_thread.start()
 
         logger.info("Feishu bot started with WebSocket long connection")
         logger.info("No public IP required - using WebSocket to receive events")
+
+        # Fetch bot open_id for mention detection (must complete before processing messages)
+        await self._fetch_bot_info()
 
         # Keep running until stopped
         while self._running:
@@ -347,61 +343,104 @@ class FeishuChannel(BaseChannel):
     GROUP_MENTION_REQUIRED_TYPES = {"text", "audio", "sticker"}
 
     async def _fetch_bot_info(self) -> None:
-        """Fetch bot's own open_id via /open-apis/bot/v3/info."""
-        try:
-            loop = asyncio.get_event_loop()
+        """Fetch bot's own open_id via /open-apis/bot/v3/info with retry."""
+        max_retries = 3
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                import lark_oapi as lark
+                from lark_oapi import AccessTokenType, HttpMethod
 
-            def _get_bot_info():
-                req = lark.BaseRequest()
-                req.http_method = lark.HttpMethod.GET
-                req.uri = "/open-apis/bot/v3/info"
-                req.token_types = {lark.AccessTokenType.TENANT}
-                return self._client.request(req)
+                loop = asyncio.get_event_loop()
 
-            response = await loop.run_in_executor(None, _get_bot_info)
-            if response.success():
-                data = json.loads(response.raw.content)
-                bot_info = data.get("bot", {})
+                def _get_bot_info():
+                    request = lark.BaseRequest.builder() \
+                        .http_method(HttpMethod.GET) \
+                        .uri("/open-apis/bot/v3/info/") \
+                        .token_types({AccessTokenType.TENANT}) \
+                        .build()
+                    response = self._client.request(request)
+                    if response.success():
+                        import json
+                        data = json.loads(response.raw.content.decode('utf-8'))
+                        return data.get("bot", {})
+                    else:
+                        logger.warning("Failed to fetch bot info: code={}, msg={}", response.code, response.msg)
+                        return {}
+
+                bot_info = await loop.run_in_executor(None, _get_bot_info)
                 self._bot_open_id = bot_info.get("open_id")
                 if self._bot_open_id:
                     logger.info("Feishu bot open_id: {}", self._bot_open_id)
+                    return  # Success, exit retry loop
                 else:
-                    logger.warning("Feishu bot open_id not found in response")
-            else:
-                logger.warning("Failed to fetch bot info: code={}, msg={}", response.code, response.msg)
-        except Exception as e:
-            logger.warning("Error fetching bot info: {}", e)
+                    logger.warning("Could not determine bot open_id (attempt {}/{})", attempt + 1, max_retries)
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay)
+            except Exception as e:
+                logger.error("Error fetching bot info (attempt {}/{}): {}", attempt + 1, max_retries, e)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+        
+        # All retries failed
+        logger.error("Failed to fetch bot open_id after {} attempts, mention filtering will use defensive fallback", max_retries)
 
     def _is_bot_mentioned(self, message) -> bool:
         """Check if the bot is mentioned in the message."""
         if not self._bot_open_id:
-            logger.warning("Bot open_id not available, cannot check mentions")
-            return False
-        mentions = message.mentions or []
-        for mention in mentions:
-            if mention.id and mention.id.open_id == self._bot_open_id:
-                return True
+            logger.warning("_is_bot_mentioned: bot_open_id not set, treating as mentioned (defensive fallback)")
+            # Defensive fallback: if bot_open_id is not available, treat as mentioned
+            # This prevents mention filtering from breaking when bot info fetch fails
+            return True
+        
+        # Primary check: mentions array
+        if hasattr(message, "mentions") and message.mentions:
+            for mention in message.mentions:
+                # @All (key "@_all") means all bots should respond
+                if hasattr(mention, "key") and mention.key == "@_all":
+                    logger.debug("_is_bot_mentioned: @All detected, treating as mentioned")
+                    return True
+                if hasattr(mention, "id") and mention.id:
+                    mention_open_id = mention.id.open_id if hasattr(mention.id, "open_id") else str(mention.id)
+                    logger.debug("_is_bot_mentioned: checking mention_open_id={} vs bot_open_id={}", mention_open_id, self._bot_open_id)
+                    if mention_open_id == self._bot_open_id:
+                        return True
+                else:
+                    logger.debug("_is_bot_mentioned: mention has no id attribute")
+        
+        # No mention found in mentions array
+        # Fallback: check if @_all is in message content (Feishu @所有人 may not populate mentions array)
+        if hasattr(message, "content") and message.content:
+            try:
+                import json as _json
+                content_json = _json.loads(message.content)
+                text = content_json.get("text", "")
+                if "@_all" in text:
+                    logger.debug("_is_bot_mentioned: @_all found in content text, treating as mentioned")
+                    return True
+            except (ValueError, TypeError):
+                pass
+        logger.debug("_is_bot_mentioned: bot not mentioned")
         return False
 
-    def _should_respond_in_group(self, message, msg_type: str) -> bool:
+    def _should_respond_in_group(self, message) -> bool:
         """Check if the bot should respond to a group message based on group_policy."""
         policy = self.config.group_policy
-
         if policy == "open":
             return True
-
-        if policy == "mention":
-            if msg_type in self.GROUP_MENTION_REQUIRED_TYPES:
-                return self._is_bot_mentioned(message)
-            return True
-
-        if policy == "allowlist":
+        elif policy == "mention":
+            msg_type = message.message_type
+            if msg_type not in self.GROUP_MENTION_REQUIRED_TYPES:
+                return True  # Non-text types (file, image, etc.) always pass
+            return self._is_bot_mentioned(message)
+        elif policy == "allowlist":
             return message.chat_id in self.config.group_allow_from
-
-        return False
+        return True
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
+        from lark_oapi.api.im.v1 import CreateMessageReactionRequest, CreateMessageReactionRequestBody, Emoji
         try:
             request = CreateMessageReactionRequest.builder() \
                 .message_id(message_id) \
@@ -426,7 +465,7 @@ class FeishuChannel(BaseChannel):
 
         Common emoji types: THUMBSUP, OK, EYES, DONE, OnIt, HEART
         """
-        if not self._client or not Emoji:
+        if not self._client:
             return
 
         loop = asyncio.get_running_loop()
@@ -475,6 +514,34 @@ class FeishuChannel(BaseChannel):
             elements.extend(self._split_headings(remaining))
         return elements or [{"tag": "markdown", "content": content}]
 
+    @staticmethod
+    def _split_elements_by_table_limit(elements: list[dict], max_tables: int = 1) -> list[list[dict]]:
+        """Split card elements into groups with at most *max_tables* table elements each.
+
+        Feishu cards have a hard limit of one table per card (API error 11310).
+        When the rendered content contains multiple markdown tables each table is
+        placed in a separate card message so every table reaches the user.
+        """
+        if not elements:
+            return [[]]
+        groups: list[list[dict]] = []
+        current: list[dict] = []
+        table_count = 0
+        for el in elements:
+            if el.get("tag") == "table":
+                if table_count >= max_tables:
+                    if current:
+                        groups.append(current)
+                    current = []
+                    table_count = 0
+                current.append(el)
+                table_count += 1
+            else:
+                current.append(el)
+        if current:
+            groups.append(current)
+        return groups or [[]]
+
     def _split_headings(self, content: str) -> list[dict]:
         """Split content by headings, converting headings to div elements."""
         protected = content
@@ -518,6 +585,7 @@ class FeishuChannel(BaseChannel):
 
     def _upload_image_sync(self, file_path: str) -> str | None:
         """Upload an image to Feishu and return the image_key."""
+        from lark_oapi.api.im.v1 import CreateImageRequest, CreateImageRequestBody
         try:
             with open(file_path, "rb") as f:
                 request = CreateImageRequest.builder() \
@@ -541,6 +609,7 @@ class FeishuChannel(BaseChannel):
 
     def _upload_file_sync(self, file_path: str) -> str | None:
         """Upload a file to Feishu and return the file_key."""
+        from lark_oapi.api.im.v1 import CreateFileRequest, CreateFileRequestBody
         ext = os.path.splitext(file_path)[1].lower()
         file_type = self._FILE_TYPE_MAP.get(ext, "stream")
         file_name = os.path.basename(file_path)
@@ -568,6 +637,7 @@ class FeishuChannel(BaseChannel):
 
     def _download_image_sync(self, message_id: str, image_key: str) -> tuple[bytes | None, str | None]:
         """Download an image from Feishu message by message_id and image_key."""
+        from lark_oapi.api.im.v1 import GetMessageResourceRequest
         try:
             request = GetMessageResourceRequest.builder() \
                 .message_id(message_id) \
@@ -592,6 +662,13 @@ class FeishuChannel(BaseChannel):
         self, message_id: str, file_key: str, resource_type: str = "file"
     ) -> tuple[bytes | None, str | None]:
         """Download a file/audio/media from a Feishu message by message_id and file_key."""
+        from lark_oapi.api.im.v1 import GetMessageResourceRequest
+
+        # Feishu API only accepts 'image' or 'file' as type parameter
+        # Convert 'audio' to 'file' for API compatibility
+        if resource_type == "audio":
+            resource_type = "file"
+
         try:
             request = (
                 GetMessageResourceRequest.builder()
@@ -660,6 +737,7 @@ class FeishuChannel(BaseChannel):
 
     def _send_message_sync(self, receive_id_type: str, receive_id: str, msg_type: str, content: str) -> bool:
         """Send a single message (text/image/file/interactive) synchronously."""
+        from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
         try:
             request = CreateMessageRequest.builder() \
                 .receive_id_type(receive_id_type) \
@@ -715,10 +793,11 @@ class FeishuChannel(BaseChannel):
                         )
 
             if msg.content and msg.content.strip():
-                card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
+                # Send as plain text instead of interactive card to avoid permission issues
+                content_json = json.dumps({"text": msg.content}, ensure_ascii=False)
                 await loop.run_in_executor(
                     None, self._send_message_sync,
-                    receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
+                    receive_id_type, msg.chat_id, "text", content_json,
                 )
 
         except Exception as e:
@@ -759,12 +838,14 @@ class FeishuChannel(BaseChannel):
             msg_type = message.message_type
 
             logger.info("Message received: chat_type={}, chat_id={}, msg_type={}, mentions={}, bot_open_id={}",
-                       chat_type, chat_id, msg_type, message.mentions, self._bot_open_id)
+                        chat_type, chat_id, msg_type,
+                        [(m.id.open_id if m.id and hasattr(m.id, "open_id") else m.id) for m in (message.mentions or [])],
+                        self._bot_open_id)
 
-            # Group chat policy check
-            if chat_type == "group" and not self._should_respond_in_group(message, msg_type):
+            # Group chat mention filtering
+            if chat_type == "group" and not self._should_respond_in_group(message):
                 logger.debug("Skipping group message (policy={}, type={}): chat={}, sender={}",
-                           self.config.group_policy, msg_type, chat_id, sender_id)
+                             self.config.group_policy, msg_type, chat_id, sender_id)
                 return
 
             # Add reaction

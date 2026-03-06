@@ -8,6 +8,22 @@
 > 
 > For the official nanobot project, please visit the upstream repository.
 
+## 📋 Custom Version History
+
+| Version | Date | Type | Description |
+|---------|------|------|-------------|
+| **v1.2.1** | 2026-03-06 | 🐛 Fix | 完善群聊 mention 过滤：bot info 获取增加重试、支持 @所有人、defensive fallback、消息改纯文本发送 |
+| **v1.2.0** | 2026-03-05 | ✨ Feature | 飞书群聊响应策略控制（groupPolicy: open/mention/allowlist） |
+| **v1.1.0** | 2026-03-04 | ✨ Feature | 多实例架构文档完善 |
+| **v1.0.0** | 2026-03-04 | 🎉 Init | 多实例配置隔离支持，基于 upstream v0.1.4.post3 |
+
+## 🔧 Custom Features (vs Upstream)
+
+- **Multi-instance support** — 通过 `--config` 参数支持多实例独立运行（不同端口、不同模型、不同飞书应用）
+- **Group chat policy** — 飞书群聊消息过滤策略（`groupPolicy`: open / mention / allowlist）
+- **Bot mention detection** — 自动获取 bot open_id，精确判断 @mention，支持 @所有人
+- **Plain text messaging** — 群聊回复改为纯文本，避免 interactive card 权限问题
+
 ---
 
 <div align="center">
