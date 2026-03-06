@@ -12,11 +12,11 @@
   </p>
 </div>
 
-🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw) 
+🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw).
 
-⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
+⚡️ Delivers core agent functionality with **99% fewer lines of code** than OpenClaw.
 
-📏 Real-time line count: **3,935 lines** (run `bash core_agent_lines.sh` to verify anytime)
+📏 Real-time line count: run `bash core_agent_lines.sh` to verify anytime.
 
 ## 📢 News
 
@@ -301,6 +301,16 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 ```
 
 - `allowBotMessages` defaults to `true`. In this mode, Discord replies only when the bot is pinged (`@bot`) by any sender (human or bot). Set it to `false` to disable bot-authored messages and allow normal non-mention flow for human senders.
+      "groupPolicy": "mention"
+    }
+  }
+}
+```
+
+> `groupPolicy` controls how the bot responds in group channels:
+> - `"mention"` (default) — Only respond when @mentioned
+> - `"open"` — Respond to all messages
+> DMs always respond when the sender is in `allowFrom`.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator
@@ -885,6 +895,33 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
+
+
+## Multiple Instances
+
+Run multiple nanobot instances simultaneously, each with its own workspace and configuration.
+
+```bash
+# Instance A - Telegram bot
+nanobot gateway -w ~/.nanobot/botA -p 18791
+
+# Instance B - Discord bot
+nanobot gateway -w ~/.nanobot/botB -p 18792
+
+# Instance C - Using custom config file
+nanobot gateway -w ~/.nanobot/botC -c ~/.nanobot/botC/config.json -p 18793
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--workspace` | `-w` | Workspace directory (default: `~/.nanobot/workspace`) |
+| `--config` | `-c` | Config file path (default: `~/.nanobot/config.json`) |
+| `--port` | `-p` | Gateway port (default: `18790`) |
+
+Each instance has its own:
+- Workspace directory (MEMORY.md, HEARTBEAT.md, session files)
+- Cron jobs storage (`workspace/cron/jobs.json`)
+- Configuration (if using `--config`)
 
 
 ## CLI Reference

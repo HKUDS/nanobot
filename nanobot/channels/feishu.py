@@ -16,26 +16,9 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import FeishuConfig
 
-try:
-    import lark_oapi as lark
-    from lark_oapi.api.im.v1 import (
-        CreateFileRequest,
-        CreateFileRequestBody,
-        CreateImageRequest,
-        CreateImageRequestBody,
-        CreateMessageReactionRequest,
-        CreateMessageReactionRequestBody,
-        CreateMessageRequest,
-        CreateMessageRequestBody,
-        Emoji,
-        GetMessageResourceRequest,
-        P2ImMessageReceiveV1,
-    )
-    FEISHU_AVAILABLE = True
-except ImportError:
-    FEISHU_AVAILABLE = False
-    lark = None
-    Emoji = None
+import importlib.util
+
+FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 
 # Message type display mapping
 MSG_TYPE_MAP = {
@@ -280,6 +263,7 @@ class FeishuChannel(BaseChannel):
             logger.error("Feishu app_id and app_secret not configured")
             return
 
+        import lark_oapi as lark
         self._running = True
         self._loop = asyncio.get_running_loop()
 
@@ -306,16 +290,28 @@ class FeishuChannel(BaseChannel):
             log_level=lark.LogLevel.INFO
         )
 
-        # Start WebSocket client in a separate thread with reconnect loop
+        # Start WebSocket client in a separate thread with reconnect loop.
+        # A dedicated event loop is created for this thread so that lark_oapi's
+        # module-level `loop = asyncio.get_event_loop()` picks up an idle loop
+        # instead of the already-running main asyncio loop, which would cause
+        # "This event loop is already running" errors.
         def run_ws():
-            while self._running:
-                try:
-                    self._ws_client.start()
-                except Exception as e:
-                    logger.warning("Feishu WebSocket error: {}", e)
-                if self._running:
-                    import time
-                    time.sleep(5)
+            import time
+            import lark_oapi.ws.client as _lark_ws_client
+            ws_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(ws_loop)
+            # Patch the module-level loop used by lark's ws Client.start()
+            _lark_ws_client.loop = ws_loop
+            try:
+                while self._running:
+                    try:
+                        self._ws_client.start()
+                    except Exception as e:
+                        logger.warning("Feishu WebSocket error: {}", e)
+                    if self._running:
+                        time.sleep(5)
+            finally:
+                ws_loop.close()
 
         self._ws_thread = threading.Thread(target=run_ws, daemon=True)
         self._ws_thread.start()
@@ -340,6 +336,7 @@ class FeishuChannel(BaseChannel):
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
+        from lark_oapi.api.im.v1 import CreateMessageReactionRequest, CreateMessageReactionRequestBody, Emoji
         try:
             request = CreateMessageReactionRequest.builder() \
                 .message_id(message_id) \
@@ -364,7 +361,7 @@ class FeishuChannel(BaseChannel):
 
         Common emoji types: THUMBSUP, OK, EYES, DONE, OnIt, HEART
         """
-        if not self._client or not Emoji:
+        if not self._client:
             return
 
         loop = asyncio.get_running_loop()
@@ -413,6 +410,34 @@ class FeishuChannel(BaseChannel):
             elements.extend(self._split_headings(remaining))
         return elements or [{"tag": "markdown", "content": content}]
 
+    @staticmethod
+    def _split_elements_by_table_limit(elements: list[dict], max_tables: int = 1) -> list[list[dict]]:
+        """Split card elements into groups with at most *max_tables* table elements each.
+
+        Feishu cards have a hard limit of one table per card (API error 11310).
+        When the rendered content contains multiple markdown tables each table is
+        placed in a separate card message so every table reaches the user.
+        """
+        if not elements:
+            return [[]]
+        groups: list[list[dict]] = []
+        current: list[dict] = []
+        table_count = 0
+        for el in elements:
+            if el.get("tag") == "table":
+                if table_count >= max_tables:
+                    if current:
+                        groups.append(current)
+                    current = []
+                    table_count = 0
+                current.append(el)
+                table_count += 1
+            else:
+                current.append(el)
+        if current:
+            groups.append(current)
+        return groups or [[]]
+
     def _split_headings(self, content: str) -> list[dict]:
         """Split content by headings, converting headings to div elements."""
         protected = content
@@ -456,6 +481,7 @@ class FeishuChannel(BaseChannel):
 
     def _upload_image_sync(self, file_path: str) -> str | None:
         """Upload an image to Feishu and return the image_key."""
+        from lark_oapi.api.im.v1 import CreateImageRequest, CreateImageRequestBody
         try:
             with open(file_path, "rb") as f:
                 request = CreateImageRequest.builder() \
@@ -479,6 +505,7 @@ class FeishuChannel(BaseChannel):
 
     def _upload_file_sync(self, file_path: str) -> str | None:
         """Upload a file to Feishu and return the file_key."""
+        from lark_oapi.api.im.v1 import CreateFileRequest, CreateFileRequestBody
         ext = os.path.splitext(file_path)[1].lower()
         file_type = self._FILE_TYPE_MAP.get(ext, "stream")
         file_name = os.path.basename(file_path)
@@ -506,6 +533,7 @@ class FeishuChannel(BaseChannel):
 
     def _download_image_sync(self, message_id: str, image_key: str) -> tuple[bytes | None, str | None]:
         """Download an image from Feishu message by message_id and image_key."""
+        from lark_oapi.api.im.v1 import GetMessageResourceRequest
         try:
             request = GetMessageResourceRequest.builder() \
                 .message_id(message_id) \
@@ -530,10 +558,13 @@ class FeishuChannel(BaseChannel):
         self, message_id: str, file_key: str, resource_type: str = "file"
     ) -> tuple[bytes | None, str | None]:
         """Download a file/audio/media from a Feishu message by message_id and file_key."""
+        from lark_oapi.api.im.v1 import GetMessageResourceRequest
+
         # Feishu API only accepts 'image' or 'file' as type parameter
         # Convert 'audio' to 'file' for API compatibility
         if resource_type == "audio":
             resource_type = "file"
+
         try:
             request = (
                 GetMessageResourceRequest.builder()
@@ -602,6 +633,7 @@ class FeishuChannel(BaseChannel):
 
     def _send_message_sync(self, receive_id_type: str, receive_id: str, msg_type: str, content: str) -> bool:
         """Send a single message (text/image/file/interactive) synchronously."""
+        from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
         try:
             request = CreateMessageRequest.builder() \
                 .receive_id_type(receive_id_type) \
@@ -657,11 +689,13 @@ class FeishuChannel(BaseChannel):
                         )
 
             if msg.content and msg.content.strip():
-                card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
-                await loop.run_in_executor(
-                    None, self._send_message_sync,
-                    receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
-                )
+                elements = self._build_card_elements(msg.content)
+                for chunk in self._split_elements_by_table_limit(elements):
+                    card = {"config": {"wide_screen_mode": True}, "elements": chunk}
+                    await loop.run_in_executor(
+                        None, self._send_message_sync,
+                        receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
+                    )
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
