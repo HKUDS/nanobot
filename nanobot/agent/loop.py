@@ -184,10 +184,8 @@ class AgentLoop:
             if not isinstance(val, str):
                 return tc.name
 
-            # Replace newlines for cleaner display (avoid multi-line hints)
-            if "\n" in val:
-                # For multi-line content, show byte/char count instead
-                return f'{tc.name}("<{len(val)} chars>")'
+            # Replace newlines for cleaner display
+            val = val.replace("\n", " ")
 
             # Truncate if too long
             if len(val) > 100:
