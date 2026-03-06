@@ -65,6 +65,10 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        smart_skill_injection: bool = True,
+        top_k_skills: int = 5,
+        smart_tool_injection: bool = True,
+        top_k_tools: int = 15,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -82,6 +86,10 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.smart_skill_injection = smart_skill_injection
+        self.top_k_skills = top_k_skills
+        self.smart_tool_injection = smart_tool_injection
+        self.top_k_tools = top_k_tools
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -188,12 +196,32 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
 
+        # Extract user query for smart tool injection
+        user_query = None
+        if self.smart_tool_injection:
+            for msg in reversed(initial_messages):
+                if msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    if isinstance(content, str):
+                        user_query = content
+                    elif isinstance(content, list):
+                        # Handle multi-part content (text + images)
+                        for part in content:
+                            if isinstance(part, dict) and part.get("type") == "text":
+                                user_query = part.get("text", "")
+                                break
+                    if user_query:
+                        break
+
         while iteration < self.max_iterations:
             iteration += 1
 
             response = await self.provider.chat(
                 messages=messages,
-                tools=self.tools.get_definitions(),
+                tools=self.tools.get_definitions(
+                    user_query=user_query if self.smart_tool_injection else None,
+                    top_k=self.top_k_tools if self.smart_tool_injection else 0,
+                ),
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
@@ -431,6 +459,7 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            top_k_skills=self.top_k_skills if self.smart_skill_injection else 0,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
