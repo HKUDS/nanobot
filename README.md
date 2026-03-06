@@ -12,11 +12,11 @@
   </p>
 </div>
 
-🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw) 
+🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw).
 
-⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
+⚡️ Delivers core agent functionality with **99% fewer lines of code** than OpenClaw.
 
-📏 Real-time line count: **3,935 lines** (run `bash core_agent_lines.sh` to verify anytime)
+📏 Real-time line count: run `bash core_agent_lines.sh` to verify anytime.
 
 ## 📢 News
 
@@ -293,11 +293,17 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
     "discord": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
+      "allowFrom": ["YOUR_USER_ID"],
+      "groupPolicy": "mention"
     }
   }
 }
 ```
+
+> `groupPolicy` controls how the bot responds in group channels:
+> - `"mention"` (default) — Only respond when @mentioned
+> - `"open"` — Respond to all messages
+> DMs always respond when the sender is in `allowFrom`.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator
@@ -658,6 +664,7 @@ Config file: `~/.nanobot/config.json`
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
 > - **VolcEngine Coding Plan**: If you're on VolcEngine's coding plan, set `"apiBase": "https://ark.cn-beijing.volces.com/api/coding/v3"` in your volcengine provider config.
+> - **Alibaba Cloud Coding Plan**: If you're on the Alibaba Cloud Coding Plan (BaiLian), set `"apiBase": "https://coding.dashscope.aliyuncs.com/v1"` in your dashscope provider config.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -884,6 +891,33 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
 
 
+## Multiple Instances
+
+Run multiple nanobot instances simultaneously, each with its own workspace and configuration.
+
+```bash
+# Instance A - Telegram bot
+nanobot gateway -w ~/.nanobot/botA -p 18791
+
+# Instance B - Discord bot
+nanobot gateway -w ~/.nanobot/botB -p 18792
+
+# Instance C - Using custom config file
+nanobot gateway -w ~/.nanobot/botC -c ~/.nanobot/botC/config.json -p 18793
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--workspace` | `-w` | Workspace directory (default: `~/.nanobot/workspace`) |
+| `--config` | `-c` | Config file path (default: `~/.nanobot/config.json`) |
+| `--port` | `-p` | Gateway port (default: `18790`) |
+
+Each instance has its own:
+- Workspace directory (MEMORY.md, HEARTBEAT.md, session files)
+- Cron jobs storage (`workspace/cron/jobs.json`)
+- Configuration (if using `--config`)
+
+
 ## CLI Reference
 
 | Command | Description |
@@ -900,23 +934,6 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `nanobot channels status` | Show channel status |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
-
-<details>
-<summary><b>Scheduled Tasks (Cron)</b></summary>
-
-```bash
-# Add a job
-nanobot cron add --name "daily" --message "Good morning!" --cron "0 9 * * *"
-nanobot cron add --name "hourly" --message "Check status" --every 3600
-
-# List jobs
-nanobot cron list
-
-# Remove a job
-nanobot cron remove <job_id>
-```
-
-</details>
 
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>
