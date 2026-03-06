@@ -10,19 +10,7 @@ from typing import Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
-
-
-def _detect_image_mime(data: bytes) -> str | None:
-    """Detect image MIME type from magic bytes, ignoring file extension."""
-    if data[:8] == b"\x89PNG\r\n\x1a\n":
-        return "image/png"
-    if data[:3] == b"\xff\xd8\xff":
-        return "image/jpeg"
-    if data[:6] in (b"GIF87a", b"GIF89a"):
-        return "image/gif"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    return None
+from nanobot.utils.helpers import detect_image_mime
 
 
 class ContextBuilder:
@@ -153,7 +141,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 continue
             raw = p.read_bytes()
             # Detect real MIME type from magic bytes; fallback to filename guess
-            mime = _detect_image_mime(raw) or mimetypes.guess_type(path)[0]
+            mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
             if not mime or not mime.startswith("image/"):
                 continue
             b64 = base64.b64encode(raw).decode()
