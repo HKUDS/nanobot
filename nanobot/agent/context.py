@@ -10,6 +10,7 @@ from typing import Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.agent.tools.redaction import redact_content, redact_text
 
 
 class ContextBuilder:
@@ -33,6 +34,7 @@ class ContextBuilder:
 
         memory = self.memory.get_memory_context()
         if memory:
+            memory = redact_text(memory)
             parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()
@@ -130,6 +132,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""
+        text = redact_text(text) if isinstance(text, str) else text
         if not media:
             return text
 
@@ -150,7 +153,9 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         self, messages: list[dict[str, Any]],
         tool_call_id: str, tool_name: str, result: str,
     ) -> list[dict[str, Any]]:
-        """Add a tool result to the message list."""
+        """Add a tool result to the message list, with redaction."""
+        # Redact sensitive data from tool outputs
+        result = redact_content(result) if isinstance(result, str) else result
         messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
         return messages
 
