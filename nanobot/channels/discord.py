@@ -76,7 +76,7 @@ class DiscordChannel(BaseChannel):
             self._http = None
 
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Discord REST API."""
+        """Send a message through Discord REST API, with optional file attachments."""
         if not self._http:
             logger.warning("Discord HTTP client not initialized")
             return
@@ -86,21 +86,71 @@ class DiscordChannel(BaseChannel):
 
         try:
             chunks = split_message(msg.content or "", MAX_MESSAGE_LEN)
-            if not chunks:
+            media_paths = msg.media or []
+            if not chunks and not media_paths:
                 return
+            if not chunks:
+                chunks = [""]
 
             for i, chunk in enumerate(chunks):
                 payload: dict[str, Any] = {"content": chunk}
 
-                # Only set reply reference on the first chunk
                 if i == 0 and msg.reply_to:
                     payload["message_reference"] = {"message_id": msg.reply_to}
                     payload["allowed_mentions"] = {"replied_user": False}
 
-                if not await self._send_payload(url, headers, payload):
-                    break  # Abort remaining chunks on failure
+                # Attach media only on the first chunk
+                if i == 0 and media_paths:
+                    if not await self._send_with_attachments(url, headers, payload, media_paths):
+                        break
+                else:
+                    if not await self._send_payload(url, headers, payload):
+                        break
         finally:
             await self._stop_typing(msg.chat_id)
+
+    async def _send_with_attachments(
+        self, url: str, headers: dict[str, str],
+        payload: dict[str, Any], media_paths: list[str],
+    ) -> bool:
+        """Send a Discord message with file attachments via multipart/form-data."""
+        import mimetypes as mt
+
+        files: dict[str, tuple[str, bytes, str]] = {}
+        attachments_meta: list[dict[str, Any]] = []
+        for i, path in enumerate(media_paths):
+            p = Path(path)
+            if not p.is_file():
+                continue
+            if p.stat().st_size > MAX_ATTACHMENT_BYTES:
+                continue
+            filename = p.name
+            mime = mt.guess_type(filename)[0] or "application/octet-stream"
+            files[f"files[{i}]"] = (filename, p.read_bytes(), mime)
+            attachments_meta.append({"id": i, "filename": filename})
+
+        if not files:
+            return await self._send_payload(url, headers, payload)
+
+        payload["attachments"] = attachments_meta
+        data = {"payload_json": json.dumps(payload)}
+
+        for attempt in range(3):
+            try:
+                response = await self._http.post(url, headers=headers, data=data, files=files)
+                if response.status_code == 429:
+                    retry_after = float(response.json().get("retry_after", 1.0))
+                    logger.warning("Discord rate limited, retrying in {}s", retry_after)
+                    await asyncio.sleep(retry_after)
+                    continue
+                response.raise_for_status()
+                return True
+            except Exception as e:
+                if attempt == 2:
+                    logger.error("Error sending Discord message with attachments: {}", e)
+                else:
+                    await asyncio.sleep(1)
+        return False
 
     async def _send_payload(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
@@ -231,7 +281,7 @@ class DiscordChannel(BaseChannel):
 
         # Check group channel policy (DMs always respond if is_allowed passes)
         if guild_id is not None:
-            if not self._should_respond_in_group(payload, content):
+            if not self._is_ping_for_bot(payload):
                 return
 
         content_parts = [content] if content else []
@@ -276,23 +326,68 @@ class DiscordChannel(BaseChannel):
         )
 
     def _is_ping_for_bot(self, payload: dict[str, Any]) -> bool:
-        """Return True when this message explicitly pings the bot."""
+        """Return True when this message explicitly pings the bot.
+
+        Checks:
+        - @everyone mention (always triggers)
+        - Bot ID ping (always for humans, controlled by allowBots for other bots)
+        - Bot role ping (if respond_to_role_mentions is enabled)
+
+        Behavior:
+        - Humans always can ping this bot
+        - Other bots can ping only if allow_bots is True
+        - Bot never responds to itself
+        """
+        author = payload.get("author") or {}
+        author_id = str(author.get("id", ""))
+        is_bot_author = bool(author.get("bot"))
+
+        # Never respond to self - if sender is this bot, return False
+        bot_user_id = self._bot_user_id
+        if bot_user_id and author_id == bot_user_id:
+            return False
+
+        # If bot is pinging and allowBots is disabled, reject
+        if is_bot_author and not self.config.allow_bots:
+            return False
+
+        # If not a bot author (human), always allow to proceed
+        # @everyone always pings
         if payload.get("mention_everyone"):
             return True
 
         mentions = payload.get("mentions") or []
-        if not isinstance(mentions, list):
-            return False
+        role_mentions = payload.get("mention_roles") or []
 
+        if not isinstance(mentions, list):
+            mentions = []
+        if not isinstance(role_mentions, list):
+            role_mentions = []
+
+        # Check for bot ID ping (explicit mention)
         bot_id = self._bot_user_id
         if bot_id:
+            # Check user mentions array
             for mention in mentions:
                 if str((mention or {}).get("id", "")) == bot_id:
                     return True
+            # Check content for mention format <@USER_ID> or <@!USER_ID>
             content = payload.get("content") or ""
-            return f"<@{bot_id}>" in content or f"<@!{bot_id}>" in content
+            if f"<@{bot_id}>" in content or f"<@!{bot_id}>" in content:
+                return True
 
-        return any(bool((mention or {}).get("bot")) for mention in mentions)
+        # Check for role mentions (if enabled)
+        if self.config.respond_to_role_mentions and self.config.bot_role_ids:
+            for role_id in self.config.bot_role_ids:
+                if str(role_id) in role_mentions:
+                    return True
+                # Also check content for role mention format <@&ROLE_ID>
+                content = payload.get("content") or ""
+                if f"<@&{role_id}>" in content:
+                    return True
+
+        return False
+
     def _should_respond_in_group(self, payload: dict[str, Any], content: str) -> bool:
         """Check if bot should respond in a group channel based on policy."""
         if self.config.group_policy == "open":
@@ -309,8 +404,6 @@ class DiscordChannel(BaseChannel):
                 # Also check content for mention format <@USER_ID>
                 if f"<@{self._bot_user_id}>" in content or f"<@!{self._bot_user_id}>" in content:
                     return True
-            logger.debug("Discord message in {} ignored (bot not mentioned)", payload.get("channel_id"))
-            return False
 
         return True
 

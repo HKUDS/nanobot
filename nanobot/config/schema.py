@@ -8,6 +8,12 @@ from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
 
+# Media generation model constants
+IMAGEN_MODEL = "imagen-4.0-generate-001"
+VEO_MODEL = "veo-3.1-generate-preview"
+LYRIA_MODEL = "models/lyria-realtime-exp"
+
+
 class Base(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
 
@@ -68,6 +74,9 @@ class DiscordConfig(Base):
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
     group_policy: Literal["mention", "open"] = "mention"
+    respond_to_role_mentions: bool = False  # Respond when the bot's role is mentioned
+    bot_role_ids: list[str] = Field(default_factory=list)  # Role IDs to respond to (if respond_to_role_mentions is True)
+    allow_bots: bool = False  # Allow other bots to ping this bot (humans always can)
 
 
 class MatrixConfig(Base):

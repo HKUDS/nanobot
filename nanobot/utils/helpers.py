@@ -1,6 +1,7 @@
 """Utility functions for nanobot."""
 
 import re
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +17,80 @@ def detect_image_mime(data: bytes) -> str | None:
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
     return None
+
+
+def detect_audio_mime(data: bytes) -> str | None:
+    """Detect audio MIME type from magic bytes."""
+    if len(data) < 12:
+        return None
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "audio/wav"
+    if data[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return "audio/mpeg"
+    if data[:3] == b"ID3":
+        return "audio/mpeg"
+    if data[:4] == b"OggS":
+        return "audio/ogg"
+    if data[:4] == b"fLaC":
+        return "audio/flac"
+    if data[4:8] == b"ftyp":
+        return "audio/mp4"
+    return None
+
+
+def detect_video_mime(data: bytes) -> str | None:
+    """Detect video MIME type from magic bytes (excludes audio-only containers)."""
+    if len(data) < 12:
+        return None
+    if data[4:8] == b"ftyp":
+        subtype = data[8:12]
+        if subtype in (b"M4A ", b"M4B "):
+            return None  # Audio, not video
+        return "video/mp4"
+    if data[:4] == b"\x1a\x45\xdf\xa3":
+        return "video/webm"
+    if data[:4] == b"RIFF" and data[8:12] == b"AVI ":
+        return "video/avi"
+    return None
+
+
+def _split_pngs(data: bytes) -> list[bytes]:
+    """Split concatenated PNG data into individual PNG buffers."""
+    PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+    frames: list[bytes] = []
+    start = 0
+    while True:
+        pos = data.find(PNG_MAGIC, start + 1 if start > 0 else 1)
+        if pos == -1:
+            if start < len(data):
+                frames.append(data[start:])
+            break
+        frames.append(data[start:pos])
+        start = pos
+    return [f for f in frames if f.startswith(PNG_MAGIC)]
+
+
+def extract_video_frames(path: Path, max_frames: int = 4) -> list[bytes]:
+    """Extract keyframes from a video using ffmpeg. Returns list of PNG bytes.
+
+    Returns empty list if ffmpeg is unavailable or extraction fails.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-i", str(path),
+                "-vf", "fps=1/2",  # ~1 frame every 2 seconds
+                "-frames:v", str(max_frames),
+                "-f", "image2pipe", "-vcodec", "png", "pipe:1",
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return []
+        return _split_pngs(result.stdout)
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return []
 
 
 def ensure_dir(path: Path) -> Path:

@@ -29,6 +29,8 @@ from rich.markdown import Markdown
 from rich.table import Table
 from rich.text import Text
 
+from loguru import logger
+
 from nanobot import __logo__, __version__
 from nanobot.config.schema import Config
 from nanobot.utils.helpers import sync_workspace_templates
@@ -41,6 +43,24 @@ app = typer.Typer(
 
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
+
+# ---------------------------------------------------------------------------
+# Persistent file logging
+# ---------------------------------------------------------------------------
+
+_LOG_DIR = Path.home() / ".nanobot" / "logs"
+
+
+def _setup_logging() -> None:
+    """Add a rotating file sink so every run is persisted to ~/.nanobot/logs/."""
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    logger.add(
+        _LOG_DIR / "nanobot.log",
+        rotation="10 MB",
+        retention="7 days",
+        encoding="utf-8",
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | {name}:{function}:{line} | {message}",
+    )
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -109,13 +129,16 @@ def _init_prompt_session() -> None:
     )
 
 
-def _print_agent_response(response: str, render_markdown: bool) -> None:
+def _print_agent_response(response: str, render_markdown: bool, media: list[str] | None = None) -> None:
     """Render assistant response with consistent terminal styling."""
     content = response or ""
     body = Markdown(content) if render_markdown else Text(content)
     console.print()
     console.print(f"[cyan]{__logo__} nanobot[/cyan]")
     console.print(body)
+    if media:
+        for path in media:
+            console.print(f"  [green]Media:[/green] {path}")
     console.print()
 
 
@@ -261,6 +284,7 @@ def gateway(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the nanobot gateway."""
+    _setup_logging()
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
@@ -452,7 +476,7 @@ def agent(
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
 ):
     """Interact with the agent directly."""
-    from loguru import logger
+    _setup_logging()
 
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus

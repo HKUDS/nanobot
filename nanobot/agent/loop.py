@@ -7,6 +7,7 @@ import json
 import re
 import weakref
 from contextlib import AsyncExitStack
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -15,6 +16,8 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.tools.creative import GenerateImageTool, GenerateMusicTool, GenerateVideoTool
+from nanobot.agent.tools.voice import GenerateVoiceTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -129,6 +132,10 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        self.tools.register(GenerateImageTool())
+        self.tools.register(GenerateVideoTool())
+        self.tools.register(GenerateMusicTool())
+        self.tools.register(GenerateVoiceTool())
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -158,6 +165,29 @@ class AgentLoop:
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+
+    _PROMPTS_DIR = Path.home() / ".nanobot" / "prompts"
+    _TOOL_SUBFOLDER = {
+        "generate_image": "images",
+        "generate_video": "videos",
+        "generate_music": "music",
+        "generate_voice": "voice",
+    }
+
+    def _save_prompt(self, tool_name: str, arguments: dict) -> None:
+        """Persist every tool call to ~/.nanobot/prompts/<subfolder>/ as a timestamped JSON file."""
+        try:
+            subfolder = self._TOOL_SUBFOLDER.get(tool_name, tool_name)
+            out_dir = self._PROMPTS_DIR / subfolder
+            out_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            path = out_dir / f"{ts}_{tool_name}.json"
+            path.write_text(
+                json.dumps({"tool": tool_name, "arguments": arguments, "timestamp": ts}, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.debug("Failed to save prompt: {}", e)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -236,7 +266,8 @@ class AgentLoop:
                 for tool_call in response.tool_calls:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                    logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    logger.info("Tool call: {}({})", tool_call.name, args_str)
+                    self._save_prompt(tool_call.name, tool_call.arguments)
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
@@ -487,6 +518,9 @@ class AgentLoop:
                         if (c.get("type") == "image_url"
                                 and c.get("image_url", {}).get("url", "").startswith("data:image/")):
                             filtered.append({"type": "text", "text": "[image]"})
+                        elif (c.get("type") == "input_audio"
+                                and isinstance(c.get("input_audio", {}).get("data"), str)):
+                            filtered.append({"type": "text", "text": "[audio]"})
                         else:
                             filtered.append(c)
                     if not filtered:
