@@ -252,7 +252,7 @@ class DiscordChannel(BaseChannel):
 
         # Check group channel policy (DMs always respond if is_allowed passes)
         if guild_id is not None:
-            if not self._should_respond_in_group(payload, content):
+            if not self._is_ping_for_bot(payload):
                 return
 
         content_parts = [content] if content else []
@@ -296,7 +296,6 @@ class DiscordChannel(BaseChannel):
             },
         )
 
-<<<<<<< HEAD
     def _is_ping_for_bot(self, payload: dict[str, Any]) -> bool:
         """Return True when this message explicitly pings the bot."""
         if payload.get("mention_everyone"):
