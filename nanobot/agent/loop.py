@@ -130,6 +130,18 @@ class AgentLoop:
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
+        # Creative media tools
+        try:
+            from nanobot.agent.tools.creative import (
+                GenerateImageTool,
+                GenerateVideoTool,
+                GenerateMusicTool,
+            )
+            self.tools.register(GenerateImageTool())
+            self.tools.register(GenerateVideoTool(subagent_manager=self.subagents))
+            self.tools.register(GenerateMusicTool())
+        except Exception as _e:
+            logger.debug("Creative tools not loaded: {}", _e)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
         self.tools.register(GenerateImageTool())
