@@ -8,6 +8,7 @@ from typing import Any
 import json_repair
 import litellm
 from litellm import acompletion
+from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
@@ -255,20 +256,37 @@ class LiteLLMProvider(LLMProvider):
         """Parse LiteLLM response into our standard format."""
         choice = response.choices[0]
         message = choice.message
+        content = message.content
+        finish_reason = choice.finish_reason
+
+        # Some providers (e.g. GitHub Copilot) split content and tool_calls
+        # across multiple choices. Merge them so tool_calls are not lost.
+        raw_tool_calls = []
+        for ch in response.choices:
+            msg = ch.message
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                raw_tool_calls.extend(msg.tool_calls)
+                if ch.finish_reason in ("tool_calls", "stop"):
+                    finish_reason = ch.finish_reason
+            if not content and msg.content:
+                content = msg.content
+
+        if len(response.choices) > 1:
+            logger.debug("LiteLLM response has {} choices, merged {} tool_calls",
+                         len(response.choices), len(raw_tool_calls))
 
         tool_calls = []
-        if hasattr(message, "tool_calls") and message.tool_calls:
-            for tc in message.tool_calls:
-                # Parse arguments from JSON string if needed
-                args = tc.function.arguments
-                if isinstance(args, str):
-                    args = json_repair.loads(args)
+        for tc in raw_tool_calls:
+            # Parse arguments from JSON string if needed
+            args = tc.function.arguments
+            if isinstance(args, str):
+                args = json_repair.loads(args)
 
-                tool_calls.append(ToolCallRequest(
-                    id=_short_tool_id(),
-                    name=tc.function.name,
-                    arguments=args,
-                ))
+            tool_calls.append(ToolCallRequest(
+                id=_short_tool_id(),
+                name=tc.function.name,
+                arguments=args,
+            ))
 
         usage = {}
         if hasattr(response, "usage") and response.usage:
@@ -280,11 +298,11 @@ class LiteLLMProvider(LLMProvider):
 
         reasoning_content = getattr(message, "reasoning_content", None) or None
         thinking_blocks = getattr(message, "thinking_blocks", None) or None
-        
+
         return LLMResponse(
-            content=message.content,
+            content=content,
             tool_calls=tool_calls,
-            finish_reason=choice.finish_reason or "stop",
+            finish_reason=finish_reason or "stop",
             usage=usage,
             reasoning_content=reasoning_content,
             thinking_blocks=thinking_blocks,
