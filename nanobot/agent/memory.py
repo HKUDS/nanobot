@@ -74,10 +74,15 @@ class MemoryStore:
         *,
         archive_all: bool = False,
         memory_window: int = 50,
+        max_tokens: int = 16384,
     ) -> bool:
         """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
 
         Returns True on success (including no-op), False on failure.
+
+        Args:
+            max_tokens: Maximum tokens for LLM response. Default 16384 to accommodate
+                        large memory_update output (existing memory + new content).
         """
         if archive_all:
             old_messages = session.messages
@@ -118,7 +123,17 @@ class MemoryStore:
                 ],
                 tools=_SAVE_MEMORY_TOOL,
                 model=model,
+                max_tokens=max_tokens,
             )
+
+            # Safety check: reject if LLM response was truncated due to token limit
+            # This prevents memory corruption from incomplete tool call arguments
+            if response.finish_reason == "length":
+                logger.warning(
+                    "Memory consolidation rejected: LLM response truncated (finish_reason='length'). "
+                    f"Current max_tokens={max_tokens}. Consider increasing it further."
+                )
+                return False
 
             if not response.has_tool_calls:
                 logger.warning("Memory consolidation: LLM did not call save_memory, skipping")
