@@ -1,7 +1,7 @@
 {
-  "min_recall_at_k": 0.85,
-  "min_precision_at_k": 0.2,
-  "min_retrieval_hit_rate": 0.6,
+  "min_recall_at_k": 0.90,
+  "min_precision_at_k": 0.80,
+  "min_retrieval_hit_rate": 1.0,
   "max_contradiction_rate_per_100_messages": 5.0,
-  "notes": "CI baseline for deterministic synthetic memory fixture"
+  "notes": "CI baseline for BM25 + topic fallback retrieval over 24 seed events (25 cases)."
 }

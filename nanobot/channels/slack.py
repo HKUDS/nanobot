@@ -2,14 +2,12 @@
 
 import asyncio
 import re
-from typing import Any
 
 from loguru import logger
-from slack_sdk.socket_mode.websockets import SocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
+from slack_sdk.socket_mode.websockets import SocketModeClient
 from slack_sdk.web.async_client import AsyncWebClient
-
 from slackify_markdown import slackify_markdown
 
 from nanobot.bus.events import OutboundMessage
@@ -47,7 +45,7 @@ class SlackChannel(BaseChannel):
             web_client=self._web_client,
         )
 
-        self._socket_client.socket_mode_request_listeners.append(self._on_socket_request)
+        self._socket_client.socket_mode_request_listeners.append(self._on_socket_request)  # type: ignore[arg-type]
 
         # Resolve bot user ID for mention handling
         try:
@@ -115,9 +113,7 @@ class SlackChannel(BaseChannel):
             return
 
         # Acknowledge right away
-        await client.send_socket_mode_response(
-            SocketModeResponse(envelope_id=req.envelope_id)
-        )
+        await client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
 
         payload = req.payload or {}
         event = payload.get("event") or {}
@@ -174,7 +170,7 @@ class SlackChannel(BaseChannel):
                 await self._web_client.reactions_add(
                     channel=chat_id,
                     name=self.config.react_emoji,
-                    timestamp=event.get("ts"),
+                    timestamp=event.get("ts") or "",
                 )
         except Exception as e:
             logger.debug("Slack reactions_add failed: {}", e)
@@ -263,7 +259,7 @@ class SlackChannel(BaseChannel):
         return text
 
     @staticmethod
-    def _convert_table(match: re.Match) -> str:
+    def _convert_table(match: re.Match[str]) -> str:
         """Convert a Markdown table to a Slack-readable list."""
         lines = [ln.strip() for ln in match.group(0).strip().splitlines() if ln.strip()]
         if len(lines) < 2:
@@ -278,4 +274,3 @@ class SlackChannel(BaseChannel):
             if parts:
                 rows.append(" · ".join(parts))
         return "\n".join(rows)
-

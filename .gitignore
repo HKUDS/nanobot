@@ -23,3 +23,4 @@ tests/__pycache__/
 .ci/
 artifacts/
 docs
+.github/prompts/

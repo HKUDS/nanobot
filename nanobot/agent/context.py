@@ -1,4 +1,22 @@
-"""Context builder for assembling agent prompts."""
+"""Context builder for assembling agent prompts.
+
+This module is responsible for constructing the complete message array
+sent to the LLM on each iteration.  Key responsibilities:
+
+- **System prompt assembly** — combines base personality, skill
+  instructions, memory context (``MEMORY.md`` excerpt + retrieved events),
+  tool schemas, and session metadata into a single system message.
+- **Token budgeting** — estimates token usage and ensures the assembled
+  context fits within the model's context window.
+- **3-phase compression** — when the budget is exceeded:
+  1. Truncate long tool-result messages.
+  2. Drop tool-result messages entirely.
+  3. Summarize older conversation segments via LLM call (preserving
+     facts and decisions) and replace them with a compact summary.
+
+The ``_ChatProvider`` protocol avoids circular imports with the providers
+package while allowing the summarization phase to call the LLM.
+"""
 
 import base64
 import hashlib
@@ -16,21 +34,23 @@ from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools.feedback import feedback_summary
 
-
 # ---------------------------------------------------------------------------
 # Async provider protocol (avoids circular import with providers module)
 # ---------------------------------------------------------------------------
 
+
 class _ChatProvider(Protocol):
     """Minimal interface used by summarize_and_compress."""
 
-    async def chat(self, *, messages: list[dict], tools: Any, model: str,
-                   temperature: float, max_tokens: int) -> Any: ...
+    async def chat(
+        self, *, messages: list[dict], tools: Any, model: str, temperature: float, max_tokens: int
+    ) -> Any: ...
 
 
 # ---------------------------------------------------------------------------
 # Token estimation
 # ---------------------------------------------------------------------------
+
 
 def estimate_tokens(text: str) -> int:
     """Fast heuristic token count (~4 chars per token for English).
@@ -88,12 +108,12 @@ def compress_context(
     tail = messages[tail_start:]
 
     # Phase 1: truncate large tool results in middle
-    _SUMMARY = "(output truncated to save context – re-run tool if needed)"
+    truncation_note = "(output truncated to save context – re-run tool if needed)"
     for i, m in enumerate(middle):
         if m.get("role") == "tool":
             content = m.get("content", "")
             if isinstance(content, str) and estimate_tokens(content) > 200:
-                middle[i] = {**m, "content": content[:200] + f"\n{_SUMMARY}"}
+                middle[i] = {**m, "content": content[:200] + f"\n{truncation_note}"}
 
     trial = system + middle + tail
     if estimate_messages_tokens(trial) <= max_tokens:
@@ -164,12 +184,12 @@ async def summarize_and_compress(
     tail = messages[tail_start:]
 
     # Phase 1: truncate large tool results in middle
-    _SUMMARY = "(output truncated to save context – re-run tool if needed)"
+    truncation_note = "(output truncated to save context – re-run tool if needed)"
     for i, m in enumerate(middle):
         if m.get("role") == "tool":
             content = m.get("content", "")
             if isinstance(content, str) and estimate_tokens(content) > 200:
-                middle[i] = {**m, "content": content[:200] + f"\n{_SUMMARY}"}
+                middle[i] = {**m, "content": content[:200] + f"\n{truncation_note}"}
 
     trial = system + middle + tail
     if estimate_messages_tokens(trial) <= max_tokens:
@@ -198,7 +218,8 @@ async def summarize_and_compress(
             content = m.get("content", "")
             if isinstance(content, list):
                 content = " ".join(
-                    p.get("text", "") for p in content
+                    p.get("text", "")
+                    for p in content
                     if isinstance(p, dict) and p.get("type") == "text"
                 )
             # Include tool call names if present
@@ -226,7 +247,8 @@ async def summarize_and_compress(
                 _summary_cache[cache_key] = summary_text
                 logger.debug(
                     "Summarised {} middle messages into {} tokens",
-                    len(middle), estimate_tokens(summary_text),
+                    len(middle),
+                    estimate_tokens(summary_text),
                 )
         except Exception:
             logger.warning("LLM summarisation failed; falling back to drop-all")
@@ -252,13 +274,13 @@ async def summarize_and_compress(
 class ContextBuilder:
     """
     Builds the context (system prompt + messages) for the agent.
-    
+
     Assembles bootstrap files, memory, skills, and conversation history
     into a coherent prompt for the LLM.
     """
-    
+
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
-    
+
     def __init__(
         self,
         workspace: Path,
@@ -274,7 +296,7 @@ class ContextBuilder:
         self.memory_retrieval_k = memory_retrieval_k
         self.memory_token_budget = memory_token_budget
         self.memory_md_token_cap = memory_md_token_cap
-    
+
     def build_system_prompt(
         self,
         skill_names: list[str] | None = None,
@@ -282,23 +304,23 @@ class ContextBuilder:
     ) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
-        
+
         Args:
             skill_names: Optional list of skills to include.
-        
+
         Returns:
             Complete system prompt.
         """
         parts = []
-        
+
         # Core identity
         parts.append(self._get_identity())
-        
+
         # Bootstrap files
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
-        
+
         # Memory context
         memory = self.memory.get_memory_context(
             query=current_message,
@@ -314,7 +336,7 @@ class ContextBuilder:
         fb_summary = feedback_summary(events_file)
         if fb_summary:
             parts.append(f"# Feedback\n\n{fb_summary}")
-        
+
         # Skills - progressive loading
         # 1. Active skills: always-loaded + requested/matched for this turn
         always_skills = self.skills.get_always_skills()
@@ -324,7 +346,7 @@ class ContextBuilder:
             active_content = self.skills.load_skills_for_context(active_skills)
             if active_content:
                 parts.append(f"# Active Skills\n\n{active_content}")
-        
+
         # 2. Available skills: only show summary (agent uses read_file to load)
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
@@ -334,18 +356,575 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
-        
+
         return "\n\n---\n\n".join(parts)
-    
+
     def _get_identity(self) -> str:
         """Get the core identity section."""
         workspace_path = str(self.workspace.expanduser().resolve())
-        system = platform.system()
-        runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
-        
+        sys_name = platform.system()
+        runtime = f"{'macOS' if sys_name == 'Darwin' else sys_name} {platform.machine()}, Python {platform.python_version()}"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         return f"""# nanobot 🐈
 
-You are nanobot, a helpful AI assistant. 
+You are nanobot, a helpful AI assistant.
 
 ## Runtime
 {runtime}
@@ -395,19 +974,19 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         if isinstance(user_content, str):
             return f"{user_content}\n\n{block}"
         return [*user_content, {"type": "text", "text": block}]
-    
+
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
-        
+
         for filename in self.BOOTSTRAP_FILES:
             file_path = self.workspace / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
                 parts.append(f"## {filename}\n\n{content}")
-        
+
         return "\n\n".join(parts) if parts else ""
-    
+
     def build_messages(
         self,
         history: list[dict[str, Any]],
@@ -450,7 +1029,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         # Current message (with optional image attachments)
         user_content = self._build_user_content(current_message, media)
         user_content = self._inject_runtime_context(user_content, channel, chat_id)
-        messages.append({"role": "user", "content": user_content})
+        messages.append({"role": "user", "content": user_content})  # type: ignore[dict-item]
 
         return messages
 
@@ -458,7 +1037,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         """Build user message content with optional base64-encoded images."""
         if not media:
             return text
-        
+
         images = []
         for path in media:
             p = Path(path)
@@ -467,38 +1046,31 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 continue
             b64 = base64.b64encode(p.read_bytes()).decode()
             images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
-        
+
         if not images:
             return text
         return images + [{"type": "text", "text": text}]
-    
+
     def add_tool_result(
-        self,
-        messages: list[dict[str, Any]],
-        tool_call_id: str,
-        tool_name: str,
-        result: str
+        self, messages: list[dict[str, Any]], tool_call_id: str, tool_name: str, result: str
     ) -> list[dict[str, Any]]:
         """
         Add a tool result to the message list.
-        
+
         Args:
             messages: Current message list.
             tool_call_id: ID of the tool call.
             tool_name: Name of the tool.
             result: Tool execution result.
-        
+
         Returns:
             Updated message list.
         """
-        messages.append({
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "name": tool_name,
-            "content": result
-        })
+        messages.append(
+            {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result}
+        )
         return messages
-    
+
     def add_assistant_message(
         self,
         messages: list[dict[str, Any]],
@@ -508,13 +1080,13 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
     ) -> list[dict[str, Any]]:
         """
         Add an assistant message to the message list.
-        
+
         Args:
             messages: Current message list.
             content: Message content.
             tool_calls: Optional tool calls.
             reasoning_content: Thinking output (Kimi, DeepSeek-R1, etc.).
-        
+
         Returns:
             Updated message list.
         """

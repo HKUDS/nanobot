@@ -13,7 +13,9 @@ from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 class TestHybridMemoryStore:
     @pytest.mark.asyncio
-    async def test_hybrid_consolidation_writes_events_profile_and_metrics(self, tmp_path: Path) -> None:
+    async def test_hybrid_consolidation_writes_events_profile_and_metrics(
+        self, tmp_path: Path
+    ) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
 
         session = MagicMock()
@@ -146,7 +148,7 @@ class TestHybridMemoryStore:
         )
         assert len(retrieved) >= 1
         assert retrieved[0]["summary"].lower().find("oauth2") >= 0
-        assert retrieved[0]["retrieval_reason"]["provider"] == "keyword"
+        assert retrieved[0]["retrieval_reason"]["provider"] == "bm25"
         assert retrieved[0]["provenance"]["canonical_id"] == retrieved[0]["id"]
 
         report = store.verify_memory(stale_days=90)
@@ -213,7 +215,9 @@ class TestHybridMemoryStore:
         assert meta["use dark mode"]["status"] == "conflicted"
         assert meta["do not use dark mode"]["status"] == "conflicted"
 
-    def test_verify_memory_marks_profile_stale_and_snapshot_has_open_tasks(self, tmp_path: Path) -> None:
+    def test_verify_memory_marks_profile_stale_and_snapshot_has_open_tasks(
+        self, tmp_path: Path
+    ) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
         profile = store.read_profile()
         profile["stable_facts"] = ["API uses OAuth2"]
@@ -269,7 +273,9 @@ class TestHybridMemoryStore:
 
         snapshot = store.rebuild_memory_snapshot(max_events=10, write=False)
         assert "Open Tasks & Decisions" in snapshot
-        open_section = snapshot.split("## Open Tasks & Decisions", 1)[1].split("## Recent Episodic Highlights", 1)[0]
+        open_section = snapshot.split("## Open Tasks & Decisions", 1)[1].split(
+            "## Recent Episodic Highlights", 1
+        )[0]
         assert "Review memory retrieval weights." in open_section
         assert "Migration completed and closed." not in open_section
 
@@ -547,7 +553,9 @@ class TestHybridMemoryStore:
         assert events
         assert any("corrected preference" in str(e.get("summary", "")).lower() for e in events)
 
-    def test_live_fact_correction_creates_stable_fact_conflict_and_event(self, tmp_path: Path) -> None:
+    def test_live_fact_correction_creates_stable_fact_conflict_and_event(
+        self, tmp_path: Path
+    ) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
         profile = store.read_profile()
         profile["stable_facts"] = ["deployment region is eu-west-1"]
@@ -570,7 +578,11 @@ class TestHybridMemoryStore:
         assert "deployment region is us-east-1" in facts
 
         conflicts = updated.get("conflicts", [])
-        open_conflicts = [c for c in conflicts if c.get("status") in ("open", "needs_user") and c.get("field") == "stable_facts"]
+        open_conflicts = [
+            c
+            for c in conflicts
+            if c.get("status") in ("open", "needs_user") and c.get("field") == "stable_facts"
+        ]
         assert open_conflicts
         assert str(open_conflicts[0]["old"]).lower() == "deployment region is eu-west-1"
         assert str(open_conflicts[0]["new"]).lower() == "deployment region is us-east-1"
@@ -757,11 +769,11 @@ class TestHybridMemoryStore:
 
         retrieved = store.retrieve("postgresql database", top_k=2, embedding_provider="hash")
         assert retrieved
-        assert retrieved[0]["retrieval_reason"]["provider"] == "keyword"
+        assert retrieved[0]["retrieval_reason"]["provider"] == "bm25"
         assert retrieved[0]["retrieval_reason"]["backend"] == "jsonl"
 
     def test_keyword_retrieval_with_recency(self, tmp_path: Path) -> None:
-        """Recency weighting should boost recent events over old ones."""
+        """Recency weighting should boost recent events of same type over old ones."""
         store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="faiss")
         store.append_events(
             [
@@ -771,8 +783,8 @@ class TestHybridMemoryStore:
                     "channel": "cli",
                     "chat_id": "direct",
                     "type": "fact",
-                    "summary": "Primary database runs on PostgreSQL in eu-west-1.",
-                    "entities": ["database", "postgresql", "eu-west-1"],
+                    "summary": "The legacy payment service uses PostgreSQL for persistence.",
+                    "entities": ["payment", "postgresql", "persistence"],
                     "salience": 0.7,
                     "confidence": 0.8,
                     "source_span": [2, 3],
@@ -783,9 +795,9 @@ class TestHybridMemoryStore:
                     "timestamp": "2026-03-01T00:00:00+00:00",
                     "channel": "cli",
                     "chat_id": "direct",
-                    "type": "decision",
-                    "summary": "Decided to migrate the database cluster to eu-west-1.",
-                    "entities": ["migration", "database", "eu-west-1"],
+                    "type": "fact",
+                    "summary": "The new analytics pipeline also uses PostgreSQL for data warehouse.",
+                    "entities": ["analytics", "postgresql", "warehouse"],
                     "salience": 0.7,
                     "confidence": 0.8,
                     "source_span": [4, 5],
@@ -795,7 +807,7 @@ class TestHybridMemoryStore:
         )
 
         retrieved = store.retrieve(
-            "database eu-west-1",
+            "postgresql",
             top_k=2,
             recency_half_life_days=30.0,
             embedding_provider="hash",

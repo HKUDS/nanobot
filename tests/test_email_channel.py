@@ -1,5 +1,5 @@
-from email.message import EmailMessage
 from datetime import date
+from email.message import EmailMessage
 
 import pytest
 
@@ -171,6 +171,7 @@ async def test_send_uses_smtp_and_reply_subject(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
     """When auto_reply_enabled=False, replies should be skipped but proactive sends allowed."""
+
     class FakeSMTP:
         def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
             self.sent_messages: list[EmailMessage] = []
@@ -232,6 +233,7 @@ async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_send_proactive_email_when_auto_reply_disabled(monkeypatch) -> None:
     """Proactive emails (not replies) should be sent even when auto_reply_enabled=False."""
+
     class FakeSMTP:
         def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
             self.sent_messages: list[EmailMessage] = []

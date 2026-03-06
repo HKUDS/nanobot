@@ -1,4 +1,22 @@
-"""Shell execution tool."""
+"""Shell execution tool with deny/allow security model.
+
+``ExecTool`` runs shell commands in the agent's working directory with a
+two-layer security model:
+
+- **Denylist mode** (default): commands are checked against
+  ``_DEFAULT_DENY_PATTERNS`` — regex patterns that block destructive
+  operations (``rm -rf``, ``dd``, fork bombs, hex-escape bypasses, etc.).
+  A blocked command returns ``ToolResult.fail`` without execution.
+- **Allowlist mode** (``shell_mode='allowlist'``): only commands matching
+  ``_DEFAULT_ALLOW_PATTERNS`` (git, python, curl, standard coreutils, …)
+  are permitted.  Everything else is blocked.
+
+The guard runs on lowercased input so case variations are caught.
+
+Workspace restriction and configurable timeouts provide additional safety.
+See ``tests/test_shell_safety.py`` for 40+ parametrized test cases covering
+bypass attempts.
+"""
 
 import asyncio
 import os
@@ -12,21 +30,21 @@ from nanobot.errors import ToolPermissionError, ToolTimeoutError
 # Default deny patterns — designed to catch common destructive commands
 # even through basic shell quoting / escaping tricks.
 _DEFAULT_DENY_PATTERNS: list[str] = [
-    r"\brm\s+-[rf]{1,2}\b",              # rm -r, rm -rf, rm -fr
-    r"\bdel\s+/[fq]\b",                  # del /f, del /q
-    r"\brmdir\s+/s\b",                   # rmdir /s
-    r"(?:^|[;&|]\s*)format\b",           # format (as standalone command only)
-    r"\b(mkfs|diskpart)\b",              # disk operations
-    r"\bdd\s+if=",                       # dd
-    r">\s*/dev/sd",                      # write to disk
-    r"\b(shutdown|reboot|poweroff)\b",   # system power
-    r":\(\)\s*\{.*\};\s*:",             # fork bomb
+    r"\brm\s+-[rf]{1,2}\b",  # rm -r, rm -rf, rm -fr
+    r"\bdel\s+/[fq]\b",  # del /f, del /q
+    r"\brmdir\s+/s\b",  # rmdir /s
+    r"(?:^|[;&|]\s*)format\b",  # format (as standalone command only)
+    r"\b(mkfs|diskpart)\b",  # disk operations
+    r"\bdd\s+if=",  # dd
+    r">\s*/dev/sd",  # write to disk
+    r"\b(shutdown|reboot|poweroff)\b",  # system power
+    r":\(\)\s*\{.*\};\s*:",  # fork bomb
     # Hardened: catch variable-expansion / hex-escape / base64 bypass attempts
-    r"\$['\"]\\x[0-9a-f]{2}",           # $'\x72\x6d' hex escape
-    r"\bbase64\s.*\|\s*(sh|bash|zsh)\b", # base64 decode | sh
-    r"\beval\s+.*\$",                    # eval with variable expansion
-    r"\bchmod\s+[0-7]*777\b",           # chmod 777
-    r"\bchown\s+-r\s+root\b",           # chown -R root (pattern lowercase; guard lowercases input)
+    r"\$['\"]\\x[0-9a-f]{2}",  # $'\x72\x6d' hex escape
+    r"\bbase64\s.*\|\s*(sh|bash|zsh)\b",  # base64 decode | sh
+    r"\beval\s+.*\$",  # eval with variable expansion
+    r"\bchmod\s+[0-7]*777\b",  # chmod 777
+    r"\bchown\s+-r\s+root\b",  # chown -R root (pattern lowercase; guard lowercases input)
     r"\bcurl\s+.*\|\s*(sh|bash|zsh)\b",  # curl | sh
     r"\bwget\s+.*\|\s*(sh|bash|zsh)\b",  # wget | sh
 ]
@@ -52,7 +70,7 @@ class ExecTool(Tool):
     """Tool to execute shell commands."""
 
     readonly = False
-    
+
     def __init__(
         self,
         timeout: int = 60,
@@ -70,15 +88,15 @@ class ExecTool(Tool):
             list(_DEFAULT_ALLOW_PATTERNS) if shell_mode == "allowlist" else []
         )
         self.restrict_to_workspace = restrict_to_workspace
-    
+
     @property
     def name(self) -> str:
         return "exec"
-    
+
     @property
     def description(self) -> str:
         return "Execute a shell command and return its output. Use with caution."
-    
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -86,17 +104,23 @@ class ExecTool(Tool):
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The shell command to execute (alias: cmd)"
+                    "description": "The shell command to execute (alias: cmd)",
                 },
                 "working_dir": {
                     "type": "string",
-                    "description": "Optional working directory for the command"
-                }
+                    "description": "Optional working directory for the command",
+                },
             },
-            "required": ["command"]
+            "required": ["command"],
         }
-    
-    async def execute(self, command: str | None = None, cmd: str | None = None, working_dir: str | None = None, **kwargs: Any) -> ToolResult:
+
+    async def execute(
+        self,
+        command: str | None = None,
+        cmd: str | None = None,
+        working_dir: str | None = None,
+        **kwargs: Any,
+    ) -> ToolResult:
         # Accept 'cmd' as alias for 'command' (models frequently use it)
         command = command or cmd
         if not command:
@@ -108,7 +132,7 @@ class ExecTool(Tool):
 
         env = os.environ.copy()
         self._inject_node_ca_bundle(env)
-        
+
         try:
             process = await asyncio.create_subprocess_shell(
                 command,
@@ -118,12 +142,9 @@ class ExecTool(Tool):
                 cwd=cwd,
                 env=env,
             )
-            
+
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=self.timeout
-                )
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=self.timeout)
             except asyncio.TimeoutError:
                 process.kill()
                 try:
@@ -131,28 +152,28 @@ class ExecTool(Tool):
                 except asyncio.TimeoutError:
                     pass
                 raise ToolTimeoutError("exec", self.timeout)
-            
+
             output_parts = []
-            
+
             if stdout:
                 output_parts.append(stdout.decode("utf-8", errors="replace"))
-            
+
             if stderr:
                 stderr_text = stderr.decode("utf-8", errors="replace")
                 if stderr_text.strip():
                     output_parts.append(f"STDERR:\n{stderr_text}")
-            
+
             if process.returncode != 0:
                 output_parts.append(f"\nExit code: {process.returncode}")
-            
+
             result = "\n".join(output_parts) if output_parts else "(no output)"
-            
+
             # Truncate very long output
             max_len = 10000
             was_truncated = len(result) > max_len
             if was_truncated:
                 result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
-            
+
             is_success = process.returncode == 0
             if is_success:
                 return ToolResult.ok(result, truncated=was_truncated)
@@ -164,7 +185,7 @@ class ExecTool(Tool):
                     truncated=was_truncated,
                     metadata={"exit_code": process.returncode},
                 )
-            
+
         except Exception as e:
             return ToolResult.fail(f"Error executing command: {str(e)}")
 
@@ -176,8 +197,8 @@ class ExecTool(Tool):
 
         candidates = [
             "/etc/ssl/certs/ca-certificates.crt",  # Debian/Ubuntu
-            "/etc/pki/tls/certs/ca-bundle.crt",   # RHEL/CentOS/Fedora
-            "/etc/ssl/cert.pem",                  # Alpine/macOS common path
+            "/etc/pki/tls/certs/ca-bundle.crt",  # RHEL/CentOS/Fedora
+            "/etc/ssl/cert.pem",  # Alpine/macOS common path
         ]
 
         for bundle_path in candidates:

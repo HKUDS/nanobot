@@ -12,10 +12,10 @@ import pytest
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.manager import ChannelManager
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _write_dead_letters(path: Path, entries: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,6 +45,7 @@ def _dead_entry(
 # ChannelManager._read_dead_letters
 # ---------------------------------------------------------------------------
 
+
 class TestReadDeadLetters:
     def test_no_file(self, tmp_path: Path) -> None:
         mgr = _make_manager(tmp_path)
@@ -70,6 +71,7 @@ class TestReadDeadLetters:
 # ChannelManager.replay_dead_letters
 # ---------------------------------------------------------------------------
 
+
 class TestReplayDeadLetters:
     @pytest.mark.asyncio
     async def test_empty_file(self, tmp_path: Path) -> None:
@@ -90,10 +92,13 @@ class TestReplayDeadLetters:
     @pytest.mark.asyncio
     async def test_successful_replay(self, tmp_path: Path) -> None:
         mgr = _make_manager(tmp_path, channels=["telegram"])
-        _write_dead_letters(mgr._dead_letter_file, [
-            _dead_entry(content="msg1"),
-            _dead_entry(content="msg2"),
-        ])
+        _write_dead_letters(
+            mgr._dead_letter_file,
+            [
+                _dead_entry(content="msg1"),
+                _dead_entry(content="msg2"),
+            ],
+        )
 
         total, ok, fail = await mgr.replay_dead_letters()
         assert total == 2
@@ -107,12 +112,16 @@ class TestReplayDeadLetters:
     @pytest.mark.asyncio
     async def test_partial_failure(self, tmp_path: Path) -> None:
         mgr = _make_manager(tmp_path, channels=["telegram"])
-        _write_dead_letters(mgr._dead_letter_file, [
-            _dead_entry(content="ok-msg"),
-            _dead_entry(content="fail-msg"),
-        ])
+        _write_dead_letters(
+            mgr._dead_letter_file,
+            [
+                _dead_entry(content="ok-msg"),
+                _dead_entry(content="fail-msg"),
+            ],
+        )
         # Make the second send fail
         call_count = 0
+
         async def _side_effect(msg):
             nonlocal call_count
             call_count += 1
@@ -133,9 +142,12 @@ class TestReplayDeadLetters:
     @pytest.mark.asyncio
     async def test_skips_unavailable_channel(self, tmp_path: Path) -> None:
         mgr = _make_manager(tmp_path, channels=["telegram"])
-        _write_dead_letters(mgr._dead_letter_file, [
-            _dead_entry(channel="discord", content="no channel"),
-        ])
+        _write_dead_letters(
+            mgr._dead_letter_file,
+            [
+                _dead_entry(channel="discord", content="no channel"),
+            ],
+        )
         total, ok, fail = await mgr.replay_dead_letters()
         assert total == 1
         assert ok == 0
@@ -145,6 +157,7 @@ class TestReplayDeadLetters:
 # ---------------------------------------------------------------------------
 # ChannelManager._write_dead_letter
 # ---------------------------------------------------------------------------
+
 
 class TestWriteDeadLetter:
     def test_writes_entry(self, tmp_path: Path) -> None:
@@ -162,6 +175,7 @@ class TestWriteDeadLetter:
 # Factory helper
 # ---------------------------------------------------------------------------
 
+
 def _make_manager(tmp_path: Path, channels: list[str] | None = None) -> ChannelManager:
     """Create a ChannelManager with mock channels, bypassing real config."""
     mgr = object.__new__(ChannelManager)
@@ -169,7 +183,7 @@ def _make_manager(tmp_path: Path, channels: list[str] | None = None) -> ChannelM
     mgr._dispatch_task = None
     mgr._dead_letter_file = tmp_path / "outbound_failed.jsonl"
 
-    for name in (channels or []):
+    for name in channels or []:
         mock_channel = AsyncMock()
         mock_channel.send = AsyncMock()
         mgr.channels[name] = mock_channel

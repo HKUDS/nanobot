@@ -1,4 +1,17 @@
-"""LLM + heuristic extraction of structured memory events."""
+"""LLM + heuristic extraction of structured memory events.
+
+``MemoryExtractor`` converts raw conversation messages into structured
+memory event dicts suitable for storage in ``events.jsonl``.  The pipeline:
+
+1. **Heuristic pre-filter** — skip short/trivial messages to avoid LLM calls.
+2. **LLM extraction** — ask the provider to identify entities, facts, and
+   events from conversation context; output structured JSON via tool-call.
+3. **Coercion + validation** — normalize extracted events (timestamps,
+   entity lists, salience scores, TTL) into the canonical event schema.
+
+Extracted events are consumed by ``MemoryStore.consolidate()`` which
+persists them and updates the active knowledge snapshot.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +25,16 @@ from .constants import _SAVE_EVENTS_TOOL
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
+
+# Words to skip when extracting single-capitalized-word entities
+_COMMON_WORDS = frozenset({
+    "the", "this", "that", "then", "than", "they", "them", "there", "these", "those",
+    "what", "when", "where", "which", "while", "who", "whom", "whose", "why", "how",
+    "also", "and", "but", "for", "from", "into", "just", "like", "not", "only",
+    "some", "such", "very", "will", "with", "would", "could", "should", "about",
+    "after", "before", "been", "being", "have", "here", "more", "most", "much",
+    "over", "same", "still", "each", "even", "every", "other",
+})
 
 
 class MemoryExtractor:
@@ -27,6 +50,7 @@ class MemoryExtractor:
         self.to_str_list = to_str_list
         self.coerce_event = coerce_event
         self.utc_now_iso = utc_now_iso
+        self.last_extraction_source: str = ""
 
     @staticmethod
     def default_profile_updates() -> dict[str, list[str]]:
@@ -134,7 +158,11 @@ class MemoryExtractor:
         for pattern in patterns:
             for match in re.finditer(pattern, text, flags=re.IGNORECASE):
                 subject = self._clean_phrase(match.group(1))
-                if "prefer" in subject.lower() or "want" in subject.lower() or "use" in subject.lower():
+                if (
+                    "prefer" in subject.lower()
+                    or "want" in subject.lower()
+                    or "use" in subject.lower()
+                ):
                     continue
 
                 if "is not" in pattern:
@@ -163,6 +191,40 @@ class MemoryExtractor:
             dedup.append((new_value, old_value))
         return dedup
 
+    @staticmethod
+    def _extract_entities(text: str) -> list[str]:
+        """Extract likely entity names from text via capitalized phrases and quoted strings."""
+        entities: list[str] = []
+        seen: set[str] = set()
+        # Quoted strings (single or double)
+        for match in re.finditer(r"""['"]([A-Za-z0-9_\- ]{2,60})['"]""", text):
+            val = match.group(1).strip()
+            if val.lower() not in seen:
+                seen.add(val.lower())
+                entities.append(val)
+        # Capitalized multi-word phrases (e.g. "Google Chrome", "Project Alpha")
+        for match in re.finditer(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b", text):
+            val = match.group(1).strip()
+            if val.lower() not in seen:
+                seen.add(val.lower())
+                entities.append(val)
+        # Single capitalized words that aren't sentence starters (preceded by space)
+        for match in re.finditer(r"(?<=\s)([A-Z][a-z]{2,})\b", text):
+            val = match.group(1).strip()
+            if val.lower() not in seen and val.lower() not in _COMMON_WORDS:
+                seen.add(val.lower())
+                entities.append(val)
+        return entities[:10]
+
+    _TYPE_CONFIDENCE: dict[str, float] = {
+        "preference": 0.70,
+        "constraint": 0.65,
+        "decision": 0.55,
+        "task": 0.50,
+        "relationship": 0.60,
+        "fact": 0.45,
+    }
+
     def heuristic_extract_events(
         self,
         old_messages: list[dict[str, Any]],
@@ -187,6 +249,8 @@ class MemoryExtractor:
             if message.get("role") != "user":
                 continue
             text = content.strip()
+            if len(text) < 8:
+                continue
             lowered = text.lower()
 
             event_type = "fact"
@@ -196,15 +260,17 @@ class MemoryExtractor:
                     break
 
             summary = text if len(text) <= 220 else text[:217] + "..."
+            entities = self._extract_entities(text)
+            confidence = self._TYPE_CONFIDENCE.get(event_type, 0.45)
             source_span = [source_start + offset, source_start + offset]
             event = self.coerce_event(
                 {
                     "timestamp": message.get("timestamp") or self.utc_now_iso(),
                     "type": event_type,
                     "summary": summary,
-                    "entities": [],
+                    "entities": entities,
                     "salience": 0.55,
-                    "confidence": 0.6,
+                    "confidence": confidence,
                 },
                 source_span=source_span,
             )
@@ -257,8 +323,14 @@ class MemoryExtractor:
             if response.has_tool_calls:
                 args = self.parse_tool_args(response.tool_calls[0].arguments)
                 if args:
-                    raw_events = args.get("events") if isinstance(args.get("events"), list) else []
-                    raw_updates = args.get("profile_updates") if isinstance(args.get("profile_updates"), dict) else {}
+                    _raw_events = args.get("events")
+                    raw_events: list[Any] = (
+                        _raw_events if isinstance(_raw_events, list) else []
+                    )
+                    _raw_updates = args.get("profile_updates")
+                    raw_updates: dict[str, Any] = (
+                        _raw_updates if isinstance(_raw_updates, dict) else {}
+                    )
                     updates = self.default_profile_updates()
                     for key in updates:
                         updates[key] = self.to_str_list(raw_updates.get(key))
@@ -273,14 +345,21 @@ class MemoryExtractor:
                             or len(source_span) != 2
                             or not all(isinstance(x, int) for x in source_span)
                         ):
-                            source_span = [source_start, source_start + max(len(old_messages) - 1, 0)]
+                            source_span = [
+                                source_start,
+                                source_start + max(len(old_messages) - 1, 0),
+                            ]
                         event = self.coerce_event(item, source_span=source_span)
                         if event:
                             events.append(event)
                         if len(events) >= 40:
                             break
+                    self.last_extraction_source = "llm"
                     return events, updates
         except Exception:
-            logger.exception("Structured event extraction failed, falling back to heuristic extraction")
+            logger.exception(
+                "Structured event extraction failed, falling back to heuristic extraction"
+            )
 
+        self.last_extraction_source = "heuristic"
         return self.heuristic_extract_events(old_messages, source_start=source_start)

@@ -10,10 +10,10 @@ import pytest
 from nanobot.agent.tools.feedback import FeedbackTool, feedback_summary, load_feedback_events
 from nanobot.bus.events import ReactionEvent
 
-
 # ---------------------------------------------------------------------------
 # FeedbackTool unit tests
 # ---------------------------------------------------------------------------
+
 
 class TestFeedbackTool:
     """Test the FeedbackTool schema, validation, and persistence."""
@@ -54,7 +54,9 @@ class TestFeedbackTool:
         assert event["channel"] == "telegram"
 
     @pytest.mark.asyncio
-    async def test_negative_feedback_with_topic(self, tool: FeedbackTool, events_file: Path) -> None:
+    async def test_negative_feedback_with_topic(
+        self, tool: FeedbackTool, events_file: Path
+    ) -> None:
         result = await tool.execute(rating="negative", comment="wrong date", topic="calendar")
         assert result.success
         assert "negative" in result.output.lower()
@@ -97,26 +99,33 @@ class TestFeedbackTool:
 # ReactionEvent tests
 # ---------------------------------------------------------------------------
 
+
 class TestReactionEvent:
     """Test emoji → rating mapping."""
 
-    @pytest.mark.parametrize("emoji,expected", [
-        ("\U0001f44d", "positive"),   # 👍
-        ("+1", "positive"),
-        ("THUMBSUP", "positive"),
-        ("heart", "positive"),
-        ("\u2764", "positive"),
-        ("DONE", "positive"),
-        ("\U0001f44e", "negative"),   # 👎
-        ("-1", "negative"),
-        ("THUMBSDOWN", "negative"),
-        ("angry", "negative"),
-        ("fire", None),               # unmapped
-        ("\U0001f525", None),          # 🔥
-    ])
+    @pytest.mark.parametrize(
+        "emoji,expected",
+        [
+            ("\U0001f44d", "positive"),  # 👍
+            ("+1", "positive"),
+            ("THUMBSUP", "positive"),
+            ("heart", "positive"),
+            ("\u2764", "positive"),
+            ("DONE", "positive"),
+            ("\U0001f44e", "negative"),  # 👎
+            ("-1", "negative"),
+            ("THUMBSDOWN", "negative"),
+            ("angry", "negative"),
+            ("fire", None),  # unmapped
+            ("\U0001f525", None),  # 🔥
+        ],
+    )
     def test_rating_mapping(self, emoji: str, expected: str | None) -> None:
         event = ReactionEvent(
-            channel="telegram", sender_id="user1", chat_id="chat1", emoji=emoji,
+            channel="telegram",
+            sender_id="user1",
+            chat_id="chat1",
+            emoji=emoji,
         )
         assert event.rating == expected
 
@@ -124,6 +133,7 @@ class TestReactionEvent:
 # ---------------------------------------------------------------------------
 # feedback_summary / load_feedback_events tests
 # ---------------------------------------------------------------------------
+
 
 class TestFeedbackSummary:
     """Test aggregation helpers."""
@@ -145,47 +155,72 @@ class TestFeedbackSummary:
         assert feedback_summary(tmp_path / "nonexistent.jsonl") == ""
 
     def test_load_filters_by_type(self, events_file: Path) -> None:
-        self._write_events(events_file, [
-            {"type": "feedback", "rating": "positive"},
-            {"type": "preference", "summary": "likes coffee"},
-            {"type": "feedback", "rating": "negative"},
-        ])
+        self._write_events(
+            events_file,
+            [
+                {"type": "feedback", "rating": "positive"},
+                {"type": "preference", "summary": "likes coffee"},
+                {"type": "feedback", "rating": "negative"},
+            ],
+        )
         items = load_feedback_events(events_file)
         assert len(items) == 2
         assert all(e["type"] == "feedback" for e in items)
 
     def test_summary_counts(self, events_file: Path) -> None:
-        self._write_events(events_file, [
-            {"type": "feedback", "rating": "positive"},
-            {"type": "feedback", "rating": "positive"},
-            {"type": "feedback", "rating": "negative", "comment": "wrong answer", "topic": "math"},
-        ])
+        self._write_events(
+            events_file,
+            [
+                {"type": "feedback", "rating": "positive"},
+                {"type": "feedback", "rating": "positive"},
+                {
+                    "type": "feedback",
+                    "rating": "negative",
+                    "comment": "wrong answer",
+                    "topic": "math",
+                },
+            ],
+        )
         result = feedback_summary(events_file)
         assert "2 positive" in result
         assert "1 negative" in result
         assert "3 total" in result
 
     def test_summary_includes_corrections(self, events_file: Path) -> None:
-        self._write_events(events_file, [
-            {"type": "feedback", "rating": "negative", "comment": "that date was wrong", "topic": "calendar"},
-            {"type": "feedback", "rating": "negative", "comment": "incorrect formula"},
-        ])
+        self._write_events(
+            events_file,
+            [
+                {
+                    "type": "feedback",
+                    "rating": "negative",
+                    "comment": "that date was wrong",
+                    "topic": "calendar",
+                },
+                {"type": "feedback", "rating": "negative", "comment": "incorrect formula"},
+            ],
+        )
         result = feedback_summary(events_file)
         assert "that date was wrong" in result
         assert "incorrect formula" in result
 
     def test_summary_topic_frequency(self, events_file: Path) -> None:
-        self._write_events(events_file, [
-            {"type": "feedback", "rating": "negative", "topic": "math"},
-            {"type": "feedback", "rating": "negative", "topic": "math"},
-            {"type": "feedback", "rating": "negative", "topic": "calendar"},
-        ])
+        self._write_events(
+            events_file,
+            [
+                {"type": "feedback", "rating": "negative", "topic": "math"},
+                {"type": "feedback", "rating": "negative", "topic": "math"},
+                {"type": "feedback", "rating": "negative", "topic": "calendar"},
+            ],
+        )
         result = feedback_summary(events_file)
         assert "math (2x)" in result
 
     def test_non_feedback_events_ignored_in_summary(self, events_file: Path) -> None:
-        self._write_events(events_file, [
-            {"type": "task", "summary": "deploy app"},
-            {"type": "fact", "summary": "sky is blue"},
-        ])
+        self._write_events(
+            events_file,
+            [
+                {"type": "task", "summary": "deploy app"},
+                {"type": "fact", "summary": "sky is blue"},
+            ],
+        )
         assert feedback_summary(events_file) == ""

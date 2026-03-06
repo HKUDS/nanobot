@@ -67,8 +67,8 @@ class QQChannel(BaseChannel):
             return
 
         self._running = True
-        BotClass = _make_bot_class(self)
-        self._client = BotClass()
+        bot_class = _make_bot_class(self)
+        self._client = bot_class()
 
         logger.info("QQ bot started (C2C private message)")
         await self._run_bot()
@@ -77,7 +77,8 @@ class QQChannel(BaseChannel):
         """Run the bot connection with auto-reconnect."""
         while self._running:
             try:
-                await self._client.start(appid=self.config.app_id, secret=self.config.secret)
+                if self._client:
+                    await self._client.start(appid=self.config.app_id, secret=self.config.secret)
             except Exception as e:
                 logger.warning("QQ bot error: {}", e)
             if self._running:
@@ -117,7 +118,7 @@ class QQChannel(BaseChannel):
             self._processed_ids.append(data.id)
 
             author = data.author
-            user_id = str(getattr(author, 'id', None) or getattr(author, 'user_openid', 'unknown'))
+            user_id = str(getattr(author, "id", None) or getattr(author, "user_openid", "unknown"))
             content = (data.content or "").strip()
             if not content:
                 return

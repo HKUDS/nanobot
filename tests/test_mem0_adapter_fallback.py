@@ -149,12 +149,20 @@ def test_get_all_fallback_respects_allowed_sources_and_blob_filter():
                 {
                     "id": "a",
                     "memory": "Constraint: commands must not mutate production.",
-                    "metadata": {"memory_type": "semantic", "topic": "constraint", "source": "profile"},
+                    "metadata": {
+                        "memory_type": "semantic",
+                        "topic": "constraint",
+                        "source": "profile",
+                    },
                 },
                 {
                     "id": "b",
                     "memory": "/home/carlos/.nanobot/workspace/sessions/cli.jsonl:42:{...}",
-                    "metadata": {"memory_type": "semantic", "topic": "history", "source": "profile"},
+                    "metadata": {
+                        "memory_type": "semantic",
+                        "topic": "history",
+                        "source": "profile",
+                    },
                 },
                 {
                     "id": "c",

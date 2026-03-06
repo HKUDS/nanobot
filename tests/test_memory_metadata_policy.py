@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
-import json
 
 from nanobot.agent.memory import MemoryStore
 
@@ -196,7 +196,9 @@ def test_get_memory_context_fact_lookup_hides_episodic(tmp_path: Path) -> None:
         ]
     )
 
-    context = store.get_memory_context(query="preferences and setup", retrieval_k=4, token_budget=220)
+    context = store.get_memory_context(
+        query="preferences and setup", retrieval_k=4, token_budget=220
+    )
 
     assert "## Relevant Semantic Memories" in context
     assert "Carlos prefers CLI tools." in context
@@ -226,7 +228,9 @@ def test_get_memory_context_debug_includes_episodic(tmp_path: Path) -> None:
         ]
     )
 
-    context = store.get_memory_context(query="what happened last time deploy failed?", retrieval_k=4, token_budget=220)
+    context = store.get_memory_context(
+        query="what happened last time deploy failed?", retrieval_k=4, token_budget=220
+    )
 
     assert "## Relevant Episodic Memories" in context
     assert "Deploy failed yesterday due to port conflict." in context
@@ -248,7 +252,9 @@ def test_get_memory_context_reflection_includes_reflection_section(tmp_path: Pat
         ]
     )
 
-    context = store.get_memory_context(query="reflect on lessons learned", retrieval_k=4, token_budget=220)
+    context = store.get_memory_context(
+        query="reflect on lessons learned", retrieval_k=4, token_budget=220
+    )
 
     assert "## Relevant Reflection Memories" in context
     assert "Reflection: incidents are usually caused by stale config drift." in context
@@ -492,9 +498,18 @@ def test_workspace_rollout_file_is_ignored(tmp_path: Path) -> None:
 
 def test_infer_retrieval_intent_expanded_markers(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path)
-    assert store._infer_retrieval_intent("List long-term constraints we must follow.") == "constraints_lookup"
-    assert store._infer_retrieval_intent("What unresolved decisions need user input?") == "conflict_review"
-    assert store._infer_retrieval_intent("What memory behavior is currently enabled in rollout?") == "rollout_status"
+    assert (
+        store._infer_retrieval_intent("List long-term constraints we must follow.")
+        == "constraints_lookup"
+    )
+    assert (
+        store._infer_retrieval_intent("What unresolved decisions need user input?")
+        == "conflict_review"
+    )
+    assert (
+        store._infer_retrieval_intent("What memory behavior is currently enabled in rollout?")
+        == "rollout_status"
+    )
 
 
 def test_evaluate_retrieval_cases_balanced_mode_supports_structural_hits(tmp_path: Path) -> None:
@@ -556,7 +571,9 @@ def test_vector_health_marks_degraded_when_history_exists_but_no_vectors(tmp_pat
     store._history_row_count = MagicMock(return_value=10)  # type: ignore[method-assign]
     store._vector_points_count = MagicMock(return_value=0)  # type: ignore[method-assign]
     store._mem0_get_all_rows = MagicMock(return_value=[])  # type: ignore[method-assign]
-    store.reindex_from_structured_memory = MagicMock(return_value={"ok": False, "reason": "structured_reindex"})  # type: ignore[method-assign]
+    store.reindex_from_structured_memory = MagicMock(
+        return_value={"ok": False, "reason": "structured_reindex"}
+    )  # type: ignore[method-assign]
 
     store._ensure_vector_health()
 

@@ -52,35 +52,32 @@ class MessageTool(Tool):
         return {
             "type": "object",
             "properties": {
-                "content": {
-                    "type": "string",
-                    "description": "The message content to send"
-                },
+                "content": {"type": "string", "description": "The message content to send"},
                 "channel": {
                     "type": "string",
-                    "description": "Optional: target channel (telegram, discord, email, etc.)"
+                    "description": "Optional: target channel (telegram, discord, email, etc.)",
                 },
                 "chat_id": {
                     "type": "string",
-                    "description": "Optional: target chat/user ID. For email, this would be the recipient's email address."
+                    "description": "Optional: target chat/user ID. For email, this would be the recipient's email address.",
                 },
                 "media": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional: list of file paths to attach (images, audio, documents)"
-                }
+                    "description": "Optional: list of file paths to attach (images, audio, documents)",
+                },
             },
-            "required": ["content"]
+            "required": ["content"],
         }
 
-    async def execute(
+    async def execute(  # type: ignore[override]
         self,
         content: str,
         channel: str | None = None,
         chat_id: str | None = None,
         message_id: str | None = None,
         media: list[str] | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> ToolResult:
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
@@ -99,7 +96,7 @@ class MessageTool(Tool):
             media=media or [],
             metadata={
                 "message_id": message_id,
-            }
+            },
         )
 
         try:

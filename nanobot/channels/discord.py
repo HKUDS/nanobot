@@ -14,7 +14,6 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import DiscordConfig
 
-
 DISCORD_API_BASE = "https://discord.com/api/v10"
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
@@ -32,9 +31,9 @@ def _split_message(content: str, max_len: int = MAX_MESSAGE_LEN) -> list[str]:
             chunks.append(content)
             break
         cut = content[:max_len]
-        pos = cut.rfind('\n')
+        pos = cut.rfind("\n")
         if pos <= 0:
-            pos = cut.rfind(' ')
+            pos = cut.rfind(" ")
         if pos <= 0:
             pos = max_len
         chunks.append(content[:pos])
@@ -50,7 +49,7 @@ class DiscordChannel(BaseChannel):
     def __init__(self, config: DiscordConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: DiscordConfig = config
-        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._ws: Any = None
         self._seq: int | None = None
         self._heartbeat_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
@@ -128,7 +127,7 @@ class DiscordChannel(BaseChannel):
         """Send a single Discord API payload with retry on rate-limit. Returns True on success."""
         for attempt in range(3):
             try:
-                response = await self._http.post(url, headers=headers, json=payload)
+                response = await self._http.post(url, headers=headers, json=payload)  # type: ignore[union-attr]
                 if response.status_code == 429:
                     data = response.json()
                     retry_after = float(data.get("retry_after", 1.0))
@@ -249,7 +248,9 @@ class DiscordChannel(BaseChannel):
                 continue
             try:
                 media_dir.mkdir(parents=True, exist_ok=True)
-                file_path = media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
+                file_path = (
+                    media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
+                )
                 resp = await self._http.get(url)
                 resp.raise_for_status()
                 file_path.write_bytes(resp.content)
@@ -284,7 +285,7 @@ class DiscordChannel(BaseChannel):
             headers = {"Authorization": f"Bot {self.config.token}"}
             while self._running:
                 try:
-                    await self._http.post(url, headers=headers)
+                    await self._http.post(url, headers=headers)  # type: ignore[union-attr]
                 except asyncio.CancelledError:
                     return
                 except Exception as e:

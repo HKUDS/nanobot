@@ -14,66 +14,43 @@ from typing import Any
 from nanobot.agent.memory import MemoryStore
 
 
-FIXTURE_EVENTS: list[dict[str, Any]] = [
-    {
-        "id": "ev-auth-oauth2",
-        "timestamp": "2026-02-20T10:00:00+00:00",
-        "channel": "ci",
-        "chat_id": "memory-eval",
-        "type": "fact",
-        "summary": "API uses OAuth2 authentication for external requests.",
-        "entities": ["api", "oauth2", "authentication"],
-        "salience": 0.9,
-        "confidence": 0.92,
-        "source_span": [0, 2],
-        "ttl_days": 365,
-    },
-    {
-        "id": "ev-db-postgres",
-        "timestamp": "2026-02-20T10:01:00+00:00",
-        "channel": "ci",
-        "chat_id": "memory-eval",
-        "type": "fact",
-        "summary": "Primary database is PostgreSQL 15.",
-        "entities": ["database", "postgresql"],
-        "salience": 0.85,
-        "confidence": 0.9,
-        "source_span": [3, 4],
-        "ttl_days": 365,
-    },
-    {
-        "id": "ev-region",
-        "timestamp": "2026-02-20T10:02:00+00:00",
-        "channel": "ci",
-        "chat_id": "memory-eval",
-        "type": "fact",
-        "summary": "Production deployment region is eu-west-1.",
-        "entities": ["deployment", "region", "eu-west-1"],
-        "salience": 0.8,
-        "confidence": 0.88,
-        "source_span": [5, 6],
-        "ttl_days": 365,
-    },
-    {
-        "id": "ev-memory-budget",
-        "timestamp": "2026-02-20T10:03:00+00:00",
-        "channel": "ci",
-        "chat_id": "memory-eval",
-        "type": "decision",
-        "summary": "Hybrid memory context token budget is 900 tokens.",
-        "entities": ["memory", "token budget"],
-        "salience": 0.82,
-        "confidence": 0.87,
-        "source_span": [7, 8],
-        "ttl_days": 365,
-    },
-]
+def _load_seed_events(seed_path: Path) -> list[dict[str, Any]]:
+    """Load seed events from a JSONL file.  Falls back to legacy fixtures."""
+    if not seed_path.exists():
+        return []
+    events: list[dict[str, Any]] = []
+    for line in seed_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict) and obj.get("id"):
+                events.append(obj)
+        except json.JSONDecodeError:
+            continue
+    return events
+
+
+def _load_seed_profile(profile_path: Path) -> dict[str, Any] | None:
+    """Load seed profile from a JSON file."""
+    if not profile_path.exists():
+        return None
+    try:
+        data = json.loads(profile_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run deterministic memory eval benchmark for CI")
     parser.add_argument("--workspace", required=True, help="Workspace path for temporary memory files")
     parser.add_argument("--cases-file", required=True, help="Benchmark cases JSON file")
+    parser.add_argument("--seed-events", default="case/memory_seed_events.jsonl",
+                        help="JSONL file with seed events (default: case/memory_seed_events.jsonl)")
+    parser.add_argument("--seed-profile", default="case/memory_seed_profile.json",
+                        help="JSON file with seed profile (default: case/memory_seed_profile.json)")
     parser.add_argument("--baseline-file", required=False, default="", help="Baseline thresholds JSON file")
     parser.add_argument("--output-file", required=True, help="Latest evaluation output JSON")
     parser.add_argument("--history-file", required=True, help="Append-only history JSON file for trends")
@@ -226,12 +203,25 @@ def main() -> int:
     cases = _load_cases(cases_path)
     _prepare_workspace(workspace)
 
+    # Load seed events from JSONL file (covers all 25 eval cases).
+    seed_events_path = Path(args.seed_events).expanduser().resolve()
+    seed_events = _load_seed_events(seed_events_path)
+    if not seed_events:
+        print(f"WARNING: No seed events loaded from {seed_events_path}", file=sys.stderr)
+
     store = MemoryStore(
         workspace,
         embedding_provider=args.embedding_provider,
         vector_backend=args.vector_backend,
     )
-    store.append_events(FIXTURE_EVENTS)
+
+    # Seed the profile (preferences, constraints, conflicts, relationships).
+    seed_profile_path = Path(args.seed_profile).expanduser().resolve()
+    seed_profile = _load_seed_profile(seed_profile_path)
+    if seed_profile:
+        store.write_profile(seed_profile)
+
+    store.append_events(seed_events)
 
     evaluation = store.evaluate_retrieval_cases(
         cases,

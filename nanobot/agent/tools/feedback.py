@@ -133,6 +133,7 @@ class FeedbackTool(Tool):
 # Helpers for reading feedback from events.jsonl
 # ---------------------------------------------------------------------------
 
+
 def load_feedback_events(events_file: Path) -> list[dict[str, Any]]:
     """Load all feedback-type events from the events file."""
     if not events_file.exists():
@@ -165,14 +166,11 @@ def feedback_summary(events_file: Path, *, max_recent: int = 20) -> str:
     negative = sum(1 for e in items if e.get("rating") == "negative")
     total = len(items)
 
-    parts: list[str] = [
-        f"User feedback: {positive} positive, {negative} negative ({total} total)."
-    ]
+    parts: list[str] = [f"User feedback: {positive} positive, {negative} negative ({total} total)."]
 
     # Collect recent negative items with comments (most actionable)
     negatives_with_comment = [
-        e for e in items
-        if e.get("rating") == "negative" and e.get("comment")
+        e for e in items if e.get("rating") == "negative" and e.get("comment")
     ]
     recent_neg = negatives_with_comment[-max_recent:]
     if recent_neg:
