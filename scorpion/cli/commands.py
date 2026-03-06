@@ -2,21 +2,20 @@
 
 import asyncio
 import os
-import signal
-from pathlib import Path
 import select
+import signal
 import sys
+from pathlib import Path
 
 import typer
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.table import Table
-from rich.text import Text
-
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.patch_stdout import patch_stdout
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.table import Table
+from rich.text import Text
 
 from scorpion import __version__, __logo__
 from scorpion.config.schema import Config
@@ -163,9 +162,9 @@ def onboard():
     from scorpion.config.loader import get_config_path, load_config, save_config
     from scorpion.config.schema import Config
     from scorpion.utils.helpers import get_workspace_path
-    
+
     config_path = get_config_path()
-    
+
     if config_path.exists():
         console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
         console.print("  [bold]y[/bold] = overwrite with defaults (existing values will be lost)")
@@ -181,16 +180,16 @@ def onboard():
     else:
         save_config(Config())
         console.print(f"[green]✓[/green] Created config at {config_path}")
-    
+
     # Create workspace
     workspace = get_workspace_path()
-    
+
     if not workspace.exists():
         workspace.mkdir(parents=True, exist_ok=True)
         console.print(f"[green]✓[/green] Created workspace at {workspace}")
-    
+
     sync_workspace_templates(workspace)
-    
+
     console.print(f"\n{__logo__} scorpion is ready!")
     console.print("\nNext steps:")
     console.print("  1. Add your Gemini API key to [cyan]~/.scorpion/config.json[/cyan]")
@@ -228,6 +227,8 @@ def _make_provider(config: Config):
 @app.command()
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the scorpion gateway."""
@@ -244,16 +245,21 @@ def gateway(
         import logging
         logging.basicConfig(level=logging.DEBUG)
 
-    console.print(f"{__logo__} Starting scorpion gateway on port {port}...")
+    config_path_obj = Path(config) if config else None
+    cfg = load_config(config_path_obj)
+    if workspace:
+        cfg.agents.defaults.workspace = workspace
+    config = cfg
 
-    config = load_config()
+    console.print(f"{__logo__} Starting scorpion gateway on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
 
     # Create cron service first (callback set after agent creation)
-    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    # Use workspace path for per-instance cron store
+    cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     # Create agent with cron service (ADK-based)
@@ -268,6 +274,7 @@ def gateway(
         memory_window=config.agents.defaults.memory_window,
         reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
+        web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -276,26 +283,32 @@ def gateway(
         channels_config=config.channels,
         gemini_api_key=config.providers.gemini.api_key or None,
     )
-    
+
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
+        reminder_note = (
+            "[Scheduled Task] Timer finished.\n\n"
+            f"Task '{job.name}' has been triggered.\n"
+            f"Scheduled instruction: {job.payload.message}"
+        )
         response = await agent.process_direct(
-            job.payload.message,
+            reminder_note,
             session_key=f"cron:{job.id}",
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
         )
-        if job.payload.deliver and job.payload.to:
+
+        if job.payload.deliver and job.payload.to and response:
             from scorpion.bus.events import OutboundMessage
             await bus.publish_outbound(OutboundMessage(
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to,
-                content=response or ""
+                content=response
             ))
         return response
     cron.on_job = on_cron_job
-    
+
     # Create channel manager
     channels = ChannelManager(config, bus)
 
@@ -349,16 +362,16 @@ def gateway(
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
     )
-    
+
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
-    
+
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
-    
+
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
     async def run():
@@ -377,7 +390,7 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
-    
+
     asyncio.run(run())
 
 
@@ -428,6 +441,7 @@ def agent(
         memory_window=config.agents.defaults.memory_window,
         reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
+        web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -472,12 +486,17 @@ def agent(
         else:
             cli_channel, cli_chat_id = "cli", session_id
 
-        def _exit_on_sigint(signum, frame):
+        def _handle_signal(signum, frame):
+            sig_name = signal.Signals(signum).name
             _restore_terminal()
-            console.print("\nGoodbye!")
-            os._exit(0)
+            console.print(f"\nReceived {sig_name}, goodbye!")
+            sys.exit(0)
 
-        signal.signal(signal.SIGINT, _exit_on_sigint)
+        signal.signal(signal.SIGINT, _handle_signal)
+        signal.signal(signal.SIGTERM, _handle_signal)
+        signal.signal(signal.SIGHUP, _handle_signal)
+        # Ignore SIGPIPE to prevent silent process termination when writing to closed pipes
+        signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         async def run_interactive():
             bus_task = asyncio.create_task(agent_loop.run())
