@@ -83,12 +83,26 @@ class WhatsAppChannel(BaseChannel):
             return
 
         try:
-            payload = {
-                "type": "send",
-                "to": msg.chat_id,
-                "text": msg.content
-            }
-            await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            # Send media files first
+            for media_path in (msg.media or []):
+                try:
+                    payload = {
+                        "type": "send_image",
+                        "to": msg.chat_id,
+                        "imagePath": media_path,
+                    }
+                    await self._ws.send(json.dumps(payload, ensure_ascii=False))
+                except Exception as e:
+                    logger.error("Error sending WhatsApp media {}: {}", media_path, e)
+
+            # Send text message if there's content
+            if msg.content:
+                payload = {
+                    "type": "send",
+                    "to": msg.chat_id,
+                    "text": msg.content
+                }
+                await self._ws.send(json.dumps(payload, ensure_ascii=False))
         except Exception as e:
             logger.error("Error sending WhatsApp message: {}", e)
 
@@ -128,10 +142,18 @@ class WhatsAppChannel(BaseChannel):
                 logger.info("Voice message received from {}, but direct download from bridge is not yet supported.", sender_id)
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
 
+            # Extract media paths (images downloaded by the bridge)
+            media_paths = data.get("media") or []
+
+            # For image messages without caption, provide descriptive content
+            if not content and media_paths:
+                content = "[image]"
+
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=sender,  # Use full LID for replies
                 content=content,
+                media=media_paths,
                 metadata={
                     "message_id": message_id,
                     "timestamp": data.get("timestamp"),

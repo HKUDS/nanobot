@@ -9,11 +9,17 @@ import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  downloadMediaMessage,
+  extractMessageContent as baileysExtractMessageContent,
 } from '@whiskeysockets/baileys';
 
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
 import pino from 'pino';
+import { writeFile, mkdir, readFile } from 'fs/promises';
+import { join } from 'path';
+import { homedir } from 'os';
+import { randomBytes } from 'crypto';
 
 const VERSION = '0.1.0';
 
@@ -24,6 +30,7 @@ export interface InboundMessage {
   content: string;
   timestamp: number;
   isGroup: boolean;
+  media?: string[];
 }
 
 export interface WhatsAppClientOptions {
@@ -110,14 +117,21 @@ export class WhatsAppClient {
       if (type !== 'notify') return;
 
       for (const msg of messages) {
-        // Skip own messages
         if (msg.key.fromMe) continue;
-
-        // Skip status updates
         if (msg.key.remoteJid === 'status@broadcast') continue;
 
-        const content = this.extractMessageContent(msg);
-        if (!content) continue;
+        const unwrapped = baileysExtractMessageContent(msg.message);
+        if (!unwrapped) continue;
+
+        const content = this.getTextContent(unwrapped);
+        const mediaPaths: string[] = [];
+
+        if (unwrapped.imageMessage) {
+          const path = await this.downloadImage(msg, unwrapped.imageMessage.mimetype ?? undefined);
+          if (path) mediaPaths.push(path);
+        }
+
+        if (!content && mediaPaths.length === 0) continue;
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
 
@@ -125,18 +139,43 @@ export class WhatsAppClient {
           id: msg.key.id || '',
           sender: msg.key.remoteJid || '',
           pn: msg.key.remoteJidAlt || '',
-          content,
+          content: content || '',
           timestamp: msg.messageTimestamp as number,
           isGroup,
+          ...(mediaPaths.length > 0 ? { media: mediaPaths } : {}),
         });
       }
     });
   }
 
-  private extractMessageContent(msg: any): string | null {
-    const message = msg.message;
-    if (!message) return null;
+  private async downloadImage(msg: any, mimetype?: string): Promise<string | null> {
+    try {
+      const mediaDir = join(homedir(), '.nanobot', 'media');
+      await mkdir(mediaDir, { recursive: true });
 
+      const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer;
+
+      const mime = mimetype || 'image/jpeg';
+      const extMap: Record<string, string> = {
+        'image/jpeg': '.jpg',
+        'image/png': '.png',
+        'image/gif': '.gif',
+        'image/webp': '.webp',
+      };
+      const ext = extMap[mime] || '.jpg';
+
+      const filename = `wa_${Date.now()}_${randomBytes(4).toString('hex')}${ext}`;
+      const filepath = join(mediaDir, filename);
+      await writeFile(filepath, buffer);
+
+      return filepath;
+    } catch (err) {
+      console.error('Failed to download image:', err);
+      return null;
+    }
+  }
+
+  private getTextContent(message: any): string | null {
     // Text message
     if (message.conversation) {
       return message.conversation;
@@ -147,9 +186,9 @@ export class WhatsAppClient {
       return message.extendedTextMessage.text;
     }
 
-    // Image with caption
-    if (message.imageMessage?.caption) {
-      return `[Image] ${message.imageMessage.caption}`;
+    // Image with optional caption
+    if (message.imageMessage) {
+      return message.imageMessage.caption || '';
     }
 
     // Video with caption
@@ -176,6 +215,18 @@ export class WhatsAppClient {
     }
 
     await this.sock.sendMessage(to, { text });
+  }
+
+  async sendImage(to: string, imagePath: string, caption?: string): Promise<void> {
+    if (!this.sock) {
+      throw new Error('Not connected');
+    }
+
+    const buffer = await readFile(imagePath);
+    await this.sock.sendMessage(to, {
+      image: buffer,
+      caption: caption || undefined,
+    });
   }
 
   async disconnect(): Promise<void> {
