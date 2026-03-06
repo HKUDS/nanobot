@@ -252,6 +252,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._allowed_users = set(getattr(config, 'allow_from', []) or [])
 
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
@@ -874,6 +875,12 @@ class FeishuChannel(BaseChannel):
             chat_id = message.chat_id
             chat_type = message.chat_type
             msg_type = message.message_type
+
+            # Check whitelist. Empty/blank entries or "*" mean allow all.
+            allowed_users = {user for user in self._allowed_users if user}
+            if "*" not in allowed_users and allowed_users and sender_id not in allowed_users:
+                logger.info(f"User {sender_id} not in whitelist, ignoring message")
+                return
 
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
