@@ -297,23 +297,59 @@ class DiscordChannel(BaseChannel):
         )
 
     def _is_ping_for_bot(self, payload: dict[str, Any]) -> bool:
-        """Return True when this message explicitly pings the bot."""
+        """Return True when this message explicitly pings the bot.
+
+        Checks:
+        - @everyone mention (always triggers)
+        - Bot ID ping (if respond_to_bot_id_ping is enabled)
+        - Bot role ping (if respond_to_role_mentions is enabled)
+        - Author type restrictions (non-bot, non-self-bot based on config)
+        """
+        author = payload.get("author") or {}
+        is_bot_author = bool(author.get("bot"))
+
+        # Check author type restrictions
+        if is_bot_author and not self.config.respond_to_self_bot_ping:
+            return False
+        if not is_bot_author and not self.config.respond_to_non_bot_ping:
+            return False
+
+        # @everyone always pings
         if payload.get("mention_everyone"):
             return True
 
         mentions = payload.get("mentions") or []
+        role_mentions = payload.get("mention_roles") or []
+
         if not isinstance(mentions, list):
-            return False
+            mentions = []
+        if not isinstance(role_mentions, list):
+            role_mentions = []
 
-        bot_id = self._bot_user_id
-        if bot_id:
-            for mention in mentions:
-                if str((mention or {}).get("id", "")) == bot_id:
+        # Check for bot ID ping (if enabled)
+        if self.config.respond_to_bot_id_ping:
+            bot_id = self._bot_user_id
+            if bot_id:
+                # Check user mentions
+                for mention in mentions:
+                    if str((mention or {}).get("id", "")) == bot_id:
+                        return True
+                # Check content for mention format <@USER_ID>
+                content = payload.get("content") or ""
+                if f"<@{bot_id}>" in content or f"<@!{bot_id}>" in content:
                     return True
-            content = payload.get("content") or ""
-            return f"<@{bot_id}>" in content or f"<@!{bot_id}>" in content
 
-        return any(bool((mention or {}).get("bot")) for mention in mentions)
+        # Check for role mentions (if enabled)
+        if self.config.respond_to_role_mentions and self.config.bot_role_ids:
+            for role_id in self.config.bot_role_ids:
+                if str(role_id) in role_mentions:
+                    return True
+                # Also check content for role mention format <@&ROLE_ID>
+                content = payload.get("content") or ""
+                if f"<@&{role_id}>" in content:
+                    return True
+
+        return False
 
     async def _start_typing(self, channel_id: str) -> None:
         """Start periodic typing indicator for a channel."""
