@@ -307,9 +307,16 @@ class DiscordChannel(BaseChannel):
         Behavior:
         - Humans always can ping this bot
         - Other bots can ping only if allow_bots is True
+        - Bot never responds to itself
         """
         author = payload.get("author") or {}
+        author_id = str(author.get("id", ""))
         is_bot_author = bool(author.get("bot"))
+
+        # Never respond to self - if sender is this bot, return False
+        bot_user_id = self._bot_user_id
+        if bot_user_id and author_id == bot_user_id:
+            return False
 
         # If bot is pinging and allowBots is disabled, reject
         if is_bot_author and not self.config.allow_bots:
