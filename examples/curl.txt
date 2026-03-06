@@ -1,0 +1,96 @@
+# =============================================================================
+# nanobot OpenAI-Compatible API — curl examples
+# =============================================================================
+#
+# Prerequisites:
+#   pip install nanobot-ai[api]    # installs aiohttp
+#   nanobot serve --port 8900      # start the API server
+#
+# The x-session-key header is REQUIRED for every request.
+# Convention:
+#   Private chat:  wx:dm:{sender_id}
+#   Group @:       wx:group:{group_id}:user:{sender_id}
+# =============================================================================
+
+# --- 1. Basic chat completion (private chat) ---
+
+curl -X POST http://localhost:8900/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "x-session-key: wx:dm:user_alice" \
+  -d '{
+    "model": "nanobot",
+    "messages": [
+      {"role": "user", "content": "Hello, who are you?"}
+    ]
+  }'
+
+# --- 2. Follow-up in the same session (context is remembered) ---
+
+curl -X POST http://localhost:8900/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "x-session-key: wx:dm:user_alice" \
+  -d '{
+    "model": "nanobot",
+    "messages": [
+      {"role": "user", "content": "What did I just ask you?"}
+    ]
+  }'
+
+# --- 3. Different user — isolated session ---
+
+curl -X POST http://localhost:8900/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "x-session-key: wx:dm:user_bob" \
+  -d '{
+    "model": "nanobot",
+    "messages": [
+      {"role": "user", "content": "What did I just ask you?"}
+    ]
+  }'
+# ↑ Bob gets a fresh context — he never asked anything before.
+
+# --- 4. Group chat — per-user session within a group ---
+
+curl -X POST http://localhost:8900/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "x-session-key: wx:group:group_abc:user:user_alice" \
+  -d '{
+    "model": "nanobot",
+    "messages": [
+      {"role": "user", "content": "Summarize our discussion"}
+    ]
+  }'
+
+# --- 5. List available models ---
+
+curl http://localhost:8900/v1/models
+
+# --- 6. Health check ---
+
+curl http://localhost:8900/health
+
+# --- 7. Missing header — expect 400 ---
+
+curl -X POST http://localhost:8900/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "nanobot",
+    "messages": [
+      {"role": "user", "content": "hello"}
+    ]
+  }'
+# ↑ Returns: {"error": {"message": "Missing required header: x-session-key", ...}}
+
+# --- 8. Stream not yet supported — expect 400 ---
+
+curl -X POST http://localhost:8900/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "x-session-key: wx:dm:user_alice" \
+  -d '{
+    "model": "nanobot",
+    "messages": [
+      {"role": "user", "content": "hello"}
+    ],
+    "stream": true
+  }'
+# ↑ Returns: {"error": {"message": "stream=true is not supported yet...", ...}}

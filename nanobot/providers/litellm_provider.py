@@ -1,5 +1,7 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+from __future__ import annotations
+
 import os
 import secrets
 import string

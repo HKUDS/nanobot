@@ -1,5 +1,7 @@
 """Web tools: web_search and web_fetch."""
 
+from __future__ import annotations
+
 import html
 import json
 import os
