@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 import weakref
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -14,6 +15,7 @@ from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.usage import UsageLog
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
@@ -85,6 +87,7 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
+        self.usage_log = UsageLog(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
             provider=provider,
@@ -180,6 +183,7 @@ class AgentLoop:
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
+        session_key: str = "",
         on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
@@ -198,6 +202,14 @@ class AgentLoop:
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
+            )
+            self.usage_log.log_llm_call(
+                session_key, iteration,
+                sys_chars=len((messages[0].get("content") or "") if messages else ""),
+                hist_chars=sum(len(m.get("content") or "") for m in messages[1:]),
+                tool_definitions=len(self.tools.get_definitions()),
+                prompt_tokens=response.usage.get("prompt_tokens") if response.usage else None,
+                completion_tokens=response.usage.get("completion_tokens") if response.usage else None,
             )
 
             if response.has_tool_calls:
@@ -228,7 +240,13 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    _t0 = time.monotonic()
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    self.usage_log.log_tool_call(
+                        session_key, tool_call.name, tool_call.arguments,
+                        int((time.monotonic() - _t0) * 1000),
+                        not result.startswith("Error"),
+                    )
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -347,7 +365,8 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, tools_used, all_msgs = await self._run_agent_loop(messages, session_key=key)
+            self.usage_log.log_turn(key, tools_used)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -432,9 +451,10 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+        final_content, tools_used, all_msgs = await self._run_agent_loop(
+            initial_messages, session_key=key, on_progress=on_progress or _bus_progress,
         )
+        self.usage_log.log_turn(key, tools_used)
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
