@@ -39,7 +39,9 @@ class _TruncatingFormatter(logging.Formatter):
 
 
 _handler = logging.StreamHandler(sys.stderr)
-_handler.setFormatter(_TruncatingFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+_handler.setFormatter(
+    _TruncatingFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+)
 logging.basicConfig(level=logging.DEBUG, handlers=[_handler])
 logger = logging.getLogger("openfaas_handler")
 
@@ -273,7 +275,6 @@ async def _a2a_handler(scope: dict, receive: callable, send: callable) -> None:
 async def _dashboard_handler(scope: dict, receive: callable, send: callable) -> None:
     """Route dashboard requests (lazy-init on first call)."""
     global _cached_dashboard_app
-    await get_state()
     if _cached_dashboard_app is None:
         _cached_dashboard_app = get_dashboard_app(lambda: _state)
         logger.info("Dashboard app built and cached")
