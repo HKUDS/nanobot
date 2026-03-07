@@ -22,7 +22,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import InboundAttachment, InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
@@ -158,6 +158,18 @@ class AgentLoop:
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+
+    @staticmethod
+    def _current_prompt_attachments(
+        msg: InboundMessage,
+    ) -> list[InboundAttachment | dict[str, Any]] | None:
+        """Return current-turn attachment metadata without changing stored history semantics."""
+        if msg.attachments:
+            return msg.attachments
+        attachments = (msg.metadata or {}).get("attachments")
+        if isinstance(attachments, list) and attachments:
+            return attachments
+        return None
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -354,7 +366,10 @@ class AgentLoop:
             history = session.get_history(max_messages=self.memory_window)
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=msg.content,
+                attachments=self._current_prompt_attachments(msg),
+                channel=channel,
+                chat_id=chat_id,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
@@ -430,7 +445,9 @@ class AgentLoop:
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
+            attachments=self._current_prompt_attachments(msg),
+            channel=msg.channel,
+            chat_id=msg.chat_id,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -473,17 +490,24 @@ class AgentLoop:
                 entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
             elif role == "user":
                 if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                    # Strip the runtime-context prefix, keep only the user text.
-                    parts = content.split("\n\n", 1)
-                    if len(parts) > 1 and parts[1].strip():
-                        entry["content"] = parts[1]
-                    else:
+                    # Strip runtime/attachment metadata prefixes, keep only user-authored text.
+                    blocks = [part for part in content.split("\n\n") if part.strip()]
+                    filtered_blocks = [
+                        block for block in blocks
+                        if not ContextBuilder._is_metadata_text_block(block)
+                    ]
+                    if not filtered_blocks:
                         continue
+                    entry["content"] = "\n\n".join(filtered_blocks)
                 if isinstance(content, list):
                     filtered = []
                     for c in content:
-                        if c.get("type") == "text" and isinstance(c.get("text"), str) and c["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                            continue  # Strip runtime context from multimodal messages
+                        if (
+                            c.get("type") == "text"
+                            and isinstance(c.get("text"), str)
+                            and ContextBuilder._is_metadata_text_block(c["text"])
+                        ):
+                            continue  # Strip runtime/attachment metadata from multimodal messages
                         if (c.get("type") == "image_url"
                                 and c.get("image_url", {}).get("url", "").startswith("data:image/")):
                             filtered.append({"type": "text", "text": "[image]"})
@@ -491,7 +515,10 @@ class AgentLoop:
                             filtered.append(c)
                     if not filtered:
                         continue
-                    entry["content"] = filtered
+                    if len(filtered) == 1 and filtered[0].get("type") == "text":
+                        entry["content"] = filtered[0]["text"]
+                    else:
+                        entry["content"] = filtered
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now()
