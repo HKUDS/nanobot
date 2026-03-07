@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import mimetypes
 from collections import OrderedDict
 
 from loguru import logger
@@ -128,12 +129,16 @@ class WhatsAppChannel(BaseChannel):
                 logger.info("Voice message received from {}, but direct download from bridge is not yet supported.", sender_id)
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
 
-            # Extract media paths (images downloaded by the bridge)
+            # Extract media paths (images/documents/videos downloaded by the bridge)
             media_paths = data.get("media") or []
 
-            # For image messages without caption, provide descriptive content
-            if not content and media_paths:
-                content = "[image]"
+            # Build content tags matching Telegram's pattern: [image: /path] or [file: /path]
+            if media_paths:
+                for p in media_paths:
+                    mime, _ = mimetypes.guess_type(p)
+                    media_type = "image" if mime and mime.startswith("image/") else "file"
+                    media_tag = f"[{media_type}: {p}]"
+                    content = f"{content}\n{media_tag}" if content else media_tag
 
             await self._handle_message(
                 sender_id=sender_id,

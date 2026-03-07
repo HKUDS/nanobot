@@ -127,7 +127,14 @@ export class WhatsAppClient {
         const mediaPaths: string[] = [];
 
         if (unwrapped.imageMessage) {
-          const path = await this.downloadImage(msg, unwrapped.imageMessage.mimetype ?? undefined);
+          const path = await this.downloadMedia(msg, unwrapped.imageMessage.mimetype ?? undefined);
+          if (path) mediaPaths.push(path);
+        } else if (unwrapped.documentMessage) {
+          const path = await this.downloadMedia(msg, unwrapped.documentMessage.mimetype ?? undefined,
+            unwrapped.documentMessage.fileName ?? undefined);
+          if (path) mediaPaths.push(path);
+        } else if (unwrapped.videoMessage) {
+          const path = await this.downloadMedia(msg, unwrapped.videoMessage.mimetype ?? undefined);
           if (path) mediaPaths.push(path);
         }
 
@@ -148,29 +155,31 @@ export class WhatsAppClient {
     });
   }
 
-  private async downloadImage(msg: any, mimetype?: string): Promise<string | null> {
+  private async downloadMedia(msg: any, mimetype?: string, fileName?: string): Promise<string | null> {
     try {
       const mediaDir = join(homedir(), '.nanobot', 'media');
       await mkdir(mediaDir, { recursive: true });
 
       const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer;
 
-      const mime = mimetype || 'image/jpeg';
-      const extMap: Record<string, string> = {
-        'image/jpeg': '.jpg',
-        'image/png': '.png',
-        'image/gif': '.gif',
-        'image/webp': '.webp',
-      };
-      const ext = extMap[mime] || '.jpg';
+      let outFilename: string;
+      if (fileName) {
+        // Documents have a filename — use it with a unique prefix to avoid collisions
+        const prefix = `wa_${Date.now()}_${randomBytes(4).toString('hex')}_`;
+        outFilename = prefix + fileName;
+      } else {
+        const mime = mimetype || 'application/octet-stream';
+        // Derive extension from mimetype subtype (e.g. "image/png" → ".png", "application/pdf" → ".pdf")
+        const ext = '.' + (mime.split('/').pop()?.split(';')[0] || 'bin');
+        outFilename = `wa_${Date.now()}_${randomBytes(4).toString('hex')}${ext}`;
+      }
 
-      const filename = `wa_${Date.now()}_${randomBytes(4).toString('hex')}${ext}`;
-      const filepath = join(mediaDir, filename);
+      const filepath = join(mediaDir, outFilename);
       await writeFile(filepath, buffer);
 
       return filepath;
     } catch (err) {
-      console.error('Failed to download image:', err);
+      console.error('Failed to download media:', err);
       return null;
     }
   }
@@ -191,14 +200,14 @@ export class WhatsAppClient {
       return message.imageMessage.caption || '';
     }
 
-    // Video with caption
-    if (message.videoMessage?.caption) {
-      return `[Video] ${message.videoMessage.caption}`;
+    // Video with optional caption
+    if (message.videoMessage) {
+      return message.videoMessage.caption || '';
     }
 
-    // Document with caption
-    if (message.documentMessage?.caption) {
-      return `[Document] ${message.documentMessage.caption}`;
+    // Document with optional caption
+    if (message.documentMessage) {
+      return message.documentMessage.caption || '';
     }
 
     // Voice/Audio message
