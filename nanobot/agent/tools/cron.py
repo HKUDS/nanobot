@@ -147,7 +147,20 @@ class CronTool(Tool):
         jobs = self._cron.list_jobs()
         if not jobs:
             return "No scheduled jobs."
-        lines = [f"- {j.name} (id: {j.id}, {j.schedule.kind})" for j in jobs]
+ 
+        lines = []
+        for j in jobs:
+            s = j.schedule
+            if s.kind == "cron":
+                detail = f"cron {s.expr}" + (f" ({s.tz})" if s.tz else "")
+            elif s.kind == "every":
+                detail = f"every {s.every_ms // 1000}s"
+            elif s.kind == "at":
+                from datetime import datetime, timezone
+                detail = "at " + datetime.fromtimestamp(s.at_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            else:
+                detail = s.kind
+            lines.append(f"- {j.name} ({detail}, id: {j.id})")
         return "Scheduled jobs:\n" + "\n".join(lines)
 
     def _remove_job(self, job_id: str | None) -> str:
