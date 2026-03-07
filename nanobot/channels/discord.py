@@ -85,6 +85,7 @@ class DiscordChannel(BaseChannel):
         reply_to = msg.reply_to
         if not reply_to and self.config.reply_to_message:
             reply_to = msg.metadata.get("message_id")
+        pending_reply_to = reply_to
 
         try:
             sent_media = False
@@ -92,8 +93,9 @@ class DiscordChannel(BaseChannel):
 
             # Send file attachments first
             for media_path in msg.media or []:
-                if await self._send_file(url, headers, media_path, reply_to=reply_to):
+                if await self._send_file(url, headers, media_path, reply_to=pending_reply_to):
                     sent_media = True
+                    pending_reply_to = None
                 else:
                     failed_media.append(Path(media_path).name)
 
@@ -110,9 +112,10 @@ class DiscordChannel(BaseChannel):
             for i, chunk in enumerate(chunks):
                 payload: dict[str, Any] = {"content": chunk}
 
-                if i == 0 and reply_to:
-                    payload["message_reference"] = {"message_id": reply_to}
+                if i == 0 and pending_reply_to:
+                    payload["message_reference"] = {"message_id": pending_reply_to}
                     payload["allowed_mentions"] = {"replied_user": False}
+                    pending_reply_to = None
 
                 if not await self._send_payload(url, headers, payload):
                     break  # Abort remaining chunks on failure
