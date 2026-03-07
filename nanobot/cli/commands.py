@@ -372,18 +372,24 @@ def gateway(
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
+        # Use explicitly configured target if set.
+        hb = config.gateway.heartbeat
+        if hb.channel and hb.chat_id:
+            return hb.channel, hb.chat_id
+
+        # Fallback: pick the most recently updated non-internal session.
         enabled = set(channels.enabled_channels)
-        # Prefer the most recently updated non-internal session on an enabled channel.
         for item in session_manager.list_sessions():
             key = item.get("key") or ""
             if ":" not in key:
                 continue
-            channel, chat_id = key.split(":", 1)
+            parts = key.split(":")
+            channel = parts[0]
+            chat_id = parts[1] if len(parts) >= 2 else ""
             if channel in {"cli", "system"}:
                 continue
             if channel in enabled and chat_id:
                 return channel, chat_id
-        # Fallback keeps prior behavior but remains explicit.
         return "cli", "direct"
 
     # Create heartbeat service
