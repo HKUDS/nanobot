@@ -34,6 +34,7 @@ class SkillsLoader:
             List of skill info dicts with 'name', 'path', 'source'.
         """
         skills = []
+        skill_names = set()
 
         # Workspace skills (highest priority)
         if self.workspace_skills.exists():
@@ -42,13 +43,14 @@ class SkillsLoader:
                     skill_file = skill_dir / "SKILL.md"
                     if skill_file.exists():
                         skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "workspace"})
+                        skill_names.add(skill_dir.name)
 
         # Built-in skills
         if self.builtin_skills and self.builtin_skills.exists():
             for skill_dir in self.builtin_skills.iterdir():
                 if skill_dir.is_dir():
                     skill_file = skill_dir / "SKILL.md"
-                    if skill_file.exists() and not any(s["name"] == skill_dir.name for s in skills):
+                    if skill_file.exists() and skill_dir.name not in skill_names:
                         skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "builtin"})
 
         # Filter by requirements
