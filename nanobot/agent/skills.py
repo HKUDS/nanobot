@@ -10,6 +10,30 @@ from pathlib import Path
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
 
+NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+class SkillInfo(BaseModel):
+    """Model for skill metadata."""
+    name: str = Field(min_length=1, max_length=64)
+    path: str
+    source: str
+    description: str = Field(min_length=1, max_length=512)
+
+
+    @field_validator("name")
+    def validate_name(cls, v):
+        if not NAME_PATTERN.match(v):
+            raise ValueError("Skill name should contain only alphanumeric characters, underscores, and hyphens")
+        return v.strip()
+
+
+    @field_validator("source")
+    def validate_source(cls, v):
+        if v not in ("workspace", "builtin"):
+            raise ValueError("Skill source must be 'workspace' or 'builtin'")
+        return v
+
+
 class SkillsLoader:
     """
     Loader for agent skills.
@@ -41,16 +65,20 @@ class SkillsLoader:
                 if skill_dir.is_dir():
                     skill_file = skill_dir / "SKILL.md"
                     if skill_file.exists():
-                        skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "workspace"})
-
+                        skill_info = {"name": skill_dir.name, "path": str(skill_file), "source": "workspace", "description": self._get_skill_description(skill_dir.name)}
+                        if self._validate_skill_info(skill_info):
+                            skills.append(skill_info)
+        
         # Built-in skills
         if self.builtin_skills and self.builtin_skills.exists():
             for skill_dir in self.builtin_skills.iterdir():
                 if skill_dir.is_dir():
                     skill_file = skill_dir / "SKILL.md"
                     if skill_file.exists() and not any(s["name"] == skill_dir.name for s in skills):
-                        skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "builtin"})
-
+                        skill_info = {"name": skill_dir.name, "path": str(skill_file), "source": "builtin", "description": self._get_skill_description(skill_dir.name)}
+                        if self._validate_skill_info(skill_info):
+                            skills.append(skill_info)
+        
         # Filter by requirements
         if filter_unavailable:
             return [s for s in skills if self._check_requirements(self._get_skill_meta(s["name"]))]
@@ -138,6 +166,15 @@ class SkillsLoader:
         lines.append("</skills>")
 
         return "\n".join(lines)
+
+    def _validate_skill_info(self, skill_info: dict) -> bool:
+        """Validate skill info using SkillInfo model."""
+        try:
+            SkillInfo(**skill_info)
+            return True
+        except (ValueError, TypeError) as e:
+            logger.warning("Skill '{}' validation failed: {}", skill_info.get("name", "unknown"), str(e))
+            return False
 
     def _get_missing_requirements(self, skill_meta: dict) -> str:
         """Get a description of missing requirements."""
