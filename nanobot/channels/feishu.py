@@ -244,9 +244,10 @@ class FeishuChannel(BaseChannel):
 
     name = "feishu"
 
-    def __init__(self, config: FeishuConfig, bus: MessageBus):
+    def __init__(self, config: FeishuConfig, bus: MessageBus, groq_api_key: str = ""):
         super().__init__(config, bus)
         self.config: FeishuConfig = config
+        self.groq_api_key = groq_api_key
         self._client: Any = None
         self._ws_client: Any = None
         self._ws_thread: threading.Thread | None = None
@@ -909,6 +910,18 @@ class FeishuChannel(BaseChannel):
                 file_path, content_text = await self._download_and_save_media(msg_type, content_json, message_id)
                 if file_path:
                     media_paths.append(file_path)
+
+                # Transcribe audio using Groq Whisper
+                if msg_type == "audio" and file_path and self.groq_api_key:
+                    try:
+                        from nanobot.providers.transcription import GroqTranscriptionProvider
+                        transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
+                        transcription = await transcriber.transcribe(file_path)
+                        if transcription:
+                            content_text = f"[transcription: {transcription}]"
+                    except Exception as e:
+                        logger.warning("Failed to transcribe audio: {}", e)
+
                 content_parts.append(content_text)
 
             elif msg_type in ("share_chat", "share_user", "interactive", "share_calendar_event", "system", "merge_forward"):
