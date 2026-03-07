@@ -54,17 +54,20 @@ def extract_document_text(path: str | Path, max_chars: int = _MAX_CHARS) -> str 
 
 
 def _extract_text_file(path: Path, max_chars: int) -> DocumentExtractionResult | None:
+    probe = _read_encoding_probe(path)
     for encoding in _iter_text_encodings(path):
         try:
-            return _read_text_excerpt(path, max_chars, encoding)
+            result = _read_text_excerpt(path, max_chars, encoding)
         except Exception:
             continue
+        if result and _should_retry_utf16_after_utf8(probe, result.text, encoding):
+            continue
+        return result
     return DocumentExtractionResult(note="Unable to decode this text document with supported fallbacks.")
 
 
 def _iter_text_encodings(path: Path) -> tuple[str, ...]:
-    with path.open("rb") as handle:
-        probe = handle.read(_ENCODING_PROBE_BYTES)
+    probe = _read_encoding_probe(path)
     if probe.startswith(codecs.BOM_UTF16_LE):
         return ("utf-16", "utf-16-le", "utf-16-be", "utf-8-sig", "utf-8", "gb18030", "latin-1")
     if probe.startswith(codecs.BOM_UTF16_BE):
@@ -72,6 +75,11 @@ def _iter_text_encodings(path: Path) -> tuple[str, ...]:
     if _looks_like_utf16_bytes(probe):
         return ("utf-16-le", "utf-16-be", "utf-8-sig", "utf-8", "gb18030", "latin-1")
     return ("utf-8-sig", "utf-8", "utf-16", "utf-16-le", "utf-16-be", "gb18030", "latin-1")
+
+
+def _read_encoding_probe(path: Path) -> bytes:
+    with path.open("rb") as handle:
+        return handle.read(_ENCODING_PROBE_BYTES)
 
 
 def _looks_like_utf16_bytes(data: bytes) -> bool:
@@ -85,6 +93,21 @@ def _looks_like_utf16_bytes(data: bytes) -> bool:
 
     # UTF-16 text often presents as ASCII bytes alternating with NULs in one lane.
     return max(even_ratio, odd_ratio) > 0.3 and abs(even_ratio - odd_ratio) > 0.2
+
+
+def _should_retry_utf16_after_utf8(probe: bytes, text: str | None, encoding: str) -> bool:
+    if encoding not in {"utf-8-sig", "utf-8"} or not text or len(probe) < 4 or len(probe) % 2 != 0:
+        return False
+    if _looks_like_utf16_bytes(probe):
+        return False
+    return _has_suspicious_control_chars(text)
+
+
+def _has_suspicious_control_chars(text: str) -> bool:
+    for char in text:
+        if ord(char) < 32 and char not in "\t\n\r":
+            return True
+    return False
 
 
 def _read_text_excerpt(path: Path, max_chars: int, encoding: str) -> DocumentExtractionResult | None:

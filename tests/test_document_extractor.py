@@ -78,3 +78,16 @@ def test_extract_text_file_detects_utf16le_without_bom(tmp_path) -> None:
     assert result.text == content
     assert result.extractor == "text:utf-16-le"
     assert result.truncated is False
+
+
+def test_extract_text_file_retries_utf16_for_bomless_cjk_mojibake(tmp_path) -> None:
+    path = tmp_path / "utf16le-cjk.txt"
+    content = "你好世界"
+    path.write_bytes(content.encode("utf-16-le"))
+
+    result = _extract_text_file(path, max_chars=100)
+
+    assert result is not None
+    assert result.text == content
+    assert result.extractor == "text:utf-16-le"
+    assert result.truncated is False
