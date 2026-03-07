@@ -115,6 +115,61 @@ class TestMessageToolSuppressLogic:
             ('read_file("foo.txt")', True),
         ]
 
+    @pytest.mark.asyncio
+    async def test_process_direct_can_disable_default_bus_progress(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        tool_call = ToolCallRequest(id="call1", name="read_file", arguments={"path": "foo.txt"})
+        calls = iter([
+            LLMResponse(content="Visible<think>hidden</think>", tool_calls=[tool_call]),
+            LLMResponse(content="Done", tool_calls=[]),
+        ])
+        loop.provider.chat = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.tools.execute = AsyncMock(return_value="ok")
+
+        response = await loop.process_direct(
+            "Scan the file",
+            session_key="cron:job1",
+            channel="telegram",
+            chat_id="chat123",
+            emit_progress=False,
+        )
+
+        assert response == "Done"
+        assert loop.bus.outbound_size == 0
+
+    @pytest.mark.asyncio
+    async def test_process_direct_keeps_explicit_progress_callback(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        tool_call = ToolCallRequest(id="call1", name="read_file", arguments={"path": "foo.txt"})
+        calls = iter([
+            LLMResponse(content="Visible<think>hidden</think>", tool_calls=[tool_call]),
+            LLMResponse(content="Done", tool_calls=[]),
+        ])
+        loop.provider.chat = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.tools.execute = AsyncMock(return_value="ok")
+
+        progress: list[tuple[str, bool]] = []
+
+        async def on_progress(content: str, *, tool_hint: bool = False) -> None:
+            progress.append((content, tool_hint))
+
+        response = await loop.process_direct(
+            "Scan the file",
+            session_key="cron:job1",
+            channel="telegram",
+            chat_id="chat123",
+            on_progress=on_progress,
+            emit_progress=False,
+        )
+
+        assert response == "Done"
+        assert progress == [
+            ("Visible", False),
+            ('read_file("foo.txt")', True),
+        ]
+
 
 class TestMessageToolTurnTracking:
 
