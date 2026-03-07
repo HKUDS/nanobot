@@ -471,7 +471,7 @@ def agent(
 
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
-    from nanobot.config.loader import get_data_dir, load_config
+    from nanobot.config.loader import load_config
     from nanobot.cron.service import CronService
 
     config = load_config()
@@ -481,7 +481,7 @@ def agent(
     provider = _make_provider(config)
 
     # Create cron service for tool usage (no callback needed for CLI unless running)
-    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     if logs:

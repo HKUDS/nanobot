@@ -128,3 +128,34 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_agent_uses_workspace_cron_store(tmp_path):
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    observed: dict[str, Path] = {}
+
+    class DummyCronService:
+        def __init__(self, store_path):
+            observed["store_path"] = store_path
+
+    class DummyAgentLoop:
+        def __init__(self, **kwargs):
+            self.channels_config = kwargs["channels_config"]
+
+        async def process_direct(self, message, session_id, on_progress=None):
+            return "ok"
+
+        async def close_mcp(self):
+            return None
+
+    with patch("nanobot.config.loader.load_config", return_value=config), \
+         patch("nanobot.cli.commands.sync_workspace_templates"), \
+         patch("nanobot.bus.queue.MessageBus"), \
+         patch("nanobot.cron.service.CronService", DummyCronService), \
+         patch("nanobot.agent.loop.AgentLoop", DummyAgentLoop), \
+         patch("nanobot.cli.commands._make_provider", return_value=object()):
+        result = runner.invoke(app, ["agent", "--message", "hello", "--logs", "--no-markdown"])
+
+    assert result.exit_code == 0
+    assert observed["store_path"] == config.workspace_path / "cron" / "jobs.json"
