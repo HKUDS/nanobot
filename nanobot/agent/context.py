@@ -12,6 +12,48 @@ from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.utils.helpers import detect_image_mime
 
+# ---------------------------------------------------------------------------
+# Prompt templates
+# ---------------------------------------------------------------------------
+
+_IDENTITY_TEMPLATE = """\
+# nanobot 🐈
+
+You are nanobot, a helpful AI assistant.
+
+## Runtime
+{runtime}
+
+## Workspace
+Your workspace is at: {workspace}
+- Long-term memory: {workspace}/memory/MEMORY.md (write important facts here)
+- History log: {workspace}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
+- Custom skills: {workspace}/skills/{{skill-name}}/SKILL.md
+
+## nanobot Guidelines
+- State intent before tool calls, but NEVER predict or claim results before receiving them.
+- Before modifying a file, read it first. Do not assume files or directories exist.
+- After writing or editing a file, re-read it if accuracy matters.
+- If a tool call fails, analyze the error before retrying with a different approach.
+- Ask for clarification when the request is ambiguous.
+
+Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel.\
+"""
+
+_SKILLS_SECTION_TEMPLATE = """\
+# Skills
+
+The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
+Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
+
+{skills_summary}\
+"""
+
+_RUNTIME_CONTEXT_TEMPLATE = "{tag}\nCurrent Time: {now} ({tz})"
+_RUNTIME_CONTEXT_CHANNEL_TEMPLATE = "{tag}\nCurrent Time: {now} ({tz})\nChannel: {channel}\nChat ID: {chat_id}"
+
+# ---------------------------------------------------------------------------
+
 
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
@@ -44,12 +86,7 @@ class ContextBuilder:
 
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
-            parts.append(f"""# Skills
-
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
-
-{skills_summary}""")
+            parts.append(_SKILLS_SECTION_TEMPLATE.format(skills_summary=skills_summary))
 
         return "\n\n---\n\n".join(parts)
 
@@ -58,38 +95,18 @@ Skills with available="false" need dependencies installed first - you can try in
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
-
-        return f"""# nanobot 🐈
-
-You are nanobot, a helpful AI assistant.
-
-## Runtime
-{runtime}
-
-## Workspace
-Your workspace is at: {workspace_path}
-- Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
-- History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
-- Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
-
-## nanobot Guidelines
-- State intent before tool calls, but NEVER predict or claim results before receiving them.
-- Before modifying a file, read it first. Do not assume files or directories exist.
-- After writing or editing a file, re-read it if accuracy matters.
-- If a tool call fails, analyze the error before retrying with a different approach.
-- Ask for clarification when the request is ambiguous.
-
-Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
+        return _IDENTITY_TEMPLATE.format(runtime=runtime, workspace=workspace_path)
 
     @staticmethod
     def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         tz = time.strftime("%Z") or "UTC"
-        lines = [f"Current Time: {now} ({tz})"]
         if channel and chat_id:
-            lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
-        return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
+            return _RUNTIME_CONTEXT_CHANNEL_TEMPLATE.format(
+                tag=ContextBuilder._RUNTIME_CONTEXT_TAG, now=now, tz=tz, channel=channel, chat_id=chat_id
+            )
+        return _RUNTIME_CONTEXT_TEMPLATE.format(tag=ContextBuilder._RUNTIME_CONTEXT_TAG, now=now, tz=tz)
 
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
