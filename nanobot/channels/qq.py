@@ -2,7 +2,7 @@
 
 import asyncio
 from collections import deque
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -13,7 +13,7 @@ from nanobot.config.schema import QQConfig
 
 try:
     import botpy
-    from botpy.message import C2CMessage, GroupMessage  # 1. Import GroupMessage
+    from botpy.message import C2CMessage, GroupMessage
 
     QQ_AVAILABLE = True
 except ImportError:
@@ -28,27 +28,23 @@ if TYPE_CHECKING:
 
 def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
     """Create a botpy Client subclass bound to the given channel."""
-    # 2. Ensure intents enable public_messages (required for group messages)
     intents = botpy.Intents(public_messages=True, direct_message=True)
 
     class _Bot(botpy.Client):
         def __init__(self):
-            super().__init__(intents=intents)
+            # Disable botpy's file log — nanobot uses loguru; default "botpy.log" fails on read-only fs
+            super().__init__(intents=intents, ext_handlers=False)
 
         async def on_ready(self):
-            logger.info(f"QQ bot ready: {self.robot.name}")
+            logger.info("QQ bot ready: {}", self.robot.name)
 
         async def on_c2c_message_create(self, message: "C2CMessage"):
-            # C2C (Private) message
             await channel._on_message(message, is_group=False)
 
         async def on_group_at_message_create(self, message: "GroupMessage"):
-            # 3. Added: Listen for group @messages
-            # Note: Official bots only receive messages @mentioning them unless privileged
             await channel._on_message(message, is_group=True)
 
         async def on_direct_message_create(self, message):
-            # Guild Direct Message
             await channel._on_message(message, is_group=False)
 
     return _Bot
@@ -64,10 +60,8 @@ class QQChannel(BaseChannel):
         self.config: QQConfig = config
         self._client: "botpy.Client | None" = None
         self._processed_ids: deque = deque(maxlen=1000)
-        self._bot_task: asyncio.Task | None = None
-        # Cache to track if chat_id is a group or individual to select the correct reply API
-        # Format: {chat_id: "group" | "c2c"}
-        self._chat_type_cache: Dict[str, str] = {}
+        self._msg_seq: int = 1  # 消息序列号，避免被 QQ API 去重
+        self._chat_type_cache: dict[str, str] = {}
 
     async def start(self) -> None:
         """Start the QQ bot."""
@@ -82,9 +76,8 @@ class QQChannel(BaseChannel):
         self._running = True
         BotClass = _make_bot_class(self)
         self._client = BotClass()
-
-        self._bot_task = asyncio.create_task(self._run_bot())
         logger.info("QQ bot started (C2C & Group supported)")
+        await self._run_bot()
 
     async def _run_bot(self) -> None:
         """Run the bot connection with auto-reconnect."""
@@ -92,7 +85,7 @@ class QQChannel(BaseChannel):
             try:
                 await self._client.start(appid=self.config.app_id, secret=self.config.secret)
             except Exception as e:
-                logger.warning(f"QQ bot error: {e}")
+                logger.warning("QQ bot error: {}", e)
             if self._running:
                 logger.info("Reconnecting QQ bot in 5 seconds...")
                 await asyncio.sleep(5)
@@ -100,11 +93,10 @@ class QQChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the QQ bot."""
         self._running = False
-        if self._bot_task:
-            self._bot_task.cancel()
+        if self._client:
             try:
-                await self._bot_task
-            except asyncio.CancelledError:
+                await self._client.close()
+            except Exception:
                 pass
         logger.info("QQ bot stopped")
 
@@ -113,29 +105,29 @@ class QQChannel(BaseChannel):
         if not self._client:
             logger.warning("QQ client not initialized")
             return
-        
-        # 4. Modified send logic: Check chat_id type to call the correct API
-        msg_type = self._chat_type_cache.get(msg.chat_id, "c2c") # Default to c2c
 
         try:
+            msg_id = msg.metadata.get("message_id")
+            self._msg_seq += 1
+            msg_type = self._chat_type_cache.get(msg.chat_id, "c2c")
             if msg_type == "group":
-                # Send group message
                 await self._client.api.post_group_message(
                     group_openid=msg.chat_id,
-                    msg_type=0, 
-                    msg_id=msg.metadata.get("message_id"), # Reply to specific message ID (optional but recommended)
-                    content=msg.content
+                    msg_type=0,
+                    content=msg.content,
+                    msg_id=msg_id,
+                    msg_seq=self._msg_seq,
                 )
             else:
-                # Send C2C (private) message
                 await self._client.api.post_c2c_message(
                     openid=msg.chat_id,
                     msg_type=0,
-                    msg_id=msg.metadata.get("message_id"),
                     content=msg.content,
+                    msg_id=msg_id,
+                    msg_seq=self._msg_seq,
                 )
         except Exception as e:
-            logger.error(f"Error sending QQ message ({msg_type}): {e}")
+            logger.error("Error sending QQ message: {}", e)
 
     async def _on_message(self, data: "C2CMessage | GroupMessage", is_group: bool = False) -> None:
         """Handle incoming message from QQ."""
@@ -149,17 +141,11 @@ class QQChannel(BaseChannel):
             if not content:
                 return
 
-            # 5. Extract ID and cache type
             if is_group:
-                # Group message: chat_id uses group_openid
                 chat_id = data.group_openid
-                user_id = data.author.member_openid # Sender's ID
+                user_id = data.author.member_openid
                 self._chat_type_cache[chat_id] = "group"
-                
-                # Remove @bot text (optional, prevents Nanobot from treating the name as prompt)
-                # content = content.replace("@BotName", "").strip()
             else:
-                # Private message: chat_id uses user_openid
                 chat_id = str(getattr(data.author, 'id', None) or getattr(data.author, 'user_openid', 'unknown'))
                 user_id = chat_id
                 self._chat_type_cache[chat_id] = "c2c"
@@ -170,5 +156,5 @@ class QQChannel(BaseChannel):
                 content=content,
                 metadata={"message_id": data.id},
             )
-        except Exception as e:
-            logger.error(f"Error handling QQ message: {e}")
+        except Exception:
+            logger.exception("Error handling QQ message")
