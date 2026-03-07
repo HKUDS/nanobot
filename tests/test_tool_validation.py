@@ -210,9 +210,10 @@ def test_cast_params_bool_not_cast_to_int() -> None:
             "properties": {"count": {"type": "integer"}},
         }
     )
-    # Bool input should remain bool (validation will catch it)
     result = tool.cast_params({"count": True})
-    assert result["count"] is True  # Not cast to 1
+    assert result["count"] is True
+    errors = tool.validate_params(result)
+    assert any("count should be integer" in e for e in errors)
 
 
 def test_cast_params_preserves_empty_string() -> None:
@@ -283,6 +284,18 @@ def test_cast_params_invalid_string_to_number() -> None:
     assert result["rate"] == "not_a_number"
 
 
+def test_validate_params_bool_not_accepted_as_number() -> None:
+    """Booleans should not pass number validation."""
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"rate": {"type": "number"}},
+        }
+    )
+    errors = tool.validate_params({"rate": False})
+    assert any("rate should be number" in e for e in errors)
+
+
 def test_cast_params_none_values() -> None:
     """Test None handling for different types."""
     tool = CastTestTool(
@@ -324,40 +337,3 @@ def test_cast_params_single_value_not_auto_wrapped_to_array() -> None:
     assert result["items"] == 5  # Not wrapped to [5]
     result = tool.cast_params({"items": "text"})
     assert result["items"] == "text"  # Not wrapped to ["text"]
-
-
-def test_cast_params_empty_string_to_array() -> None:
-    """Empty string should convert to empty array."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"items": {"type": "array"}},
-        }
-    )
-    result = tool.cast_params({"items": ""})
-    assert result["items"] == []
-
-
-def test_cast_params_empty_string_to_object() -> None:
-    """Empty string should convert to empty object."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"config": {"type": "object"}},
-        }
-    )
-    result = tool.cast_params({"config": ""})
-    assert result["config"] == {}
-
-
-def test_cast_params_float_to_int() -> None:
-    """Float values should be cast to integers."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"count": {"type": "integer"}},
-        }
-    )
-    result = tool.cast_params({"count": 42.7})
-    assert result["count"] == 42
-    assert isinstance(result["count"], int)
