@@ -11,6 +11,8 @@ import json_repair
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
+_AZURE_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name"})
+
 
 class AzureOpenAIProvider(LLMProvider):
     """
@@ -67,18 +69,37 @@ class AzureOpenAIProvider(LLMProvider):
             "x-session-affinity": uuid.uuid4().hex,  # For cache locality
         }
 
+    @staticmethod
+    def _supports_temperature(
+        deployment_name: str,
+        reasoning_effort: str | None = None,
+    ) -> bool:
+        """Return True when temperature is likely supported for this deployment."""
+        if reasoning_effort:
+            return False
+        name = deployment_name.lower()
+        return not any(token in name for token in ("gpt-5", "o1", "o3", "o4"))
+
     def _prepare_request_payload(
         self,
+        deployment_name: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 4096,
+        temperature: float = 0.7,
         reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         """Prepare the request payload with Azure OpenAI 2024-10-21 compliance."""
         payload: dict[str, Any] = {
-            "messages": self._sanitize_empty_content(messages),
+            "messages": self._sanitize_request_messages(
+                self._sanitize_empty_content(messages),
+                _AZURE_MSG_KEYS,
+            ),
             "max_completion_tokens": max(1, max_tokens),  # Azure API 2024-10-21 uses max_completion_tokens
         }
+
+        if self._supports_temperature(deployment_name, reasoning_effort):
+            payload["temperature"] = temperature
 
         if reasoning_effort:
             payload["reasoning_effort"] = reasoning_effort
@@ -116,7 +137,7 @@ class AzureOpenAIProvider(LLMProvider):
         url = self._build_chat_url(deployment_name)
         headers = self._build_headers()
         payload = self._prepare_request_payload(
-            messages, tools, max_tokens, reasoning_effort
+            deployment_name, messages, tools, max_tokens, temperature, reasoning_effort
         )
 
         try:

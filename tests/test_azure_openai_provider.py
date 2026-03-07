@@ -1,8 +1,8 @@
 """Test Azure OpenAI provider implementation (updated for model-based deployment names)."""
 
-import asyncio
-import pytest
 from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 from nanobot.providers.base import LLMResponse
@@ -89,22 +89,65 @@ def test_prepare_request_payload():
     )
     
     messages = [{"role": "user", "content": "Hello"}]
-    payload = provider._prepare_request_payload(messages, max_tokens=1500)
+    payload = provider._prepare_request_payload("gpt-4o", messages, max_tokens=1500, temperature=0.8)
     
     assert payload["messages"] == messages
     assert payload["max_completion_tokens"] == 1500  # Azure API 2024-10-21 uses max_completion_tokens
-    assert "temperature" not in payload  # Temperature not included in payload
+    assert payload["temperature"] == 0.8
     assert "tools" not in payload
     
     # Test with tools
     tools = [{"type": "function", "function": {"name": "get_weather", "parameters": {}}}]
-    payload_with_tools = provider._prepare_request_payload(messages, tools=tools)
+    payload_with_tools = provider._prepare_request_payload("gpt-4o", messages, tools=tools)
     assert payload_with_tools["tools"] == tools
     assert payload_with_tools["tool_choice"] == "auto"
     
     # Test with reasoning_effort
-    payload_with_reasoning = provider._prepare_request_payload(messages, reasoning_effort="medium")
+    payload_with_reasoning = provider._prepare_request_payload(
+        "gpt-5-chat", messages, reasoning_effort="medium"
+    )
     assert payload_with_reasoning["reasoning_effort"] == "medium"
+    assert "temperature" not in payload_with_reasoning
+
+
+def test_prepare_request_payload_sanitizes_messages():
+    """Test Azure payload strips non-standard message keys before sending."""
+    provider = AzureOpenAIProvider(
+        api_key="test-key",
+        api_base="https://test-resource.openai.azure.com",
+        default_model="gpt-4o",
+    )
+
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "call_123", "type": "function", "function": {"name": "x"}}],
+            "reasoning_content": "hidden chain-of-thought",
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_123",
+            "name": "x",
+            "content": "ok",
+            "extra_field": "should be removed",
+        },
+    ]
+
+    payload = provider._prepare_request_payload("gpt-4o", messages)
+
+    assert payload["messages"] == [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "call_123", "type": "function", "function": {"name": "x"}}],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_123",
+            "name": "x",
+            "content": "ok",
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -349,7 +392,7 @@ if __name__ == "__main__":
     
     # Test payload preparation
     messages = [{"role": "user", "content": "Test"}]
-    payload = provider._prepare_request_payload(messages, max_tokens=1000)
+    payload = provider._prepare_request_payload("gpt-4o-deployment", messages, max_tokens=1000)
     assert payload["max_completion_tokens"] == 1000  # Azure 2024-10-21 format
     print("✅ Payload preparation works correctly")
     
