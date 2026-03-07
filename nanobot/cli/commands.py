@@ -210,12 +210,38 @@ def onboard():
 
 
 
+def _ensure_explicit_model_provider_configured(config: Config, model: str) -> None:
+    """Fail fast when model explicitly targets a provider without credentials."""
+    if model.startswith("bedrock/") or "/" not in model:
+        return
+
+    from nanobot.providers.registry import find_by_name
+
+    prefix = model.split("/", 1)[0].lower().replace("-", "_")
+    spec = find_by_name(prefix)
+    if not spec:
+        return
+
+    provider_cfg = getattr(config.providers, spec.name, None)
+    has_auth = spec.is_oauth or bool(provider_cfg and provider_cfg.api_key)
+    if has_auth:
+        return
+
+    console.print(f"[red]Error: Model '{model}' requires provider '{spec.name}'.[/red]")
+    console.print(
+        f"Set [cyan]providers.{spec.name}.apiKey[/cyan] in ~/.nanobot/config.json, "
+        "or switch to a model backed by a configured provider."
+    )
+    raise typer.Exit(1)
+
+
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
     model = config.agents.defaults.model
+    _ensure_explicit_model_provider_configured(config, model)
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
 
