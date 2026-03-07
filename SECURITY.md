@@ -5,7 +5,7 @@
 If you discover a security vulnerability in nanobot, please report it by:
 
 1. **DO NOT** open a public GitHub issue
-2. Create a private security advisory on GitHub or contact the repository maintainers
+2. Create a private security advisory on GitHub or contact the repository maintainers (xubinrencs@gmail.com)
 3. Include:
    - Description of the vulnerability
    - Steps to reproduce
@@ -55,7 +55,7 @@ chmod 600 ~/.nanobot/config.json
 ```
 
 **Security Notes:**
-- Empty `allowFrom` list will **ALLOW ALL** users (open by default for personal use)
+- In `v0.1.4.post3` and earlier, an empty `allowFrom` allows all users. In newer versions (including source builds), **empty `allowFrom` denies all access** — set `["*"]` to explicitly allow everyone.
 - Get your Telegram user ID from `@userinfobot`
 - Use full phone numbers with country code for WhatsApp
 - Review access logs regularly for unauthorized access attempts
@@ -95,8 +95,8 @@ File operations have path traversal protection, but:
 - Consider using a firewall to restrict outbound connections if needed
 
 **WhatsApp Bridge:**
-- The bridge runs on `localhost:3001` by default
-- If exposing to network, use proper authentication and TLS
+- The bridge binds to `127.0.0.1:3001` (localhost only, not accessible from external network)
+- Set `bridgeToken` in config to enable shared-secret authentication between Python and Node.js
 - Keep authentication data in `~/.nanobot/whatsapp-auth` secure (mode 0700)
 
 ### 6. Dependency Security
@@ -212,9 +212,8 @@ If you suspect a security breach:
 - Input length limits on HTTP requests
 
 ✅ **Authentication**
-- Allow-list based access control
+- Allow-list based access control — in `v0.1.4.post3` and earlier empty means allow all; in newer versions empty means deny all (`["*"]` to explicitly allow all)
 - Failed authentication attempt logging
-- Open by default (configure allowFrom for production use)
 
 ✅ **Resource Protection**
 - Command execution timeouts (60s default)
@@ -224,7 +223,7 @@ If you suspect a security breach:
 ✅ **Secure Communication**
 - HTTPS for all external API calls
 - TLS for Telegram API
-- WebSocket security for WhatsApp bridge
+- WhatsApp bridge: localhost-only binding + optional token auth
 
 ## Known Limitations
 
