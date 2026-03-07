@@ -1,5 +1,6 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import hashlib
 import os
 import secrets
 import string
@@ -167,24 +168,47 @@ class LiteLLMProvider(LLMProvider):
         return frozenset()
 
     @staticmethod
+    def _normalize_tool_call_id(tool_call_id: Any) -> Any:
+        """Normalize tool_call_id to a provider-safe 9-char alphanumeric form."""
+        if not isinstance(tool_call_id, str):
+            return tool_call_id
+        if len(tool_call_id) == 9 and tool_call_id.isalnum():
+            return tool_call_id
+        return hashlib.sha1(tool_call_id.encode()).hexdigest()[:9]
+
+    @staticmethod
     def _sanitize_messages(messages: list[dict[str, Any]], extra_keys: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
         """Strip non-standard keys and ensure assistant messages have a content key."""
-        # GitHub Copilot and some other providers have a 64-character limit on tool_call_id
-        MAX_TOOL_CALL_ID_LENGTH = 64
         allowed = _ALLOWED_MSG_KEYS | extra_keys
         sanitized = []
+        id_map: dict[str, str] = {}
+
+        def map_id(value: Any) -> Any:
+            if not isinstance(value, str):
+                return value
+            return id_map.setdefault(value, LiteLLMProvider._normalize_tool_call_id(value))
+
         for msg in messages:
             clean = {k: v for k, v in msg.items() if k in allowed}
             # Strict providers require "content" even when assistant only has tool_calls
             if clean.get("role") == "assistant" and "content" not in clean:
                 clean["content"] = None
-            # Truncate tool_call_id if it exceeds the provider's limit
-            # This can happen when switching from providers that generate longer IDs
+
+            # Keep assistant tool_calls[].id and tool tool_call_id in sync after
+            # shortening, otherwise strict providers reject the broken linkage.
+            if isinstance(clean.get("tool_calls"), list):
+                normalized_tool_calls = []
+                for tc in clean["tool_calls"]:
+                    if not isinstance(tc, dict):
+                        normalized_tool_calls.append(tc)
+                        continue
+                    tc_clean = dict(tc)
+                    tc_clean["id"] = map_id(tc_clean.get("id"))
+                    normalized_tool_calls.append(tc_clean)
+                clean["tool_calls"] = normalized_tool_calls
+
             if "tool_call_id" in clean and clean["tool_call_id"]:
-                tool_call_id = clean["tool_call_id"]
-                if isinstance(tool_call_id, str) and len(tool_call_id) > MAX_TOOL_CALL_ID_LENGTH:
-                    # Preserve first 32 chars and last 32 chars to maintain uniqueness
-                    clean["tool_call_id"] = tool_call_id[:32] + tool_call_id[-32:]
+                clean["tool_call_id"] = map_id(clean["tool_call_id"])
             sanitized.append(clean)
         return sanitized
 
