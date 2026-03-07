@@ -420,6 +420,10 @@ nanobot channels login
 nanobot gateway
 ```
 
+> WhatsApp bridge updates are not applied automatically for existing installations.
+> If you upgrade nanobot and need the latest WhatsApp bridge, run:
+> `rm -rf ~/.nanobot/bridge && nanobot channels login`
+
 </details>
 
 <details>
