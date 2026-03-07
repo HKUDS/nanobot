@@ -86,6 +86,36 @@ class TestMessageToolSuppressLogic:
         assert result is not None
         assert "Hello" in result.content
 
+    @pytest.mark.asyncio
+    async def test_progress_hides_internal_reasoning(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        tool_call = ToolCallRequest(id="call1", name="read_file", arguments={"path": "foo.txt"})
+        calls = iter([
+            LLMResponse(
+                content="Visible<think>hidden</think>",
+                tool_calls=[tool_call],
+                reasoning_content="secret reasoning",
+                thinking_blocks=[{"signature": "sig", "thought": "secret thought"}],
+            ),
+            LLMResponse(content="Done", tool_calls=[]),
+        ])
+        loop.provider.chat = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.tools.execute = AsyncMock(return_value="ok")
+
+        progress: list[tuple[str, bool]] = []
+
+        async def on_progress(content: str, *, tool_hint: bool = False) -> None:
+            progress.append((content, tool_hint))
+
+        final_content, _, _ = await loop._run_agent_loop([], on_progress=on_progress)
+
+        assert final_content == "Done"
+        assert progress == [
+            ("Visible", False),
+            ('read_file("foo.txt")', True),
+        ]
+
 
 class TestMessageToolTurnTracking:
 
