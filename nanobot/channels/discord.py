@@ -220,6 +220,8 @@ class DiscordChannel(BaseChannel):
                 logger.info("Discord bot connected as user {}", self._bot_user_id)
             elif op == 0 and event_type == "MESSAGE_CREATE":
                 await self._handle_message_create(payload)
+            elif op == 0 and event_type == "INTERACTION_CREATE":
+                await self._handle_interaction_create(payload)
             elif op == 7:
                 # RECONNECT: exit loop to reconnect
                 logger.info("Discord gateway requested reconnect")
@@ -327,6 +329,64 @@ class DiscordChannel(BaseChannel):
                 "reply_to": reply_to,
             },
         )
+
+
+    async def _handle_interaction_create(self, payload: dict[str, Any]) -> None:
+        """Handle Discord slash-command interactions.
+
+        Discord requires an interaction callback within ~3 seconds, otherwise
+        clients show "This application did not respond".
+        """
+        if not self._http:
+            return
+
+        if payload.get("type") != 2:  # APPLICATION_COMMAND
+            return
+
+        interaction_id = str(payload.get("id", ""))
+        interaction_token = str(payload.get("token", ""))
+        data = payload.get("data") or {}
+        command_name = str(data.get("name", "")).strip().lower()
+        channel_id = str(payload.get("channel_id", ""))
+        user = payload.get("member", {}).get("user") or payload.get("user") or {}
+        sender_id = str(user.get("id", ""))
+
+        if not interaction_id or not interaction_token or not channel_id or not sender_id:
+            return
+
+        if not self.is_allowed(sender_id):
+            return
+
+        callback_url = f"{DISCORD_API_BASE}/interactions/{interaction_id}/{interaction_token}/callback"
+        headers = {"Authorization": f"Bot {self.config.token}"}
+
+        try:
+            response = await self._http.post(callback_url, headers=headers, json={"type": 5})
+            if response.status_code >= 400:
+                logger.warning(
+                    "Failed to acknowledge Discord interaction {}: {} {}",
+                    interaction_id,
+                    response.status_code,
+                    response.text[:200],
+                )
+                return
+        except Exception as e:
+            logger.warning("Failed to acknowledge Discord interaction {}: {}", interaction_id, e)
+            return
+
+        if command_name:
+            await self._start_typing(channel_id)
+            await self._handle_message(
+                sender_id=sender_id,
+                chat_id=channel_id,
+                content=f"/{command_name}",
+                metadata={
+                    "message_id": interaction_id,
+                    "guild_id": payload.get("guild_id"),
+                    "reply_to": None,
+                    "interaction_token": interaction_token,
+                },
+            )
 
     def _should_respond_in_group(self, payload: dict[str, Any], content: str) -> bool:
         """Check if bot should respond in a group channel based on policy."""
