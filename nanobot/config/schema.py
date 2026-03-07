@@ -36,13 +36,17 @@ class TelegramConfig(Base):
 
 
 class FeishuConfig(Base):
-    """Feishu/Lark channel configuration using WebSocket long connection."""
+    """Feishu/Lark channel configuration supporting WebSocket and Webhook modes."""
 
     enabled: bool = False
     app_id: str = ""  # App ID from Feishu Open Platform
     app_secret: str = ""  # App Secret from Feishu Open Platform
-    encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
-    verification_token: str = ""  # Verification Token for event subscription (optional)
+    encrypt_key: str = ""  # Encrypt Key for event subscription (required for webhook mode)
+    verification_token: str = ""  # Verification Token for event subscription (required for webhook mode)
+    connection_mode: Literal["websocket", "webhook"] = "websocket"  # Connection mode
+    webhook_port: int = 9321  # Port for webhook HTTP server
+    webhook_path: str = "/feishu/events"  # Path for webhook endpoint
+    webhook_host: str = "0.0.0.0"  # Bind address for webhook server
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
     react_emoji: str = (
         "THUMBSUP"  # Emoji type for message reactions (e.g. THUMBSUP, OK, DONE, SMILE)

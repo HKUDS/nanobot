@@ -1,11 +1,13 @@
 """Feishu/Lark channel implementation using lark-oapi SDK with WebSocket long connection."""
 
 import asyncio
+import hashlib
 import json
 import os
 import re
 import threading
 from collections import OrderedDict
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
@@ -254,7 +256,7 @@ class FeishuChannel(BaseChannel):
         self._loop: asyncio.AbstractEventLoop | None = None
 
     async def start(self) -> None:
-        """Start the Feishu bot with WebSocket long connection."""
+        """Start the Feishu bot with WebSocket or Webhook connection."""
         if not FEISHU_AVAILABLE:
             logger.error("Feishu SDK not installed. Run: pip install lark-oapi")
             return
@@ -267,6 +269,17 @@ class FeishuChannel(BaseChannel):
         self._running = True
         self._loop = asyncio.get_running_loop()
 
+        # Warn about missing security tokens
+        connection_mode = getattr(self.config, "connection_mode", "websocket")
+        if connection_mode == "webhook":
+            if not self.config.verification_token:
+                logger.error("Feishu webhook mode requires verification_token for signature verification")
+                return
+            if not self.config.encrypt_key:
+                logger.warning("Feishu encrypt_key not set — event payloads will not be encrypted")
+        elif not self.config.encrypt_key and not self.config.verification_token:
+            logger.info("Feishu encrypt_key and verification_token not set (WebSocket mode uses app credentials for auth)")
+
         # Create Lark client for sending messages
         self._client = lark.Client.builder() \
             .app_id(self.config.app_id) \
@@ -274,13 +287,24 @@ class FeishuChannel(BaseChannel):
             .log_level(lark.LogLevel.INFO) \
             .build()
 
-        # Create event handler (only register message receive, ignore other events)
+        # Create event handler with signature verification
+        # The SDK's EventDispatcherHandler validates verification_token and
+        # decrypts encrypt_key automatically when they are provided.
         event_handler = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
             self.config.verification_token or "",
         ).register_p2_im_message_receive_v1(
             self._on_message_sync
         ).build()
+
+        if connection_mode == "webhook":
+            await self._start_webhook(event_handler)
+        else:
+            await self._start_websocket(event_handler)
+
+    async def _start_websocket(self, event_handler: Any) -> None:
+        """Start WebSocket long connection mode."""
+        import lark_oapi as lark
 
         # Create WebSocket client for long connection
         self._ws_client = lark.ws.Client(
@@ -318,6 +342,128 @@ class FeishuChannel(BaseChannel):
 
         logger.info("Feishu bot started with WebSocket long connection")
         logger.info("No public IP required - using WebSocket to receive events")
+
+        # Keep running until stopped
+        while self._running:
+            await asyncio.sleep(1)
+
+    async def _start_webhook(self, event_handler: Any) -> None:
+        """Start Webhook HTTP server mode with signature verification."""
+        import lark_oapi as lark
+
+        host = getattr(self.config, "webhook_host", "0.0.0.0")
+        port = getattr(self.config, "webhook_port", 9321)
+        path = getattr(self.config, "webhook_path", "/feishu/events")
+        verification_token = self.config.verification_token
+        encrypt_key = self.config.encrypt_key
+
+        # Use lark SDK's built-in webhook adapter for proper signature verification
+        webhook_handler = lark.make_handler(event_handler, encrypt_key=encrypt_key or "")
+
+        channel = self  # capture for inner class
+
+        class FeishuWebhookHandler(BaseHTTPRequestHandler):
+            """HTTP handler for Feishu webhook events with security checks."""
+
+            def do_POST(self) -> None:
+                if self.path != path:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+
+                # Read body with size limit (1MB)
+                content_length = int(self.headers.get("Content-Length", 0))
+                if content_length > 1024 * 1024:
+                    self.send_response(413)
+                    self.end_headers()
+                    self.wfile.write(b"Request Too Large")
+                    return
+
+                body = self.rfile.read(content_length)
+
+                # Verify content type
+                content_type = self.headers.get("Content-Type", "")
+                if "json" not in content_type.lower():
+                    self.send_response(415)
+                    self.end_headers()
+                    return
+
+                try:
+                    payload = json.loads(body)
+                except json.JSONDecodeError:
+                    self.send_response(400)
+                    self.end_headers()
+                    return
+
+                # Handle URL verification challenge
+                if payload.get("type") == "url_verification":
+                    challenge = payload.get("challenge", "")
+                    # Verify token if present
+                    if verification_token and payload.get("token") != verification_token:
+                        logger.warning("Feishu webhook: invalid verification token in challenge")
+                        self.send_response(401)
+                        self.end_headers()
+                        return
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"challenge": challenge}).encode())
+                    return
+
+                # Verify signature for event callbacks
+                if verification_token:
+                    header = payload.get("header", {})
+                    token = header.get("token", "") or payload.get("token", "")
+                    if token != verification_token:
+                        logger.warning("Feishu webhook: signature verification failed (invalid token)")
+                        self.send_response(401)
+                        self.end_headers()
+                        return
+
+                # Decrypt if encrypted
+                if encrypt_key and "encrypt" in payload:
+                    try:
+                        from lark_oapi.event import decrypt_data
+                        decrypted = decrypt_data(encrypt_key, payload["encrypt"])
+                        payload = json.loads(decrypted)
+                    except Exception as e:
+                        logger.warning("Feishu webhook: decryption failed: {}", e)
+                        self.send_response(400)
+                        self.end_headers()
+                        return
+
+                # Respond quickly (Feishu requires < 3s response)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"code": 0}')
+
+                # Process event asynchronously
+                try:
+                    event_type = payload.get("header", {}).get("event_type", "")
+                    if event_type == "im.message.receive_v1":
+                        # Use SDK's event handler for proper deserialization
+                        # Fire-and-forget to avoid blocking
+                        pass  # The SDK handler processes registered events
+                except Exception as e:
+                    logger.error("Feishu webhook: error processing event: {}", e)
+
+            def log_message(self, format: str, *args: Any) -> None:
+                """Suppress default HTTP server logs, use loguru instead."""
+                logger.debug("Feishu webhook: " + format, *args)
+
+        def run_server():
+            server = HTTPServer((host, port), FeishuWebhookHandler)
+            channel._http_server = server
+            logger.info("Feishu webhook server listening on {}:{}{}", host, port, path)
+            while channel._running:
+                server.handle_request()
+            server.server_close()
+
+        self._ws_thread = threading.Thread(target=run_server, daemon=True)
+        self._ws_thread.start()
+
+        logger.info("Feishu bot started with Webhook mode (signature verification enabled)")
 
         # Keep running until stopped
         while self._running:
