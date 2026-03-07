@@ -1,6 +1,7 @@
 """QQ channel implementation using botpy SDK."""
 
 import asyncio
+import base64
 import mimetypes
 from collections import deque
 from pathlib import Path
@@ -15,16 +16,18 @@ from nanobot.config.schema import QQConfig
 
 try:
     import botpy
-    from botpy.message import C2CMessage
 
     QQ_AVAILABLE = True
 except ImportError:
     QQ_AVAILABLE = False
     botpy = None
-    C2CMessage = None
+    # C2CMessage = None
 
 if TYPE_CHECKING:
+    from botpy import Client
+    from botpy.http import Route
     from botpy.message import C2CMessage
+    from botpy.types.message import Media
 
 # QQ C2C 富媒体文件类型
 # 1: 图片, 2: 语音, 3: 视频, 4: 文件
@@ -46,26 +49,22 @@ def _get_file_type(file_path: str) -> int:
         return QQ_FILE_TYPE_IMAGE
 
     # 语音类型
-    if ext in (".mp3", ".wav", ".ogg", ".m4a", ".aac") or (
-        mime and mime.startswith("audio/")
-    ):
+    if ext in (".mp3", ".wav", ".ogg", ".m4a", ".aac") or (mime and mime.startswith("audio/")):
         return QQ_FILE_TYPE_VOICE
 
     # 视频类型
-    if ext in (".mp4", ".avi", ".mov", ".mkv", ".flv") or (
-        mime and mime.startswith("video/")
-    ):
+    if ext in (".mp4", ".avi", ".mov", ".mkv", ".flv") or (mime and mime.startswith("video/")):
         return QQ_FILE_TYPE_VIDEO
 
     # 默认文件类型
     return QQ_FILE_TYPE_FILE
 
 
-def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
+def _make_bot_class(channel: "QQChannel") -> "type[Client]":
     """Create a botpy Client subclass bound to the given channel."""
     intents = botpy.Intents(public_messages=True, direct_message=True)
 
-    class _Bot(botpy.Client):
+    class _Bot(Client):
         def __init__(self):
             # Disable botpy's file log — nanobot uses loguru; default "botpy.log" fails on read-only fs
             super().__init__(intents=intents, ext_handlers=False)
@@ -90,7 +89,7 @@ class QQChannel(BaseChannel):
     def __init__(self, config: QQConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: QQConfig = config
-        self._client: "botpy.Client | None" = None
+        self._client: "Client | None" = None
         self._processed_ids: deque = deque(maxlen=1000)
         self._msg_seq: int = 1  # 消息序列号，避免被 QQ API 去重
 
@@ -142,7 +141,7 @@ class QQChannel(BaseChannel):
         self._msg_seq += 1  # 递增序列号避免去重
 
         # 发送富媒体文件
-        for media_path in (msg.media or []):
+        for media_path in msg.media or []:
             await self._send_media(msg.chat_id, media_path, msg_id)
 
         # 发送文本内容
@@ -158,9 +157,7 @@ class QQChannel(BaseChannel):
             except Exception as e:
                 logger.error("Error sending QQ message: {}", e)
 
-    async def _send_media(
-        self, chat_id: str, file_path: str, msg_id: str | None = None
-    ) -> bool:
+    async def _send_media(self, chat_id: str, file_path: str, msg_id: str | None = None) -> bool:
         """发送富媒体文件到QQ C2C.
 
         流程:
@@ -172,17 +169,18 @@ class QQChannel(BaseChannel):
             logger.warning("QQ media file not found: {}", file_path)
             return False
 
+        base64_encoded_data = base64.b64encode(path.read_bytes()).decode("utf-8")
+
         file_type = _get_file_type(file_path)
-        file_url = f"file://{path.absolute()}"
 
         try:
             self._msg_seq += 1
 
             # 1. 上传文件获取 Media 对象
-            upload_result = await self._client.api.post_c2c_file(
+            upload_result = await self.post_c2c_base64file(
                 openid=chat_id,
                 file_type=file_type,
-                url=file_url,
+                file_data=base64_encoded_data,
             )
 
             if not upload_result:
@@ -214,7 +212,7 @@ class QQChannel(BaseChannel):
             self._processed_ids.append(data.id)
 
             author = data.author
-            user_id = str(getattr(author, 'id', None) or getattr(author, 'user_openid', 'unknown'))
+            user_id = str(getattr(author, "id", None) or getattr(author, "user_openid", "unknown"))
             content = (data.content or "").strip()
             if not content:
                 return
@@ -228,3 +226,24 @@ class QQChannel(BaseChannel):
         except Exception:
             logger.exception("Error handling QQ message")
 
+    # https://github.com/tencent-connect/botpy/issues/198
+    async def post_c2c_base64file(
+        self,
+        openid: str,
+        file_type: int,
+        file_data: str,
+        srv_send_msg: bool = False,
+    ) -> Media:
+        """
+        上传/发送c2c图片
+
+        Args:
+          openid (str): 您要将消息发送到的用户的 ID
+          file_type (int): 媒体类型：1 图片png/jpg，2 视频mp4，3 语音silk，4 文件（暂不开放）
+          file_data (str): base64 编码的媒体数据
+          srv_send_msg (bool): 设置 true 会直接发送消息到目标端，且会占用主动消息频次
+        """
+        payload = locals()
+        payload.pop("self", None)
+        route = Route("POST", "/v2/users/{openid}/files", openid=openid)
+        return await self._client.api._http.request(route, json=payload)
