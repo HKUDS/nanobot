@@ -150,6 +150,17 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
 
+        # Alexa channel
+        if self.config.channels.alexa.enabled:
+            try:
+                from nanobot.channels.alexa import AlexaChannel
+                self.channels["alexa"] = AlexaChannel(
+                    self.config.channels.alexa, self.bus
+                )
+                logger.info("Alexa channel enabled")
+            except ImportError as e:
+                logger.warning("Alexa channel not available: {}", e)
+
         self._validate_allow_from()
 
     def _validate_allow_from(self) -> None:

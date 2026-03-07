@@ -202,6 +202,18 @@ class QQConfig(Base):
 
 
 
+class AlexaConfig(Base):
+    """Amazon Alexa Custom Skill channel configuration."""
+
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 8443  # Alexa requires 443, 8443, or 10443 for custom endpoints
+    endpoint_path: str = "/alexa"
+    verify_signatures: bool = True  # Verify Alexa request signatures
+    allow_from: list[str] = Field(default_factory=lambda: ["*"])  # Alexa user IDs
+    launch_message: str = "Hi, I'm nanobot. What can I help you with?"
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -217,6 +229,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    alexa: AlexaConfig = Field(default_factory=AlexaConfig)
 
 
 class AgentDefaults(Base):
