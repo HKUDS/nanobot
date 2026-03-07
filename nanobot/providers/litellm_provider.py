@@ -164,7 +164,8 @@ class LiteLLMProvider(LLMProvider):
     def _build_extra_headers(self, session_id: str | None) -> dict[str, str] | None:
         """Merge user headers with a stable session-affinity key for sticky routing."""
         headers = dict(self.extra_headers)
-        affinity = self._session_affinity(session_id)
+        # Inject affinity only for vLLM path where cache-aware sticky routing is documented.
+        affinity = self._session_affinity(session_id) if self._is_vllm else None
         if affinity:
             headers.setdefault("x-session-affinity", affinity)
         return headers or None

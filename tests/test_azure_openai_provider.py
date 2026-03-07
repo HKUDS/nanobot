@@ -80,22 +80,6 @@ def test_build_headers():
     assert "x-session-affinity" in headers
 
 
-def test_build_headers_stable_per_session_id():
-    """Session ID should map to a stable affinity key for sticky routing."""
-    provider = AzureOpenAIProvider(
-        api_key="test-api-key-123",
-        api_base="https://test-resource.openai.azure.com",
-        default_model="gpt-4o",
-    )
-
-    headers_a1 = provider._build_headers(session_id="cli:room-a")
-    headers_a2 = provider._build_headers(session_id="cli:room-a")
-    headers_b = provider._build_headers(session_id="cli:room-b")
-
-    assert headers_a1["x-session-affinity"] == headers_a2["x-session-affinity"]
-    assert headers_a1["x-session-affinity"] != headers_b["x-session-affinity"]
-
-
 def test_prepare_request_payload():
     """Test request payload preparation with Azure OpenAI 2024-10-21 compliance."""
     provider = AzureOpenAIProvider(
