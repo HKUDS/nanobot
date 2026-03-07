@@ -1,6 +1,7 @@
 .worktrees/
 .assets
 .env
+.vscode
 *.pyc
 dist/
 build/
