@@ -180,7 +180,7 @@ class LiteLLMProvider(LLMProvider):
     def _sanitize_messages(messages: list[dict[str, Any]], extra_keys: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
         """Strip non-standard keys and ensure assistant messages have a content key."""
         allowed = _ALLOWED_MSG_KEYS | extra_keys
-        sanitized = []
+        sanitized = LLMProvider._sanitize_request_messages(messages, allowed)
         id_map: dict[str, str] = {}
 
         def map_id(value: Any) -> Any:
@@ -188,12 +188,7 @@ class LiteLLMProvider(LLMProvider):
                 return value
             return id_map.setdefault(value, LiteLLMProvider._normalize_tool_call_id(value))
 
-        for msg in messages:
-            clean = {k: v for k, v in msg.items() if k in allowed}
-            # Strict providers require "content" even when assistant only has tool_calls
-            if clean.get("role") == "assistant" and "content" not in clean:
-                clean["content"] = None
-
+        for clean in sanitized:
             # Keep assistant tool_calls[].id and tool tool_call_id in sync after
             # shortening, otherwise strict providers reject the broken linkage.
             if isinstance(clean.get("tool_calls"), list):
@@ -209,7 +204,6 @@ class LiteLLMProvider(LLMProvider):
 
             if "tool_call_id" in clean and clean["tool_call_id"]:
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
-            sanitized.append(clean)
         return sanitized
 
     async def chat(
