@@ -500,6 +500,23 @@ class TelegramChannel(BaseChannel):
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
 
+        # Enforce group_policy: in group chats with "mention" policy,
+        # only respond when the bot is @mentioned or the message is a reply to the bot.
+        is_group = message.chat.type != "private"
+        if is_group and getattr(self.config, "group_policy", "open") == "mention":
+            bot_username = (await self._app.bot.get_me()).username if self._app else None
+            mentioned = False
+            # Check if bot is @mentioned in text
+            if bot_username and message.text:
+                mentioned = f"@{bot_username}" in message.text
+            # Check if the message is a reply to the bot
+            if not mentioned and message.reply_to_message and message.reply_to_message.from_user:
+                bot_id = (await self._app.bot.get_me()).id if self._app else None
+                if bot_id and message.reply_to_message.from_user.id == bot_id:
+                    mentioned = True
+            if not mentioned:
+                return
+
         # Build content from text and/or media
         content_parts = []
         media_paths = []
