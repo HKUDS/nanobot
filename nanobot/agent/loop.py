@@ -153,17 +153,30 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    async def _ask_user(self, session_key: str, channel: str, chat_id: str, prompt: str) -> str:
+    async def _ask_user(
+            self, session_key: str, channel: str, chat_id: str, prompt: str, timeout: int = 300
+    ) -> str:
+        """
+        Send a prompt to the user and suspend the current task until a reply is received
+        on the message bus, or until the timeout is reached.
+        """
         await self.bus.publish_outbound(OutboundMessage(
             channel=channel, chat_id=chat_id, content=prompt
         ))
 
         loop = asyncio.get_running_loop()
         future = loop.create_future()
+
+        if not hasattr(self, "_pending_inputs"):
+            self._pending_inputs = {}
+
         self._pending_inputs[session_key] = future
 
         try:
-            return await asyncio.wait_for(future, timeout=300)
+            return await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(f"User confirmation timed out for session {session_key}")
+            return "timeout"
         finally:
             self._pending_inputs.pop(session_key, None)
 
@@ -255,13 +268,25 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    if tool_call.name == "exec":
+
+                    # === Interception logic for user confirmation BEGIN ===
+                    # Only intercept if the tool is "exec" AND the config requires confirmation
+                    if tool_call.name == "exec" and self.exec_config.require_confirmation:
                         prompt = (
-                            f"\n⚠️ WARNING: The AI wants to execute a shell command ⚠️\n"
-                            f"Arguments: {args_str}\n"
-                            f"Allow execution? [y/N]: "
+                            f"⚠️ **WARNING: AI requests to execute a shell command** ⚠️\n\n"
+                            f"**Arguments:**\n`{args_str}`\n\n"
+                            f"Reply with **'y'** or **'yes'** to allow execution. (Times out in 5 minutes)"
                         )
-                        choice = await self._ask_user(session_key, channel, chat_id, prompt)
+
+                        # Suspend and wait for user reply across the bus
+                        choice = await self._ask_user(session_key, channel, chat_id, prompt, timeout=self.exec_config.timeout)
+
+                        if choice == "timeout":
+                            result = "Action cancelled: User did not respond in time (timeout)."
+                            messages = self.context.add_tool_result(
+                                messages, tool_call.id, tool_call.name, result
+                            )
+                            continue
 
                         if choice.strip().lower() not in ['y', 'yes']:
                             logger.info("User denied the execution of the command.")
@@ -270,6 +295,9 @@ class AgentLoop:
                                 messages, tool_call.id, tool_call.name, result
                             )
                             continue
+                            # === Interception logic END ===
+
+                    # Normal tool execution flow
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result

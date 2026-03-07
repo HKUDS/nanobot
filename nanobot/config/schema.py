@@ -306,6 +306,7 @@ class ExecToolConfig(Base):
 
     timeout: int = 60
     path_append: str = ""
+    require_confirmation: bool = True
 
 
 class MCPServerConfig(Base):
