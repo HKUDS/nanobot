@@ -436,6 +436,20 @@ class AgentLoop:
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
+        # Media files were encoded to base64 by build_messages above and
+        # may also have been referenced by tool calls during the agent loop.
+        # Clean up now that all processing is done so ~/.nanobot/media/
+        # doesn't grow unbounded.  Only delete files inside the expected
+        # media directory for safety.
+        media_dir = Path.home() / ".nanobot" / "media"
+        for media_path in (msg.media or []):
+            try:
+                p = Path(media_path).resolve()
+                p.relative_to(media_dir)
+                p.unlink(missing_ok=True)
+            except (OSError, ValueError):
+                pass
+
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
