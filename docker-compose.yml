@@ -4,15 +4,16 @@ x-common-config: &common-config
     dockerfile: Dockerfile
   volumes:
     - ~/.nanobot:/root/.nanobot
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
 
 services:
   nanobot-gateway:
     container_name: nanobot-gateway
     <<: *common-config
+    network_mode: host
     command: ["gateway"]
     restart: unless-stopped
-    ports:
-      - 18790:18790
     deploy:
       resources:
         limits:

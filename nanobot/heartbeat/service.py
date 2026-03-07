@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
@@ -59,6 +60,8 @@ class HeartbeatService:
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
+        quiet_start: str | None = None,
+        quiet_end: str | None = None,
     ):
         self.workspace = workspace
         self.provider = provider
@@ -67,12 +70,34 @@ class HeartbeatService:
         self.on_notify = on_notify
         self.interval_s = interval_s
         self.enabled = enabled
+        self.quiet_start = quiet_start
+        self.quiet_end = quiet_end
         self._running = False
         self._task: asyncio.Task | None = None
 
     @property
     def heartbeat_file(self) -> Path:
         return self.workspace / "HEARTBEAT.md"
+
+    def _in_quiet_hours(self) -> bool:
+        """Check if current time is within quiet hours."""
+        if not self.quiet_start or not self.quiet_end:
+            return False
+        try:
+            now = datetime.now()
+            current = now.hour * 60 + now.minute
+            start_h, start_m = map(int, self.quiet_start.split(":"))
+            end_h, end_m = map(int, self.quiet_end.split(":"))
+            start = start_h * 60 + start_m
+            end = end_h * 60 + end_m
+            if start <= end:
+                # Same day range, e.g. 09:00 - 17:00
+                return start <= current < end
+            else:
+                # Overnight range, e.g. 23:00 - 07:00
+                return current >= start or current < end
+        except (ValueError, AttributeError):
+            return False
 
     def _read_heartbeat_file(self) -> str | None:
         if self.heartbeat_file.exists():
@@ -139,6 +164,10 @@ class HeartbeatService:
 
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
+        if self._in_quiet_hours():
+            logger.debug("Heartbeat: skipping (quiet hours)")
+            return
+
         content = self._read_heartbeat_file()
         if not content:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")

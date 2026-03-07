@@ -228,6 +228,11 @@ class AgentDefaults(Base):
     )
     max_tokens: int = 8192
     temperature: float = 0.1
+    top_p: float | None = None  # Nucleus sampling (0.0-1.0)
+    top_k: int | None = None  # Top-k sampling
+    min_p: float | None = None  # Min-p sampling (0.0-1.0)
+    presence_penalty: float | None = None  # Presence penalty (-2.0 to 2.0)
+    frequency_penalty: float | None = None  # Frequency penalty (-2.0 to 2.0)
     max_tool_iterations: int = 40
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
@@ -274,6 +279,8 @@ class HeartbeatConfig(Base):
 
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
+    quiet_start: str | None = None  # Start of quiet hours, e.g. "23:00" (local time)
+    quiet_end: str | None = None  # End of quiet hours, e.g. "07:00" (local time)
 
 
 class GatewayConfig(Base):

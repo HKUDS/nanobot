@@ -297,6 +297,11 @@ def gateway(
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
         temperature=config.agents.defaults.temperature,
+        top_p=config.agents.defaults.top_p,
+        top_k=config.agents.defaults.top_k,
+        min_p=config.agents.defaults.min_p,
+        presence_penalty=config.agents.defaults.presence_penalty,
+        frequency_penalty=config.agents.defaults.frequency_penalty,
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
@@ -403,6 +408,8 @@ def gateway(
         on_notify=on_heartbeat_notify,
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
+        quiet_start=hb_cfg.quiet_start,
+        quiet_end=hb_cfg.quiet_end,
     )
 
     if channels.enabled_channels:
@@ -414,7 +421,10 @@ def gateway(
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
 
-    console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+    hb_status = f"every {hb_cfg.interval_s}s"
+    if hb_cfg.quiet_start and hb_cfg.quiet_end:
+        hb_status += f" (quiet {hb_cfg.quiet_start}-{hb_cfg.quiet_end})"
+    console.print(f"[green]✓[/green] Heartbeat: {hb_status}")
 
     async def run():
         try:
@@ -479,6 +489,11 @@ def agent(
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
         temperature=config.agents.defaults.temperature,
+        top_p=config.agents.defaults.top_p,
+        top_k=config.agents.defaults.top_k,
+        min_p=config.agents.defaults.min_p,
+        presence_penalty=config.agents.defaults.presence_penalty,
+        frequency_penalty=config.agents.defaults.frequency_penalty,
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,

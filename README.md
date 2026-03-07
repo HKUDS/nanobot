@@ -7,6 +7,35 @@ This fork replaces **Brave Search** with **[Exa AI](https://exa.ai)** for both w
 - **Configuration**: Set your Exa API key via `EXA_API_KEY` environment variable or in `~/.nanobot/config.json` under `tools.web.search.apiKey`
 - **Dependency change**: `readability-lxml` replaced with `exa_py`
 
+### Docker: Host Network Mode
+
+Docker Compose now uses `network_mode: host` for the gateway service, allowing containers to access services running on `localhost` (e.g., local LLM servers like llama.cpp, Ollama, vLLM):
+
+- **Configuration**: Use `http://localhost:PORT/v1` as your `apiBase` for local models
+- **Ports**: The gateway binds directly to host port 18790 (no port mapping needed)
+- **Linux only**: Host network mode works on Linux; macOS/Windows users should use `host.docker.internal`
+
+### Heartbeat Quiet Hours
+
+The heartbeat service now supports quiet hours to prevent notifications during specific times:
+
+```json
+{
+  "gateway": {
+    "heartbeat": {
+      "enabled": true,
+      "intervalS": 1800,
+      "quietStart": "23:00",
+      "quietEnd": "07:00"
+    }
+  }
+}
+```
+
+- **`quietStart`**: Time to start quiet period (24h format, local time)
+- **`quietEnd`**: Time to end quiet period (24h format, local time)
+- Supports overnight ranges (e.g., 23:00 - 07:00)
+
 ---
 
 <div align="center">
