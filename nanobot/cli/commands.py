@@ -640,6 +640,192 @@ def agent(
 
 
 # ============================================================================
+# Session Commands
+# ============================================================================
+
+session_app = typer.Typer(help="Manage conversation sessions")
+app.add_typer(session_app, name="session")
+
+
+@session_app.command("list")
+def session_list():
+    """List all conversation sessions."""
+    from nanobot.config.loader import load_config
+    from nanobot.session.manager import SessionManager
+
+    config = load_config()
+    manager = SessionManager(config.workspace_path)
+    sessions = manager.list_sessions()
+
+    if not sessions:
+        console.print("[dim]No sessions found.[/dim]")
+        return
+
+    table = Table(title="Conversation Sessions")
+    table.add_column("Session Key", style="cyan")
+    table.add_column("Created", style="green")
+    table.add_column("Last Updated", style="yellow")
+
+    for s in sessions:
+        created = s.get("created_at", "unknown")[:19].replace("T", " ") if s.get("created_at") else "unknown"
+        updated = s.get("updated_at", "unknown")[:19].replace("T", " ") if s.get("updated_at") else "unknown"
+        table.add_row(s["key"], created, updated)
+
+    console.print(table)
+
+
+@session_app.command("export")
+def session_export(
+    key: str = typer.Argument(..., help="Session key (e.g., 'cli:direct', 'telegram:123456')"),
+    output: str = typer.Option(None, "--output", "-o", help="Output file path (optional)"),
+):
+    """Export a session to a JSON file."""
+    from nanobot.config.loader import load_config
+    from nanobot.session.manager import SessionManager
+
+    config = load_config()
+    manager = SessionManager(config.workspace_path)
+
+    try:
+        output_path = Path(output) if output else None
+        exported_path = manager.export_session(key, output_path)
+        console.print(f"[green]✓[/green] Session exported to: [cyan]{exported_path}[/cyan]")
+    except Exception as e:
+        console.print(f"[red]Error exporting session:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@session_app.command("import")
+def session_import(
+    file: str = typer.Argument(..., help="Path to exported JSON file"),
+    key: str = typer.Option(None, "--key", "-k", help="New session key (optional, uses original if not set)"),
+):
+    """Import a session from a JSON file."""
+    from nanobot.config.loader import load_config
+    from nanobot.session.manager import SessionManager
+
+    config = load_config()
+    manager = SessionManager(config.workspace_path)
+
+    try:
+        input_path = Path(file)
+        if not input_path.exists():
+            console.print(f"[red]File not found:[/red] {file}")
+            raise typer.Exit(1)
+
+        session = manager.import_session(input_path, key)
+        console.print(f"[green]✓[/green] Session imported with key: [cyan]{session.key}[/cyan]")
+        console.print(f"  [dim]{len(session.messages)} messages loaded[/dim]")
+    except Exception as e:
+        console.print(f"[red]Error importing session:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@session_app.command("stats")
+def session_stats(
+    key: str = typer.Argument(..., help="Session key (e.g., 'cli:direct')"),
+):
+    """Show statistics for a session."""
+    from nanobot.config.loader import load_config
+    from nanobot.session.manager import SessionManager
+
+    config = load_config()
+    manager = SessionManager(config.workspace_path)
+
+    try:
+        stats = manager.get_session_stats(key)
+
+        table = Table(title=f"Session Stats: {key}")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+
+        table.add_row("Total Messages", str(stats["total_messages"]))
+        table.add_row("User Messages", str(stats["user_messages"]))
+        table.add_row("Assistant Messages", str(stats["assistant_messages"]))
+        table.add_row("Tool Calls", str(stats["tool_calls"]))
+        table.add_row("Tool Results", str(stats["tool_results"]))
+        table.add_row("Unconsolidated", str(stats["unconsolidated_messages"]))
+        table.add_row("Created", stats["created_at"][:19].replace("T", " "))
+        table.add_row("Last Updated", stats["updated_at"][:19].replace("T", " "))
+
+        console.print(table)
+    except Exception as e:
+        console.print(f"[red]Error getting stats:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@session_app.command("search")
+def session_search(
+    query: str = typer.Argument(..., help="Search query"),
+    case_sensitive: bool = typer.Option(False, "--case-sensitive", help="Case-sensitive search"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Maximum results to show"),
+):
+    """Search through all sessions for messages containing the query."""
+    from nanobot.config.loader import load_config
+    from nanobot.session.manager import SessionManager
+
+    config = load_config()
+    manager = SessionManager(config.workspace_path)
+
+    try:
+        results = manager.search_sessions(query, case_sensitive)
+
+        if not results:
+            console.print(f"[dim]No results found for '{query}'[/dim]")
+            return
+
+        console.print(f"\n[green]Found {len(results)} results for '{query}':[/green]\n")
+
+        for i, r in enumerate(results[:limit], 1):
+            timestamp = r.get("timestamp", "unknown")[:19].replace("T", " ") if r.get("timestamp") else "unknown"
+            console.print(f"[cyan]{i}.[/cyan] [bold]{r['session_key']}[/bold] | {timestamp} | [dim]{r['role']}[/dim]")
+            console.print(f"   {r['content']}")
+            console.print()
+
+        if len(results) > limit:
+            console.print(f"[dim]... and {len(results) - limit} more results[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]Error searching sessions:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@session_app.command("delete")
+def session_delete(
+    key: str = typer.Argument(..., help="Session key to delete"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """Delete a session."""
+    from nanobot.config.loader import load_config
+    from nanobot.session.manager import SessionManager
+
+    config = load_config()
+    manager = SessionManager(config.workspace_path)
+
+    # Check if session exists
+    session = manager.get_or_create(key)
+    if not session.messages and session.key not in manager._cache:
+        console.print(f"[yellow]Session '{key}' not found.[/yellow]")
+        raise typer.Exit(1)
+
+    if not force:
+        confirm = typer.confirm(f"Delete session '{key}' with {len(session.messages)} messages?")
+        if not confirm:
+            console.print("Cancelled.")
+            return
+
+    try:
+        path = manager._get_session_path(key)
+        if path.exists():
+            path.unlink()
+        manager._cache.pop(key, None)
+        console.print(f"[green]✓[/green] Session '{key}' deleted.")
+    except Exception as e:
+        console.print(f"[red]Error deleting session:[/red] {e}")
+        raise typer.Exit(1)
+
+
+# ============================================================================
 # Channel Commands
 # ============================================================================
 
