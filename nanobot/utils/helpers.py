@@ -82,6 +82,8 @@ def split_message(content: str, max_len: int = 2000) -> list[str]:
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
     """Sync bundled templates to workspace. Only creates missing files."""
     from importlib.resources import files as pkg_files
+    from nanobot.config.loader import load_config
+    config = load_config()
     try:
         tpl = pkg_files("nanobot") / "templates"
     except Exception:
@@ -100,6 +102,9 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
 
     for item in tpl.iterdir():
         if item.name.endswith(".md"):
+            if item.name == "SECURITY.md" and not config.agents.defaults.security:
+                (workspace / "SECURITY.md").unlink(missing_ok=True)
+                continue
             _write(item, workspace / item.name)
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
     _write(None, workspace / "memory" / "HISTORY.md")

@@ -231,6 +231,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    security: bool = True  # Provision and load SECURITY.md (cognitive inoculation framework)
 
 
 class AgentsConfig(Base):
