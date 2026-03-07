@@ -96,6 +96,13 @@ Your workspace is at: {workspace_path}
 
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
 
+    _VOICE_CHANNEL_HINT = (
+        "IMPORTANT: This is a voice channel with a strict ~7 second response time limit. "
+        "Reply in 1-2 short spoken sentences. Use at most 1 tool call only if essential. "
+        "Do NOT use markdown, links, code blocks, or any formatting — the response will be "
+        "read aloud. Be direct and conversational."
+    )
+
     @staticmethod
     def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
@@ -104,6 +111,8 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         lines = [f"Current Time: {now} ({tz})"]
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
+        if channel == "alexa":
+            lines.append(ContextBuilder._VOICE_CHANNEL_HINT)
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
 
     def _load_bootstrap_files(self) -> str:
