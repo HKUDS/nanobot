@@ -150,6 +150,18 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
 
+        # Nostr channel
+        if self.config.channels.nostr.enabled:
+            try:
+                from nanobot.channels.nostrchat import NostrChannel
+                self.channels["nostr"] = NostrChannel(
+                    self.config.channels.nostr,
+                    self.bus,
+                )
+                logger.info("Nostr channel enabled")
+            except ImportError as e:
+                logger.warning("Nostr channel not available: {}", e)        
+
         self._validate_allow_from()
 
     def _validate_allow_from(self) -> None:
