@@ -436,7 +436,7 @@ class TelegramChannel(BaseChannel):
         providers = [provider for provider in config.providers.model_dump().keys() if config.providers.model_dump()[provider]["api_key"] != ""]
         await update.message.reply_text(
             "Current Model: {}"
-            "\nChoose a model to manage:".format(config.agents.defaults.model or "Unknown"),
+            "\nChoose a provider to switch to:".format(config.agents.defaults.model or "Unknown"),
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton(provider.replace("_", " ").title(), callback_data=provider + "_provider")]
                 for provider in providers]
