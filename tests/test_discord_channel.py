@@ -139,3 +139,24 @@ async def test_send_suppresses_text_reply_anchor_after_successful_attachment_rep
     payload = channel._send_payload.await_args_list[0].args[2]
     assert "message_reference" not in payload
     assert "allowed_mentions" not in payload
+
+
+@pytest.mark.asyncio
+async def test_send_falls_back_to_text_reply_anchor_after_attachment_failure() -> None:
+    channel = _make_channel(reply_to_message=True)
+    channel._send_file = AsyncMock(return_value=False)
+    channel._send_payload = AsyncMock(return_value=True)
+
+    await channel.send(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="hello",
+            media=["/tmp/file1.txt"],
+            metadata={"message_id": "inbound-1"},
+        )
+    )
+
+    payload = channel._send_payload.await_args_list[0].args[2]
+    assert payload["message_reference"] == {"message_id": "inbound-1"}
+    assert payload["allowed_mentions"] == {"replied_user": False}
