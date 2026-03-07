@@ -664,7 +664,7 @@ Config file: `~/.nanobot/config.json`
 ### Providers
 
 > [!TIP]
-> - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
+> - **Voice transcription** (Telegram voice messages → text) requires explicit opt-in via a top-level `transcription` config block. See [Voice Transcription](#voice-transcription) below.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
 > - **VolcEngine Coding Plan**: If you're on VolcEngine's coding plan, set `"apiBase": "https://ark.cn-beijing.volces.com/api/coding/v3"` in your volcengine provider config.
@@ -679,6 +679,7 @@ Config file: `~/.nanobot/config.json`
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
+| `mistral` | LLM + Voice transcription (Voxtral) | [console.mistral.ai](https://console.mistral.ai) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `minimax` | LLM (MiniMax direct) | [platform.minimaxi.com](https://platform.minimaxi.com) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
@@ -690,6 +691,43 @@ Config file: `~/.nanobot/config.json`
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
+
+### Voice Transcription
+
+Voice transcription converts Telegram voice messages to text. It is **opt-in** — add a top-level `transcription` block to enable it.
+
+```json
+{
+  "transcription": {
+    "provider": "groq",
+    "model": "groq/whisper-large-v3"
+  }
+}
+```
+
+Both `provider` and `model` are required. The `provider` must match a key in your `providers` config (the API key is read from there). For LiteLLM-routed providers (groq, openai), use the provider-prefixed model name:
+
+| Provider | Example model | Notes |
+|----------|--------------|-------|
+| `groq` | `groq/whisper-large-v3` | Routed via LiteLLM |
+| `openai` | `openai/whisper-1` | Routed via LiteLLM |
+| `mistral` | `voxtral-mini-latest` | Direct client (LiteLLM doesn't support Voxtral yet) |
+| `custom` | *(whatever your endpoint accepts)* | Requires `apiBase` in provider config |
+
+The transcription provider is **independent of the LLM provider** — you can use Anthropic for chat and Groq for voice transcription simultaneously:
+
+```json
+{
+  "providers": {
+    "anthropic": { "apiKey": "sk-ant-..." },
+    "groq": { "apiKey": "gsk_..." }
+  },
+  "transcription": {
+    "provider": "groq",
+    "model": "groq/whisper-large-v3"
+  }
+}
+```
 
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>
