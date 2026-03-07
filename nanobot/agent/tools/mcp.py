@@ -83,16 +83,21 @@ async def connect_mcp_servers(
                 )
                 read, write = await stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
+                # Align httpx timeout with MCP tool timeout for clean error handling
+                httpx_timeout = min(cfg.tool_timeout, 300) if cfg.tool_timeout else 30  # Cap at 5min
+                
                 def httpx_client_factory(
                     headers: dict[str, str] | None = None,
                     timeout: httpx.Timeout | None = None,
                     auth: httpx.Auth | None = None,
                 ) -> httpx.AsyncClient:
                     merged_headers = {**(cfg.headers or {}), **(headers or {})}
+                    # Use MCP tool timeout for httpx, but allow override from mcp library
+                    final_timeout = timeout or httpx.Timeout(httpx_timeout)
                     return httpx.AsyncClient(
                         headers=merged_headers or None,
                         follow_redirects=True,
-                        timeout=timeout,
+                        timeout=final_timeout,
                         auth=auth,
                     )
 
@@ -100,13 +105,16 @@ async def connect_mcp_servers(
                     sse_client(cfg.url, httpx_client_factory=httpx_client_factory)
                 )
             elif transport_type == "streamableHttp":
-                # Always provide an explicit httpx client so MCP HTTP transport does not
-                # inherit httpx's default 5s timeout and preempt the higher-level tool timeout.
+                # Align httpx timeout with MCP tool timeout for clean error handling
+                httpx_timeout = min(cfg.tool_timeout, 300) if cfg.tool_timeout else 30  # Cap at 5min
+                
+                # Provide explicit httpx client with aligned timeout so MCP HTTP transport
+                # does not inherit httpx's default 5s timeout and preempt the tool timeout
                 http_client = await stack.enter_async_context(
                     httpx.AsyncClient(
                         headers=cfg.headers or None,
                         follow_redirects=True,
-                        timeout=None,
+                        timeout=httpx.Timeout(httpx_timeout),
                     )
                 )
                 read, write, _ = await stack.enter_async_context(
@@ -121,7 +129,8 @@ async def connect_mcp_servers(
 
             tools = await session.list_tools()
             for tool_def in tools.tools:
-                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
+                timeout = cfg.tool_timeout or 30  # Default to 30s if not specified
+                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=timeout)
                 registry.register(wrapper)
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
 
