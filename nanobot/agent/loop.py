@@ -187,6 +187,7 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        total_usage: dict[str, int] = {}
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -199,6 +200,9 @@ class AgentLoop:
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
             )
+
+            for key, val in response.usage.items():
+                total_usage[key] = total_usage.get(key, 0) + val
 
             if response.has_tool_calls:
                 if on_progress:
@@ -252,6 +256,14 @@ class AgentLoop:
             final_content = (
                 f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
                 "without completing the task. You can try breaking the task into smaller steps."
+            )
+
+        if total_usage:
+            logger.info(
+                "Token usage — prompt: {}, completion: {}, total: {}",
+                total_usage.get("prompt_tokens", 0),
+                total_usage.get("completion_tokens", 0),
+                total_usage.get("total_tokens", 0),
             )
 
         return final_content, tools_used, messages
