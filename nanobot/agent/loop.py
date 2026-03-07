@@ -159,6 +159,33 @@ class AgentLoop:
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
 
+    _RETRY_DELAYS = (1, 2, 4)  # seconds — exponential backoff for transient LLM errors
+
+    async def _chat_with_retry(self, **kwargs: Any) -> Any:
+        """Call provider.chat() with retry on transient errors (429, 5xx, network)."""
+        from nanobot.providers.base import LLMResponse
+
+        last_response: LLMResponse | None = None
+        for attempt, delay in enumerate(self._RETRY_DELAYS):
+            response = await self.provider.chat(**kwargs)
+            if response.finish_reason != "error":
+                return response
+            # Check if the error looks transient (rate limit, server error, network)
+            err = (response.content or "").lower()
+            is_transient = any(kw in err for kw in (
+                "429", "rate limit", "500", "502", "503", "504",
+                "overloaded", "timeout", "connection", "server error",
+            ))
+            if not is_transient:
+                return response  # permanent error (400, 401, etc.) — don't retry
+            last_response = response
+            logger.warning("LLM transient error (attempt {}/{}), retrying in {}s: {}",
+                           attempt + 1, len(self._RETRY_DELAYS), delay, err[:120])
+            await asyncio.sleep(delay)
+        # All retries exhausted — make one final attempt
+        response = await self.provider.chat(**kwargs)
+        return response if response.finish_reason != "error" else (last_response or response)
+
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
         """Remove <think>…</think> blocks that some models embed in content."""
@@ -191,7 +218,7 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await self.provider.chat(
+            response = await self._chat_with_retry(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model,
