@@ -110,17 +110,20 @@ class LLMProvider(ABC):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        thinking: dict | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request.
-        
+
         Args:
             messages: List of message dicts with 'role' and 'content'.
             tools: Optional list of tool definitions.
             model: Model identifier (provider-specific).
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
-        
+            reasoning_effort: Thinking level for supported models ("low"/"medium"/"high").
+            thinking: Anthropic extended thinking config, e.g. {"type": "enabled", "budget_tokens": 10000}.
+
         Returns:
             LLMResponse with content and/or tool calls.
         """
