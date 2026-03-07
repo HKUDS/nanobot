@@ -12,7 +12,7 @@ from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTo
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
-from nanobot.bus.events import InboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig
 from nanobot.providers.base import LLMProvider
@@ -92,6 +92,21 @@ class SubagentManager:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
 
+        # Define on_progress callback to send subagent tool output to CLI
+        async def _subagent_progress(content: str, *, tool_hint: bool = False, display_type: str = "text") -> None:
+            """Send subagent tool output to CLI via message bus."""
+            meta = {
+                "_progress": True,
+                "_tool_hint": tool_hint,
+                "_display_type": display_type,
+            }
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=origin["channel"],
+                chat_id=origin["chat_id"],
+                content=content,
+                metadata=meta,
+            ))
+
         try:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
@@ -155,7 +170,11 @@ class SubagentManager:
                     for tool_call in response.tool_calls:
                         args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                         logger.debug("Subagent [{}] executing: {} with arguments: {}", task_id, tool_call.name, args_str)
-                        result, _ = await tools.execute(tool_call.name, tool_call.arguments)
+                        result, _ = await tools.execute(
+                            tool_call.name,
+                            tool_call.arguments,
+                            on_progress=_subagent_progress,
+                        )
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,

@@ -54,7 +54,7 @@ class ReadFileTool(Tool):
             "required": ["path"],
         }
 
-    async def execute(self, path: str, **kwargs: Any) -> str:
+    async def execute(self, path: str, **kwargs: Any) -> str | ToolResult:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
             if not file_path.exists():
@@ -71,12 +71,84 @@ class ReadFileTool(Tool):
 
             content = file_path.read_text(encoding="utf-8")
             if len(content) > self._MAX_CHARS:
-                return content[: self._MAX_CHARS] + f"\n\n... (truncated — file is {len(content):,} chars, limit {self._MAX_CHARS:,})"
-            return content
+                content = content[: self._MAX_CHARS] + f"\n\n... (truncated — file is {len(content):,} chars, limit {self._MAX_CHARS:,})"
+
+            # Generate display preview for CLI
+            preview = self._format_read_preview(content, str(file_path), size)
+
+            return ToolResult(
+                content=content,
+                display=preview,
+                display_type="list_result",
+            )
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
             return f"Error reading file: {str(e)}"
+
+    def _format_read_preview(self, content: str, path: str, size: int, max_lines: int = 5) -> str:
+        """
+        Format a preview of read file content with background color.
+
+        Args:
+            content: The content that was read.
+            path: File path for display.
+            size: File size in bytes.
+            max_lines: Maximum number of lines to preview.
+
+        Returns:
+            Formatted preview string with dark gray background and dim text.
+        """
+        # ANSI color codes - dark gray background with dim foreground
+        BG_COLOR = "\x1b[48;2;26;26;26m"   # #1a1a1a
+        DIM_FG = "\x1b[38;2;150;150;150m"   # 暗灰色
+        BOLD = "\x1b[1m"
+        RESET = "\x1b[0m"
+
+        # Get terminal width for full-line background
+        try:
+            terminal_width = os.get_terminal_size().columns
+        except OSError:
+            terminal_width = 100
+
+        lines = []
+
+        # Header
+        header = f"Read {size:,} bytes from {path}"
+        lines.append(f"{BOLD}{BG_COLOR}{DIM_FG}{header}{' ' * (terminal_width - len(header))}{RESET}")
+        # Empty line with background
+        lines.append(f"{BG_COLOR}{' ' * terminal_width}{RESET}")
+
+        content_lines = content.splitlines()
+        total_lines = len(content_lines)
+
+        if total_lines == 0:
+            line = "(empty file)"
+            padded = line.ljust(terminal_width)
+            lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+        elif total_lines <= max_lines:
+            # Show all content with line numbers
+            msg = f"Showing all {total_lines} line{'s' if total_lines != 1 else ''}:"
+            padded = msg.ljust(terminal_width)
+            lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+            for i, line in enumerate(content_lines, 1):
+                line_content = f" {i:>4}   {line}"
+                padded = line_content.ljust(terminal_width)
+                lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+        else:
+            # Show first max_lines with indicator
+            msg = f"Showing first {max_lines} of {total_lines} lines:"
+            padded = msg.ljust(terminal_width)
+            lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+            for i in range(max_lines):
+                line_content = f" {i+1:>4}   {content_lines[i]}"
+                padded = line_content.ljust(terminal_width)
+                lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+            msg = f"... ({total_lines - max_lines} more lines)"
+            padded = msg.ljust(terminal_width)
+            lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+
+        return "\n".join(lines) + "\n"
 
 
 class WriteFileTool(Tool):
@@ -126,7 +198,7 @@ class WriteFileTool(Tool):
 
     def _format_content_preview(self, content: str, path: str, max_lines: int = 20) -> str:
         """
-        Format a preview of written file content.
+        Format a preview of written file content with background color.
 
         Args:
             content: The content that was written.
@@ -134,26 +206,53 @@ class WriteFileTool(Tool):
             max_lines: Maximum number of lines to preview.
 
         Returns:
-            Formatted preview string.
+            Formatted preview string with dark gray background and dim text.
         """
+        # ANSI color codes - dark gray background with dim foreground
+        BG_COLOR = "\x1b[48;2;26;26;26m"   # #1a1a1a
+        DIM_FG = "\x1b[38;2;150;150;150m"   # 暗灰色
+        BOLD = "\x1b[1m"
+        RESET = "\x1b[0m"
+
+        # Get terminal width for full-line background
+        try:
+            terminal_width = os.get_terminal_size().columns
+        except OSError:
+            terminal_width = 100
+
         lines = content.splitlines(keepends=False)
         total_lines = len(lines)
 
         preview = []
-        preview.append(f"Wrote {len(content)} bytes to {path}")
+
+        # Header
+        header = f"Wrote {len(content)} bytes to {path}"
+        preview.append(f"{BOLD}{BG_COLOR}{DIM_FG}{header}{' ' * (terminal_width - len(header))}{RESET}")
+        # Empty line with background
+        preview.append(f"{BG_COLOR}{' ' * terminal_width}{RESET}")
 
         if total_lines == 0:
-            preview.append("(empty file)")
+            line = "(empty file)"
+            padded = line.ljust(terminal_width)
+            preview.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
         elif total_lines <= max_lines:
             # Show all content with line numbers
             for i, line in enumerate(lines, 1):
-                preview.append(f" {i:>4}   {line}")
+                line_content = f" {i:>4}   {line}"
+                padded = line_content.ljust(terminal_width)
+                preview.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
         else:
             # Show first max_lines with indicator
-            preview.append(f"--- Content preview (first {max_lines} of {total_lines} lines) ---")
+            msg = f"--- Content preview (first {max_lines} of {total_lines} lines) ---"
+            padded = msg.ljust(terminal_width)
+            preview.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
             for i in range(max_lines):
-                preview.append(f" {i+1:>4}   {lines[i]}")
-            preview.append(f"... ({total_lines - max_lines} more lines)")
+                line_content = f" {i+1:>4}   {lines[i]}"
+                padded = line_content.ljust(terminal_width)
+                preview.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+            msg = f"... ({total_lines - max_lines} more lines)"
+            padded = msg.ljust(terminal_width)
+            preview.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
 
         return "\n".join(preview) + "\n"
 
@@ -268,8 +367,12 @@ class EditFileTool(Tool):
         removed_count = sum(1 for line in diff if line.startswith("-"))
 
         lines = []
-        lines.append(f"{BOLD}Update: {path}{RESET}\n")
-        lines.append(f"  ↳ Added {added_count} line{'s' if added_count != 1 else ''}, removed {removed_count} line{'s' if removed_count != 1 else ''}\n")
+        # Header without trailing \n
+        header = f"Update: {path}"
+        lines.append(f"{BOLD}{header}{RESET}")
+        # Summary line without trailing \n
+        summary = f"  ↳ Added {added_count} line{'s' if added_count != 1 else ''}, removed {removed_count} line{'s' if removed_count != 1 else ''}"
+        lines.append(f"{summary}{RESET}")
 
         # Track line numbers for old and new files
         old_line_num = 0
@@ -293,30 +396,29 @@ class EditFileTool(Tool):
                 # Removed line - show with old line number and red background
                 # The old_line_num represents the line number in the original file
                 content = line[1:].rstrip("\n")
-                visible_prefix = f" {old_line_num:>4} - {content}"
-                remaining = max(0, terminal_width - len(visible_prefix))
-                lines.append(f"{RED_BG} {RED_FG}{old_line_num:>4}{RESET}{RED_BG} - {content}{' ' * remaining}{RESET}\n")
+                remaining = max(0, terminal_width - len(f" {old_line_num:>4} - {content}"))
+                lines.append(f"{RED_BG} {RED_FG}{old_line_num:>4}{RESET}{RED_BG} - {content}{' ' * remaining}{RESET}")
                 # Move to next line in old file after displaying
                 old_line_num += 1
             elif line.startswith("+"):
                 # Added line - show with new line number and green background
                 # The new_line_num represents the line number in the new file
                 content = line[1:].rstrip("\n")
-                visible_prefix = f" {new_line_num:>4} + {content}"
-                remaining = max(0, terminal_width - len(visible_prefix))
-                lines.append(f"{GREEN_BG} {GREEN_FG}{new_line_num:>4}{RESET}{GREEN_BG} + {content}{' ' * remaining}{RESET}\n")
+                remaining = max(0, terminal_width - len(f" {new_line_num:>4} + {content}"))
+                lines.append(f"{GREEN_BG} {GREEN_FG}{new_line_num:>4}{RESET}{GREEN_BG} + {content}{' ' * remaining}{RESET}")
                 # Move to next line in new file after displaying
                 new_line_num += 1
             elif line.startswith(" "):
                 # Unchanged line - exists in both files
                 # Show new_line_num since we're viewing the modified file
                 content = line[1:].rstrip("\n")
-                lines.append(f" {new_line_num:>4}   {content}\n")
+                padded = f" {new_line_num:>4}   {content}".ljust(terminal_width)
+                lines.append(f"{padded}{RESET}")
                 # Move to next line in both files
                 old_line_num += 1
                 new_line_num += 1
 
-        return "".join(lines)
+        return "\n".join(lines) + "\n"
 
     @staticmethod
     def _not_found_message(old_text: str, content: str, path: str) -> str:
@@ -391,14 +493,55 @@ class ListDirTool(Tool):
                     display_type="list_result",
                 )
 
-            result = "\n".join(items)
+            # Format display with background color
+            display = self._format_list_display(path, items)
 
             return ToolResult(
                 content=f"Listed {len(items)} items",
-                display=result,
+                display=display,
                 display_type="list_result",
             )
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
             return f"Error listing directory: {str(e)}"
+
+    def _format_list_display(self, path: str, items: list[str]) -> str:
+        """
+        Format directory listing with background color.
+
+        Args:
+            path: Directory path.
+            items: List of directory items.
+
+        Returns:
+            Formatted listing with dark gray background and dim text.
+        """
+        # ANSI color codes - dark gray background with dim foreground
+        BG_COLOR = "\x1b[48;2;26;26;26m"   # #1a1a1a
+        DIM_FG = "\x1b[38;2;150;150;150m"   # 暗��色
+        BOLD = "\x1b[1m"
+        RESET = "\x1b[0m"
+
+        # Get terminal width for full-line background
+        try:
+            terminal_width = os.get_terminal_size().columns
+        except OSError:
+            terminal_width = 100
+
+        lines = []
+
+        # Header
+        header = f"Directory listing: {path}"
+        lines.append(f"{BOLD}{BG_COLOR}{DIM_FG}{header}{' ' * (terminal_width - len(header))}{RESET}")
+        count = f"Total items: {len(items)}"
+        lines.append(f"{BG_COLOR}{DIM_FG}{count}{' ' * (terminal_width - len(count))}{RESET}")
+        # Empty line with background
+        lines.append(f"{BG_COLOR}{' ' * terminal_width}{RESET}")
+
+        # Items
+        for item in items:
+            padded = item.ljust(terminal_width)
+            lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+
+        return "\n".join(lines) + "\n"

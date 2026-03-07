@@ -139,8 +139,9 @@ class ExecTool(Tool):
         if not output:
             return ""
 
-        # ANSI color codes - dark gray background
-        BG_COLOR = "\x1b[48;2;26;26;26m"  # #1a1a1a
+        # ANSI color codes - dark gray background with dim foreground
+        BG_COLOR = "\x1b[48;2;26;26;26m"   # #1a1a1a
+        DIM_FG = "\x1b[38;2;150;150;150m"   # 暗灰色
         RESET = "\x1b[0m"
 
         # Get terminal width for full-line background
@@ -156,10 +157,11 @@ class ExecTool(Tool):
             content_len = len(line)
             # Pad with spaces to fill terminal width
             remaining = max(0, terminal_width - content_len)
-            # Apply background color to entire line and add newline
-            lines.append(f"{BG_COLOR}{line}{' ' * remaining}{RESET}\n")
+            # Apply background color and dim foreground, no trailing \n
+            padded = f"{line}{' ' * remaining}"
+            lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
 
-        return "".join(lines)
+        return "\n".join(lines) + "\n"
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
