@@ -1,5 +1,6 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import hashlib
 import os
 import secrets
 import string
@@ -8,6 +9,7 @@ from typing import Any
 import json_repair
 import litellm
 from litellm import acompletion
+from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
@@ -166,16 +168,42 @@ class LiteLLMProvider(LLMProvider):
         return frozenset()
 
     @staticmethod
+    def _normalize_tool_call_id(tool_call_id: Any) -> Any:
+        """Normalize tool_call_id to a provider-safe 9-char alphanumeric form."""
+        if not isinstance(tool_call_id, str):
+            return tool_call_id
+        if len(tool_call_id) == 9 and tool_call_id.isalnum():
+            return tool_call_id
+        return hashlib.sha1(tool_call_id.encode()).hexdigest()[:9]
+
+    @staticmethod
     def _sanitize_messages(messages: list[dict[str, Any]], extra_keys: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
         """Strip non-standard keys and ensure assistant messages have a content key."""
         allowed = _ALLOWED_MSG_KEYS | extra_keys
-        sanitized = []
-        for msg in messages:
-            clean = {k: v for k, v in msg.items() if k in allowed}
-            # Strict providers require "content" even when assistant only has tool_calls
-            if clean.get("role") == "assistant" and "content" not in clean:
-                clean["content"] = None
-            sanitized.append(clean)
+        sanitized = LLMProvider._sanitize_request_messages(messages, allowed)
+        id_map: dict[str, str] = {}
+
+        def map_id(value: Any) -> Any:
+            if not isinstance(value, str):
+                return value
+            return id_map.setdefault(value, LiteLLMProvider._normalize_tool_call_id(value))
+
+        for clean in sanitized:
+            # Keep assistant tool_calls[].id and tool tool_call_id in sync after
+            # shortening, otherwise strict providers reject the broken linkage.
+            if isinstance(clean.get("tool_calls"), list):
+                normalized_tool_calls = []
+                for tc in clean["tool_calls"]:
+                    if not isinstance(tc, dict):
+                        normalized_tool_calls.append(tc)
+                        continue
+                    tc_clean = dict(tc)
+                    tc_clean["id"] = map_id(tc_clean.get("id"))
+                    normalized_tool_calls.append(tc_clean)
+                clean["tool_calls"] = normalized_tool_calls
+
+            if "tool_call_id" in clean and clean["tool_call_id"]:
+                clean["tool_call_id"] = map_id(clean["tool_call_id"])
         return sanitized
 
     async def chat(
@@ -255,20 +283,37 @@ class LiteLLMProvider(LLMProvider):
         """Parse LiteLLM response into our standard format."""
         choice = response.choices[0]
         message = choice.message
+        content = message.content
+        finish_reason = choice.finish_reason
+
+        # Some providers (e.g. GitHub Copilot) split content and tool_calls
+        # across multiple choices. Merge them so tool_calls are not lost.
+        raw_tool_calls = []
+        for ch in response.choices:
+            msg = ch.message
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                raw_tool_calls.extend(msg.tool_calls)
+                if ch.finish_reason in ("tool_calls", "stop"):
+                    finish_reason = ch.finish_reason
+            if not content and msg.content:
+                content = msg.content
+
+        if len(response.choices) > 1:
+            logger.debug("LiteLLM response has {} choices, merged {} tool_calls",
+                         len(response.choices), len(raw_tool_calls))
 
         tool_calls = []
-        if hasattr(message, "tool_calls") and message.tool_calls:
-            for tc in message.tool_calls:
-                # Parse arguments from JSON string if needed
-                args = tc.function.arguments
-                if isinstance(args, str):
-                    args = json_repair.loads(args)
+        for tc in raw_tool_calls:
+            # Parse arguments from JSON string if needed
+            args = tc.function.arguments
+            if isinstance(args, str):
+                args = json_repair.loads(args)
 
-                tool_calls.append(ToolCallRequest(
-                    id=_short_tool_id(),
-                    name=tc.function.name,
-                    arguments=args,
-                ))
+            tool_calls.append(ToolCallRequest(
+                id=_short_tool_id(),
+                name=tc.function.name,
+                arguments=args,
+            ))
 
         usage = {}
         if hasattr(response, "usage") and response.usage:
@@ -280,11 +325,11 @@ class LiteLLMProvider(LLMProvider):
 
         reasoning_content = getattr(message, "reasoning_content", None) or None
         thinking_blocks = getattr(message, "thinking_blocks", None) or None
-        
+
         return LLMResponse(
-            content=message.content,
+            content=content,
             tool_calls=tool_calls,
-            finish_reason=choice.finish_reason or "stop",
+            finish_reason=finish_reason or "stop",
             usage=usage,
             reasoning_content=reasoning_content,
             thinking_blocks=thinking_blocks,
