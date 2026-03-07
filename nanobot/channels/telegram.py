@@ -179,6 +179,25 @@ class TelegramChannel(BaseChannel):
         self._media_group_tasks: dict[str, asyncio.Task] = {}
         self._message_threads: dict[tuple[str, int], int] = {}
 
+    def is_allowed(self, sender_id: str) -> bool:
+        """Preserve Telegram's legacy id|username allowlist matching."""
+        if super().is_allowed(sender_id):
+            return True
+
+        allow_list = getattr(self.config, "allow_from", [])
+        if not allow_list or "*" in allow_list:
+            return False
+
+        sender_str = str(sender_id)
+        if sender_str.count("|") != 1:
+            return False
+
+        sid, username = sender_str.split("|", 1)
+        if not sid.isdigit() or not username:
+            return False
+
+        return sid in allow_list or username in allow_list
+
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
         if not self.config.token:
