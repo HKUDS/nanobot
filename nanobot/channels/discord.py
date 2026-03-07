@@ -173,7 +173,9 @@ class DiscordChannel(BaseChannel):
                     data: dict[str, Any] = {}
                     if payload_json:
                         data["payload_json"] = json.dumps(payload_json)
-                    response = await self._http.post(url, headers=headers, files=files, data=data)
+                    response = await self._http.post(
+                        url, headers=headers, files=files, data=data
+                    )
                 if response.status_code == 429:
                     resp_data = response.json()
                     retry_after = float(resp_data.get("retry_after", 1.0))
@@ -305,9 +307,7 @@ class DiscordChannel(BaseChannel):
                 continue
             try:
                 media_dir.mkdir(parents=True, exist_ok=True)
-                file_path = (
-                    media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
-                )
+                file_path = media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
                 resp = await self._http.get(url)
                 resp.raise_for_status()
                 file_path.write_bytes(resp.content)
@@ -349,9 +349,7 @@ class DiscordChannel(BaseChannel):
                 # Also check content for mention format <@USER_ID>
                 if f"<@{self._bot_user_id}>" in content or f"<@!{self._bot_user_id}>" in content:
                     return True
-            logger.debug(
-                "Discord message in {} ignored (bot not mentioned)", payload.get("channel_id")
-            )
+            logger.debug("Discord message in {} ignored (bot not mentioned)", payload.get("channel_id"))
             return False
 
         return True
