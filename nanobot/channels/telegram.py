@@ -15,7 +15,7 @@ from telegram.request import HTTPXRequest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import TelegramConfig
+from nanobot.config.schema import AgentsConfig, TelegramConfig
 from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
@@ -168,10 +168,12 @@ class TelegramChannel(BaseChannel):
         config: TelegramConfig,
         bus: MessageBus,
         groq_api_key: str = "",
+        agents_config: AgentsConfig | None = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
+        self.agents_config = agents_config
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -427,12 +429,21 @@ class TelegramChannel(BaseChannel):
         """Handle /help command, bypassing ACL so all users can access it."""
         if not update.message:
             return
-        await update.message.reply_text(
+        help_text = (
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
             "/help — Show available commands"
         )
+        if self.agents_config and self.agents_config.models:
+            default_model = self.agents_config.defaults.model or "default"
+            parts = default_model.rsplit("/", 1)[-1].split("-")
+            default_label = parts[1].capitalize() if len(parts) > 1 else parts[0].capitalize()
+            help_text += "\n\nModel routing:"
+            for name in self.agents_config.models:
+                help_text += f"\n  @\u200B{name} — routes to {name.capitalize()}"
+            help_text += f"\n  (no prefix) — {default_label}"
+        await update.message.reply_text(help_text)
 
     @staticmethod
     def _sender_id(user) -> str:

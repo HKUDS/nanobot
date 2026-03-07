@@ -233,10 +233,45 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
 
 
+class AgentModel(Base):
+    """Named agent with a specific model (used for @prefix routing)."""
+
+    model: str = ""
+    aliases: list[str] = Field(default_factory=list)
+
+
 class AgentsConfig(Base):
-    """Agent configuration."""
+    """Agent configuration.
+
+    The ``defaults`` key holds base settings.  Additional keys define named
+    agents that users can invoke via ``@name`` or ``@alias`` message prefixes
+    to route a single request to a different model.
+    """
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    models: dict[str, AgentModel] = Field(default_factory=dict)
+
+    def __init__(self, **data):
+        # Pull any extra keys (haiku, opus, …) out of *data* and park them in
+        # ``models`` so the Pydantic schema stays strict while the JSON config
+        # stays flat.
+        known = {"defaults", "models"}
+        extra = {k: v for k, v in data.items() if k not in known and isinstance(v, dict)}
+        for k in extra:
+            data.pop(k)
+        super().__init__(**data)
+        for name, cfg in extra.items():
+            self.models[name] = AgentModel(**cfg)
+
+    def resolve_model(self, alias: str) -> str | None:
+        """Return the full model string for *alias*, or ``None``."""
+        alias = alias.lower()
+        if alias in self.models and self.models[alias].model:
+            return self.models[alias].model
+        for agent in self.models.values():
+            if alias in (a.lower() for a in agent.aliases):
+                return agent.model or None
+        return None
 
 
 class ProviderConfig(Base):

@@ -28,7 +28,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig
+    from nanobot.config.schema import AgentsConfig, ChannelsConfig, ExecToolConfig
     from nanobot.cron.service import CronService
 
 
@@ -65,9 +65,11 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        agents_config: AgentsConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
+        self.agents_config = agents_config
         self.channels_config = channels_config
         self.provider = provider
         self.workspace = workspace
@@ -177,16 +179,39 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    def _parse_model_prefix(self, content: str) -> tuple[str | None, str]:
+        """Check *content* for a ``@model`` prefix and resolve it.
+
+        Returns ``(model_override, cleaned_content)``.  When no valid prefix
+        is found the content is returned unchanged with ``None`` as model.
+        """
+        if not content.startswith("@") or not self.agents_config:
+            return None, content
+        first_space = content.find(" ")
+        if first_space < 0:
+            return None, content
+        alias = content[1:first_space]
+        remainder = content[first_space + 1:].strip()
+        if not remainder:
+            return None, content
+        model = self.agents_config.resolve_model(alias)
+        if model:
+            logger.info("@{} prefix → model override: {}", alias, model)
+            return model, remainder
+        return None, content
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        model_override: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        model = model_override or self.model
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -194,7 +219,7 @@ class AgentLoop:
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
-                model=self.model,
+                model=model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
@@ -389,9 +414,23 @@ class AgentLoop:
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
-        if cmd == "/help":
+        if cmd in ("/help", "help"):
+            help_text = (
+                "🐈 nanobot commands:\n"
+                "/new — Start a new conversation\n"
+                "/stop — Stop the current task\n"
+                "/help — Show available commands"
+            )
+            if self.agents_config and self.agents_config.models:
+                default_model = self.agents_config.defaults.model or "default"
+                parts = default_model.rsplit("/", 1)[-1].split("-")
+                default_label = parts[1].capitalize() if len(parts) > 1 else parts[0].capitalize()
+                help_text += "\n\nModel routing:"
+                for name in self.agents_config.models:
+                    help_text += f"\n  @{name} — routes to {name.capitalize()}"
+                help_text += f"\n  (no prefix) — {default_label}"
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
+                                  content=help_text)
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
@@ -416,10 +455,13 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
+        # Check for @model prefix (e.g. "@haiku hello") and resolve override
+        model_override, user_content = self._parse_model_prefix(msg.content.strip())
+
         history = session.get_history(max_messages=self.memory_window)
         initial_messages = self.context.build_messages(
             history=history,
-            current_message=msg.content,
+            current_message=user_content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
         )
@@ -434,6 +476,7 @@ class AgentLoop:
 
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
+            model_override=model_override,
         )
 
         if final_content is None:
