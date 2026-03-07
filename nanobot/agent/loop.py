@@ -389,9 +389,17 @@ class AgentLoop:
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
+
+        if cmd == "/discard":
+            session.clear()
+            self.sessions.save(session)
+            self.sessions.invalidate(session.key)
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
+                                  content="Discarded previous session. New session started.")
+        
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/discard — Discard current conversation\n/stop — Stop the current task\n/help — Show available commands")
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
