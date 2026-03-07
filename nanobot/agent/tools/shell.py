@@ -24,15 +24,27 @@ class ExecTool(Tool):
         self.timeout = timeout
         self.working_dir = working_dir
         self.deny_patterns = deny_patterns or [
-            r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
-            r"\bdel\s+/[fq]\b",              # del /f, del /q
-            r"\brmdir\s+/s\b",               # rmdir /s
-            r"(?:^|[;&|]\s*)format\b",       # format (as standalone command only)
-            r"\b(mkfs|diskpart)\b",          # disk operations
-            r"\bdd\s+if=",                   # dd
-            r">\s*/dev/sd",                  # write to disk
-            r"\b(shutdown|reboot|poweroff)\b",  # system power
-            r":\(\)\s*\{.*\};\s*:",          # fork bomb
+            r"\brm\s+-[rf]{1,2}\b",              # rm -r, rm -rf, rm -fr
+            r"\bdel\s+/[fq]\b",                  # del /f, del /q (Windows)
+            r"\brmdir\s+/s\b",                   # rmdir /s (Windows recursive)
+            r"(?:^|[;&|]\s*)format\b",           # format (as standalone command only)
+            r"\b(mkfs|diskpart)\b",              # disk formatting/partitioning
+            r"\bdd\s+if=",                       # dd disk operations
+            r">\s*/dev/sd",                      # write to disk devices
+            r"\b(shutdown|reboot|poweroff)\b",   # system power control
+            r":\(\)\s*\{.*\};\s*:",              # fork bomb
+            r">\s*/etc/(passwd|shadow|sudoers|hosts)",  # overwrite system files
+            r">\s*/\.ssh/",                      # write to ssh directory
+            r"\bcurl\s+.*\|\s*(ba)?sh",          # remote code exec via curl
+            r"\bwget\s+.*\|\s*(ba)?sh",          # remote code exec via wget
+            r"\b(sudo|su)\b",                    # privilege escalation
+            r"\bbase64\s+.*\|\s*(ba)?sh",        # obfuscated code exec
+            r"\bnc\s+.*-e\s+/bin/(ba)?sh",       # reverse shell via netcat
+            r"\bnetcat\s+.*-e\s+/bin/(ba)?sh",   # reverse shell via netcat
+            r"/dev/tcp/",                        # bash network connections
+            r"/dev/udp/",                        # bash network connections
+            r"\bchmod\s+[0-7]*777\b",            # world-writable permissions
+            r"\bchown\s+.*\broot\b",             # change ownership to root
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
