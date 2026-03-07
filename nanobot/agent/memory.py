@@ -104,16 +104,17 @@ class MemoryStore:
         current_memory = self.read_long_term()
         prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
 
-## Current Long-term Memory
-{current_memory or "(empty)"}
-
-## Conversation to Process
-{chr(10).join(lines)}"""
+        ## Current Long-term Memory
+        {current_memory or "(empty)"}
+        
+        ## Conversation to Process
+        {chr(10).join(lines)}"""
 
         try:
             response = await provider.chat(
                 messages=[
-                    {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+                    {"role": "system",
+                     "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
                     {"role": "user", "content": prompt},
                 ],
                 tools=_SAVE_MEMORY_TOOL,
@@ -150,7 +151,8 @@ class MemoryStore:
                     self.write_long_term(update)
 
             session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
-            logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)
+            logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages),
+                        session.last_consolidated)
             return True
         except Exception:
             logger.exception("Memory consolidation failed")
