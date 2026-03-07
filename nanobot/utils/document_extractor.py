@@ -15,6 +15,7 @@ _MAX_CHARS = 4000
 _TEXT_READ_CHUNK_SIZE = 8192
 _ENCODING_PROBE_BYTES = 16384
 _FALLBACK_ENCODINGS = ("utf-8-sig", "utf-8", "utf-16-le", "utf-16-be", "gb18030", "cp1252", "latin-1")
+_MAX_TRAILING_WHITESPACE = 256
 
 
 @dataclass
@@ -118,6 +119,7 @@ def _read_text_excerpt(path: Path, max_chars: int, encoding: str) -> DocumentExt
     decoder = codecs.getincrementaldecoder(encoding)(errors="strict")
     text = ""
     started = False
+    trailing_whitespace = 0
 
     with path.open("rb") as handle:
         while chunk := handle.read(_TEXT_READ_CHUNK_SIZE):
@@ -127,20 +129,31 @@ def _read_text_excerpt(path: Path, max_chars: int, encoding: str) -> DocumentExt
                 if not piece:
                     continue
                 started = True
-            text += piece
-            stripped = text.rstrip()
-            if len(stripped) > max_chars:
+            next_text = f"{text}{piece}"
+            trailing_whitespace = len(next_text) - len(next_text.rstrip())
+            if len(next_text) > max_chars or trailing_whitespace > _MAX_TRAILING_WHITESPACE:
+                stripped = next_text.rstrip()
                 return DocumentExtractionResult(
                     text=stripped[:max_chars],
                     extractor=f"text:{encoding}",
                     truncated=True,
                 )
+            text = next_text
 
         tail = decoder.decode(b"", final=True)
 
     if not started:
         tail = tail.lstrip()
-    text = f"{text}{tail}".strip()
+    next_text = f"{text}{tail}"
+    trailing_whitespace = len(next_text) - len(next_text.rstrip())
+    if len(next_text) > max_chars or trailing_whitespace > _MAX_TRAILING_WHITESPACE:
+        stripped = next_text.rstrip()
+        return DocumentExtractionResult(
+            text=stripped[:max_chars],
+            extractor=f"text:{encoding}",
+            truncated=True,
+        )
+    text = next_text.strip()
     if not text:
         return None
     return DocumentExtractionResult(

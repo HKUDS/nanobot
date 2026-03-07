@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nanobot.utils.document_extractor import _extract_text_file
+from nanobot.utils.document_extractor import _TEXT_READ_CHUNK_SIZE, _extract_text_file
 
 
 class _TrackingReader:
@@ -52,6 +52,33 @@ def test_extract_text_file_limits_reads_for_large_text(tmp_path, monkeypatch) ->
     assert result.truncated is True
     assert tracker["saw_unbounded_read"] is False
     assert tracker["bytes_read"] < path.stat().st_size
+
+
+def test_extract_text_file_limits_reads_for_large_trailing_whitespace(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "padded.log"
+    content = "header" + (" " * 20000)
+    path.write_text(content, encoding="utf-8")
+
+    tracker: dict[str, int | bool] = {"bytes_read": 0, "saw_unbounded_read": False}
+    original_open = Path.open
+
+    def _tracking_open(self: Path, *args, **kwargs):
+        handle = original_open(self, *args, **kwargs)
+        if self == path and args[:1] == ("rb",):
+            return _TrackingReader(handle, tracker)
+        return handle
+
+    monkeypatch.setattr(Path, "open", _tracking_open)
+    monkeypatch.setattr("nanobot.utils.document_extractor._TEXT_READ_CHUNK_SIZE", 64)
+
+    result = _extract_text_file(path, max_chars=100)
+
+    assert result is not None
+    assert result.text == "header"
+    assert result.extractor == "text:utf-8"
+    assert result.truncated is True
+    assert tracker["saw_unbounded_read"] is False
+    assert tracker["bytes_read"] < path.stat().st_size + _TEXT_READ_CHUNK_SIZE
 
 
 def test_extract_text_file_keeps_encoding_fallbacks(tmp_path) -> None:
