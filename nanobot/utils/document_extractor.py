@@ -15,6 +15,7 @@ _MAX_CHARS = 4000
 _TEXT_READ_CHUNK_SIZE = 8192
 _ENCODING_PROBE_BYTES = 16384
 _FALLBACK_ENCODINGS = ("utf-8-sig", "utf-8", "utf-16-le", "utf-16-be", "gb18030", "cp1252", "latin-1")
+_MAX_LEADING_WHITESPACE = 256
 _MAX_TRAILING_WHITESPACE = 256
 
 
@@ -119,13 +120,22 @@ def _read_text_excerpt(path: Path, max_chars: int, encoding: str) -> DocumentExt
     decoder = codecs.getincrementaldecoder(encoding)(errors="strict")
     text = ""
     started = False
+    leading_whitespace = 0
     trailing_whitespace = 0
 
     with path.open("rb") as handle:
         while chunk := handle.read(_TEXT_READ_CHUNK_SIZE):
             piece = decoder.decode(chunk)
             if not started:
-                piece = piece.lstrip()
+                stripped_piece = piece.lstrip()
+                leading_whitespace += len(piece) - len(stripped_piece)
+                if leading_whitespace > _MAX_LEADING_WHITESPACE:
+                    return DocumentExtractionResult(
+                        extractor=f"text:{encoding}",
+                        truncated=True,
+                        note="Text excerpt skipped because the document starts with excessive whitespace.",
+                    )
+                piece = stripped_piece
                 if not piece:
                     continue
                 started = True
