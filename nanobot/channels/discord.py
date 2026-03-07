@@ -84,20 +84,31 @@ class DiscordChannel(BaseChannel):
         headers = {"Authorization": f"Bot {self.config.token}"}
 
         try:
+            sent_media = False
+            failed_media: list[str] = []
+
             # Send file attachments first
             for media_path in msg.media or []:
-                await self._send_file(url, headers, media_path, reply_to=msg.reply_to)
+                if await self._send_file(url, headers, media_path, reply_to=msg.reply_to):
+                    sent_media = True
+                else:
+                    failed_media.append(Path(media_path).name)
 
             # Send text content
             chunks = split_message(msg.content or "", MAX_MESSAGE_LEN)
+            if not chunks and failed_media and not sent_media:
+                chunks = split_message(
+                    "\n".join(f"[attachment: {name} - send failed]" for name in failed_media),
+                    MAX_MESSAGE_LEN,
+                )
             if not chunks:
                 return
 
             for i, chunk in enumerate(chunks):
                 payload: dict[str, Any] = {"content": chunk}
 
-                # Only set reply reference on the first chunk (if no media was sent)
-                if i == 0 and msg.reply_to and not msg.media:
+                # Let the first successful attachment carry the reply if present.
+                if i == 0 and msg.reply_to and not sent_media:
                     payload["message_reference"] = {"message_id": msg.reply_to}
                     payload["allowed_mentions"] = {"replied_user": False}
 
