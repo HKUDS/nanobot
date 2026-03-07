@@ -552,7 +552,9 @@ def agent(
                                 # For these types, use print() for better formatting control
                                 print(msg.content, end="")
                             else:
-                                console.print(f"  [dim]↳ {msg.content}[/dim]")
+                                # Render progress message as markdown
+                                body = Markdown(msg.content) if markdown else Text(msg.content)
+                                console.print(body)
                         elif not turn_done.is_set():
                             if msg.content:
                                 turn_response.append(msg.content)
@@ -570,6 +572,10 @@ def agent(
             try:
                 while True:
                     try:
+                        # Wait for background tasks (subagents) to complete
+                        while bus.has_pending_background:
+                            await asyncio.sleep(0.1)
+
                         _flush_pending_tty_input()
                         user_input = await _read_interactive_input_async()
                         command = user_input.strip()
