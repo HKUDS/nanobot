@@ -6,12 +6,15 @@ import codecs
 from dataclasses import dataclass
 from pathlib import Path
 
+from charset_normalizer import from_bytes
+
 
 _TEXT_EXTS = {".txt", ".md", ".markdown", ".py", ".json", ".yaml", ".yml", ".toml", ".ini", ".csv", ".log"}
 _DOC_EXTS = {".pdf", *list(_TEXT_EXTS)}
 _MAX_CHARS = 4000
 _TEXT_READ_CHUNK_SIZE = 8192
-_ENCODING_PROBE_BYTES = 4096
+_ENCODING_PROBE_BYTES = 16384
+_FALLBACK_ENCODINGS = ("utf-8-sig", "utf-8", "utf-16-le", "utf-16-be", "gb18030", "cp1252", "latin-1")
 
 
 @dataclass
@@ -55,26 +58,34 @@ def extract_document_text(path: str | Path, max_chars: int = _MAX_CHARS) -> str 
 
 def _extract_text_file(path: Path, max_chars: int) -> DocumentExtractionResult | None:
     probe = _read_encoding_probe(path)
-    for encoding in _iter_text_encodings(path):
+    for encoding in _iter_text_encodings(probe):
         try:
             result = _read_text_excerpt(path, max_chars, encoding)
         except Exception:
-            continue
-        if result and _should_retry_utf16_after_utf8(probe, result.text, encoding):
             continue
         return result
     return DocumentExtractionResult(note="Unable to decode this text document with supported fallbacks.")
 
 
-def _iter_text_encodings(path: Path) -> tuple[str, ...]:
-    probe = _read_encoding_probe(path)
+def _iter_text_encodings(probe: bytes) -> tuple[str, ...]:
     if probe.startswith(codecs.BOM_UTF16_LE):
-        return ("utf-16", "utf-16-le", "utf-16-be", "utf-8-sig", "utf-8", "gb18030", "latin-1")
+        return ("utf-16", "utf-16-le", "utf-16-be", *_FALLBACK_ENCODINGS)
     if probe.startswith(codecs.BOM_UTF16_BE):
-        return ("utf-16", "utf-16-be", "utf-16-le", "utf-8-sig", "utf-8", "gb18030", "latin-1")
-    if _looks_like_utf16_bytes(probe):
-        return ("utf-16-le", "utf-16-be", "utf-8-sig", "utf-8", "gb18030", "latin-1")
-    return ("utf-8-sig", "utf-8", "utf-16", "utf-16-le", "utf-16-be", "gb18030", "latin-1")
+        return ("utf-16", "utf-16-be", "utf-16-le", *_FALLBACK_ENCODINGS)
+    if probe.startswith(codecs.BOM_UTF8):
+        return ("utf-8-sig", *_FALLBACK_ENCODINGS)
+
+    detected: list[str] = []
+    for match in from_bytes(probe):
+        encoding = _normalize_encoding_name(match.encoding)
+        if encoding and encoding not in detected:
+            detected.append(encoding)
+
+    ordered: list[str] = []
+    for encoding in (*detected, *_FALLBACK_ENCODINGS):
+        if encoding not in ordered:
+            ordered.append(encoding)
+    return tuple(ordered)
 
 
 def _read_encoding_probe(path: Path) -> bytes:
@@ -82,32 +93,25 @@ def _read_encoding_probe(path: Path) -> bytes:
         return handle.read(_ENCODING_PROBE_BYTES)
 
 
-def _looks_like_utf16_bytes(data: bytes) -> bool:
-    if len(data) < 4:
-        return False
+def _normalize_encoding_name(encoding: str | None) -> str | None:
+    if not encoding:
+        return None
 
-    even_nuls = sum(byte == 0 for byte in data[::2])
-    odd_nuls = sum(byte == 0 for byte in data[1::2])
-    even_ratio = even_nuls / max(1, len(data[::2]))
-    odd_ratio = odd_nuls / max(1, len(data[1::2]))
-
-    # UTF-16 text often presents as ASCII bytes alternating with NULs in one lane.
-    return max(even_ratio, odd_ratio) > 0.3 and abs(even_ratio - odd_ratio) > 0.2
-
-
-def _should_retry_utf16_after_utf8(probe: bytes, text: str | None, encoding: str) -> bool:
-    if encoding not in {"utf-8-sig", "utf-8"} or not text or len(probe) < 4 or len(probe) % 2 != 0:
-        return False
-    if _looks_like_utf16_bytes(probe):
-        return False
-    return _has_suspicious_control_chars(text)
-
-
-def _has_suspicious_control_chars(text: str) -> bool:
-    for char in text:
-        if ord(char) < 32 and char not in "\t\n\r":
-            return True
-    return False
+    normalized = encoding.lower().replace("_", "-")
+    aliases = {
+        "ascii": "utf-8",
+        "utf-8": "utf-8",
+        "utf-8-sig": "utf-8-sig",
+        "utf-16": "utf-16",
+        "utf-16-le": "utf-16-le",
+        "utf-16-be": "utf-16-be",
+        "cp1252": "cp1252",
+        "windows-1252": "cp1252",
+        "latin-1": "latin-1",
+        "iso-8859-1": "latin-1",
+        "gb18030": "gb18030",
+    }
+    return aliases.get(normalized)
 
 
 def _read_text_excerpt(path: Path, max_chars: int, encoding: str) -> DocumentExtractionResult | None:

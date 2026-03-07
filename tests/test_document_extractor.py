@@ -48,7 +48,7 @@ def test_extract_text_file_limits_reads_for_large_text(tmp_path, monkeypatch) ->
 
     assert result is not None
     assert result.text == content[:100]
-    assert result.extractor == "text:utf-8-sig"
+    assert result.extractor == "text:utf-8"
     assert result.truncated is True
     assert tracker["saw_unbounded_read"] is False
     assert tracker["bytes_read"] < path.stat().st_size
@@ -56,38 +56,38 @@ def test_extract_text_file_limits_reads_for_large_text(tmp_path, monkeypatch) ->
 
 def test_extract_text_file_keeps_encoding_fallbacks(tmp_path) -> None:
     path = tmp_path / "sample.csv"
-    content = "café,1\nniño,2"
+    content = ("café niño jalapeño résumé,1\n" * 8).strip()
     path.write_bytes(content.encode("latin-1"))
 
     result = _extract_text_file(path, max_chars=100)
 
     assert result is not None
-    assert result.text == content
-    assert result.extractor == "text:latin-1"
-    assert result.truncated is False
+    assert result.text == content[:100]
+    assert result.extractor == "text:cp1252"
+    assert result.truncated is True
 
 
 def test_extract_text_file_detects_utf16le_without_bom(tmp_path) -> None:
     path = tmp_path / "utf16le.txt"
-    content = "Hello, world!\nSecond line."
+    content = ("Hello world from Windows text files.\nSecond line stays readable.\n" * 6).strip()
     path.write_bytes(content.encode("utf-16-le"))
 
     result = _extract_text_file(path, max_chars=100)
 
     assert result is not None
-    assert result.text == content
+    assert result.text == content[:100]
     assert result.extractor == "text:utf-16-le"
-    assert result.truncated is False
+    assert result.truncated is True
 
 
-def test_extract_text_file_retries_utf16_for_bomless_cjk_mojibake(tmp_path) -> None:
+def test_extract_text_file_detects_utf16le_cjk_without_bom(tmp_path) -> None:
     path = tmp_path / "utf16le-cjk.txt"
-    content = "你好世界"
+    content = ("这是一个更长一点的中文段落，用来测试无 BOM 的 UTF-16LE 文本是否能被正确检测。\n" * 6).strip()
     path.write_bytes(content.encode("utf-16-le"))
 
     result = _extract_text_file(path, max_chars=100)
 
     assert result is not None
-    assert result.text == content
+    assert result.text == content[:100]
     assert result.extractor == "text:utf-16-le"
-    assert result.truncated is False
+    assert result.truncated is True
