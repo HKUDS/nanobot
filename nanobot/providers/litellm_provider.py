@@ -40,10 +40,12 @@ class LiteLLMProvider(LLMProvider):
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
+        num_retries: int = 2,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self._num_retries = max(0, num_retries)
 
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -269,13 +271,19 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
+        kwargs["num_retries"] = self._num_retries
+
         try:
             response = await acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
-            # Return error as content for graceful handling
+            logger.error("LLM request failed after retries: {}", e)
+            retries_note = f" We retried {self._num_retries} times." if self._num_retries > 0 else ""
             return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
+                content=(
+                    f"The AI model server returned a temporary error.{retries_note} "
+                    "Please try again in a moment."
+                ),
                 finish_reason="error",
             )
 

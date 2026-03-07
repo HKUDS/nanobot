@@ -231,6 +231,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    llm_retries: int = 2  # Number of retries for transient LLM errors (500, rate limit, etc.)
 
 
 class AgentsConfig(Base):
