@@ -124,6 +124,13 @@ def test_derive_topic_session_key_uses_thread_id() -> None:
     assert TelegramChannel._derive_topic_session_key(message) == "telegram:-100123:topic:42"
 
 
+def test_get_extension_falls_back_to_original_filename() -> None:
+    channel = TelegramChannel(TelegramConfig(), MessageBus())
+
+    assert channel._get_extension("file", None, "report.pdf") == ".pdf"
+    assert channel._get_extension("file", None, "archive.tar.gz") == ".tar.gz"
+
+
 @pytest.mark.asyncio
 async def test_send_progress_keeps_message_in_topic() -> None:
     config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])

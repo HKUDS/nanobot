@@ -512,8 +512,11 @@ class TelegramChannel(BaseChannel):
         if media_file and self._app:
             try:
                 file = await self._app.bot.get_file(media_file.file_id)
-                ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
-
+                ext = self._get_extension(
+                    media_type,
+                    getattr(media_file, 'mime_type', None),
+                    getattr(media_file, 'file_name', None),
+                )
                 # Save to workspace/media/
                 from pathlib import Path
                 media_dir = Path.home() / ".nanobot" / "media"
@@ -625,8 +628,13 @@ class TelegramChannel(BaseChannel):
         """Log polling / handler errors instead of silently swallowing them."""
         logger.error("Telegram error: {}", context.error)
 
-    def _get_extension(self, media_type: str, mime_type: str | None) -> str:
-        """Get file extension based on media type."""
+    def _get_extension(
+        self,
+        media_type: str,
+        mime_type: str | None,
+        filename: str | None = None,
+    ) -> str:
+        """Get file extension based on media type or original filename."""
         if mime_type:
             ext_map = {
                 "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
@@ -636,4 +644,12 @@ class TelegramChannel(BaseChannel):
                 return ext_map[mime_type]
 
         type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
-        return type_map.get(media_type, "")
+        if ext := type_map.get(media_type, ""):
+            return ext
+
+        if filename:
+            from pathlib import Path
+
+            return "".join(Path(filename).suffixes)
+
+        return ""
