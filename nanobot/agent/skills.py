@@ -36,22 +36,26 @@ class SkillsLoader:
         skills = []
         skill_names = set()
 
-        # Workspace skills (highest priority)
-        if self.workspace_skills.exists():
-            for skill_dir in self.workspace_skills.iterdir():
-                if skill_dir.is_dir():
-                    skill_file = skill_dir / "SKILL.md"
-                    if skill_file.exists():
-                        skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "workspace"})
-                        skill_names.add(skill_dir.name)
+        def add_skills(skills_dir: Path, source: str, check_duplicate: bool):
+            if not skills_dir or not skills_dir.exists():
+                return
+            
+            for skill_dir in skills_dir.iterdir():
+                if not skill_dir.is_dir():
+                    continue
+                
+                skill_file = skill_dir / "SKILL.md"
+                if not skill_file.exists():
+                    continue
+                
+                if check_duplicate and skill_dir.name in skill_names:
+                    continue
+                
+                skills.append({"name": skill_dir.name, "path": str(skill_file), "source": source})
+                skill_names.add(skill_dir.name)
 
-        # Built-in skills
-        if self.builtin_skills and self.builtin_skills.exists():
-            for skill_dir in self.builtin_skills.iterdir():
-                if skill_dir.is_dir():
-                    skill_file = skill_dir / "SKILL.md"
-                    if skill_file.exists() and skill_dir.name not in skill_names:
-                        skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "builtin"})
+        add_skills(self.workspace_skills, "workspace", check_duplicate=False)
+        add_skills(self.builtin_skills, "builtin", check_duplicate=True)
 
         # Filter by requirements
         if filter_unavailable:
