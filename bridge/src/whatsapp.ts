@@ -124,21 +124,26 @@ export class WhatsAppClient {
         if (!unwrapped) continue;
 
         const content = this.getTextContent(unwrapped);
+        let fallbackContent: string | null = null;
         const mediaPaths: string[] = [];
 
         if (unwrapped.imageMessage) {
+          fallbackContent = '[Image]';
           const path = await this.downloadMedia(msg, unwrapped.imageMessage.mimetype ?? undefined);
           if (path) mediaPaths.push(path);
         } else if (unwrapped.documentMessage) {
+          fallbackContent = '[Document]';
           const path = await this.downloadMedia(msg, unwrapped.documentMessage.mimetype ?? undefined,
             unwrapped.documentMessage.fileName ?? undefined);
           if (path) mediaPaths.push(path);
         } else if (unwrapped.videoMessage) {
+          fallbackContent = '[Video]';
           const path = await this.downloadMedia(msg, unwrapped.videoMessage.mimetype ?? undefined);
           if (path) mediaPaths.push(path);
         }
 
-        if (!content && mediaPaths.length === 0) continue;
+        const finalContent = content || (mediaPaths.length === 0 ? fallbackContent : '') || '';
+        if (!finalContent && mediaPaths.length === 0) continue;
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
 
@@ -146,7 +151,7 @@ export class WhatsAppClient {
           id: msg.key.id || '',
           sender: msg.key.remoteJid || '',
           pn: msg.key.remoteJidAlt || '',
-          content: content || '',
+          content: finalContent,
           timestamp: msg.messageTimestamp as number,
           isGroup,
           ...(mediaPaths.length > 0 ? { media: mediaPaths } : {}),
