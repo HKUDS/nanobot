@@ -82,6 +82,9 @@ class DiscordChannel(BaseChannel):
 
         url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
         headers = {"Authorization": f"Bot {self.config.token}"}
+        reply_to = msg.reply_to
+        if not reply_to and self.config.reply_to_message:
+            reply_to = msg.metadata.get("message_id")
 
         try:
             sent_media = False
@@ -89,7 +92,7 @@ class DiscordChannel(BaseChannel):
 
             # Send file attachments first
             for media_path in msg.media or []:
-                if await self._send_file(url, headers, media_path, reply_to=msg.reply_to):
+                if await self._send_file(url, headers, media_path, reply_to=reply_to):
                     sent_media = True
                 else:
                     failed_media.append(Path(media_path).name)
@@ -107,9 +110,8 @@ class DiscordChannel(BaseChannel):
             for i, chunk in enumerate(chunks):
                 payload: dict[str, Any] = {"content": chunk}
 
-                # Let the first successful attachment carry the reply if present.
-                if i == 0 and msg.reply_to and not sent_media:
-                    payload["message_reference"] = {"message_id": msg.reply_to}
+                if i == 0 and reply_to:
+                    payload["message_reference"] = {"message_id": reply_to}
                     payload["allowed_mentions"] = {"replied_user": False}
 
                 if not await self._send_payload(url, headers, payload):
@@ -168,9 +170,7 @@ class DiscordChannel(BaseChannel):
                     data: dict[str, Any] = {}
                     if payload_json:
                         data["payload_json"] = json.dumps(payload_json)
-                    response = await self._http.post(
-                        url, headers=headers, files=files, data=data
-                    )
+                    response = await self._http.post(url, headers=headers, files=files, data=data)
                 if response.status_code == 429:
                     resp_data = response.json()
                     retry_after = float(resp_data.get("retry_after", 1.0))
@@ -302,7 +302,9 @@ class DiscordChannel(BaseChannel):
                 continue
             try:
                 media_dir.mkdir(parents=True, exist_ok=True)
-                file_path = media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
+                file_path = (
+                    media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
+                )
                 resp = await self._http.get(url)
                 resp.raise_for_status()
                 file_path.write_bytes(resp.content)
@@ -344,7 +346,9 @@ class DiscordChannel(BaseChannel):
                 # Also check content for mention format <@USER_ID>
                 if f"<@{self._bot_user_id}>" in content or f"<@!{self._bot_user_id}>" in content:
                     return True
-            logger.debug("Discord message in {} ignored (bot not mentioned)", payload.get("channel_id"))
+            logger.debug(
+                "Discord message in {} ignored (bot not mentioned)", payload.get("channel_id")
+            )
             return False
 
         return True
