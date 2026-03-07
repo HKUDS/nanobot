@@ -341,6 +341,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(("kimi-k2.5", {"temperature": 1.0}),),
     ),
+    # Fireworks AI: global gateway, OpenAI-compatible, hosts models from many orgs.
+    # Keys start with "fw_". Model names use "accounts/fireworks/models/" prefix.
+    ProviderSpec(
+        name="fireworks",
+        keywords=("fireworks",),
+        env_key="OPENAI_API_KEY",
+        display_name="Fireworks AI",
+        litellm_prefix="openai",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="fw_",
+        detect_by_base_keyword="fireworks",
+        default_api_base="https://api.fireworks.ai/inference/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+        supports_prompt_caching=True,
+    ),
     # MiniMax: needs "minimax/" prefix for LiteLLM routing.
     # Uses OpenAI-compatible API at api.minimax.io/v1.
     ProviderSpec(
