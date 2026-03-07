@@ -151,13 +151,23 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             return text
         return images + [{"type": "text", "text": text}]
 
+    # Default cap for tool results sent to the LLM in the current turn.
+    # Keeps context lean without losing useful information.
+    TOOL_RESULT_MAX_CHARS = 16_000
+
     def add_tool_result(
         self, messages: list[dict[str, Any]],
         tool_call_id: str, tool_name: str, result: str,
+        max_chars: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Add a tool result to the message list."""
+        """Add a tool result to the message list, truncating if too large."""
+        limit = max_chars if max_chars is not None else self.TOOL_RESULT_MAX_CHARS
+        if limit and len(result) > limit:
+            result = result[:limit] + "\n... (truncated)"
         messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
         return messages
+
+    def add_assistant_message(
 
     def add_assistant_message(
         self, messages: list[dict[str, Any]],
