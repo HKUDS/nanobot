@@ -430,6 +430,7 @@ class TelegramChannel(BaseChannel):
         await update.message.reply_text(
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
+            "/session [name] — Switch or list sessions\n"
             "/stop — Stop the current task\n"
             "/help — Show available commands"
         )

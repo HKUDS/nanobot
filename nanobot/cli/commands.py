@@ -463,6 +463,7 @@ def gateway(
 def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
+    resume: bool = typer.Option(False, "--resume", "-r", help="Interactively select a session to resume"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
 ):
@@ -476,6 +477,40 @@ def agent(
 
     config = load_config()
     sync_workspace_templates(config.workspace_path)
+
+    # Handle --resume flag
+    if resume:
+        from prompt_toolkit.shortcuts.dialogs import radiolist_dialog
+        from nanobot.session.manager import SessionManager
+
+        manager = SessionManager(config.workspace_path)
+        sessions = manager.list_sessions()
+
+        if not sessions:
+            console.print("[yellow]No sessions found to resume[/yellow]")
+            raise typer.Exit(0)
+
+        # Build choices for dialog
+        values = []
+        for s in sessions:
+            metadata = manager.get_session_metadata(s["key"])
+            msg_count = metadata.get("message_count", 0) if metadata else 0
+            updated = _format_datetime(s.get("updated_at"))
+            label = f"{s['key']} ({msg_count} msgs, {updated})"
+            values.append((s["key"], label))
+
+        selected = radiolist_dialog(
+            title="Select Session to Resume",
+            text="Choose a previous conversation to continue:",
+            values=values,
+        ).run()
+
+        if selected is None:
+            console.print("[dim]Cancelled[/dim]")
+            raise typer.Exit(0)
+
+        session_id = selected
+        console.print(f"[green]Resuming session: {session_id}[/green]\n")
 
     bus = MessageBus()
     provider = _make_provider(config)
@@ -947,6 +982,91 @@ def _login_github_copilot() -> None:
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
+
+
+# ============================================================================
+# Session Commands
+# ============================================================================
+
+sessions_app = typer.Typer(help="Manage conversation sessions")
+app.add_typer(sessions_app, name="sessions")
+
+
+def _format_datetime(iso_str: str | None) -> str:
+    """Format ISO datetime string for display."""
+    if not iso_str:
+        return "[dim]N/A[/dim]"
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(iso_str)
+        now = datetime.now()
+        diff = now - dt
+        if diff.days == 0:
+            return dt.strftime("%H:%M")
+        elif diff.days < 7:
+            return dt.strftime("%a %H:%M")
+        else:
+            return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return iso_str[:16] if len(iso_str) > 16 else iso_str
+
+
+@sessions_app.command("list")
+def sessions_list():
+    """List all conversation sessions."""
+    from nanobot.config.loader import load_config
+    from nanobot.session.manager import SessionManager
+
+    config = load_config()
+    manager = SessionManager(config.workspace_path)
+    sessions = manager.list_sessions()
+
+    if not sessions:
+        console.print("[dim]No sessions found[/dim]")
+        return
+
+    table = Table(title="Sessions")
+    table.add_column("Key", style="cyan")
+    table.add_column("Updated", style="green")
+    table.add_column("Msgs", style="yellow", justify="right")
+    table.add_column("Last Message", style="dim")
+
+    for session in sessions:
+        metadata = manager.get_session_metadata(session["key"])
+        if metadata:
+            table.add_row(
+                metadata["key"],
+                _format_datetime(metadata.get("updated_at")),
+                str(metadata.get("message_count", 0)),
+                metadata.get("last_message_preview") or "[dim]N/A[/dim]",
+            )
+
+    console.print(table)
+
+
+@sessions_app.command("show")
+def sessions_show(
+    key: str = typer.Argument(..., help="Session key (e.g., 'cli:direct')")
+):
+    """Show details of a specific session."""
+    from nanobot.config.loader import load_config
+    from nanobot.session.manager import SessionManager
+
+    config = load_config()
+    manager = SessionManager(config.workspace_path)
+    metadata = manager.get_session_metadata(key)
+
+    if not metadata:
+        console.print(f"[red]Session not found: {key}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"\n[cyan]Session:[/cyan] {metadata['key']}")
+    console.print(f"[cyan]Created:[/cyan] {_format_datetime(metadata.get('created_at'))}")
+    console.print(f"[cyan]Updated:[/cyan] {_format_datetime(metadata.get('updated_at'))}")
+    console.print(f"[cyan]Messages:[/cyan] {metadata.get('message_count', 0)}")
+    if metadata.get("last_message_preview"):
+        console.print(f"[cyan]Last message:[/cyan] {metadata['last_message_preview']}")
+    console.print()
 
 
 if __name__ == "__main__":

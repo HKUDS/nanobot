@@ -45,6 +45,7 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 500
+    _SESSION_SUFFIX_RE = re.compile(r"^[\w-]+$")
 
     def __init__(
         self,
@@ -356,11 +357,83 @@ class AgentLoop:
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
-        key = session_key or msg.session_key
-        session = self.sessions.get_or_create(key)
+        # Resolve base/active session key.
+        # Keys are normally "channel:chat_id". Named sessions append ":suffix".
+        raw_key = session_key or msg.session_key
+        base_key = raw_key
+        active_key = raw_key
+
+        if ":" in raw_key:
+            # Parse channel and the remainder (chat_id or chat_id:suffix).
+            channel, remainder = raw_key.split(":", 1)
+            if ":" in remainder:
+                chat_id, possible_suffix = remainder.rsplit(":", 1)
+                if self._SESSION_SUFFIX_RE.match(possible_suffix):
+                    # Treat this as an explicitly selected named session, and
+                    # persist that choice as the active session for later turns.
+                    base_key = f"{channel}:{chat_id}"
+                    active_key = raw_key
+                    self.sessions.set_active_session(channel, chat_id, possible_suffix)
+                else:
+                    base_key = raw_key
+                    active_key = self.sessions.get_active_session_key(channel, remainder)
+            else:
+                base_key = raw_key
+                active_key = self.sessions.get_active_session_key(channel, remainder)
+
+        session = self.sessions.get_or_create(active_key)
 
         # Slash commands
         cmd = msg.content.strip().lower()
+        cmd_parts = msg.content.strip().split(maxsplit=1)
+
+        # /session command - switch or list sessions
+        if cmd.startswith("/session"):
+            if cmd == "/sessions" or cmd == "/session":
+                # List all sessions for this user
+                if ":" in base_key:
+                    parts = base_key.split(":", 1)
+                    user_sessions = self.sessions.list_user_sessions(parts[0], parts[1])
+                    if not user_sessions:
+                        return OutboundMessage(
+                            channel=msg.channel, chat_id=msg.chat_id,
+                            content="No sessions found. Use `/session <name>` to create one."
+                        )
+                    lines = ["📁 Your sessions:"]
+                    current_suffix = self.sessions._active_sessions.get(base_key, "")
+                    for s in user_sessions:
+                        marker = "▶ " if s["suffix"] == (current_suffix or "default") else "  "
+                        count = s.get("message_count", 0)
+                        preview_text = (s.get("last_message_preview") or "")[:40]
+                        lines.append(f"{marker}`{s['suffix']}` ({count} msgs) {preview_text}")
+                    lines.append("\nSwitch: `/session <name>` | Default: `/session default`")
+                    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines))
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Sessions not available in this context.")
+
+            # /session <name> - switch to named session
+            if len(cmd_parts) > 1:
+                suffix = cmd_parts[1].strip()
+                if ":" in base_key:
+                    parts = base_key.split(":", 1)
+                    if suffix.lower() == "default":
+                        new_key = self.sessions.set_active_session(parts[0], parts[1], None)
+                        return OutboundMessage(
+                            channel=msg.channel, chat_id=msg.chat_id,
+                            content=f"🔄 Switched to default session."
+                        )
+                    else:
+                        # Validate suffix (alphanumeric, dash, underscore)
+                        if not re.match(r'^[\w-]+$', suffix):
+                            return OutboundMessage(
+                                channel=msg.channel, chat_id=msg.chat_id,
+                                content="❌ Session name can only contain letters, numbers, dash, and underscore."
+                            )
+                        new_key = self.sessions.set_active_session(parts[0], parts[1], suffix)
+                        return OutboundMessage(
+                            channel=msg.channel, chat_id=msg.chat_id,
+                            content=f"🔄 Switched to session: `{suffix}`"
+                        )
+
         if cmd == "/new":
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
             self._consolidating.add(session.key)
@@ -391,7 +464,7 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/session [name] — Switch or list sessions\n/stop — Stop the current task\n/help — Show available commands")
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):

@@ -937,8 +937,48 @@ Each instance has its own:
 | `nanobot provider login openai-codex` | OAuth login for providers |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
+| `nanobot sessions list` | List all conversation sessions |
+| `nanobot sessions show <key>` | Show session details |
+| `nanobot agent --resume` | Interactively select session to resume |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
+
+<details>
+<summary><b>Session Management</b></summary>
+
+nanobot supports multiple named sessions per user. Use slash commands to manage sessions:
+
+| Command | Description |
+|---------|-------------|
+| `/session` or `/sessions` | List all your sessions |
+| `/session <name>` | Switch to (or create) a named session |
+| `/session default` | Switch back to the default session |
+| `/new` | Clear current session and start fresh |
+
+**Example workflow:**
+```
+You: /session work
+Bot: 🔄 Switched to session: work
+
+You: Help me with the project...
+(later)
+
+You: /session personal
+Bot: 🔄 Switched to session: personal
+
+You: Plan my weekend...
+(later)
+
+You: /sessions
+Bot: 📁 Your sessions:
+     ▶ personal (5 msgs) Plan my weekend...
+       work (12 msgs) Help me with the project...
+       default (3 msgs) Hi! How can I help...
+```
+
+Sessions persist across restarts. Use `nanobot sessions list` to see all sessions from CLI.
+
+</details>
 
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>
