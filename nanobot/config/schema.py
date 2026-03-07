@@ -199,8 +199,6 @@ class QQConfig(Base):
     )  # Allowed user openids (empty = public access)
 
 
-
-
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -251,7 +249,9 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
-    azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
+    azure_openai: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -277,11 +277,18 @@ class HeartbeatConfig(Base):
     interval_s: int = 30 * 60  # 30 minutes
 
 
+class GatewayAuthConfig(Base):
+    """Gateway authentication configuration."""
+
+    token: str = ""  # Random auth token for gateway UI access
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
     host: str = "0.0.0.0"
     port: int = 18790
+    auth: GatewayAuthConfig = Field(default_factory=GatewayAuthConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 

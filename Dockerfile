@@ -33,6 +33,9 @@ WORKDIR /app
 # Create config directory
 RUN mkdir -p /root/.nanobot
 
+# Set Docker mode for gateway UI
+ENV NANOBOT_DOCKER=1
+
 # Gateway default port
 EXPOSE 18790
 

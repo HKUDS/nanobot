@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nanobot Gateway</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/preact@10.19.6/dist/preact.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/preact@10.19.6/hooks/dist/hooks.umd.js"></script>
+  <style>
+    :root {
+      --bg: #f8f9fa;
+      --bg-card: #ffffff;
+      --text: #212529;
+      --text-muted: #6c757d;
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --border: #dee2e6;
+      --success: #10b981;
+      --error: #ef4444;
+      --shadow: 0 1px 3px rgba(0,0,0,0.1);
+      --radius: 8px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111827;
+        --bg-card: #1f2937;
+        --text: #f9fafb;
+        --text-muted: #9ca3af;
+        --border: #374151;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    .container { max-width: 900px; margin: 0 auto; padding: 2rem 1rem; }
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      box-shadow: var(--shadow);
+    }
+    .btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: var(--primary-hover); }
+    .btn-secondary { background: var(--text-muted); }
+    .btn-secondary:hover { background: var(--text); }
+    .input {
+      width: 100%;
+      padding: 0.6rem 0.8rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 1rem;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .input:focus { outline: none; border-color: var(--primary); }
+    .label { display: block; margin-bottom: 0.4rem; font-weight: 500; font-size: 0.9rem; }
+    .form-group { margin-bottom: 1rem; }
+    .error { color: var(--error); font-size: 0.9rem; margin-top: 0.5rem; }
+    .success { color: var(--success); font-size: 0.9rem; margin-top: 0.5rem; }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .header h1 { font-size: 1.5rem; font-weight: 600; }
+    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+    .tab {
+      padding: 0.5rem 1rem;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.9rem;
+      border-radius: var(--radius);
+      transition: all 0.2s;
+    }
+    .tab.active { background: var(--primary); color: white; }
+    .tab:hover:not(.active) { background: var(--border); }
+    .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+    .status-item { padding: 1rem; background: var(--bg); border-radius: var(--radius); }
+    .status-item .label { color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+    .status-item .value { font-size: 1.25rem; font-weight: 600; margin-top: 0.25rem; }
+    .channel-list { display: grid; gap: 0.75rem; }
+    .channel-item { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem; background: var(--bg); border-radius: var(--radius); }
+    .channel-item .name { font-weight: 500; }
+    .channel-item .enabled { color: var(--success); font-size: 0.85rem; }
+    .channel-item .disabled { color: var(--text-muted); font-size: 0.85rem; }
+    .toggle {
+      width: 44px; height: 24px; background: var(--border); border-radius: 12px; position: relative; cursor: pointer; border: none;
+    }
+    .toggle.active { background: var(--success); }
+    .toggle::after {
+      content: ''; position: absolute; width: 20px; height: 20px; background: white; border-radius: 50%; top: 2px; left: 2px; transition: transform 0.2s;
+    }
+    .toggle.active::after { transform: translateX(20px); }
+    .json-editor { font-family: 'Monaco', 'Menlo', monospace; font-size: 0.85rem; }
+    .checkbox-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+    .checkbox-label input { width: auto; }
+    .actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
+    .loading { text-align: center; padding: 2rem; color: var(--text-muted); }
+    .nav { display: flex; gap: 1rem; align-items: center; }
+    .nav a { color: var(--primary); text-decoration: none; font-size: 0.9rem; }
+    .nav a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    const { h, render } = preact;
+    const { useState, useEffect } = preactHooks;
+    const html = htm.bind(h);
+
+    const API_BASE = '';
+
+    function App() {
+      const [token, setToken] = useState(localStorage.getItem('gateway_token') || '');
+      const [authenticated, setAuthenticated] = useState(false);
+      const [checking, setChecking] = useState(true);
+
+      useEffect(() => {
+        if (token) {
+          fetch(API_BASE + '/api/config', { headers: { 'Authorization': 'Bearer ' + token } })
+            .then(r => r.ok ? setAuthenticated(true) : setAuthenticated(false))
+            .catch(() => setAuthenticated(false))
+            .finally(() => setChecking(false));
+        } else {
+          setChecking(false);
+        }
+      }, [token]);
+
+      if (checking) return html`<div class="loading">Loading...</div>`;
+      
+      if (!authenticated) {
+        return html`<${Login} token=${token} onLogin=${(t) => { setToken(t); setAuthenticated(true); }} />`;
+      }
+
+      return html`<${Dashboard} token=${token} onLogout=${() => { setToken(''); setAuthenticated(false); localStorage.removeItem('gateway_token'); }} />`;
+    }
+
+    function Login({ token, onLogin }) {
+      const [input, setInput] = useState(token);
+      const [error, setError] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [remember, setRemember] = useState(true);
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+        
+        try {
+          const r = await fetch(API_BASE + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: input })
+          });
+          const data = await r.json();
+          
+          if (data.authenticated) {
+            if (remember) localStorage.setItem('gateway_token', input);
+            onLogin(input);
+          } else {
+            setError('Invalid token');
+          }
+        } catch (err) {
+          setError('Connection error');
+        }
+        setLoading(false);
+      };
+
+      return html`
+        <div class="container" style="max-width: 400px; padding-top: 4rem;">
+          <div class="card">
+            <h2 style="margin-bottom: 1.5rem; text-align: center;">Nanobot Gateway</h2>
+            <form onSubmit=${handleSubmit}>
+              <div class="form-group">
+                <label class="label">Token</label>
+                <input class="input" type="text" value=${input} onInput=${e => setInput(e.target.value)} placeholder="Enter your gateway token" />
+              </div>
+              <label class="checkbox-label">
+                <input type="checkbox" checked=${remember} onChange=${e => setRemember(e.target.checked)} />
+                Remember me
+              </label>
+              ${error && html`<p class="error">${error}</p>`}
+              <button class="btn" type="submit" style="width: 100%; margin-top: 1rem;" disabled=${loading}>
+                ${loading ? 'Loading...' : 'Login'}
+              </button>
+            </form>
+          </div>
+        </div>
+      `;
+    }
+
+    function Dashboard({ token, onLogout }) {
+      const [tab, setTab] = useState('status');
+      const [config, setConfig] = useState(null);
+      const [status, setStatus] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [saving, setSaving] = useState(false);
+      const [message, setMessage] = useState('');
+
+      const headers = { 'Authorization': 'Bearer ' + token };
+
+      useEffect(() => {
+        loadData();
+      }, []);
+
+      const loadData = async () => {
+        setLoading(true);
+        try {
+          const [c, s] = await Promise.all([
+            fetch(API_BASE + '/api/config', { headers }).then(r => r.json()),
+            fetch(API_BASE + '/api/status', { headers }).then(r => r.json())
+          ]);
+          setConfig(c);
+          setStatus(s);
+        } catch (e) {
+          console.error(e);
+        }
+        setLoading(false);
+      };
+
+      const saveConfig = async (newConfig) => {
+        setSaving(true);
+        setMessage('');
+        try {
+          const r = await fetch(API_BASE + '/api/config', {
+            method: 'PUT',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify(newConfig)
+          });
+          if (r.ok) {
+            setMessage('Saved successfully');
+            loadData();
+          } else {
+            const e = await r.json();
+            setMessage('Error: ' + (e.error || 'Unknown error'));
+          }
+        } catch (e) {
+          setMessage('Error: ' + e.message);
+        }
+        setSaving(false);
+      };
+
+      const reloadConfig = async () => {
+        await fetch(API_BASE + '/api/config/reload', { method: 'POST', headers });
+        loadData();
+        setMessage('Config reloaded');
+      };
+
+      if (loading) return html`<div class="loading">Loading...</div>`;
+
+      return html`
+        <div class="container">
+          <div class="header">
+            <h1>Nanobot Gateway</h1>
+            <div class="nav">
+              <a href="#" onClick=${(e) => { e.preventDefault(); setTab('status'); }}>Dashboard</a>
+              <a href="#" onClick=${(e) => { e.preventDefault(); setTab('config'); }}>Config</a>
+              <button class="btn btn-secondary" onClick=${onLogout}>Logout</button>
+            </div>
+          </div>
+
+          ${tab === 'status' && status && html`
+            <div class="status-grid">
+              <div class="status-item">
+                <div class="label">Model</div>
+                <div class="value">${status.agents?.model || 'N/A'}</div>
+              </div>
+              <div class="status-item">
+                <div class="label">Channels Enabled</div>
+                <div class="value">${Object.values(status.channels || {}).filter(c => c.enabled).length}</div>
+              </div>
+              <div class="status-item">
+                <div class="label">Cron Jobs</div>
+                <div class="value">${status.cron?.jobs || 0}</div>
+              </div>
+              <div class="status-item">
+                <div class="label">Heartbeat</div>
+                <div class="value">${status.gateway?.heartbeat?.enabled ? status.gateway.heartbeat.interval_s + 's' : 'Disabled'}</div>
+              </div>
+            </div>
+
+            <div class="card" style="margin-top: 1.5rem;">
+              <h3 style="margin-bottom: 1rem;">Channels</h3>
+              <div class="channel-list">
+                ${Object.entries(status.channels || {}).map(([name, c]) => html`
+                  <div class="channel-item">
+                    <span class="name">${name}</span>
+                    <span class="${c.enabled ? 'enabled' : 'disabled'}">${c.enabled ? '✓ Enabled' : '✗ Disabled'}</span>
+                  </div>
+                `)}
+              </div>
+            </div>
+
+            <div class="card" style="margin-top: 1.5rem;">
+              <h3 style="margin-bottom: 1rem;">Providers</h3>
+              <div class="channel-list">
+                ${(status.providers || []).map(p => html`
+                  <div class="channel-item">
+                    <span class="name">${p}</span>
+                    <span class="enabled">✓ Configured</span>
+                  </div>
+                `)}
+                ${status.providers?.length === 0 && html`<p style="color: var(--text-muted);">No providers configured</p>`}
+              </div>
+            </div>
+          `}
+
+          ${tab === 'config' && config && html`
+            <${ConfigEditor} config=${config} onSave=${saveConfig} onReload=${reloadConfig} saving=${saving} message=${message} />
+          `}
+        </div>
+      `;
+    }
+
+    function ConfigEditor({ config, onSave, onReload, saving, message }) {
+      const [tab, setTab] = useState('agents');
+      const [jsonMode, setJsonMode] = useState(false);
+      const [jsonText, setJsonText] = useState('');
+      const [localConfig, setLocalConfig] = useState(config);
+
+      useEffect(() => {
+        setLocalConfig(config);
+        setJsonText(JSON.stringify(config, null, 2));
+      }, [config]);
+
+      const updateConfig = (path, value) => {
+        const newConfig = JSON.parse(JSON.stringify(localConfig));
+        let obj = newConfig;
+        for (let i = 0; i < path.length - 1; i++) {
+          obj = obj[path[i]] = obj[path[i]] || {};
+        }
+        obj[path[path.length - 1]] = value;
+        setLocalConfig(newConfig);
+      };
+
+      const handleJsonSave = () => {
+        try {
+          const parsed = JSON.parse(jsonText);
+          onSave(parsed);
+        } catch (e) {
+          alert('Invalid JSON');
+        }
+      };
+
+      const handleFormSave = () => {
+        onSave(localConfig);
+      };
+
+      const tabs = ['agents', 'providers', 'channels', 'tools', 'gateway'];
+
+      return html`
+        <div class="tabs">
+          ${tabs.map(t => html`
+            <button class="tab ${tab === t ? 'active' : ''}" onClick=${() => setTab(t)}>${t.charAt(0).toUpperCase() + t.slice(1)}</button>
+          `)}
+          <button class="tab ${jsonMode ? 'active' : ''}" onClick=${() => setJsonMode(!jsonMode)}>JSON</button>
+        </div>
+
+        ${message && html`<p class="${message.includes('Error') ? 'error' : 'success'}" style="margin-bottom: 1rem;">${message}</p>`}
+
+        ${jsonMode ? html`
+          <div class="card">
+            <textarea class="input json-editor" rows="20" value=${jsonText} onInput=${e => setJsonText(e.target.value)}></textarea>
+            <div class="actions">
+              <button class="btn" onClick=${handleJsonSave} disabled=${saving}>${saving ? 'Saving...' : 'Apply JSON'}</button>
+            </div>
+          </div>
+        ` : html`
+          <div class="card">
+            ${tab === 'agents' && localConfig.agents?.defaults && html`
+              <div class="form-group">
+                <label class="label">Model</label>
+                <input class="input" value=${localConfig.agents.defaults.model || ''} onInput=${e => updateConfig(['agents', 'defaults', 'model'], e.target.value)} />
+              </div>
+              <div class="form-group">
+                <label class="label">Temperature</label>
+                <input class="input" type="number" step="0.1" min="0" max="2" value=${localConfig.agents.defaults.temperature || 0} onInput=${e => updateConfig(['agents', 'defaults', 'temperature'], parseFloat(e.target.value))} />
+              </div>
+              <div class="form-group">
+                <label class="label">Max Tokens</label>
+                <input class="input" type="number" value=${localConfig.agents.defaults.maxTokens || 4096} onInput=${e => updateConfig(['agents', 'defaults', 'maxTokens'], parseInt(e.target.value))} />
+              </div>
+              <div class="form-group">
+                <label class="label">Max Tool Iterations</label>
+                <input class="input" type="number" value=${localConfig.agents.defaults.maxToolIterations || 50} onInput=${e => updateConfig(['agents', 'defaults', 'maxToolIterations'], parseInt(e.target.value))} />
+              </div>
+              <div class="form-group">
+                <label class="label">Memory Window</label>
+                <input class="input" type="number" value=${localConfig.agents.defaults.memoryWindow || 10} onInput=${e => updateConfig(['agents', 'defaults', 'memoryWindow'], parseInt(e.target.value))} />
+              </div>
+              <div class="form-group">
+                <label class="label">Reasoning Effort</label>
+                <input class="input" value=${localConfig.agents.defaults.reasoningEffort || 'medium'} onInput=${e => updateConfig(['agents', 'defaults', 'reasoningEffort'], e.target.value)} />
+              </div>
+            `}
+
+            ${tab === 'providers' && html`
+              ${Object.entries(localConfig.providers || {}).map(([name, p]) => html`
+                <div style="margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border);">
+                  <h4 style="margin-bottom: 0.75rem;">${name}</h4>
+                  <div class="form-group">
+                    <label class="label">API Key</label>
+                    <input class="input" type="password" value=${p?.apiKey || ''} onInput=${e => updateConfig(['providers', name, 'apiKey'], e.target.value)} placeholder="sk-..." />
+                  </div>
+                  <div class="form-group">
+                    <label class="label">API Base URL</label>
+                    <input class="input" value=${p?.apiBase || ''} onInput=${e => updateConfig(['providers', name, 'apiBase'], e.target.value)} placeholder="https://api.example.com/v1" />
+                  </div>
+                </div>
+              `)}
+            `}
+
+            ${tab === 'channels' && html`
+              ${Object.entries(localConfig.channels || {}).map(([name, c]) => html`
+                <div style="margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border);">
+                  <h4 style="margin-bottom: 0.75rem;">${name}</h4>
+                  <div class="form-group">
+                    <label class="checkbox-label">
+                      <input type="checkbox" checked=${c?.enabled || false} onChange=${e => updateConfig(['channels', name, 'enabled'], e.target.checked)} />
+                      Enabled
+                    </label>
+                  </div>
+                  ${name === 'telegram' && html`
+                    <div class="form-group">
+                      <label class="label">Bot Token</label>
+                      <input class="input" value=${c?.token || ''} onInput=${e => updateConfig(['channels', name, 'token'], e.target.value)} />
+                    </div>
+                  `}
+                  ${name === 'discord' && html`
+                    <div class="form-group">
+                      <label class="label">Bot Token</label>
+                      <input class="input" value=${c?.token || ''} onInput=${e => updateConfig(['channels', name, 'token'], e.target.value)} />
+                    </div>
+                  `}
+                  ${name === 'whatsapp' && html`
+                    <div class="form-group">
+                      <label class="label">Bridge URL</label>
+                      <input class="input" value=${c?.bridgeUrl || 'ws://localhost:3001'} onInput=${e => updateConfig(['channels', name, 'bridgeUrl'], e.target.value)} />
+                    </div>
+                    <div class="form-group">
+                      <label class="label">Bridge Token</label>
+                      <input class="input" value=${c?.bridgeToken || ''} onInput=${e => updateConfig(['channels', name, 'bridgeToken'], e.target.value)} />
+                    </div>
+                  `}
+                  ${name === 'slack' && html`
+                    <div class="form-group">
+                      <label class="label">Bot Token</label>
+                      <input class="input" value=${c?.token || ''} onInput=${e => updateConfig(['channels', name, 'token'], e.target.value)} />
+                    </div>
+                  `}
+                  ${name === 'feishu' && html`
+                    <div class="form-group">
+                      <label class="label">App ID</label>
+                      <input class="input" value=${c?.appId || ''} onInput=${e => updateConfig(['channels', name, 'appId'], e.target.value)} />
+                    </div>
+                    <div class="form-group">
+                      <label class="label">App Secret</label>
+                      <input class="input" value=${c?.appSecret || ''} onInput=${e => updateConfig(['channels', name, 'appSecret'], e.target.value)} />
+                    </div>
+                  `}
+                  ${name === 'dingtalk' && html`
+                    <div class="form-group">
+                      <label class="label">Client ID</label>
+                      <input class="input" value=${c?.clientId || ''} onInput=${e => updateConfig(['channels', name, 'clientId'], e.target.value)} />
+                    </div>
+                    <div class="form-group">
+                      <label class="label">Client Secret</label>
+                      <input class="input" value=${c?.clientSecret || ''} onInput=${e => updateConfig(['channels', name, 'clientSecret'], e.target.value)} />
+                    </div>
+                  `}
+                  ${name === 'email' && html`
+                    <div class="form-group">
+                      <label class="checkbox-label">
+                        <input type="checkbox" checked=${c?.enabled || false} onChange=${e => updateConfig(['channels', name, 'enabled'], e.target.checked)} />
+                        IMAP/SMTP configured in config file
+                      </label>
+                    </div>
+                  `}
+                </div>
+              `)}
+            `}
+
+            ${tab === 'tools' && localConfig.tools && html`
+              <div class="form-group">
+                <label class="label">Web Search API Key</label>
+                <input class="input" value=${localConfig.tools?.web?.search?.apiKey || ''} onInput=${e => updateConfig(['tools', 'web', 'search', 'apiKey'], e.target.value)} />
+              </div>
+              <div class="form-group">
+                <label class="label">Web Search Max Results</label>
+                <input class="input" type="number" value=${localConfig.tools?.web?.search?.maxResults || 5} onInput=${e => updateConfig(['tools', 'web', 'search', 'maxResults'], parseInt(e.target.value))} />
+              </div>
+              <div class="form-group">
+                <label class="label">Exec Timeout (seconds)</label>
+                <input class="input" type="number" value=${localConfig.tools?.exec?.timeout || 60} onInput=${e => updateConfig(['tools', 'exec', 'timeout'], parseInt(e.target.value))} />
+              </div>
+            `}
+
+            ${tab === 'gateway' && localConfig.gateway && html`
+              <div class="form-group">
+                <label class="checkbox-label">
+                  <input type="checkbox" checked=${localConfig.gateway?.heartbeat?.enabled || false} onChange=${e => updateConfig(['gateway', 'heartbeat', 'enabled'], e.target.checked)} />
+                  Heartbeat Enabled
+                </label>
+              </div>
+              <div class="form-group">
+                <label class="label">Heartbeat Interval (seconds)</label>
+                <input class="input" type="number" value=${localConfig.gateway?.heartbeat?.intervalS || 1800} onInput=${e => updateConfig(['gateway', 'heartbeat', 'intervalS'], parseInt(e.target.value))} />
+              </div>
+            `}
+
+            <div class="actions">
+              <button class="btn" onClick=${handleFormSave} disabled=${saving}>${saving ? 'Saving...' : 'Save Changes'}</button>
+              <button class="btn btn-secondary" onClick=${onReload}>Reload from Disk</button>
+            </div>
+          </div>
+        `}
+      `;
+    }
+
+    render(html`<${App} />`, document.getElementById('app'));
+  </script>
+</body>
+</html>
