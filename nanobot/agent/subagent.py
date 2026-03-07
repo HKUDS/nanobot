@@ -34,6 +34,7 @@ class SubagentManager:
         web_proxy: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        parent_tools: ToolRegistry | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.provider = provider
@@ -47,6 +48,7 @@ class SubagentManager:
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self._parent_tools = parent_tools
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
@@ -108,7 +110,14 @@ class SubagentManager:
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
             tools.register(WebFetchTool(proxy=self.web_proxy))
-            
+            if self._parent_tools:
+                from nanobot.agent.tools.mcp import MCPToolWrapper
+                for name in self._parent_tools.tool_names:
+                    tool = self._parent_tools.get(name)
+                    if isinstance(tool, MCPToolWrapper):
+                        tools.register(tool)
+                        logger.debug("Subagent [{}]: shared MCP tool '{}'", task_id, name)
+
             system_prompt = self._build_subagent_prompt()
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
