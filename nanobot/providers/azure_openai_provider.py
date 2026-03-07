@@ -35,6 +35,7 @@ class AzureOpenAIProvider(LLMProvider):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.api_version = "2024-10-21"
+        self._default_affinity = uuid.uuid4().hex
         
         # Validate required parameters
         if not api_key:
@@ -61,12 +62,13 @@ class AzureOpenAIProvider(LLMProvider):
         )
         return f"{url}?api-version={self.api_version}"
 
-    def _build_headers(self) -> dict[str, str]:
+    def _build_headers(self, session_id: str | None = None) -> dict[str, str]:
         """Build headers for Azure OpenAI API with api-key header."""
+        affinity = self._session_affinity(session_id) or self._default_affinity
         return {
             "Content-Type": "application/json",
             "api-key": self.api_key,  # Azure OpenAI uses api-key header, not Authorization
-            "x-session-affinity": uuid.uuid4().hex,  # For cache locality
+            "x-session-affinity": affinity,  # Stable per session when available
         }
 
     @staticmethod
@@ -118,6 +120,7 @@ class AzureOpenAIProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        session_id: str | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request to Azure OpenAI.
@@ -135,7 +138,7 @@ class AzureOpenAIProvider(LLMProvider):
         """
         deployment_name = model or self.default_model
         url = self._build_chat_url(deployment_name)
-        headers = self._build_headers()
+        headers = self._build_headers(session_id=session_id)
         payload = self._prepare_request_payload(
             deployment_name, messages, tools, max_tokens, temperature, reasoning_effort
         )
