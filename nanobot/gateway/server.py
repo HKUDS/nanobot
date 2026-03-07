@@ -51,6 +51,10 @@ class GatewayServer:
         self.app.post("/api/config/reload")(self.reload_config)
         self.app.get("/api/status")(self.get_status)
 
+        # Mount static files (images, etc.) from ui directory
+        ui_path = Path(__file__).parent / "ui"
+        self.app.mount("/static", StaticFiles(directory=ui_path, html=False), name="static")
+
     async def index(self) -> HTMLResponse:
         ui_path = Path(__file__).parent / "ui" / "index.html"
         if ui_path.exists():
@@ -132,6 +136,7 @@ class GatewayServer:
             },
             "agents": {
                 "model": config.agents.defaults.model,
+                "provider": config.agents.defaults.provider,
                 "temperature": config.agents.defaults.temperature,
             },
             "channels": {},
@@ -193,6 +198,7 @@ class GatewayServer:
             "agents": {
                 "defaults": {
                     "model": config.get("agents", {}).get("defaults", {}).get("model"),
+                    "provider": config.get("agents", {}).get("defaults", {}).get("provider"),
                     "temperature": config.get("agents", {}).get("defaults", {}).get("temperature"),
                     "maxTokens": config.get("agents", {}).get("defaults", {}).get("maxTokens"),
                     "maxToolIterations": config.get("agents", {})
@@ -219,6 +225,18 @@ class GatewayServer:
             "deepseek",
             "custom",
             "azure_openai",
+            "groq",
+            "zhipu",
+            "dashscope",
+            "vllm",
+            "gemini",
+            "moonshot",
+            "minimax",
+            "aihubmix",
+            "siliconflow",
+            "volcengine",
+            "openai_codex",
+            "github_copilot",
         ]:
             if provider_name in config.get("providers", {}):
                 p = config["providers"][provider_name]

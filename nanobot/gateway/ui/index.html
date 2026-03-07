@@ -22,14 +22,12 @@
       --shadow: 0 1px 3px rgba(0,0,0,0.1);
       --radius: 8px;
     }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #111827;
-        --bg-card: #1f2937;
-        --text: #f9fafb;
-        --text-muted: #9ca3af;
-        --border: #374151;
-      }
+    :root.dark {
+      --bg: #111827;
+      --bg-card: #1f2937;
+      --text: #f9fafb;
+      --text-muted: #9ca3af;
+      --border: #374151;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -39,24 +37,34 @@
       line-height: 1.6;
       min-height: 100vh;
     }
-    .container { max-width: 900px; margin: 0 auto; padding: 2rem 1rem; }
+    .container { max-width: 900px; margin: 0 auto; padding: 1rem; }
+    @media (min-width: 768px) {
+      .container { padding: 2rem 1rem; }
+    }
     .card {
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 1.5rem;
+      padding: 1rem;
       box-shadow: var(--shadow);
+    }
+    @media (min-width: 768px) {
+      .card { padding: 1.5rem; }
     }
     .btn {
       background: var(--primary);
       color: white;
       border: none;
-      padding: 0.5rem 1rem;
+      padding: 0.4rem 0.8rem;
       border-radius: var(--radius);
       cursor: pointer;
-      font-size: 0.9rem;
+      font-size: 0.8rem;
       font-weight: 500;
       transition: background 0.2s;
+      min-height: 36px;
+    }
+    @media (min-width: 768px) {
+      .btn { padding: 0.5rem 1rem; font-size: 0.9rem; }
     }
     .btn:hover { background: var(--primary-hover); }
     .btn-secondary { background: var(--text-muted); }
@@ -69,43 +77,137 @@
       font-size: 1rem;
       background: var(--bg);
       color: var(--text);
+      -webkit-appearance: none;
+      border-radius: var(--radius);
     }
     .input:focus { outline: none; border-color: var(--primary); }
-    .label { display: block; margin-bottom: 0.4rem; font-weight: 500; font-size: 0.9rem; }
+    .label {
+      display: block;
+      margin-bottom: 0.4rem;
+      font-weight: 500;
+      font-size: 0.85rem;
+    }
+    @media (min-width: 768px) {
+      .label { font-size: 0.9rem; }
+    }
     .form-group { margin-bottom: 1rem; }
     .error { color: var(--error); font-size: 0.9rem; margin-top: 0.5rem; }
     .success { color: var(--success); font-size: 0.9rem; margin-top: 0.5rem; }
     .header {
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 2rem;
+      flex-direction: column;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
       padding-bottom: 1rem;
       border-bottom: 1px solid var(--border);
     }
-    .header h1 { font-size: 1.5rem; font-weight: 600; }
-    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+    @media (min-width: 768px) {
+      .header {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+      }
+    }
+    .header h1 { font-size: 1.25rem; font-weight: 600; }
+    @media (min-width: 768px) {
+      .header h1 { font-size: 1.5rem; }
+    }
+    .tabs {
+      display: flex;
+      gap: 0.25rem;
+      margin-bottom: 1.5rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
     .tab {
-      padding: 0.5rem 1rem;
+      padding: 0.4rem 0.8rem;
       background: none;
       border: none;
       color: var(--text-muted);
       cursor: pointer;
-      font-size: 0.9rem;
+      font-size: 0.8rem;
       border-radius: var(--radius);
       transition: all 0.2s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    @media (min-width: 768px) {
+      .tab { padding: 0.5rem 1rem; font-size: 0.9rem; }
     }
     .tab.active { background: var(--primary); color: white; }
     .tab:hover:not(.active) { background: var(--border); }
-    .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
-    .status-item { padding: 1rem; background: var(--bg); border-radius: var(--radius); }
-    .status-item .label { color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
-    .status-item .value { font-size: 1.25rem; font-weight: 600; margin-top: 0.25rem; }
-    .channel-list { display: grid; gap: 0.75rem; }
-    .channel-item { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem; background: var(--bg); border-radius: var(--radius); }
-    .channel-item .name { font-weight: 500; }
-    .channel-item .enabled { color: var(--success); font-size: 0.85rem; }
-    .channel-item .disabled { color: var(--text-muted); font-size: 0.85rem; }
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 0.75rem;
+    }
+    @media (min-width: 640px) {
+      .status-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+    }
+    .status-item {
+      padding: 0.75rem;
+      background: var(--bg);
+      border-radius: var(--radius);
+    }
+    @media (min-width: 768px) {
+      .status-item { padding: 1rem; }
+    }
+    .status-item .label {
+      color: var(--text-muted);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    @media (min-width: 768px) {
+      .status-item .label { font-size: 0.8rem; }
+    }
+    .status-item .value {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-top: 0.25rem;
+    }
+    @media (min-width: 768px) {
+      .status-item .value { font-size: 1.25rem; }
+    }
+    .channel-list { display: grid; gap: 0.5rem; }
+    @media (min-width: 768px) {
+      .channel-list { gap: 0.75rem; }
+    }
+    .channel-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.6rem;
+      background: var(--bg);
+      border-radius: var(--radius);
+      flex-wrap: wrap;
+    }
+    @media (min-width: 768px) {
+      .channel-item { padding: 0.75rem; }
+    }
+    .channel-item .name {
+      font-weight: 500;
+      font-size: 0.9rem;
+      min-width: 100px;
+    }
+    .channel-item .enabled {
+      color: var(--success);
+      font-size: 0.75rem;
+    }
+    @media (min-width: 768px) {
+      .channel-item .enabled { font-size: 0.85rem; }
+    }
+    .channel-item .disabled {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+    }
+    @media (min-width: 768px) {
+      .channel-item .disabled { font-size: 0.85rem; }
+    }
     .toggle {
       width: 44px; height: 24px; background: var(--border); border-radius: 12px; position: relative; cursor: pointer; border: none;
     }
@@ -114,14 +216,68 @@
       content: ''; position: absolute; width: 20px; height: 20px; background: white; border-radius: 50%; top: 2px; left: 2px; transition: transform 0.2s;
     }
     .toggle.active::after { transform: translateX(20px); }
-    .json-editor { font-family: 'Monaco', 'Menlo', monospace; font-size: 0.85rem; }
-    .checkbox-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+    .json-editor {
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 0.75rem;
+    }
+    @media (min-width: 768px) {
+      .json-editor { font-size: 0.85rem; }
+    }
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
     .checkbox-label input { width: auto; }
-    .actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
+    .actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+    .actions .btn { flex: 1; min-width: 120px; }
+    @media (max-width: 480px) {
+      .actions .btn { flex: 1 1 100%; }
+    }
     .loading { text-align: center; padding: 2rem; color: var(--text-muted); }
-    .nav { display: flex; gap: 1rem; align-items: center; }
-    .nav a { color: var(--primary); text-decoration: none; font-size: 0.9rem; }
+    .nav {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      width: 100%;
+    }
+    @media (min-width: 768px) {
+      .nav { gap: 1rem; width: auto; }
+    }
+    .nav a {
+      color: var(--primary);
+      text-decoration: none;
+      font-size: 0.8rem;
+    }
+    @media (min-width: 768px) {
+      .nav a { font-size: 0.9rem; }
+    }
     .nav a:hover { text-decoration: underline; }
+    .theme-toggle {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.35rem 0.5rem;
+      cursor: pointer;
+      color: var(--text);
+      font-size: 0.9rem;
+      line-height: 1;
+      min-height: 36px;
+      min-width: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .theme-toggle:hover { background: var(--border); }
   </style>
 </head>
 <body>
@@ -199,7 +355,7 @@
                 <input class="input" type="text" value=${input} onInput=${e => setInput(e.target.value)} placeholder="Enter your gateway token" />
               </div>
               <label class="checkbox-label">
-                <input type="checkbox" checked=${remember} onChange=${e => setRemember(e.target.checked)} />
+                <input type="checkbox" checked=${remember} onClick=${e => setRemember(e.target.checked)} />
                 Remember me
               </label>
               ${error && html`<p class="error">${error}</p>`}
@@ -219,6 +375,15 @@
       const [loading, setLoading] = useState(true);
       const [saving, setSaving] = useState(false);
       const [message, setMessage] = useState('');
+      const [darkMode, setDarkMode] = useState(() => {
+        const saved = localStorage.getItem('gateway_dark_mode');
+        return saved ? saved === 'true' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+      });
+
+      useEffect(() => {
+        document.documentElement.classList.toggle('dark', darkMode);
+        localStorage.setItem('gateway_dark_mode', darkMode);
+      }, [darkMode]);
 
       const headers = { 'Authorization': 'Bearer ' + token };
 
@@ -274,8 +439,14 @@
       return html`
         <div class="container">
           <div class="header">
-            <h1>Nanobot Gateway</h1>
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+              <img src="/static/nanobot_logo.png" alt="Nanobot" style="height: 32px;" />
+              <h1>Gateway</h1>
+            </div>
             <div class="nav">
+              <button class="theme-toggle" onClick=${() => setDarkMode(!darkMode)} title="${darkMode ? 'Light mode' : 'Dark mode'}">
+                ${darkMode ? '☀️' : '🌙'}
+              </button>
               <a href="#" onClick=${(e) => { e.preventDefault(); setTab('status'); }}>Dashboard</a>
               <a href="#" onClick=${(e) => { e.preventDefault(); setTab('config'); }}>Config</a>
               <button class="btn btn-secondary" onClick=${onLogout}>Logout</button>
@@ -284,6 +455,10 @@
 
           ${tab === 'status' && status && html`
             <div class="status-grid">
+              <div class="status-item">
+                <div class="label">Provider</div>
+                <div class="value">${status.agents?.provider || 'auto'}</div>
+              </div>
               <div class="status-item">
                 <div class="label">Model</div>
                 <div class="value">${status.agents?.model || 'N/A'}</div>
@@ -296,10 +471,6 @@
                 <div class="label">Cron Jobs</div>
                 <div class="value">${status.cron?.jobs || 0}</div>
               </div>
-              <div class="status-item">
-                <div class="label">Heartbeat</div>
-                <div class="value">${status.gateway?.heartbeat?.enabled ? status.gateway.heartbeat.interval_s + 's' : 'Disabled'}</div>
-              </div>
             </div>
 
             <div class="card" style="margin-top: 1.5rem;">
@@ -311,19 +482,6 @@
                     <span class="${c.enabled ? 'enabled' : 'disabled'}">${c.enabled ? '✓ Enabled' : '✗ Disabled'}</span>
                   </div>
                 `)}
-              </div>
-            </div>
-
-            <div class="card" style="margin-top: 1.5rem;">
-              <h3 style="margin-bottom: 1rem;">Providers</h3>
-              <div class="channel-list">
-                ${(status.providers || []).map(p => html`
-                  <div class="channel-item">
-                    <span class="name">${p}</span>
-                    <span class="enabled">✓ Configured</span>
-                  </div>
-                `)}
-                ${status.providers?.length === 0 && html`<p style="color: var(--text-muted);">No providers configured</p>`}
               </div>
             </div>
           `}
@@ -396,6 +554,10 @@
                 <input class="input" value=${localConfig.agents.defaults.model || ''} onInput=${e => updateConfig(['agents', 'defaults', 'model'], e.target.value)} />
               </div>
               <div class="form-group">
+                <label class="label">Provider</label>
+                <input class="input" value=${localConfig.agents.defaults.provider || ''} onInput=${e => updateConfig(['agents', 'defaults', 'provider'], e.target.value)} placeholder="auto" />
+              </div>
+              <div class="form-group">
                 <label class="label">Temperature</label>
                 <input class="input" type="number" step="0.1" min="0" max="2" value=${localConfig.agents.defaults.temperature || 0} onInput=${e => updateConfig(['agents', 'defaults', 'temperature'], parseFloat(e.target.value))} />
               </div>
@@ -434,25 +596,41 @@
             `}
 
             ${tab === 'channels' && html`
-              ${Object.entries(localConfig.channels || {}).map(([name, c]) => html`
+              <div style="margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border);">
+                <h4 style="margin-bottom: 0.75rem;">Global Channel Settings</h4>
+                <div class="form-group">
+                  <label class="checkbox-label">
+                    <input type="checkbox" checked=${localConfig.channels?.sendProgress ?? true} onClick=${e => updateConfig(['channels', 'sendProgress'], e.target.checked)} />
+                    Send Progress - stream agent's text progress to channels
+                  </label>
+                </div>
+                <div class="form-group">
+                  <label class="checkbox-label">
+                    <input type="checkbox" checked=${localConfig.channels?.sendToolHints ?? false} onClick=${e => updateConfig(['channels', 'sendToolHints'], e.target.checked)} />
+                    Send Tool Hints - stream tool-call hints to channels
+                  </label>
+                </div>
+              </div>
+
+              ${Object.entries(localConfig.channels || {}).filter(([name]) => !['sendProgress', 'sendToolHints'].includes(name)).map(([name, c]) => html`
                 <div style="margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border);">
                   <h4 style="margin-bottom: 0.75rem;">${name}</h4>
                   <div class="form-group">
                     <label class="checkbox-label">
-                      <input type="checkbox" checked=${c?.enabled || false} onChange=${e => updateConfig(['channels', name, 'enabled'], e.target.checked)} />
+                      <input type="checkbox" checked=${c?.enabled || false} onClick=${e => updateConfig(['channels', name, 'enabled'], e.target.checked)} />
                       Enabled
                     </label>
                   </div>
                   ${name === 'telegram' && html`
                     <div class="form-group">
                       <label class="label">Bot Token</label>
-                      <input class="input" value=${c?.token || ''} onInput=${e => updateConfig(['channels', name, 'token'], e.target.value)} />
+                      <input class="input" type="password" value=${c?.token || ''} onInput=${e => updateConfig(['channels', name, 'token'], e.target.value)} />
                     </div>
                   `}
                   ${name === 'discord' && html`
                     <div class="form-group">
                       <label class="label">Bot Token</label>
-                      <input class="input" value=${c?.token || ''} onInput=${e => updateConfig(['channels', name, 'token'], e.target.value)} />
+                      <input class="input" type="password" value=${c?.token || ''} onInput=${e => updateConfig(['channels', name, 'token'], e.target.value)} />
                     </div>
                   `}
                   ${name === 'whatsapp' && html`
@@ -462,13 +640,13 @@
                     </div>
                     <div class="form-group">
                       <label class="label">Bridge Token</label>
-                      <input class="input" value=${c?.bridgeToken || ''} onInput=${e => updateConfig(['channels', name, 'bridgeToken'], e.target.value)} />
+                      <input class="input" type="password" value=${c?.bridgeToken || ''} onInput=${e => updateConfig(['channels', name, 'bridgeToken'], e.target.value)} />
                     </div>
                   `}
                   ${name === 'slack' && html`
                     <div class="form-group">
                       <label class="label">Bot Token</label>
-                      <input class="input" value=${c?.token || ''} onInput=${e => updateConfig(['channels', name, 'token'], e.target.value)} />
+                      <input class="input" type="password" value=${c?.token || ''} onInput=${e => updateConfig(['channels', name, 'token'], e.target.value)} />
                     </div>
                   `}
                   ${name === 'feishu' && html`
@@ -494,7 +672,7 @@
                   ${name === 'email' && html`
                     <div class="form-group">
                       <label class="checkbox-label">
-                        <input type="checkbox" checked=${c?.enabled || false} onChange=${e => updateConfig(['channels', name, 'enabled'], e.target.checked)} />
+                        <input type="checkbox" checked=${c?.enabled || false} onClick=${e => updateConfig(['channels', name, 'enabled'], e.target.checked)} />
                         IMAP/SMTP configured in config file
                       </label>
                     </div>
@@ -506,7 +684,7 @@
             ${tab === 'tools' && localConfig.tools && html`
               <div class="form-group">
                 <label class="label">Web Search API Key</label>
-                <input class="input" value=${localConfig.tools?.web?.search?.apiKey || ''} onInput=${e => updateConfig(['tools', 'web', 'search', 'apiKey'], e.target.value)} />
+                <input class="input" type="password" value=${localConfig.tools?.web?.search?.apiKey || ''} onInput=${e => updateConfig(['tools', 'web', 'search', 'apiKey'], e.target.value)} />
               </div>
               <div class="form-group">
                 <label class="label">Web Search Max Results</label>
@@ -521,7 +699,7 @@
             ${tab === 'gateway' && localConfig.gateway && html`
               <div class="form-group">
                 <label class="checkbox-label">
-                  <input type="checkbox" checked=${localConfig.gateway?.heartbeat?.enabled || false} onChange=${e => updateConfig(['gateway', 'heartbeat', 'enabled'], e.target.checked)} />
+                  <input type="checkbox" checked=${localConfig.gateway?.heartbeat?.enabled || false} onClick=${e => updateConfig(['gateway', 'heartbeat', 'enabled'], e.target.checked)} />
                   Heartbeat Enabled
                 </label>
               </div>
