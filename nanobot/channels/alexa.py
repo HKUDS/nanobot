@@ -273,12 +273,32 @@ class AlexaChannel(BaseChannel):
                     )
                 )
             if intent_name == "AMAZON.FallbackIntent":
-                return web.json_response(
-                    _build_response(
-                        "I didn't catch that. Could you say it again?",
-                        end_session=False,
-                    )
-                )
+                return web.json_response({
+                    "version": "1.0",
+                    "response": {
+                        "directives": [
+                            {
+                                "type": "Dialog.ElicitSlot",
+                                "slotToElicit": "utterance",
+                                "updatedIntent": {
+                                    "name": "CatchAllIntent",
+                                    "confirmationStatus": "NONE",
+                                    "slots": {
+                                        "utterance": {
+                                            "name": "utterance",
+                                            "confirmationStatus": "NONE",
+                                        }
+                                    },
+                                },
+                            }
+                        ],
+                        "outputSpeech": {
+                            "type": "PlainText",
+                            "text": "Sorry, could you say that again?",
+                        },
+                        "shouldEndSession": False,
+                    },
+                })
 
             # Extract the user's utterance from the catch-all slot
             slots = intent.get("slots", {})
