@@ -167,10 +167,30 @@ class SubagentManager:
                     break
 
             if final_result is None:
-                final_result = "Task completed but no final response was generated."
-
-            logger.info("Subagent [{}] completed successfully", task_id)
-            await self._announce_result(task_id, label, task, final_result, origin, "ok")
+                logger.warning("Subagent [{}] exhausted max iterations ({}), requesting summary", task_id, max_iterations)
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "You have used all your available tool calls. Do NOT call any more tools. "
+                        "Respond with a brief summary:\n"
+                        "1. What you accomplished\n"
+                        "2. What remains to be done\n"
+                        "3. Exact parameters to pass if spawning a new subagent to finish the remaining work"
+                    ),
+                })
+                summary_response = await self.provider.chat(
+                    messages=messages,
+                    tools=[],
+                    model=self.model,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    reasoning_effort=self.reasoning_effort,
+                )
+                final_result = summary_response.content or "Subagent exhausted iterations and failed to produce a summary."
+                await self._announce_result(task_id, label, task, final_result, origin, "error")
+            else:
+                logger.info("Subagent [{}] completed successfully", task_id)
+                await self._announce_result(task_id, label, task, final_result, origin, "ok")
 
         except Exception as e:
             error_msg = f"Error: {str(e)}"
