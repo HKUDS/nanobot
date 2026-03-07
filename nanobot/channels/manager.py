@@ -150,6 +150,20 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
 
+        # A2A Protocol channel
+        if self.config.channels.a2a.enabled:
+            try:
+                from nanobot.channels.a2a import A2AChannel
+                self.channels["a2a"] = A2AChannel(
+                    self.config.channels.a2a,
+                    self.bus,
+                    agent_name=self.config.agents.defaults.model.split("/")[-1] if "/" in self.config.agents.defaults.model else "nanobot",
+                    agent_description="Ultra-lightweight AI assistant powered by nanobot",
+                )
+                logger.info("A2A channel enabled on port {}", self.config.channels.a2a.port)
+            except ImportError as e:
+                logger.warning("A2A channel not available: {}. Install with: pip install 'a2a-sdk[http-server]'", e)
+
         self._validate_allow_from()
 
     def _validate_allow_from(self) -> None:
