@@ -7,7 +7,9 @@ from typing import Any
 from nanobot.agent.tools.base import Tool
 
 
-def _resolve_path(path: str, workspace: Path | None = None, allowed_dir: Path | None = None) -> Path:
+def _resolve_path(
+    path: str, workspace: Path | None = None, allowed_dir: Path | None = None
+) -> Path:
     """Resolve path against workspace (if relative) and enforce directory restriction."""
     p = Path(path).expanduser()
     if not p.is_absolute() and workspace:
@@ -24,6 +26,8 @@ def _resolve_path(path: str, workspace: Path | None = None, allowed_dir: Path | 
 class ReadFileTool(Tool):
     """Tool to read file contents."""
 
+    _MAX_CHARS = 128_000  # ~128 KB — prevents OOM from reading huge files into LLM context
+
     def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
@@ -31,7 +35,7 @@ class ReadFileTool(Tool):
     @property
     def name(self) -> str:
         return "read_file"
-    
+
     @property
     def description(self) -> str:
         return (
@@ -51,7 +55,7 @@ class ReadFileTool(Tool):
             },
             "required": ["path"]
         }
-    
+
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
@@ -60,7 +64,16 @@ class ReadFileTool(Tool):
             if not file_path.is_file():
                 return f"Error: Not a file: {path}"
 
+            size = file_path.stat().st_size
+            if size > self._MAX_CHARS * 4:  # rough upper bound (UTF-8 chars ≤ 4 bytes)
+                return (
+                    f"Error: File too large ({size:,} bytes). "
+                    f"Use exec tool with head/tail/grep to read portions."
+                )
+
             content = file_path.read_text(encoding="utf-8")
+            if len(content) > self._MAX_CHARS:
+                return content[: self._MAX_CHARS] + f"\n\n... (truncated — file is {len(content):,} chars, limit {self._MAX_CHARS:,})"
             return content
         except PermissionError as e:
             return f"Error: {e}"
@@ -78,7 +91,7 @@ class WriteFileTool(Tool):
     @property
     def name(self) -> str:
         return "write_file"
-    
+
     @property
     def description(self) -> str:
         return (
@@ -100,9 +113,9 @@ class WriteFileTool(Tool):
                     "description": "Exact content to write"
                 }
             },
-            "required": ["path", "content"]
+            "required": ["path", "content"],
         }
-    
+
     async def execute(self, path: str, content: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
@@ -125,7 +138,7 @@ class EditFileTool(Tool):
     @property
     def name(self) -> str:
         return "edit_file"
-    
+
     @property
     def description(self) -> str:
         return (
@@ -151,9 +164,9 @@ class EditFileTool(Tool):
                     "description": "Text to replace it with"
                 }
             },
-            "required": ["path", "old_text", "new_text"]
+            "required": ["path", "old_text", "new_text"],
         }
-    
+
     async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
@@ -193,13 +206,19 @@ class EditFileTool(Tool):
                 best_ratio, best_start = ratio, i
 
         if best_ratio > 0.5:
-            diff = "\n".join(difflib.unified_diff(
-                old_lines, lines[best_start : best_start + window],
-                fromfile="old_text (provided)", tofile=f"{path} (actual, line {best_start + 1})",
-                lineterm="",
-            ))
+            diff = "\n".join(
+                difflib.unified_diff(
+                    old_lines,
+                    lines[best_start : best_start + window],
+                    fromfile="old_text (provided)",
+                    tofile=f"{path} (actual, line {best_start + 1})",
+                    lineterm="",
+                )
+            )
             return f"Error: old_text not found in {path}.\nBest match ({best_ratio:.0%} similar) at line {best_start + 1}:\n{diff}"
-        return f"Error: old_text not found in {path}. No similar text found. Verify the file content."
+        return (
+            f"Error: old_text not found in {path}. No similar text found. Verify the file content."
+        )
 
 
 class ListDirTool(Tool):
@@ -212,7 +231,7 @@ class ListDirTool(Tool):
     @property
     def name(self) -> str:
         return "list_dir"
-    
+
     @property
     def description(self) -> str:
         return (
@@ -232,7 +251,7 @@ class ListDirTool(Tool):
             },
             "required": ["path"]
         }
-    
+
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
             dir_path = _resolve_path(path, self._workspace, self._allowed_dir)

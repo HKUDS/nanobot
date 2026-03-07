@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import weakref
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -44,6 +45,8 @@ class AgentLoop:
     5. Sends responses back
     """
 
+    _TOOL_RESULT_MAX_CHARS = 500
+
     def __init__(
         self,
         bus: MessageBus,
@@ -54,7 +57,9 @@ class AgentLoop:
         temperature: float = 0.1,
         max_tokens: int = 4096,
         memory_window: int = 100,
+        reasoning_effort: str | None = None,
         brave_api_key: str | None = None,
+        web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
@@ -72,7 +77,9 @@ class AgentLoop:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.memory_window = memory_window
+        self.reasoning_effort = reasoning_effort
         self.brave_api_key = brave_api_key
+        self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -87,7 +94,9 @@ class AgentLoop:
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            reasoning_effort=reasoning_effort,
             brave_api_key=brave_api_key,
+            web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
@@ -99,7 +108,7 @@ class AgentLoop:
         self._mcp_connecting = False
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
-        self._consolidation_locks: dict[str, asyncio.Lock] = {}
+        self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
         self._register_default_tools()
@@ -115,8 +124,8 @@ class AgentLoop:
             restrict_to_workspace=self.restrict_to_workspace,
             path_append=self.exec_config.path_append,
         ))
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key))
-        self.tools.register(WebFetchTool())
+        self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
+        self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         self.tools.register(EndTurnTool())
@@ -147,17 +156,10 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool):
-                message_tool.set_context(channel, chat_id, message_id)
-
-        if spawn_tool := self.tools.get("spawn"):
-            if isinstance(spawn_tool, SpawnTool):
-                spawn_tool.set_context(channel, chat_id)
-
-        if cron_tool := self.tools.get("cron"):
-            if isinstance(cron_tool, CronTool):
-                cron_tool.set_context(channel, chat_id)
+        for name in ("message", "spawn", "cron"):
+            if tool := self.tools.get(name):
+                if hasattr(tool, "set_context"):
+                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -170,7 +172,8 @@ class AgentLoop:
     def _tool_hint(tool_calls: list) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
         def _fmt(tc):
-            val = next(iter(tc.arguments.values()), None) if tc.arguments else None
+            args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
+            val = next(iter(args.values()), None) if isinstance(args, dict) else None
             if not isinstance(val, str):
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
@@ -204,16 +207,27 @@ class AgentLoop:
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
+                reasoning_effort=self.reasoning_effort,
             )
 
             if response.has_tool_calls:
                 if on_progress:
-                    clean = self._strip_think(response.content)
                     # When end_turn is in this batch, we'll send final_content once at the end;
                     # don't send the same content as progress to avoid duplicate messages.
                     end_turn_in_batch = any(tc.name == "end_turn" for tc in response.tool_calls)
-                    if clean and not end_turn_in_batch:
-                        await on_progress(clean)
+
+                    thoughts = [
+                        self._strip_think(response.content),
+                        response.reasoning_content,
+                        *(
+                            f"Thinking [{b.get('signature', '...')}]:\n{b.get('thought', '...')}"
+                            for b in (response.thinking_blocks or [])
+                            if isinstance(b, dict) and "signature" in b
+                        ),
+                    ]
+                    combined_thoughts = "\n\n".join(filter(None, thoughts))
+                    if combined_thoughts and not end_turn_in_batch:
+                        await on_progress(combined_thoughts)
                     await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
                 tool_call_dicts = [
@@ -230,6 +244,7 @@ class AgentLoop:
                 messages = self.context.add_assistant_message(
                     messages, response.content, tool_call_dicts,
                     reasoning_content=response.reasoning_content,
+                    thinking_blocks=response.thinking_blocks,
                 )
 
                 end_turn_called = False
@@ -251,8 +266,15 @@ class AgentLoop:
                     break
             else:
                 clean = self._strip_think(response.content)
+                # Don't persist error responses to session history — they can
+                # poison the context and cause permanent 400 loops (#1303).
+                if response.finish_reason == "error":
+                    logger.error("LLM returned error: {}", (clean or "")[:200])
+                    final_content = clean or "Sorry, I encountered an error calling the AI model."
+                    break
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
+                    thinking_blocks=response.thinking_blocks,
                 )
                 messages.append({
                     "role": "user",
@@ -344,18 +366,6 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
 
-    def _get_consolidation_lock(self, session_key: str) -> asyncio.Lock:
-        lock = self._consolidation_locks.get(session_key)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._consolidation_locks[session_key] = lock
-        return lock
-
-    def _prune_consolidation_lock(self, session_key: str, lock: asyncio.Lock) -> None:
-        """Drop lock entry if no longer in use."""
-        if not lock.locked():
-            self._consolidation_locks.pop(session_key, None)
-
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -391,7 +401,7 @@ class AgentLoop:
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            lock = self._get_consolidation_lock(session.key)
+            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
             self._consolidating.add(session.key)
             try:
                 async with lock:
@@ -412,7 +422,6 @@ class AgentLoop:
                 )
             finally:
                 self._consolidating.discard(session.key)
-                self._prune_consolidation_lock(session.key, lock)
 
             session.clear()
             self.sessions.save(session)
@@ -426,7 +435,7 @@ class AgentLoop:
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
             self._consolidating.add(session.key)
-            lock = self._get_consolidation_lock(session.key)
+            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
 
             async def _consolidate_and_unlock():
                 try:
@@ -434,7 +443,6 @@ class AgentLoop:
                         await self._consolidate_memory(session)
                 finally:
                     self._consolidating.discard(session.key)
-                    self._prune_consolidation_lock(session.key, lock)
                     _task = asyncio.current_task()
                     if _task is not None:
                         self._consolidation_tasks.discard(_task)
@@ -470,22 +478,18 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
-
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
 
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-                return None
+        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
+            return None
 
+        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},
         )
-
-    _TOOL_RESULT_MAX_CHARS = 500
 
     _END_TURN_REMINDER_PREFIX = "[System: You replied with text but did not call end_turn"
     _ITERATION_PREFIX = "[System: Tool call iteration "
@@ -494,24 +498,38 @@ class AgentLoop:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
         for m in messages[skip:]:
-            entry = {k: v for k, v in m.items() if k != "reasoning_content"}
-            if entry.get("role") == "user" and isinstance(entry.get("content"), str):
-                if entry["content"].startswith(self._END_TURN_REMINDER_PREFIX):
-                    continue
-                if entry["content"].startswith(self._ITERATION_PREFIX):
-                    continue
-            if entry.get("role") == "tool" and isinstance(entry.get("content"), str):
-                content = entry["content"]
-                if len(content) > self._TOOL_RESULT_MAX_CHARS:
-                    entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
-            if entry.get("role") == "user" and isinstance(entry.get("content"), list):
-                entry["content"] = [
-                    {"type": "text", "text": "[image]"} if (
-                        c.get("type") == "image_url"
-                        and c.get("image_url", {}).get("url", "").startswith("data:image/")
-                    ) else c
-                    for c in entry["content"]
-                ]
+            entry = dict(m)
+            role, content = entry.get("role"), entry.get("content")
+            if role == "assistant" and not content and not entry.get("tool_calls"):
+                continue  # skip empty assistant messages — they poison session context
+            if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
+                entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+            elif role == "user":
+                if isinstance(content, str):
+                    if content.startswith(self._END_TURN_REMINDER_PREFIX):
+                        continue
+                    if content.startswith(self._ITERATION_PREFIX):
+                        continue
+                    if content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
+                        # Strip the runtime-context prefix, keep only the user text.
+                        parts = content.split("\n\n", 1)
+                        if len(parts) > 1 and parts[1].strip():
+                            entry["content"] = parts[1]
+                        else:
+                            continue
+                if isinstance(content, list):
+                    filtered = []
+                    for c in content:
+                        if c.get("type") == "text" and isinstance(c.get("text"), str) and c["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
+                            continue  # Strip runtime context from multimodal messages
+                        if (c.get("type") == "image_url"
+                                and c.get("image_url", {}).get("url", "").startswith("data:image/")):
+                            filtered.append({"type": "text", "text": "[image]"})
+                        else:
+                            filtered.append(c)
+                    if not filtered:
+                        continue
+                    entry["content"] = filtered
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now()
