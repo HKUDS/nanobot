@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
+import unicodedata
 
 from loguru import logger
 from telegram import BotCommand, ReplyParameters, Update
@@ -17,6 +19,47 @@ from nanobot.config.schema import TelegramConfig
 from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
+
+
+def _strip_md(s: str) -> str:
+    """Strip markdown inline formatting from text."""
+    s = re.sub(r'\*\*(.+?)\*\*', r'\1', s)
+    s = re.sub(r'__(.+?)__', r'\1', s)
+    s = re.sub(r'~~(.+?)~~', r'\1', s)
+    s = re.sub(r'`([^`]+)`', r'\1', s)
+    return s.strip()
+
+
+def _render_table_box(table_lines: list[str]) -> str:
+    """Convert markdown pipe-table to compact aligned text for <pre> display."""
+
+    def dw(s: str) -> int:
+        return sum(2 if unicodedata.east_asian_width(c) in ('W', 'F') else 1 for c in s)
+
+    rows: list[list[str]] = []
+    has_sep = False
+    for line in table_lines:
+        cells = [_strip_md(c) for c in line.strip().strip('|').split('|')]
+        if all(re.match(r'^:?-+:?$', c) for c in cells if c):
+            has_sep = True
+            continue
+        rows.append(cells)
+    if not rows or not has_sep:
+        return '\n'.join(table_lines)
+
+    ncols = max(len(r) for r in rows)
+    for r in rows:
+        r.extend([''] * (ncols - len(r)))
+    widths = [max(dw(r[c]) for r in rows) for c in range(ncols)]
+
+    def dr(cells: list[str]) -> str:
+        return '  '.join(f'{c}{" " * (w - dw(c))}' for c, w in zip(cells, widths))
+
+    out = [dr(rows[0])]
+    out.append('  '.join('─' * w for w in widths))
+    for row in rows[1:]:
+        out.append(dr(row))
+    return '\n'.join(out)
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -33,6 +76,27 @@ def _markdown_to_telegram_html(text: str) -> str:
         return f"\x00CB{len(code_blocks) - 1}\x00"
 
     text = re.sub(r'```[\w]*\n?([\s\S]*?)```', save_code_block, text)
+
+    # 1.5. Convert markdown tables to box-drawing (reuse code_block placeholders)
+    lines = text.split('\n')
+    rebuilt: list[str] = []
+    li = 0
+    while li < len(lines):
+        if re.match(r'^\s*\|.+\|', lines[li]):
+            tbl: list[str] = []
+            while li < len(lines) and re.match(r'^\s*\|.+\|', lines[li]):
+                tbl.append(lines[li])
+                li += 1
+            box = _render_table_box(tbl)
+            if box != '\n'.join(tbl):
+                code_blocks.append(box)
+                rebuilt.append(f"\x00CB{len(code_blocks) - 1}\x00")
+            else:
+                rebuilt.extend(tbl)
+        else:
+            rebuilt.append(lines[li])
+            li += 1
+    text = '\n'.join(rebuilt)
 
     # 2. Extract and protect inline code
     inline_codes: list[str] = []
@@ -255,42 +319,48 @@ class TelegramChannel(BaseChannel):
         # Send text content
         if msg.content and msg.content != "[empty message]":
             is_progress = msg.metadata.get("_progress", False)
-            draft_id = msg.metadata.get("message_id")
 
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                try:
-                    html = _markdown_to_telegram_html(chunk)
-                    if is_progress and draft_id:
-                        await self._app.bot.send_message_draft(
-                            chat_id=chat_id,
-                            draft_id=draft_id,
-                            text=html,
-                            parse_mode="HTML"
-                        )
-                    else:
-                        await self._app.bot.send_message(
-                            chat_id=chat_id,
-                            text=html,
-                            parse_mode="HTML",
-                            reply_parameters=reply_params
-                        )
-                except Exception as e:
-                    logger.warning("HTML parse failed, falling back to plain text: {}", e)
-                    try:
-                        if is_progress and draft_id:
-                            await self._app.bot.send_message_draft(
-                                chat_id=chat_id,
-                                draft_id=draft_id,
-                                text=chunk
-                            )
-                        else:
-                            await self._app.bot.send_message(
-                                chat_id=chat_id,
-                                text=chunk,
-                                reply_parameters=reply_params
-                            )
-                    except Exception as e2:
-                        logger.error("Error sending Telegram message: {}", e2)
+                # Final response: simulate streaming via draft, then persist
+                if not is_progress:
+                    await self._send_with_streaming(chat_id, chunk, reply_params)
+                else:
+                    await self._send_text(chat_id, chunk, reply_params)
+
+    async def _send_text(self, chat_id: int, text: str, reply_params=None) -> None:
+        """Send a plain text message with HTML fallback."""
+        try:
+            html = _markdown_to_telegram_html(text)
+            await self._app.bot.send_message(
+                chat_id=chat_id, text=html, parse_mode="HTML",
+                reply_parameters=reply_params,
+            )
+        except Exception as e:
+            logger.warning("HTML parse failed, falling back to plain text: {}", e)
+            try:
+                await self._app.bot.send_message(
+                    chat_id=chat_id, text=text, reply_parameters=reply_params,
+                )
+            except Exception as e2:
+                logger.error("Error sending Telegram message: {}", e2)
+
+    async def _send_with_streaming(self, chat_id: int, text: str, reply_params=None) -> None:
+        """Simulate streaming via send_message_draft, then persist with send_message."""
+        draft_id = int(time.time() * 1000) % (2**31)
+        try:
+            step = max(len(text) // 8, 40)
+            for i in range(step, len(text), step):
+                await self._app.bot.send_message_draft(
+                    chat_id=chat_id, draft_id=draft_id, text=text[:i],
+                )
+                await asyncio.sleep(0.04)
+            await self._app.bot.send_message_draft(
+                chat_id=chat_id, draft_id=draft_id, text=text,
+            )
+            await asyncio.sleep(0.15)
+        except Exception:
+            pass
+        await self._send_text(chat_id, text, reply_params)
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""

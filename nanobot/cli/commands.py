@@ -213,6 +213,7 @@ def onboard():
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+    from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
@@ -228,6 +229,20 @@ def _make_provider(config: Config):
         return CustomProvider(
             api_key=p.api_key if p else "no-key",
             api_base=config.get_api_base(model) or "http://localhost:8000/v1",
+            default_model=model,
+        )
+
+    # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
+    if provider_name == "azure_openai":
+        if not p or not p.api_key or not p.api_base:
+            console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
+            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
+            console.print("Use the model field to specify the deployment name.")
+            raise typer.Exit(1)
+        
+        return AzureOpenAIProvider(
+            api_key=p.api_key,
+            api_base=p.api_base,
             default_model=model,
         )
 
