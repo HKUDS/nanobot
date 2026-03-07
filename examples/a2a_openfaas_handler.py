@@ -16,13 +16,48 @@ from typing import Any
 
 from starlette.responses import JSONResponse
 
-# Configure logging to stderr so OpenFaaS watchdog captures it
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    stream=sys.stderr,
-)
+# ---------------------------------------------------------------------------
+# Logging — truncate messages to stay under the OpenFaaS watchdog's
+# bufio.Scanner limit (64 KB default).  We cap at 32 KB per line to leave
+# headroom for the formatted prefix.
+# ---------------------------------------------------------------------------
+_LOG_MAX_CHARS = 32_000
+
+
+class _TruncatingFormatter(logging.Formatter):
+    """Formatter that truncates the final formatted line to *maxlen* chars."""
+
+    def __init__(self, fmt: str, maxlen: int = _LOG_MAX_CHARS) -> None:
+        super().__init__(fmt)
+        self.maxlen = maxlen
+
+    def format(self, record: logging.LogRecord) -> str:
+        msg = super().format(record)
+        if len(msg) > self.maxlen:
+            return msg[: self.maxlen] + "... [truncated]"
+        return msg
+
+
+_handler = logging.StreamHandler(sys.stderr)
+_handler.setFormatter(_TruncatingFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+logging.basicConfig(level=logging.DEBUG, handlers=[_handler])
 logger = logging.getLogger("openfaas_handler")
+
+# Truncate loguru output (used by nanobot internals) the same way.
+from loguru import logger as _loguru
+
+_loguru.remove()  # drop default stderr sink
+
+
+def _truncating_sink(message: str) -> None:
+    """Write loguru message to stderr, truncating long lines."""
+    for line in message.rstrip("\n").split("\n"):
+        if len(line) > _LOG_MAX_CHARS:
+            line = line[:_LOG_MAX_CHARS] + "... [truncated]"
+        sys.stderr.write(line + "\n")
+
+
+_loguru.add(_truncating_sink, level="DEBUG")
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
@@ -238,6 +273,7 @@ async def _a2a_handler(scope: dict, receive: callable, send: callable) -> None:
 async def _dashboard_handler(scope: dict, receive: callable, send: callable) -> None:
     """Route dashboard requests (lazy-init on first call)."""
     global _cached_dashboard_app
+    await get_state()
     if _cached_dashboard_app is None:
         _cached_dashboard_app = get_dashboard_app(lambda: _state)
         logger.info("Dashboard app built and cached")
