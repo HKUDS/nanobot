@@ -1,7 +1,9 @@
 """QQ channel implementation using botpy SDK."""
 
 import asyncio
+import mimetypes
 from collections import deque
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -23,6 +25,40 @@ except ImportError:
 
 if TYPE_CHECKING:
     from botpy.message import C2CMessage
+
+# QQ C2C 富媒体文件类型
+# 1: 图片, 2: 语音, 3: 视频, 4: 文件
+QQ_FILE_TYPE_IMAGE = 1
+QQ_FILE_TYPE_VOICE = 2
+QQ_FILE_TYPE_VIDEO = 3
+QQ_FILE_TYPE_FILE = 4
+
+
+def _get_file_type(file_path: str) -> int:
+    """根据文件路径判断QQ文件类型."""
+    ext = Path(file_path).suffix.lower()
+    mime, _ = mimetypes.guess_type(file_path)
+
+    # 图片类型
+    if ext in (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp") or (
+        mime and mime.startswith("image/")
+    ):
+        return QQ_FILE_TYPE_IMAGE
+
+    # 语音类型
+    if ext in (".mp3", ".wav", ".ogg", ".m4a", ".aac") or (
+        mime and mime.startswith("audio/")
+    ):
+        return QQ_FILE_TYPE_VOICE
+
+    # 视频类型
+    if ext in (".mp4", ".avi", ".mov", ".mkv", ".flv") or (
+        mime and mime.startswith("video/")
+    ):
+        return QQ_FILE_TYPE_VIDEO
+
+    # 默认文件类型
+    return QQ_FILE_TYPE_FILE
 
 
 def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
@@ -101,18 +137,73 @@ class QQChannel(BaseChannel):
         if not self._client:
             logger.warning("QQ client not initialized")
             return
+
+        msg_id = msg.metadata.get("message_id")
+        self._msg_seq += 1  # 递增序列号避免去重
+
+        # 发送富媒体文件
+        for media_path in (msg.media or []):
+            await self._send_media(msg.chat_id, media_path, msg_id)
+
+        # 发送文本内容
+        if msg.content and msg.content != "[empty message]":
+            try:
+                await self._client.api.post_c2c_message(
+                    openid=msg.chat_id,
+                    msg_type=0,
+                    content=msg.content,
+                    msg_id=msg_id,
+                    msg_seq=self._msg_seq,
+                )
+            except Exception as e:
+                logger.error("Error sending QQ message: {}", e)
+
+    async def _send_media(
+        self, chat_id: str, file_path: str, msg_id: str | None = None
+    ) -> bool:
+        """发送富媒体文件到QQ C2C.
+
+        流程:
+        1. 调用 post_c2c_file 上传文件获取 Media 对象
+        2. 调用 post_c2c_message 发送富媒体消息 (msg_type=7)
+        """
+        path = Path(file_path)
+        if not path.is_file():
+            logger.warning("QQ media file not found: {}", file_path)
+            return False
+
+        file_type = _get_file_type(file_path)
+        file_url = f"file://{path.absolute()}"
+
         try:
-            msg_id = msg.metadata.get("message_id")
-            self._msg_seq += 1  # 递增序列号
-            await self._client.api.post_c2c_message(
-                openid=msg.chat_id,
-                msg_type=0,
-                content=msg.content,
-                msg_id=msg_id,
-                msg_seq=self._msg_seq,  # 添加序列号避免去重
+            self._msg_seq += 1
+
+            # 1. 上传文件获取 Media 对象
+            upload_result = await self._client.api.post_c2c_file(
+                openid=chat_id,
+                file_type=file_type,
+                url=file_url,
             )
+
+            if not upload_result:
+                logger.error("QQ media upload failed: no response")
+                return False
+
+            # 2. 发送富媒体消息
+            await self._client.api.post_c2c_message(
+                openid=chat_id,
+                msg_type=7,  # 7 表示富媒体类型
+                msg_id=msg_id,
+                msg_seq=self._msg_seq,
+                media=upload_result,
+            )
+
+            logger.debug("QQ media sent: {}", path.name)
+            return True
+
         except Exception as e:
-            logger.error("Error sending QQ message: {}", e)
+            logger.error("Error sending QQ media {}: {}", path.name, e)
+            return False
 
     async def _on_message(self, data: "C2CMessage") -> None:
         """Handle incoming message from QQ."""
