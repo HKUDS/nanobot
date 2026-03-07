@@ -13,7 +13,7 @@ from telegram.request import HTTPXRequest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import TelegramConfig
+from nanobot.config.schema import AgentsConfig, TelegramConfig
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -121,7 +121,7 @@ class TelegramChannel(BaseChannel):
         config: TelegramConfig,
         bus: MessageBus,
         groq_api_key: str = "",
-        agents_config=None,
+        agents_config: AgentsConfig | None = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
