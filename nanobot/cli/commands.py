@@ -738,6 +738,14 @@ def channels_status():
         em_config
     )
 
+    # Python Call
+    pc = config.channels.python_call
+    table.add_row(
+        "Python Call",
+        "✓" if pc.enabled else "✗",
+        "programmatic API"
+    )
+
     console.print(table)
 
 
