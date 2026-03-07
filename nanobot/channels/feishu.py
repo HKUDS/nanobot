@@ -878,6 +878,14 @@ class FeishuChannel(BaseChannel):
             chat_type = message.chat_type
             msg_type = message.message_type
 
+            if not self.is_allowed(sender_id):
+                logger.warning(
+                    "Access denied for sender {} on channel {}. "
+                    "Add them to allowFrom list in config to grant access.",
+                    sender_id, self.name,
+                )
+                return
+
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
 

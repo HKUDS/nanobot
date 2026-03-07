@@ -13,7 +13,7 @@ from nanobot.utils.document_extractor import DocumentExtractionResult
 
 @pytest.mark.asyncio
 async def test_feishu_file_message_uses_first_class_attachments_with_extraction_note(tmp_path, monkeypatch) -> None:
-    channel = FeishuChannel(config=FeishuConfig(), bus=SimpleNamespace())
+    channel = FeishuChannel(config=FeishuConfig(allow_from=["user-1"]), bus=SimpleNamespace())
     channel._processed_message_ids.clear()
 
     media_path = tmp_path / "scan.pdf"
@@ -68,3 +68,53 @@ async def test_feishu_file_message_uses_first_class_attachments_with_extraction_
     metadata = captured["metadata"]
     assert metadata["attachments"][0]["text_status"] == "unavailable"
     assert metadata["attachments"][0]["text_note"] == "PDF text extraction unavailable because optional dependency 'pypdf' is not installed."
+
+
+@pytest.mark.asyncio
+async def test_feishu_file_message_skips_attachment_work_for_denied_sender(tmp_path, monkeypatch) -> None:
+    channel = FeishuChannel(config=FeishuConfig(allow_from=["allowed-user"]), bus=SimpleNamespace())
+    channel._processed_message_ids.clear()
+
+    media_path = tmp_path / "scan.pdf"
+    media_path.write_text("placeholder", encoding="utf-8")
+
+    calls = {"download": 0, "extract": 0, "handled": 0}
+
+    async def _fake_add_reaction(message_id: str, emoji: str) -> None:
+        return None
+
+    async def _fake_download_and_save_media(msg_type: str, content_json: dict, message_id: str) -> tuple[str, str]:
+        calls["download"] += 1
+        return str(media_path), f"[attachment: {media_path}]"
+
+    async def _fake_handle_message(**kwargs) -> None:
+        calls["handled"] += 1
+
+    def _fake_extract_document(path: str, max_chars: int) -> DocumentExtractionResult:
+        calls["extract"] += 1
+        return DocumentExtractionResult(text="should not run")
+
+    monkeypatch.setattr(channel, "_add_reaction", _fake_add_reaction)
+    monkeypatch.setattr(channel, "_download_and_save_media", _fake_download_and_save_media)
+    monkeypatch.setattr("nanobot.channels.feishu.extract_document", _fake_extract_document)
+    monkeypatch.setattr(channel, "_handle_message", _fake_handle_message)
+
+    data = SimpleNamespace(
+        event=SimpleNamespace(
+            message=SimpleNamespace(
+                message_id="mid-2",
+                chat_id="chat-1",
+                chat_type="p2p",
+                message_type="file",
+                content=json.dumps({"file_key": "file-1"}),
+            ),
+            sender=SimpleNamespace(
+                sender_type="user",
+                sender_id=SimpleNamespace(open_id="denied-user"),
+            ),
+        )
+    )
+
+    await channel._on_message(data)
+
+    assert calls == {"download": 0, "extract": 0, "handled": 0}
