@@ -69,13 +69,15 @@ class NanobotDingTalkHandler(CallbackHandler):
 
             sender_id = chatbot_msg.sender_staff_id or chatbot_msg.sender_id
             sender_name = chatbot_msg.sender_nick or "Unknown"
+            conversation_type = chatbot_msg.conversation_type  # "1"=private, "2"=group
+            conversation_id = chatbot_msg.conversation_id
 
             logger.info("Received DingTalk message from {} ({}): {}", sender_name, sender_id, content)
 
             # Forward to Nanobot via _on_message (non-blocking).
             # Store reference to prevent GC before task completes.
             task = asyncio.create_task(
-                self.channel._on_message(content, sender_id, sender_name)
+                self.channel._on_message(content, sender_id, sender_name, conversation_type, conversation_id)
             )
             self.channel._background_tasks.add(task)
             task.add_done_callback(self.channel._background_tasks.discard)
@@ -95,8 +97,8 @@ class DingTalkChannel(BaseChannel):
     Uses WebSocket to receive events via `dingtalk-stream` SDK.
     Uses direct HTTP API to send messages (SDK is mainly for receiving).
 
-    Note: Currently only supports private (1:1) chat. Group messages are
-    received but replies are sent back as private messages to the sender.
+    Supports both private (1:1) and group chats.
+    Group chat_id is stored with a "group:" prefix to distinguish from private.
     """
 
     name = "dingtalk"
@@ -290,6 +292,37 @@ class DingTalkChannel(BaseChannel):
             logger.error("DingTalk media upload error type={} err={}", media_type, e)
             return None
 
+    async def _do_send(
+        self,
+        token: str,
+        url: str,
+        payload: dict[str, Any],
+        msg_key: str,
+        target: str,
+    ) -> bool:
+        """Shared HTTP POST logic for both private and group message sends."""
+        if not self._http:
+            logger.warning("DingTalk HTTP client not initialized, cannot send")
+            return False
+        headers = {"x-acs-dingtalk-access-token": token}
+        try:
+            resp = await self._http.post(url, json=payload, headers=headers)
+            body = resp.text
+            if resp.status_code != 200:
+                logger.error("DingTalk send failed msgKey={} target={} status={} body={}", msg_key, target, resp.status_code, body[:500])
+                return False
+            try: result = resp.json()
+            except Exception: result = {}
+            errcode = result.get("errcode")
+            if errcode not in (None, 0):
+                logger.error("DingTalk send api error msgKey={} target={} errcode={} body={}", msg_key, target, errcode, body[:500])
+                return False
+            logger.debug("DingTalk message sent to {} with msgKey={}", target, msg_key)
+            return True
+        except Exception as e:
+            logger.error("Error sending DingTalk message msgKey={} target={} err={}", msg_key, target, e)
+            return False
+
     async def _send_batch_message(
         self,
         token: str,
@@ -297,38 +330,52 @@ class DingTalkChannel(BaseChannel):
         msg_key: str,
         msg_param: dict[str, Any],
     ) -> bool:
-        if not self._http:
-            logger.warning("DingTalk HTTP client not initialized, cannot send")
-            return False
-
-        url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
-        headers = {"x-acs-dingtalk-access-token": token}
+        """Send a private (1:1) message via batchSend API."""
         payload = {
             "robotCode": self.config.client_id,
             "userIds": [chat_id],
             "msgKey": msg_key,
             "msgParam": json.dumps(msg_param, ensure_ascii=False),
         }
+        return await self._do_send(
+            token,
+            "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend",
+            payload,
+            msg_key,
+            chat_id,
+        )
 
-        try:
-            resp = await self._http.post(url, json=payload, headers=headers)
-            body = resp.text
-            if resp.status_code != 200:
-                logger.error("DingTalk send failed msgKey={} status={} body={}", msg_key, resp.status_code, body[:500])
-                return False
-            try: result = resp.json()
-            except Exception: result = {}
-            errcode = result.get("errcode")
-            if errcode not in (None, 0):
-                logger.error("DingTalk send api error msgKey={} errcode={} body={}", msg_key, errcode, body[:500])
-                return False
-            logger.debug("DingTalk message sent to {} with msgKey={}", chat_id, msg_key)
-            return True
-        except Exception as e:
-            logger.error("Error sending DingTalk message msgKey={} err={}", msg_key, e)
-            return False
+    async def _send_group_message(
+        self,
+        token: str,
+        open_conversation_id: str,
+        msg_key: str,
+        msg_param: dict[str, Any],
+    ) -> bool:
+        """Send a message to a group chat via openConversationId."""
+        payload = {
+            "robotCode": self.config.client_id,
+            "openConversationId": open_conversation_id,
+            "msgKey": msg_key,
+            "msgParam": json.dumps(msg_param, ensure_ascii=False),
+        }
+        return await self._do_send(
+            token,
+            "https://api.dingtalk.com/v1.0/robot/groupMessages/send",
+            payload,
+            msg_key,
+            open_conversation_id,
+        )
 
     async def _send_markdown_text(self, token: str, chat_id: str, content: str) -> bool:
+        if chat_id.startswith("group:"):
+            open_conversation_id = chat_id.removeprefix("group:")
+            return await self._send_group_message(
+                token,
+                open_conversation_id,
+                "sampleMarkdown",
+                {"text": content, "title": "Nanobot Reply"},
+            )
         return await self._send_batch_message(
             token,
             chat_id,
@@ -341,11 +388,17 @@ class DingTalkChannel(BaseChannel):
         if not media_ref:
             return True
 
+        is_group = chat_id.startswith("group:")
+        open_conversation_id = chat_id.removeprefix("group:") if is_group else None
+
+        async def _send_msg(msg_key: str, msg_param: dict[str, Any]) -> bool:
+            if is_group and open_conversation_id:
+                return await self._send_group_message(token, open_conversation_id, msg_key, msg_param)
+            return await self._send_batch_message(token, chat_id, msg_key, msg_param)
+
         upload_type = self._guess_upload_type(media_ref)
         if upload_type == "image" and self._is_http_url(media_ref):
-            ok = await self._send_batch_message(
-                token,
-                chat_id,
+            ok = await _send_msg(
                 "sampleImageMsg",
                 {"photoURL": media_ref},
             )
@@ -378,9 +431,7 @@ class DingTalkChannel(BaseChannel):
 
         if upload_type == "image":
             # Verified in production: sampleImageMsg accepts media_id in photoURL.
-            ok = await self._send_batch_message(
-                token,
-                chat_id,
+            ok = await _send_msg(
                 "sampleImageMsg",
                 {"photoURL": media_id},
             )
@@ -388,9 +439,7 @@ class DingTalkChannel(BaseChannel):
                 return True
             logger.warning("DingTalk image media_id send failed, falling back to file: {}", media_ref)
 
-        return await self._send_batch_message(
-            token,
-            chat_id,
+        return await _send_msg(
             "sampleFile",
             {"mediaId": media_id, "fileName": filename, "fileType": file_type},
         )
@@ -417,21 +466,33 @@ class DingTalkChannel(BaseChannel):
                 f"[Attachment send failed: {filename}]",
             )
 
-    async def _on_message(self, content: str, sender_id: str, sender_name: str) -> None:
+    async def _on_message(
+        self,
+        content: str,
+        sender_id: str,
+        sender_name: str,
+        conversation_type: str | None = None,
+        conversation_id: str | None = None,
+    ) -> None:
         """Handle incoming message (called by NanobotDingTalkHandler).
 
         Delegates to BaseChannel._handle_message() which enforces allow_from
         permission checks before publishing to the bus.
+        conversation_type: "1"=private, "2"=group.
+        For group chats, chat_id is prefixed with "group:" to route replies back to the group.
         """
         try:
             logger.info("DingTalk inbound: {} from {}", content, sender_name)
+            is_group = conversation_type == "2" and conversation_id
+            chat_id = f"group:{conversation_id}" if is_group else sender_id
             await self._handle_message(
                 sender_id=sender_id,
-                chat_id=sender_id,  # For private chat, chat_id == sender_id
+                chat_id=chat_id,
                 content=str(content),
                 metadata={
                     "sender_name": sender_name,
                     "platform": "dingtalk",
+                    "conversation_type": conversation_type,
                 },
             )
         except Exception as e:
