@@ -37,12 +37,11 @@ async def get_channel():
     ChannelManager.  This helper is a self-contained shortcut for
     examples and scripts.
     """
+    from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
     from nanobot.config.loader import load_config
 
     config = load_config()
-    from nanobot.bus.queue import MessageBus
-
     bus = MessageBus()
     manager = ChannelManager(config, bus)
     await manager.start_all()
@@ -120,15 +119,19 @@ async def example_metadata_override():
 # ===================================================================
 
 """
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
-app = FastAPI()
 channel = None
 
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app):
     global channel
-    channel, _ = await get_channel()
+    channel, manager = await get_channel()
+    yield
+    await manager.stop_all()
+
+app = FastAPI(lifespan=lifespan)
 
 @app.post("/chat")
 async def chat(msg: str, user_id: str = "anonymous"):
@@ -271,16 +274,16 @@ if __name__ == "__main__":
     asyncio.run(example_metadata_override())
 
     print("\n" + "=" * 60)
-    print("Example 5: Batch processing")
+    print("Example 4: Batch processing")
     print("=" * 60)
     asyncio.run(example_batch())
 
     print("\n" + "=" * 60)
-    print("Example 6: Multi-agent pipeline")
+    print("Example 5: Multi-agent pipeline")
     print("=" * 60)
     asyncio.run(example_pipeline())
 
     print("\n" + "=" * 60)
-    print("Example 7: Timeout handling")
+    print("Example 6: Timeout handling")
     print("=" * 60)
     asyncio.run(example_timeout())

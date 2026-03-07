@@ -177,6 +177,7 @@ Connect nanobot to your favorite chat platform.
 | **Slack** | Bot token + App-Level token |
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
+| **Python Call** | Just `enabled: true` (programmatic access) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -692,6 +693,17 @@ async def chat(msg: str, user_id: str):
     reply = await channel.call(msg, sender_id=user_id, session_id=user_id, timeout=60.0)
     return {"reply": reply}
 ```
+
+**`call()` parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `content` | Message text to send |
+| `sender_id` | Caller identifier (default `"python_caller"`) |
+| `session_id` | Stable session ID for conversation persistence |
+| `metadata` | Config overrides (e.g. `system_prompt`, `model`) |
+| `media` | List of media URLs to attach |
+| `timeout` | Max seconds to wait (`None` = wait forever) |
 
 > See [`examples/python_call_examples.py`](examples/python_call_examples.py) for more patterns — multi-agent pipelines, timeout handling, CI testing, and more.
 
