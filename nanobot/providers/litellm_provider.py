@@ -169,6 +169,8 @@ class LiteLLMProvider(LLMProvider):
     @staticmethod
     def _sanitize_messages(messages: list[dict[str, Any]], extra_keys: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
         """Strip non-standard keys and ensure assistant messages have a content key."""
+        # GitHub Copilot and some other providers have a 64-character limit on tool_call_id
+        MAX_TOOL_CALL_ID_LENGTH = 64
         allowed = _ALLOWED_MSG_KEYS | extra_keys
         sanitized = []
         for msg in messages:
@@ -176,6 +178,13 @@ class LiteLLMProvider(LLMProvider):
             # Strict providers require "content" even when assistant only has tool_calls
             if clean.get("role") == "assistant" and "content" not in clean:
                 clean["content"] = None
+            # Truncate tool_call_id if it exceeds the provider's limit
+            # This can happen when switching from providers that generate longer IDs
+            if "tool_call_id" in clean and clean["tool_call_id"]:
+                tool_call_id = clean["tool_call_id"]
+                if isinstance(tool_call_id, str) and len(tool_call_id) > MAX_TOOL_CALL_ID_LENGTH:
+                    # Preserve first 32 chars and last 32 chars to maintain uniqueness
+                    clean["tool_call_id"] = tool_call_id[:32] + tool_call_id[-32:]
             sanitized.append(clean)
         return sanitized
 
