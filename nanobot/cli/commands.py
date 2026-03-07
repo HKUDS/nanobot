@@ -173,8 +173,18 @@ def onboard():
     from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
     from nanobot.utils.helpers import get_workspace_path
+    from nanobot.gateway.server import detect_gateway_host
 
     config_path = get_config_path()
+
+    def _create_or_reset() -> Config:
+        # helper to encapsulate whatever host/token defaults we need
+        cfg = Config()
+        cfg.gateway.auth.token = cfg.gateway.auth.token or secrets.token_urlsafe(32)
+        # set host based on environment detection; this ensures the generated
+        # config reflects the interface the server will actually bind to.
+        cfg.gateway.host = detect_gateway_host()
+        return cfg
 
     if config_path.exists():
         console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
@@ -183,22 +193,23 @@ def onboard():
             "  [bold]N[/bold] = refresh config, keeping existing values and adding new fields"
         )
         if typer.confirm("Overwrite?"):
-            config = Config()
-            if not config.gateway.auth.token:
-                config.gateway.auth.token = secrets.token_urlsafe(32)
+            config = _create_or_reset()
             save_config(config)
             console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
         else:
             config = load_config()
             if not config.gateway.auth.token:
                 config.gateway.auth.token = secrets.token_urlsafe(32)
-                save_config(config)
+            # if there is no explicit host set yet, populate it so users see
+            # something reasonable when they open the file later
+            if not config.gateway.host:
+                config.gateway.host = detect_gateway_host()
+            save_config(config)
             console.print(
                 f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)"
             )
     else:
-        config = Config()
-        config.gateway.auth.token = secrets.token_urlsafe(32)
+        config = _create_or_reset()
         save_config(config)
         console.print(f"[green]✓[/green] Created config at {config_path}")
 
@@ -217,7 +228,8 @@ def onboard():
     console.print("     Get one at: https://openrouter.ai/keys")
     console.print('  2. Chat: [cyan]nanobot agent -m "Hello!"[/cyan]')
     console.print(f"\n[bold]Gateway token:[/bold] {config.gateway.auth.token}")
-    console.print("  Use this token to access the web UI at [cyan]http://localhost:18790[/cyan]")
+    host_display = config.gateway.host or "localhost"
+    console.print(f"  Use this token to access the web UI at [cyan]http://{host_display}:{config.gateway.port}[/cyan]")
     console.print(
         "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]"
     )
@@ -476,10 +488,12 @@ def gateway(
         from nanobot.gateway.server import GatewayServer
         import threading
 
-        http_server = GatewayServer(port=port)
+        # obey whatever host the config specifies (onboard will have filled it)
+        http_server = GatewayServer(port=port, host=config.gateway.host)
         server_thread = threading.Thread(target=http_server.run, daemon=True)
         server_thread.start()
-        console.print(f"[green]✓[/green] Web UI: http://localhost:{port}")
+        host_display = config.gateway.host or "localhost"
+        console.print(f"[green]✓[/green] Web UI: http://{host_display}:{port}")
     else:
         console.print(
             "[yellow]Warning: No gateway token configured. Run 'nanobot onboard' to enable web UI.[/yellow]"

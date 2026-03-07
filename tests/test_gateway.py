@@ -78,6 +78,12 @@ def test_onboard_generates_token(mock_paths):
     assert len(data["gateway"]["auth"]["token"]) > 0
 
 
+def test_gateway_config_default_host():
+    """Config schema should default to localhost rather than all interfaces."""
+    config = GatewayConfig()
+    assert config.host == "127.0.0.1"
+
+
 def test_onboard_token_is_random():
     """Each onboard should generate a different token."""
     tokens = set()
@@ -264,6 +270,39 @@ class TestGatewayServer:
 
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
+
+
+# --- onboarding host tests --------------------------------------------------
+
+def test_onboard_sets_default_host(mock_paths):
+    """Running onboard in a normal environment should set localhost host."""
+    config_file, workspace_dir, mock_lc = mock_paths
+    with patch.dict("os.environ", {}, clear=True):
+        result = runner.invoke(app, ["onboard"])
+    assert result.exit_code == 0
+    data = json.loads(config_file.read_text())
+    assert data["gateway"]["host"] == "127.0.0.1"
+
+
+def test_onboard_sets_docker_host_env(mock_paths):
+    """If NANOBOT_DOCKER=1 the generated config should use 0.0.0.0."""
+    config_file, workspace_dir, mock_lc = mock_paths
+    with patch.dict("os.environ", {"NANOBOT_DOCKER": "1"}):
+        result = runner.invoke(app, ["onboard"])
+    assert result.exit_code == 0
+    data = json.loads(config_file.read_text())
+    assert data["gateway"]["host"] == "0.0.0.0"
+
+
+def test_onboard_sets_docker_host_file(mock_paths):
+    """Presence of /.dockerenv should also produce 0.0.0.0."""
+    config_file, workspace_dir, mock_lc = mock_paths
+    with patch("pathlib.Path.exists") as mock_exists:
+        mock_exists.return_value = True
+        result = runner.invoke(app, ["onboard"])
+    assert result.exit_code == 0
+    data = json.loads(config_file.read_text())
+    assert data["gateway"]["host"] == "0.0.0.0"
 
 
 class TestGatewayServerHost:

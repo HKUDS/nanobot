@@ -13,24 +13,40 @@ from fastapi.staticfiles import StaticFiles
 from nanobot.config.loader import load_config, save_config
 
 
+def detect_gateway_host() -> str:
+    """Determine the default host the gateway should bind to.
+
+    Docker environments need ``0.0.0.0`` so that the container's port mapping
+    works; a normal desktop install should listen only on the loopback interface
+    by default.  The CLI and onboarding logic call this helper rather than
+    duplicating detection code.
+    """
+
+    import os
+    # check for explicit environment variable first, then the usual Docker
+    # sentinel file.  We deliberately avoid heavyweight dependencies here so
+    # the function can be called very early in startup.
+    if os.environ.get("NANOBOT_DOCKER") == "1":
+        return "0.0.0.0"
+    if Path("/.dockerenv").exists():
+        return "0.0.0.0"
+    return "127.0.0.1"
+
+
 class GatewayServer:
     """FastAPI server for gateway web UI."""
 
     def __init__(self, port: int = 18790, host: str | None = None):
         self.port = port
-        self.host = host or self._detect_host()
+        # if a host string is provided use it, otherwise fall back to detection
+        self.host = host or detect_gateway_host()
         self.app = FastAPI(title="Nanobot Gateway", docs_url=None, redoc_url=None)
         self._setup_routes()
         self._setup_middleware()
 
     def _detect_host(self) -> str:
-        """Detect whether to bind to localhost or all interfaces."""
-        import os
-        if os.environ.get("NANOBOT_DOCKER") == "1":
-            return "0.0.0.0"
-        if Path("/.dockerenv").exists():
-            return "0.0.0.0"
-        return "127.0.0.1"
+        """Legacy wrapper for tests; callers should prefer :func:`detect_gateway_host`."""
+        return detect_gateway_host()
 
     def _setup_middleware(self):
         self.app.add_middleware(

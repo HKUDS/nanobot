@@ -284,9 +284,18 @@ class GatewayAuthConfig(Base):
 
 
 class GatewayConfig(Base):
-    """Gateway/server configuration."""
+    """Gateway/server configuration.
 
-    host: str = "0.0.0.0"
+    The default value here is intended to be a sensible non-Docker default (127.0.0.1).
+    The CLI/onboard code will still inspect the environment and may override it (e.g. when
+    running inside a container).  Keeping the schema default narrow avoids surprising
+    users who read the generated config file and expect the service to bind accordingly.
+    """
+
+    # binding address that should be used when starting the HTTP server
+    # (see :func:`nanobot.gateway.server.detect_gateway_host` for how the value is
+    # determined during onboarding/startup).
+    host: str = "127.0.0.1"
     port: int = 18790
     auth: GatewayAuthConfig = Field(default_factory=GatewayAuthConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
