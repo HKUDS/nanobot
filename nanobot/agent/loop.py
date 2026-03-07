@@ -202,19 +202,9 @@ class AgentLoop:
 
             if response.has_tool_calls:
                 if on_progress:
-                    # Only show stripped content and thinking blocks in progress, not reasoning_content
-                    # reasoning_content is internal thinking and should not be shown to users
-                    thoughts = [
-                        self._strip_think(response.content),
-                        *(
-                            f"Thinking [{b.get('signature', '...')}]:\n{b.get('thought', '...')}"
-                            for b in (response.thinking_blocks or [])
-                            if isinstance(b, dict) and "signature" in b
-                        ),
-                    ]
-                    combined_thoughts = "\n\n".join(filter(None, thoughts))
-                    if combined_thoughts:
-                        await on_progress(combined_thoughts)
+                    thought = self._strip_think(response.content)
+                    if thought:
+                        await on_progress(thought)
                     await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
                 tool_call_dicts = [
