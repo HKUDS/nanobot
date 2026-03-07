@@ -232,6 +232,19 @@ def _make_provider(config: Config):
             default_model=model,
         )
 
+    # AtomGit: OpenAI-compatible endpoint at api-ai.gitcode.com
+    from nanobot.providers.atomgit_provider import AtomGitProvider
+    if provider_name == "atomgit":
+        if not (p and p.api_key):
+            console.print("[red]Error: No API key configured.[/red]")
+            console.print("Set atomgit.apiKey in ~/.nanobot/config.json under providers section")
+            raise typer.Exit(1)
+        return AtomGitProvider(
+            api_key=p.api_key,
+            api_base=p.api_base or AtomGitProvider.DEFAULT_API_BASE,
+            default_model=model,
+        )
+
     # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
     if provider_name == "azure_openai":
         if not p or not p.api_key or not p.api_base:

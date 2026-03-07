@@ -80,6 +80,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_direct=True,
     ),
 
+    # === AtomGit (api-ai.gitcode.com, streaming-only OpenAI-compatible) ====
+    ProviderSpec(
+        name="atomgit",
+        keywords=("atomgit", "gitcode"),
+        env_key="",
+        display_name="AtomGit",
+        litellm_prefix="",
+        default_api_base="https://api-ai.gitcode.com/v1",
+        detect_by_base_keyword="gitcode",
+        is_direct=True,
+    ),
+
     # === Azure OpenAI (direct API calls with API version 2024-10-21) =====
     ProviderSpec(
         name="azure_openai",
