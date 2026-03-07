@@ -642,6 +642,61 @@ nanobot gateway
 
 </details>
 
+<details>
+<summary><b>Python Call (Programmatic Access)</b></summary>
+
+Use nanobot as an **async function** from any Python code — no webhooks, no message queues, just `await`.
+
+**1. Enable**
+
+```json
+{
+  "channels": {
+    "python_call": {
+      "enabled": true
+    }
+  }
+}
+```
+
+**2. Usage**
+
+```python
+channel = manager.get_channel("python_call")
+
+# One-off call
+response = await channel.call("What is 2 + 2?", timeout=30.0)
+
+# Persistent session (agent remembers prior messages)
+await channel.call("My name is Alice.", session_id="alice", timeout=30.0)
+reply = await channel.call("What's my name?", session_id="alice", timeout=30.0)
+
+# Config overrides via metadata
+response = await channel.call(
+    "Translate to French",
+    session_id="translator",
+    metadata={"system_prompt": "You are a French translator."},
+    timeout=30.0,
+)
+
+# Batch processing
+tasks = [channel.call(f"Summarize: {doc}", session_id=f"doc-{i}", timeout=60.0) for i, doc in enumerate(docs)]
+results = await asyncio.gather(*tasks)
+```
+
+**3. Embed in a web app (FastAPI)**
+
+```python
+@app.post("/chat")
+async def chat(msg: str, user_id: str):
+    reply = await channel.call(msg, sender_id=user_id, session_id=user_id, timeout=60.0)
+    return {"reply": reply}
+```
+
+> See [`examples/python_call_examples.py`](examples/python_call_examples.py) for more patterns — multi-agent pipelines, timeout handling, CI testing, and more.
+
+</details>
+
 ## 🌐 Agent Social Network
 
 🐈 nanobot is capable of linking to the agent social network (agent community). **Just send one message and your nanobot joins automatically!**
