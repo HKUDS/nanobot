@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WorldClaw Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <span class="header-name" id="agent-name">WorldClaw</span>
+    <div class="header-meta" id="header-meta">
+      <span class="badge status-initializing"><span class="spinner"></span> Loading…</span>
+    </div>
+    <span id="last-updated"></span>
+    <button id="refresh-btn">↻ Refresh</button>
+  </header>
+
+  <main>
+
+    <!-- Sessions (full width) -->
+    <div class="panel" id="sessions-panel">
+      <div class="panel-header">
+        Sessions
+        <span class="panel-count" id="sessions-count"></span>
+      </div>
+      <div class="panel-body">
+        <div class="session-list" id="session-list">
+          <div class="empty"><span class="spinner"></span> Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Session detail drawer (full width, hidden until a session is clicked) -->
+    <div id="session-detail">
+      <div id="session-detail-header">
+        <span>Session: </span>
+        <span id="session-detail-title" style="font-family:var(--mono);font-size:12px;color:var(--accent)"></span>
+        <button id="session-detail-close" onclick="closeSession()">✕</button>
+      </div>
+      <div id="session-messages"></div>
+    </div>
+
+    <!-- Tools & MCP -->
+    <div class="panel">
+      <div class="panel-header">Tools &amp; MCP Servers</div>
+      <div class="panel-body">
+        <div class="tools-section">
+          <div class="tools-section-label">Built-in</div>
+          <div class="tool-chips" id="builtin-tools">
+            <span class="empty"><span class="spinner"></span></span>
+          </div>
+        </div>
+        <div class="tools-section">
+          <div class="tools-section-label">MCP Servers</div>
+          <div id="mcp-servers">
+            <span class="empty"><span class="spinner"></span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Channels -->
+    <div class="panel">
+      <div class="panel-header">Channels</div>
+      <div class="panel-body" id="channels-body">
+        <div class="empty"><span class="spinner"></span></div>
+      </div>
+    </div>
+
+    <!-- System -->
+    <div class="panel">
+      <div class="panel-header">System</div>
+      <div class="panel-body" id="system-body">
+        <div class="empty"><span class="spinner"></span></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
