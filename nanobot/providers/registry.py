@@ -341,6 +341,28 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+
+    # Venice.ai 
+    # Uses OpenAI-compatible API at api.venice.ai/api/v1
+    ProviderSpec(
+        name="venice",
+        keywords=("venice",),
+        env_key="VENICE_API_KEY",
+        display_name="Venice.ai",
+        litellm_prefix="openai",            # OpenAI-compatible, no native LiteLLM support
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="venice",
+        default_api_base="https://api.venice.ai/api/v1",
+        strip_model_prefix=True,
+        model_overrides=(),
+        supports_prompt_caching=True
+        
+    ),
+
     # === Local deployment (matched by config key, NOT by api_base) =========
     # vLLM / any OpenAI-compatible local server.
     # Detected when config key is "vllm" (provider_name="vllm").
