@@ -6,7 +6,6 @@ import os
 import re
 import threading
 from collections import OrderedDict
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -732,7 +731,8 @@ class FeishuChannel(BaseChannel):
             (file_path, content_text) - file_path is None if download failed
         """
         loop = asyncio.get_running_loop()
-        media_dir = Path.home() / ".nanobot" / "media"
+        from nanobot.utils.helpers import get_data_path
+        media_dir = get_data_path() / "media"
         media_dir.mkdir(parents=True, exist_ok=True)
 
         data, filename = None, None

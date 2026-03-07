@@ -99,7 +99,8 @@ def _init_prompt_session() -> None:
     except Exception:
         pass
 
-    history_file = Path.home() / ".nanobot" / "history" / "cli_history"
+    from nanobot.config.loader import get_data_dir
+    history_file = get_data_dir() / "history" / "cli_history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
     _PROMPT_SESSION = PromptSession(
@@ -201,7 +202,7 @@ def onboard():
 
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
-    console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
+    console.print(f"  1. Add your API key to [cyan]{config_path}[/cyan]")
     console.print("     Get one at: https://openrouter.ai/keys")
     console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
@@ -251,7 +252,8 @@ def _make_provider(config: Config):
     spec = find_by_name(provider_name)
     if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
         console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers section")
+        from nanobot.config.loader import get_config_path
+        console.print(f"Set one in {get_config_path()} under providers section")
         raise typer.Exit(1)
 
     return LiteLLMProvider(
@@ -746,8 +748,10 @@ def _get_bridge_dir() -> Path:
     import shutil
     import subprocess
 
-    # User's bridge location
-    user_bridge = Path.home() / ".nanobot" / "bridge"
+    from nanobot.config.loader import get_data_dir
+
+    # User's bridge location (under data root so NANOBOT_HOME applies)
+    user_bridge = get_data_dir() / "bridge"
 
     # Check if already built
     if (user_bridge / "dist" / "index.js").exists():

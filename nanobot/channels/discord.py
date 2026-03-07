@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -289,7 +288,8 @@ class DiscordChannel(BaseChannel):
 
         content_parts = [content] if content else []
         media_paths: list[str] = []
-        media_dir = Path.home() / ".nanobot" / "media"
+        from nanobot.utils.helpers import get_data_path
+        media_dir = get_data_path() / "media"
 
         for attachment in payload.get("attachments") or []:
             url = attachment.get("url")
