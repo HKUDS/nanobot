@@ -16,6 +16,10 @@ from nanobot.config.schema import QQConfig
 
 try:
     import botpy
+    from botpy import Client
+    from botpy.http import Route
+    from botpy.message import C2CMessage
+    from botpy.types.message import Media
 
     QQ_AVAILABLE = True
 except ImportError:
@@ -23,14 +27,10 @@ except ImportError:
     botpy = None
     # C2CMessage = None
 
-if TYPE_CHECKING:
-    from botpy import Client
-    from botpy.http import Route
-    from botpy.message import C2CMessage
-    from botpy.types.message import Media
 
 # QQ C2C 富媒体文件类型
 # 1: 图片, 2: 语音, 3: 视频, 4: 文件
+# 2, 3经测试无法发送mp3, mp4等常见格式，暂时只能发送图片和文件
 QQ_FILE_TYPE_IMAGE = 1
 QQ_FILE_TYPE_VOICE = 2
 QQ_FILE_TYPE_VIDEO = 3
@@ -48,13 +48,12 @@ def _get_file_type(file_path: str) -> int:
     ):
         return QQ_FILE_TYPE_IMAGE
 
-    # 语音类型
-    if ext in (".mp3", ".wav", ".ogg", ".m4a", ".aac") or (mime and mime.startswith("audio/")):
-        return QQ_FILE_TYPE_VOICE
+    # if ext in (".mp3", ".wav", ".ogg", ".m4a", ".aac") or (mime and mime.startswith("audio/")):
+    #     return QQ_FILE_TYPE_VOICE
 
-    # 视频类型
-    if ext in (".mp4", ".avi", ".mov", ".mkv", ".flv") or (mime and mime.startswith("video/")):
-        return QQ_FILE_TYPE_VIDEO
+    # # 视频类型
+    # if ext in (".mp4", ".avi", ".mov", ".mkv", ".flv") or (mime and mime.startswith("video/")):
+    #     return QQ_FILE_TYPE_VIDEO
 
     # 默认文件类型
     return QQ_FILE_TYPE_FILE
@@ -227,6 +226,7 @@ class QQChannel(BaseChannel):
             logger.exception("Error handling QQ message")
 
     # https://github.com/tencent-connect/botpy/issues/198
+    # https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/send-receive/rich-media.html
     async def post_c2c_base64file(
         self,
         openid: str,
