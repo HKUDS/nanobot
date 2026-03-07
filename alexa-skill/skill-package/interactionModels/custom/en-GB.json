@@ -1,0 +1,236 @@
+{
+  "interactionModel": {
+    "dialog": {
+      "intents": [
+        {
+          "name": "CatchAllIntent",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "utterance",
+              "type": "AMAZON.SearchQuery",
+              "elicitationRequired": true,
+              "confirmationRequired": false,
+              "prompts": {
+                "elicitation": "Elicit.Slot.utterance"
+              }
+            }
+          ]
+        }
+      ],
+      "delegationStrategy": "ALWAYS"
+    },
+    "languageModel": {
+      "invocationName": "nano bot",
+      "intents": [
+        {
+          "name": "CatchAllIntent",
+          "slots": [
+            {
+              "name": "utterance",
+              "type": "AMAZON.SearchQuery",
+              "samples": [
+                "about {utterance}",
+                "for {utterance}",
+                "regarding {utterance}"
+              ]
+            }
+          ],
+          "samples": [
+            "ask {utterance}",
+            "tell me {utterance}",
+            "tell me about {utterance}",
+            "please {utterance}",
+            "can you {utterance}",
+            "can I {utterance}",
+            "I want to know {utterance}",
+            "I want to know about {utterance}",
+            "I want {utterance}",
+            "I need {utterance}",
+            "help me with {utterance}",
+            "help me {utterance}",
+            "what is {utterance}",
+            "what are {utterance}",
+            "what was {utterance}",
+            "what were {utterance}",
+            "what do {utterance}",
+            "what does {utterance}",
+            "what did {utterance}",
+            "what has {utterance}",
+            "what have {utterance}",
+            "what will {utterance}",
+            "what would {utterance}",
+            "what could {utterance}",
+            "what should {utterance}",
+            "what about {utterance}",
+            "how is {utterance}",
+            "how are {utterance}",
+            "how do {utterance}",
+            "how does {utterance}",
+            "how did {utterance}",
+            "how do I {utterance}",
+            "how can I {utterance}",
+            "how would {utterance}",
+            "how many {utterance}",
+            "how much {utterance}",
+            "where is {utterance}",
+            "where are {utterance}",
+            "where do {utterance}",
+            "where does {utterance}",
+            "where did {utterance}",
+            "where can I {utterance}",
+            "when is {utterance}",
+            "when are {utterance}",
+            "when do {utterance}",
+            "when does {utterance}",
+            "when did {utterance}",
+            "when will {utterance}",
+            "when was {utterance}",
+            "who is {utterance}",
+            "who are {utterance}",
+            "who was {utterance}",
+            "who does {utterance}",
+            "who did {utterance}",
+            "who has {utterance}",
+            "why is {utterance}",
+            "why are {utterance}",
+            "why do {utterance}",
+            "why does {utterance}",
+            "why did {utterance}",
+            "why would {utterance}",
+            "which {utterance}",
+            "which is {utterance}",
+            "which are {utterance}",
+            "is {utterance}",
+            "is there {utterance}",
+            "is it {utterance}",
+            "are {utterance}",
+            "are there {utterance}",
+            "are they {utterance}",
+            "was {utterance}",
+            "were {utterance}",
+            "do {utterance}",
+            "do I {utterance}",
+            "do you {utterance}",
+            "does {utterance}",
+            "did {utterance}",
+            "has {utterance}",
+            "have {utterance}",
+            "had {utterance}",
+            "will {utterance}",
+            "would {utterance}",
+            "could {utterance}",
+            "could you {utterance}",
+            "should {utterance}",
+            "should I {utterance}",
+            "shall I {utterance}",
+            "may I {utterance}",
+            "might {utterance}",
+            "show me {utterance}",
+            "give me {utterance}",
+            "find {utterance}",
+            "find out {utterance}",
+            "look up {utterance}",
+            "look for {utterance}",
+            "search for {utterance}",
+            "search {utterance}",
+            "check {utterance}",
+            "check on {utterance}",
+            "check if {utterance}",
+            "get {utterance}",
+            "get me {utterance}",
+            "list {utterance}",
+            "list all {utterance}",
+            "explain {utterance}",
+            "describe {utterance}",
+            "any {utterance}",
+            "hey {utterance}",
+            "so {utterance}",
+            "well {utterance}",
+            "ok {utterance}",
+            "right {utterance}",
+            "now {utterance}",
+            "also {utterance}",
+            "and {utterance}",
+            "then {utterance}",
+            "just {utterance}",
+            "play {utterance}",
+            "start {utterance}",
+            "stop {utterance}",
+            "turn on {utterance}",
+            "turn off {utterance}",
+            "open {utterance}",
+            "run {utterance}",
+            "set {utterance}",
+            "add {utterance}",
+            "remove {utterance}",
+            "delete {utterance}",
+            "create {utterance}",
+            "make {utterance}",
+            "put {utterance}",
+            "send {utterance}",
+            "read {utterance}",
+            "go to {utterance}",
+            "try {utterance}",
+            "let me {utterance}",
+            "I think {utterance}",
+            "I know {utterance}",
+            "I have {utterance}",
+            "I had {utterance}",
+            "I am {utterance}",
+            "I was {utterance}",
+            "I like {utterance}",
+            "I don't {utterance}",
+            "my {utterance}",
+            "the {utterance}",
+            "a {utterance}",
+            "this {utterance}",
+            "that {utterance}",
+            "it {utterance}",
+            "its {utterance}",
+            "there {utterance}",
+            "some {utterance}",
+            "all {utterance}",
+            "no {utterance}",
+            "yes {utterance}",
+            "if {utterance}",
+            "but {utterance}"
+          ]
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        }
+      ],
+      "types": []
+    },
+    "prompts": [
+      {
+        "id": "Elicit.Slot.utterance",
+        "variations": [
+          {
+            "type": "PlainText",
+            "value": "What would you like to ask?"
+          }
+        ]
+      }
+    ]
+  }
+}

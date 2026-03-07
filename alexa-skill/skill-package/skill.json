@@ -1,0 +1,41 @@
+{
+  "manifest": {
+    "apis": {
+      "custom": {
+        "endpoint": {
+          "uri": "https://YOUR_DOMAIN/alexa",
+          "sslCertificateType": "Trusted"
+        }
+      }
+    },
+    "manifestVersion": "1.0",
+    "publishingInformation": {
+      "locales": {
+        "en-GB": {
+          "name": "Nanobot",
+          "summary": "AI assistant powered by Nanobot",
+          "description": "Ask Nanobot anything using natural language.",
+          "examplePhrases": [
+            "Alexa, open nano bot",
+            "Alexa, ask nano bot what the weather is",
+            "Alexa, tell nano bot to help me"
+          ],
+          "keywords": ["assistant", "ai", "chatbot"]
+        }
+      },
+      "isAvailableWorldwide": false,
+      "testingInstructions": "Open the skill and ask any question.",
+      "category": "KNOWLEDGE_AND_TRIVIA"
+    },
+    "privacyAndCompliance": {
+      "allowsPurchases": false,
+      "usesPersonalInfo": false,
+      "isChildDirected": false,
+      "isExportCompliant": true,
+      "containsAds": false,
+      "locales": {
+        "en-GB": {}
+      }
+    }
+  }
+}
