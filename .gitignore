@@ -20,3 +20,5 @@ poetry.lock
 .pytest_cache/
 botpy.log
 tests/
+.DS_Store
+.nanobot/
