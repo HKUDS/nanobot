@@ -113,6 +113,10 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         chat_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
+        system_content = self.build_system_prompt(skill_names)
+        relevant_history = self.memory.get_relevant_history(current_message, top_k=5)
+        if relevant_history:
+            system_content += "\n\n## Relevant History (retrieved by query)\n\n" + relevant_history
         runtime_ctx = self._build_runtime_context(channel, chat_id)
         user_content = self._build_user_content(current_message, media)
 
@@ -124,7 +128,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": system_content},
             *history,
             {"role": "user", "content": merged},
         ]
