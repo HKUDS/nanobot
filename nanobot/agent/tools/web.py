@@ -11,6 +11,7 @@ import httpx
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool
+from nanobot.utils.helpers import retry_with_backoff
 
 # Shared constants
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
@@ -76,9 +77,17 @@ class WebSearchTool(Tool):
                 "(or export BRAVE_API_KEY), then restart the gateway."
             )
 
-        try:
-            n = min(max(count or self.max_results, 1), 10)
-            logger.debug("WebSearch: {}", "proxy enabled" if self.proxy else "direct connection")
+        n = min(max(count or self.max_results, 1), 10)
+        logger.debug("WebSearch: {}", "proxy enabled" if self.proxy else "direct connection")
+
+        def should_retry(e: Exception) -> bool:
+            if isinstance(e, httpx.ProxyError):
+                return False
+            if isinstance(e, httpx.HTTPStatusError):
+                return e.response.status_code >= 500 or e.response.status_code == 429
+            return isinstance(e, (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError))
+
+        async def _search() -> str:
             async with httpx.AsyncClient(proxy=self.proxy) as client:
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
@@ -98,6 +107,12 @@ class WebSearchTool(Tool):
                 if desc := item.get("description"):
                     lines.append(f"   {desc}")
             return "\n".join(lines)
+
+        try:
+            return await retry_with_backoff(_search, max_retries=3, should_retry=should_retry)
+        except httpx.HTTPStatusError as e:
+            logger.error("WebSearch HTTP error: {}", e)
+            return f"HTTP error: {e}"
         except httpx.ProxyError as e:
             logger.error("WebSearch proxy error: {}", e)
             return f"Proxy error: {e}"

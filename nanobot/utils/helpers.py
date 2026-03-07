@@ -1,8 +1,12 @@
 """Utility functions for nanobot."""
 
+import asyncio
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import Callable, TypeVar
+
+T = TypeVar("T")
 
 
 def detect_image_mime(data: bytes) -> str | None:
@@ -110,3 +114,43 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         for name in added:
             Console().print(f"  [dim]Created {name}[/dim]")
     return added
+
+
+async def retry_with_backoff(
+    func: Callable[[], T],
+    max_retries: int = 3,
+    should_retry: Callable[[Exception], bool] | None = None,
+) -> T:
+    """
+    Retry an async function with exponential backoff.
+
+    Args:
+        func: Async function to retry.
+        max_retries: Maximum number of retry attempts.
+        should_retry: Optional function to determine if an exception should be retried.
+                     Returns True to retry, False to raise immediately.
+
+    Returns:
+        Result of the function call.
+
+    Raises:
+        Exception: The last exception if all retries fail.
+    """
+    import httpx
+    from loguru import logger
+
+    for attempt in range(max_retries):
+        try:
+            return await func()
+        except Exception as e:
+            if should_retry and not should_retry(e):
+                raise
+
+            if attempt == max_retries - 1:
+                raise
+
+            backoff = 2 ** attempt
+            logger.warning("Retry attempt {}/{} after {}s: {}", attempt + 1, max_retries, backoff, type(e).__name__)
+            await asyncio.sleep(backoff)
+
+    raise RuntimeError("Unexpected error in retry_with_backoff")
