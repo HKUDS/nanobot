@@ -121,10 +121,12 @@ class TelegramChannel(BaseChannel):
         config: TelegramConfig,
         bus: MessageBus,
         groq_api_key: str = "",
+        agents_config=None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
+        self.agents_config = agents_config
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -305,13 +307,19 @@ class TelegramChannel(BaseChannel):
         """Handle /help command, bypassing ACL so all users can access it."""
         if not update.message:
             return
-        await update.message.reply_text(
+        help_text = (
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
-            "/help — Show available commands\n"
-            "\n@model — Route a message to a specific model, e.g. @haiku hello"
+            "/help — Show available commands"
         )
+        if self.agents_config and self.agents_config.models:
+            help_text += "\n\nModel routing:"
+            for name, agent in self.agents_config.models.items():
+                label = name.capitalize()
+                help_text += f"\n  @{name} <message>  — Route to {label}"
+            help_text += "\n  (no prefix)       — Use default model"
+        await update.message.reply_text(help_text)
 
     @staticmethod
     def _sender_id(user) -> str:

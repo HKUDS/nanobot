@@ -419,9 +419,14 @@ class AgentLoop:
                 "🐈 nanobot commands:\n"
                 "/new — Start a new conversation\n"
                 "/stop — Stop the current task\n"
-                "/help — Show available commands\n"
-                "\n@model — Route a message to a specific model, e.g. @haiku hello"
+                "/help — Show available commands"
             )
+            if self.agents_config and self.agents_config.models:
+                help_text += "\n\nModel routing:"
+                for name, agent in self.agents_config.models.items():
+                    label = name.capitalize()
+                    help_text += f"\n  @{name} <message>  — Route to {label}"
+                help_text += "\n  (no prefix)       — Use default model"
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content=help_text)
 
