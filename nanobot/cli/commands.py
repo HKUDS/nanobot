@@ -221,7 +221,10 @@ def _make_provider(config: Config):
 
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
-        return OpenAICodexProvider(default_model=model)
+        return OpenAICodexProvider(
+            default_model=model,
+            retry_config=config.providers.retry,
+        )
 
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     from nanobot.providers.custom_provider import CustomProvider
@@ -230,6 +233,7 @@ def _make_provider(config: Config):
             api_key=p.api_key if p else "no-key",
             api_base=config.get_api_base(model) or "http://localhost:8000/v1",
             default_model=model,
+            retry_config=config.providers.retry,
         )
 
     # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
@@ -244,6 +248,7 @@ def _make_provider(config: Config):
             api_key=p.api_key,
             api_base=p.api_base,
             default_model=model,
+            retry_config=config.providers.retry,
         )
 
     from nanobot.providers.litellm_provider import LiteLLMProvider
@@ -260,6 +265,7 @@ def _make_provider(config: Config):
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=provider_name,
+        retry_config=config.providers.retry,
     )
 
 
