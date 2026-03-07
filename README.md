@@ -154,6 +154,26 @@ Add or merge these **two parts** into your config (other options have defaults).
 }
 ```
 
+*Optional — add model routing* to let users switch models per message with `@name`:
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-sonnet-4-6"
+    },
+    "haiku": {
+      "model": "anthropic/claude-haiku-4-5",
+      "aliases": ["fast", "cheap"]
+    },
+    "opus": {
+      "model": "anthropic/claude-opus-4-6",
+      "aliases": ["smart", "deep"]
+    }
+  }
+}
+```
+Users can then type `@haiku what's the weather?` to route a single message to a cheaper/faster model, or `@opus explain quantum computing` for a more capable one. Messages without a prefix use the default model. Available models appear automatically in `/help`.
+
 **3. Chat**
 
 ```bash
