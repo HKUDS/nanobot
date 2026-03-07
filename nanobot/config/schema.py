@@ -201,6 +201,16 @@ class QQConfig(Base):
 
 
 
+class WeComConfig(Base):
+    """WeChat Work (企业微信) channel via SillyMD bridge."""
+
+    enabled: bool = False
+    api_key: str = ""  # SillyMD API Key
+    base_url: str = "https://websocket.sillymd.com"
+    owner_id: str = ""  # WeChat Work owner user ID (receives CC messages)
+    allow_from: list[str] = Field(default_factory=list)  # Allowed WeChat user IDs
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -216,6 +226,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    wecom: WeComConfig = Field(default_factory=WeComConfig)
 
 
 class AgentDefaults(Base):
