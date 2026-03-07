@@ -136,7 +136,7 @@ class MemoryStore:
                     logger.warning("Memory consolidation: unexpected arguments as empty or non-dict list")
                     return False
             if not isinstance(args, dict):
-                logger.warning("Memory consolidation: unexpected arguments type {}", type(args).__name__)
+                logger.warning("Memory consolidation: unexpected arguments type {}, skipping", type(args).__name__)
                 return False
 
             if entry := args.get("history_entry"):
