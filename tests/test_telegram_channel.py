@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram import TelegramChannel
 from nanobot.config.schema import TelegramConfig
@@ -24,11 +25,17 @@ class _FakeUpdater:
 
 
 class _FakeBot:
+    def __init__(self) -> None:
+        self.sent_messages: list[dict] = []
+
     async def get_me(self):
         return SimpleNamespace(username="nanobot_test")
 
     async def set_my_commands(self, commands) -> None:
         self.commands = commands
+
+    async def send_message(self, **kwargs) -> None:
+        self.sent_messages.append(kwargs)
 
 
 class _FakeApp:
@@ -105,3 +112,51 @@ async def test_start_uses_request_proxy_without_builder_proxy(monkeypatch) -> No
     assert _FakeHTTPXRequest.instances[0].kwargs["proxy"] == config.proxy
     assert builder.request_value is _FakeHTTPXRequest.instances[0]
     assert builder.get_updates_request_value is _FakeHTTPXRequest.instances[0]
+
+
+def test_derive_topic_session_key_uses_thread_id() -> None:
+    message = SimpleNamespace(
+        chat=SimpleNamespace(type="supergroup"),
+        chat_id=-100123,
+        message_thread_id=42,
+    )
+
+    assert TelegramChannel._derive_topic_session_key(message) == "telegram:-100123:topic:42"
+
+
+@pytest.mark.asyncio
+async def test_send_progress_keeps_message_in_topic() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="hello",
+            metadata={"_progress": True, "message_thread_id": 42},
+        )
+    )
+
+    assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_send_reply_infers_topic_from_message_id_cache() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], reply_to_message=True)
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+    channel._message_threads[("123", 10)] = 42
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="hello",
+            metadata={"message_id": 10},
+        )
+    )
+
+    assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
+    assert channel._app.bot.sent_messages[0]["reply_parameters"].message_id == 10
