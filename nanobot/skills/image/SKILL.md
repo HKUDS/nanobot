@@ -27,7 +27,7 @@ Unified tool for image analysis, display, and generation.
 **Parameters**:
 - `mode` (string, required): The operation mode - `vision` for image analysis, `display` for showing images to users, `generate` for creating images from text prompts
 - `image_path` (string, required):
-  - In vision/display mode: Absolute path to the image file (e.g., "/Users/archer/Desktop/photo.png")
+  - In vision/display mode: Absolute path to the image file (e.g., "/Users/photo.png")
   - In generate mode: File name where the generated image will be saved. This parameter should contain few words which generalize the `text`
 - `text` (string, optional):
   - In vision mode: User's request or question about the image (e.g., "Describe this image", "Extract text from this image")
