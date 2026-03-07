@@ -255,6 +255,14 @@ class TelegramChannel(BaseChannel):
             self._app = None
 
     @staticmethod
+    def _format_group_content(content: str, user, is_group: bool) -> str:
+        """Prefix content with sender name in group chats."""
+        if not is_group:
+            return content
+        name = user.first_name or user.username or str(user.id)
+        return f"[{name}]: {content}"
+
+    @staticmethod
     def _get_media_type(path: str) -> str:
         """Guess media type from file extension."""
         ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
@@ -477,6 +485,9 @@ class TelegramChannel(BaseChannel):
 
         content = "\n".join(content_parts) if content_parts else "[empty message]"
 
+        is_group = message.chat.type != "private"
+        content = self._format_group_content(content, user, is_group)
+
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
 
         str_chat_id = str(chat_id)
@@ -491,7 +502,7 @@ class TelegramChannel(BaseChannel):
                     "metadata": {
                         "message_id": message.message_id, "user_id": user.id,
                         "username": user.username, "first_name": user.first_name,
-                        "is_group": message.chat.type != "private",
+                        "is_group": is_group,
                     },
                 }
                 self._start_typing(str_chat_id)
@@ -517,7 +528,7 @@ class TelegramChannel(BaseChannel):
                 "user_id": user.id,
                 "username": user.username,
                 "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
+                "is_group": is_group,
             }
         )
 
