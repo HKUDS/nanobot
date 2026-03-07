@@ -8,7 +8,7 @@ import re
 import weakref
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from loguru import logger
 
@@ -331,7 +331,8 @@ class AgentLoop:
         self,
         msg: InboundMessage,
         session_key: str | None = None,
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
+        emit_progress: bool = True,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -432,8 +433,12 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
+        progress_handler = on_progress
+        if progress_handler is None and emit_progress:
+            progress_handler = _bus_progress
+
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages, on_progress=progress_handler,
         )
 
         if final_content is None:
@@ -500,10 +505,16 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
+        emit_progress: bool = True,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        response = await self._process_message(
+            msg,
+            session_key=session_key,
+            on_progress=on_progress,
+            emit_progress=emit_progress,
+        )
         return response.content if response else ""
