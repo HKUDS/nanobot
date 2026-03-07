@@ -91,6 +91,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     ),
     # === Gateways (detected by api_key / api_base, not model name) =========
     # Gateways can route any model, so they win in fallback.
+    # Parasail: global gateway, OpenAI-compatible Anthropic endpoint
+    ProviderSpec(
+        name="parasail",
+        keywords=("parasail",),
+        env_key="OPENAI_API_KEY",
+        display_name="Parasail",
+        litellm_prefix="openai",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="parasail",
+        default_api_base="https://api.parasail.io/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+        supports_prompt_caching=True,
+    ),
     # OpenRouter: global gateway, keys start with "sk-or-"
     ProviderSpec(
         name="openrouter",
