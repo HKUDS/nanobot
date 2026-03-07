@@ -2,6 +2,7 @@
 
 import json
 import os
+import platform
 import re
 import shutil
 from pathlib import Path
@@ -55,6 +56,43 @@ class SkillsLoader:
         if filter_unavailable:
             return [s for s in skills if self._check_requirements(self._get_skill_meta(s["name"]))]
         return skills
+
+    def list_skills_with_status(self) -> list[dict[str, str]]:
+        """List skills with availability status and details."""
+        skills = self.list_skills(filter_unavailable=False)
+        results: list[dict[str, str]] = []
+
+        for skill in skills:
+            name = skill["name"]
+            meta = self.get_skill_metadata(name) or {}
+            skill_meta = self._parse_nanobot_metadata(meta.get("metadata", ""))
+
+            missing = self._get_missing_requirements(skill_meta)
+            runtime = self._get_skill_runtime(skill_meta, meta)
+            os_issue = self._check_os_support(skill_meta)
+
+            if missing:
+                status = "error"
+                detail = missing
+            elif os_issue:
+                status = "error"
+                detail = os_issue
+            elif runtime and self._is_runtime_unsupported(runtime):
+                status = "error"
+                detail = f"runtime: {runtime}"
+            else:
+                status = "ready"
+                detail = "ok"
+
+            results.append({
+                "name": name,
+                "path": skill["path"],
+                "source": skill["source"],
+                "status": status,
+                "details": detail,
+            })
+
+        return results
 
     def load_skill(self, name: str) -> str | None:
         """
@@ -150,6 +188,45 @@ class SkillsLoader:
             if not os.environ.get(env):
                 missing.append(f"ENV: {env}")
         return ", ".join(missing)
+
+    def _get_skill_runtime(self, skill_meta: dict, raw_meta: dict) -> str | None:
+        """Return declared runtime from metadata or frontmatter."""
+        runtime = skill_meta.get("runtime") if isinstance(skill_meta, dict) else None
+        if runtime:
+            return str(runtime).strip().lower()
+        raw_runtime = raw_meta.get("runtime")
+        if raw_runtime:
+            return str(raw_runtime).strip().lower()
+        return None
+
+    def _is_runtime_unsupported(self, runtime: str) -> bool:
+        """Return True if runtime is unsupported by nanobot."""
+        return runtime in {"typescript", "ts", "deno"}
+
+    def _check_os_support(self, skill_meta: dict) -> str | None:
+        """Return OS compatibility issue if current OS is unsupported."""
+        if not isinstance(skill_meta, dict):
+            return None
+        allowed = skill_meta.get("os")
+        if not allowed:
+            return None
+        if isinstance(allowed, str):
+            allowed_list = [allowed]
+        else:
+            allowed_list = list(allowed)
+        allowed_list = [str(item).strip().lower() for item in allowed_list if str(item).strip()]
+        if not allowed_list:
+            return None
+        current = platform.system().lower()
+        if current.startswith("darwin"):
+            current = "darwin"
+        elif current.startswith("linux"):
+            current = "linux"
+        elif current.startswith("win"):
+            current = "windows"
+        if current not in allowed_list:
+            return f"os: {current} not supported"
+        return None
 
     def _get_skill_description(self, name: str) -> str:
         """Get the description of a skill from its frontmatter."""
