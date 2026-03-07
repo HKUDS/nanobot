@@ -20,7 +20,15 @@ class InboundMessage:
 
     @property
     def session_key(self) -> str:
-        """Unique key for session identification."""
+        """Unique key for session identification.
+        
+        For Telegram forum topics (threads), includes thread_id for isolation:
+        - Regular chat: "telegram:chat_id"
+        - Thread message: "telegram:chat_id:thread_id"
+        """
+        thread_id = self.metadata.get("thread_id")
+        if thread_id:
+            return f"{self.channel}:{self.chat_id}:{thread_id}"
         return self.session_key_override or f"{self.channel}:{self.chat_id}"
 
 
@@ -34,5 +42,3 @@ class OutboundMessage:
     reply_to: str | None = None
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-
-

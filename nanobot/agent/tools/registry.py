@@ -34,11 +34,24 @@ class ToolRegistry:
     def get_definitions(self) -> list[dict[str, Any]]:
         """Get all tool definitions in OpenAI format."""
         return [tool.to_schema() for tool in self._tools.values()]
+    
+    async def execute(self, name: str, params: dict[str, Any], **context: Any) -> str:
+        """
+        Execute a tool by name with given parameters.
 
-    async def execute(self, name: str, params: dict[str, Any]) -> str:
-        """Execute a tool by name with given parameters."""
+        Args:
+            name: Tool name.
+            params: Tool parameters.
+            **context: Extra context (channel, chat_id, job_id) forwarded
+                       to the tool via kwargs. Context takes precedence over params.
+
+        Returns:
+            Tool execution result as string.
+
+        Raises:
+            KeyError: If tool not found.
+        """
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
-
         tool = self._tools.get(name)
         if not tool:
             return f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
@@ -51,7 +64,10 @@ class ToolRegistry:
             errors = tool.validate_params(params)
             if errors:
                 return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _HINT
-            result = await tool.execute(**params)
+            
+            # Merge params with context; context takes precedence to avoid duplicate key errors
+            merged = {**params, **context}
+            result = await tool.execute(**merged)
             if isinstance(result, str) and result.startswith("Error"):
                 return result + _HINT
             return result

@@ -6,11 +6,16 @@ import asyncio
 import re
 import time
 import unicodedata
+from typing import Any, TYPE_CHECKING
 
 from loguru import logger
-from telegram import BotCommand, ReplyParameters, Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import BotCommand, ReplyParameters, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ChatAction
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from telegram.request import HTTPXRequest
+
+if TYPE_CHECKING:
+    from nanobot.session.manager import SessionManager
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -65,21 +70,18 @@ def _render_table_box(table_lines: list[str]) -> str:
 
 
 def _markdown_to_telegram_html(text: str) -> str:
-    """
-    Convert markdown to Telegram-safe HTML.
-    """
+    """Convert markdown to Telegram-safe HTML."""
     if not text:
         return ""
 
-    # 1. Extract and protect code blocks (preserve content from other processing)
+    # 1. Extract and protect code blocks
     code_blocks: list[str] = []
     def save_code_block(m: re.Match) -> str:
         code_blocks.append(m.group(1))
         return f"\x00CB{len(code_blocks) - 1}\x00"
-
     text = re.sub(r'```[\w]*\n?([\s\S]*?)```', save_code_block, text)
 
-    # 1.5. Convert markdown tables to box-drawing (reuse code_block placeholders)
+    # 1.5. Convert markdown tables to box-drawing
     lines = text.split('\n')
     rebuilt: list[str] = []
     li = 0
@@ -105,43 +107,40 @@ def _markdown_to_telegram_html(text: str) -> str:
     def save_inline_code(m: re.Match) -> str:
         inline_codes.append(m.group(1))
         return f"\x00IC{len(inline_codes) - 1}\x00"
-
     text = re.sub(r'`([^`]+)`', save_inline_code, text)
 
-    # 3. Headers # Title -> just the title text
+    # 3. Headers
     text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
 
-    # 4. Blockquotes > text -> just the text (before HTML escaping)
+    # 4. Blockquotes
     text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
 
-    # 5. Escape HTML special characters
+    # 5. Escape HTML
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    # 6. Links [text](url) - must be before bold/italic to handle nested cases
+    # 6. Links
     text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
 
-    # 7. Bold **text** or __text__
+    # 7. Bold
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
 
-    # 8. Italic _text_ (avoid matching inside words like some_var_name)
+    # 8. Italic
     text = re.sub(r'(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])', r'<i>\1</i>', text)
 
-    # 9. Strikethrough ~~text~~
+    # 9. Strikethrough
     text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)
 
-    # 10. Bullet lists - item -> • item
+    # 10. Bullet lists
     text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
 
-    # 11. Restore inline code with HTML tags
+    # 11. Restore inline code
     for i, code in enumerate(inline_codes):
-        # Escape HTML in code content
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00IC{i}\x00", f"<code>{escaped}</code>")
 
-    # 12. Restore code blocks with HTML tags
+    # 12. Restore code blocks
     for i, code in enumerate(code_blocks):
-        # Escape HTML in code content
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
 
@@ -149,35 +148,50 @@ def _markdown_to_telegram_html(text: str) -> str:
 
 
 class TelegramChannel(BaseChannel):
-    """
-    Telegram channel using long polling.
-
-    Simple and reliable - no webhook/public IP needed.
-    """
+    """Telegram channel using long polling with hook-based architecture."""
 
     name = "telegram"
-    display_name = "Telegram"
 
-    # Commands registered with Telegram's command menu
     BOT_COMMANDS = [
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("help", "Show available commands"),
         BotCommand("restart", "Restart the bot"),
+        BotCommand("jobs", "Show running jobs"),
+        BotCommand("thread", "Create a new discussion thread"),
+        BotCommand("topic", "Manage named conversation topics"),
     ]
 
-    def __init__(self, config: TelegramConfig, bus: MessageBus):
+    def __init__(
+        self,
+        config: TelegramConfig,
+        bus: MessageBus,
+        groq_api_key: str = "",
+        session_manager: SessionManager | None = None,
+        tool_executor: Any = None,
+        tool_definitions: list[dict[str, Any]] | None = None,
+        on_tool_call: Any = None,
+        is_session_busy: Any = None,
+    ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
+        self.groq_api_key = groq_api_key
+        self.session_manager = session_manager
+        self.tool_executor = tool_executor
+        self.tool_definitions = tool_definitions or []
+        self.on_tool_call = on_tool_call
+        self.is_session_busy = is_session_busy
         self._app: Application | None = None
-        self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
-        self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
+        self._chat_ids: dict[str, int] = {}
+        self._typing_tasks: dict[str, asyncio.Task] = {}
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
         self._message_threads: dict[tuple[str, int], int] = {}
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
+        self._session_threads: dict[str, int] = {}
+        self._thread_info: dict[int, dict[str, Any]] = {}
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -206,7 +220,7 @@ class TelegramChannel(BaseChannel):
 
         self._running = True
 
-        # Build the application with larger connection pool to avoid pool-timeout on long runs
+        # Build application with proxy support
         req = HTTPXRequest(
             connection_pool_size=16,
             pool_timeout=5.0,
@@ -224,8 +238,11 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("stop", self._forward_command))
         self._app.add_handler(CommandHandler("restart", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
+        self._app.add_handler(CommandHandler("jobs", self._on_jobs_command))
+        self._app.add_handler(CommandHandler("thread", self._on_thread_command))
+        self._app.add_handler(CommandHandler("topic", self._on_topic_command))
 
-        # Add message handler for text, photos, voice, documents
+        # Add message handler
         self._app.add_handler(
             MessageHandler(
                 (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL)
@@ -234,39 +251,53 @@ class TelegramChannel(BaseChannel):
             )
         )
 
+        # Add callback query handler
+        self._app.add_handler(CallbackQueryHandler(self._on_callback, pattern="^restart_gateway:"))
+
         logger.info("Starting Telegram bot (polling mode)...")
 
-        # Initialize and start polling
         await self._app.initialize()
         await self._app.start()
 
-        # Get bot info and register command menu
         bot_info = await self._app.bot.get_me()
-        self._bot_user_id = getattr(bot_info, "id", None)
-        self._bot_username = getattr(bot_info, "username", None)
         logger.info("Telegram bot @{} connected", bot_info.username)
 
+        # Allow plugins to register handlers
+        from nanobot.system.hooks import hook_manager
+        await hook_manager.emit("telegram.init", app=self._app, channel=self)
+
         try:
-            await self._app.bot.set_my_commands(self.BOT_COMMANDS)
-            logger.debug("Telegram bot commands registered")
+            unique_commands = {}
+            for cmd in self.BOT_COMMANDS:
+                unique_commands[cmd.command] = cmd
+            await self._app.bot.set_my_commands(list(unique_commands.values()))
         except Exception as e:
             logger.warning("Failed to register bot commands: {}", e)
 
-        # Start polling (this runs until stopped)
-        await self._app.updater.start_polling(
-            allowed_updates=["message"],
-            drop_pending_updates=True  # Ignore old messages on startup
-        )
+        try:
+            await self._app.updater.start_polling(
+                allowed_updates=["message", "callback_query"],
+                drop_pending_updates=True,
+                poll_interval=1.0,
+                timeout=30
+            )
+        except Exception as e:
+            logger.error(f"Error starting Telegram polling: {e}")
+            raise
 
-        # Keep running until stopped
         while self._running:
-            await asyncio.sleep(1)
+            try:
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in Telegram polling loop: {e}")
+                await asyncio.sleep(2)
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
         self._running = False
 
-        # Cancel all typing indicators
         for chat_id in list(self._typing_tasks):
             self._stop_typing(chat_id)
 
@@ -300,30 +331,29 @@ class TelegramChannel(BaseChannel):
             logger.warning("Telegram bot not running")
             return
 
-        # Only stop typing indicator for final responses
-        if not msg.metadata.get("_progress", False):
-            self._stop_typing(msg.chat_id)
+        # Stop typing indicator
+        session_key = msg.metadata.get("session_key", f"telegram:{msg.chat_id}") if msg.metadata else f"telegram:{msg.chat_id}"
+        self._stop_typing(session_key)
 
         try:
             chat_id = int(msg.chat_id)
         except ValueError:
             logger.error("Invalid chat_id: {}", msg.chat_id)
             return
-        reply_to_message_id = msg.metadata.get("message_id")
-        message_thread_id = msg.metadata.get("message_thread_id")
-        if message_thread_id is None and reply_to_message_id is not None:
-            message_thread_id = self._message_threads.get((msg.chat_id, reply_to_message_id))
-        thread_kwargs = {}
-        if message_thread_id is not None:
-            thread_kwargs["message_thread_id"] = message_thread_id
+
+        thread_id = msg.metadata.get("thread_id") if msg.metadata else None
+        reply_to_message_id = msg.metadata.get("message_id") if msg.metadata else None
 
         reply_params = None
-        if self.config.reply_to_message:
-            if reply_to_message_id:
-                reply_params = ReplyParameters(
-                    message_id=reply_to_message_id,
-                    allow_sending_without_reply=True
-                )
+        if self.config.reply_to_message and reply_to_message_id:
+            reply_params = ReplyParameters(
+                message_id=reply_to_message_id,
+                allow_sending_without_reply=True
+            )
+
+        thread_kwargs = {}
+        if thread_id is not None:
+            thread_kwargs["message_thread_id"] = thread_id
 
         # Send media files
         for media_path in (msg.media or []):
@@ -354,14 +384,8 @@ class TelegramChannel(BaseChannel):
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
-            is_progress = msg.metadata.get("_progress", False)
-
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                # Final response: simulate streaming via draft, then persist
-                if not is_progress:
-                    await self._send_with_streaming(chat_id, chunk, reply_params, thread_kwargs)
-                else:
-                    await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
+                await self._send_text(chat_id, chunk, reply_params, thread_kwargs, msg.metadata)
 
     async def _send_text(
         self,
@@ -369,13 +393,35 @@ class TelegramChannel(BaseChannel):
         text: str,
         reply_params=None,
         thread_kwargs: dict | None = None,
+        metadata: dict | None = None,
     ) -> None:
-        """Send a plain text message with HTML fallback."""
+        """Send a plain text message with HTML fallback and optional inline keyboard."""
+        metadata = metadata or {}
+        reply_markup = None
+        
+        # Handle inline keyboard from metadata
+        if "reply_markup" in metadata:
+            keyboard_data = metadata["reply_markup"]
+            if isinstance(keyboard_data, dict) and "inline_keyboard" in keyboard_data:
+                from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+                keyboard = []
+                for row in keyboard_data["inline_keyboard"]:
+                    button_row = []
+                    for btn in row:
+                        button_row.append(InlineKeyboardButton(
+                            text=btn.get("text", ""),
+                            callback_data=btn.get("callback_data"),
+                            url=btn.get("url"),
+                        ))
+                    keyboard.append(button_row)
+                reply_markup = InlineKeyboardMarkup(keyboard)
+        
         try:
             html = _markdown_to_telegram_html(text)
             await self._app.bot.send_message(
                 chat_id=chat_id, text=html, parse_mode="HTML",
                 reply_parameters=reply_params,
+                reply_markup=reply_markup,
                 **(thread_kwargs or {}),
             )
         except Exception as e:
@@ -385,34 +431,11 @@ class TelegramChannel(BaseChannel):
                     chat_id=chat_id,
                     text=text,
                     reply_parameters=reply_params,
+                    reply_markup=reply_markup,
                     **(thread_kwargs or {}),
                 )
             except Exception as e2:
                 logger.error("Error sending Telegram message: {}", e2)
-
-    async def _send_with_streaming(
-        self,
-        chat_id: int,
-        text: str,
-        reply_params=None,
-        thread_kwargs: dict | None = None,
-    ) -> None:
-        """Simulate streaming via send_message_draft, then persist with send_message."""
-        draft_id = int(time.time() * 1000) % (2**31)
-        try:
-            step = max(len(text) // 8, 40)
-            for i in range(step, len(text), step):
-                await self._app.bot.send_message_draft(
-                    chat_id=chat_id, draft_id=draft_id, text=text[:i],
-                )
-                await asyncio.sleep(0.04)
-            await self._app.bot.send_message_draft(
-                chat_id=chat_id, draft_id=draft_id, text=text,
-            )
-            await asyncio.sleep(0.15)
-        except Exception:
-            pass
-        await self._send_text(chat_id, text, reply_params, thread_kwargs)
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -423,18 +446,22 @@ class TelegramChannel(BaseChannel):
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
             "Send me a message and I'll respond!\n"
-            "Type /help to see available commands."
+            "Type /help to see available commands.\n"
+            "Type /thread <name> to start a new discussion thread."
         )
 
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /help command, bypassing ACL so all users can access it."""
+        """Handle /help command."""
         if not update.message:
             return
         await update.message.reply_text(
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
-            "/help — Show available commands"
+            "/jobs — Show running jobs\n"
+            "/help — Show available commands\n"
+            "/thread <name> — Create a forum topic\n"
+            "/topic — Manage named topics"
         )
 
     @staticmethod
@@ -604,8 +631,140 @@ class TelegramChannel(BaseChannel):
         if len(self._message_threads) > 1000:
             self._message_threads.pop(next(iter(self._message_threads)))
 
+    async def _on_jobs_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /jobs command."""
+        if not update.message:
+            return
+        
+        from nanobot.agent.job_tracker import job_manager
+        running_jobs = []
+        completed_jobs = []
+        for session_key, jobs in job_manager._jobs.items():
+            for job in jobs:
+                if job.status == "running":
+                    running_jobs.append(job)
+                elif job.status == "completed":
+                    completed_jobs.append(job)
+        
+        # Sort completed by created_at descending
+        completed_jobs.sort(key=lambda j: j.created_at, reverse=True)
+        recent_completed = completed_jobs[:5]  # Show last 5 completed
+        
+        lines = []
+        
+        if running_jobs:
+            lines.append(f"🔄 *{len(running_jobs)} job(s) running:*\n")
+            for job in running_jobs:
+                duration = job.duration_seconds
+                thread_info = f" (thread {job.thread_id})" if job.thread_id else ""
+                lines.append(
+                    f"• `{job.id[:8]}`{thread_info}\n"
+                    f"  {job.user_message[:50]}{'...' if len(job.user_message) > 50 else ''}\n"
+                    f"  ⏱️ {duration:.1f}s | {len(job.tool_calls)} tools\n"
+                )
+        
+        if recent_completed:
+            lines.append(f"\n✅ *Recent completed:*\n")
+            for job in recent_completed:
+                duration = job.duration_seconds
+                thread_info = f" (thread {job.thread_id})" if job.thread_id else ""
+                lines.append(
+                    f"• `{job.id[:8]}`{thread_info}\n"
+                    f"  {job.user_message[:50]}{'...' if len(job.user_message) > 50 else ''}\n"
+                    f"  ⏱️ {duration:.1f}s | {len(job.tool_calls)} tools\n"
+                )
+        
+        if not running_jobs and not recent_completed:
+            await update.message.reply_text("✅ No jobs found.")
+            return
+        
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    async def _on_thread_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /thread command - create a forum topic."""
+        if not update.message or not update.effective_user:
+            return
+        
+        chat_id = update.message.chat_id
+        args = context.args if context.args else []
+        thread_name = " ".join(args) if args else None
+        
+        if not thread_name:
+            from datetime import datetime
+            thread_name = f"Thread {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        
+        result = await self.create_forum_topic(chat_id, thread_name)
+        
+        if result:
+            thread_id = result["message_thread_id"]
+            await update.message.reply_text(
+                f"🧵 Created new thread: *{thread_name}*\n"
+                f"Thread ID: `{thread_id}`\n\n"
+                f"Messages sent in this thread will have their own conversation context.",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Failed to create thread. Make sure the bot has permission to manage topics."
+            )
+
+    async def _on_topic_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /topic command - manage named conversation topics."""
+        if not update.message or not update.effective_user:
+            return
+        
+        chat_id = str(update.message.chat_id)
+        args = context.args if context.args else []
+        
+        if not args:
+            await update.message.reply_text(
+                "📁 *Named Topics*\n\n"
+                "Commands:\n"
+                "/topic list - List all topics\n"
+                "/topic current - Show current topic\n"
+                "/topic create <name> - Create a new topic\n"
+                "/topic switch <name> - Switch to a topic\n"
+                "/topic delete <name> - Delete a topic",
+                parse_mode="Markdown"
+            )
+            return
+        
+        from nanobot.agent.tools.topics import TopicTool
+        tool = TopicTool()
+        session_key = f"telegram:{chat_id}"
+        action = args[0].lower()
+        name = " ".join(args[1:]) if len(args) > 1 else None
+        
+        if action == "list":
+            result = tool.execute(action="list", session_key=session_key)
+        elif action == "current":
+            result = tool.execute(action="current", session_key=session_key)
+        elif action == "create":
+            if not name:
+                await update.message.reply_text("❌ Usage: /topic create <name>")
+                return
+            result = tool.execute(action="create", name=name, session_key=session_key)
+        elif action == "switch":
+            if not name:
+                await update.message.reply_text("❌ Usage: /topic switch <name>")
+                return
+            result = tool.execute(action="switch", name=name, session_key=session_key)
+        elif action == "delete":
+            if not name:
+                await update.message.reply_text("❌ Usage: /topic delete <name>")
+                return
+            result = tool.execute(action="delete", name=name, session_key=session_key)
+        else:
+            await update.message.reply_text(f"❌ Unknown action: {action}")
+            return
+        
+        if "error" in result:
+            await update.message.reply_text(f"❌ {result['error']}")
+        else:
+            await update.message.reply_text(result.get("message", "Done"))
+
     async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Forward slash commands to the bus for unified handling in AgentLoop."""
+        """Forward slash commands to the bus."""
         if not update.message or not update.effective_user:
             return
         message = update.message
@@ -620,27 +779,32 @@ class TelegramChannel(BaseChannel):
         )
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle incoming messages (text, photos, voice, documents)."""
+        """Handle incoming messages."""
         if not update.message or not update.effective_user:
             return
 
         message = update.message
         user = update.effective_user
         chat_id = message.chat_id
+        
+        thread_id = message.message_thread_id
+        is_topic_message = getattr(message, 'is_topic_message', False) or thread_id is not None
+        
         sender_id = self._sender_id(user)
         self._remember_thread_context(message)
 
-        # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
+        
+        str_chat_id = str(chat_id)
+        if thread_id:
+            session_key = f"telegram:{str_chat_id}:{thread_id}"
+        else:
+            session_key = f"telegram:{str_chat_id}"
 
-        if not await self._is_group_message_for_bot(message):
-            return
-
-        # Build content from text and/or media
+        # Build content
         content_parts = []
         media_paths = []
 
-        # Text content
         if message.text:
             content_parts.append(message.text)
         if message.caption:
@@ -668,13 +832,11 @@ class TelegramChannel(BaseChannel):
                 content_parts.insert(0, tag)
         content = "\n".join(content_parts) if content_parts else "[empty message]"
 
-        logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
-
-        str_chat_id = str(chat_id)
         metadata = self._build_message_metadata(message, user)
+        metadata["thread_id"] = thread_id
         session_key = self._derive_topic_session_key(message)
 
-        # Telegram media groups: buffer briefly, forward as one aggregated turn.
+        # Handle media groups
         if media_group_id := getattr(message, "media_group_id", None):
             key = f"{str_chat_id}:{media_group_id}"
             if key not in self._media_group_buffers:
@@ -693,10 +855,40 @@ class TelegramChannel(BaseChannel):
                 self._media_group_tasks[key] = asyncio.create_task(self._flush_media_group(key))
             return
 
-        # Start typing indicator before processing
-        self._start_typing(str_chat_id)
+        self._start_typing(session_key)
+        
+        # Create job for tracking
+        from nanobot.agent.job_tracker import job_manager
+        from nanobot.system.hooks import hook_manager
+        
+        # Skip job creation if there's already a running job for this session
+        # but still process the message (it will be queued by the agent loop)
+        if not job_manager.has_running_job(session_key):
+            logger.info(f"[TELEGRAM] Creating job for session_key={session_key}")
+            job = await job_manager.create_job(
+                session_key=session_key,
+                channel="telegram",
+                chat_id=str_chat_id,
+                user_message=content,
+            )
+            logger.info(f"[TELEGRAM] Created job {job.id}")
+            
+            if thread_id:
+                await job_manager.set_thread_id(job.id, thread_id)
+            
+            metadata["job_id"] = job.id
+            
+            logger.info(f"[TELEGRAM] Emitting agent.job.created for job {job.id}")
+            await hook_manager.emit("agent.job.created",
+                job=job,
+                channel="telegram",
+                chat_id=str_chat_id,
+                thread_id=thread_id,
+            )
+            logger.info(f"[TELEGRAM] Emitted agent.job.created for job {job.id}")
+        else:
+            logger.info(f"[TELEGRAM] Skipping job creation - running job exists for {session_key}")
 
-        # Forward to the message bus
         await self._handle_message(
             sender_id=sender_id,
             chat_id=str_chat_id,
@@ -724,7 +916,6 @@ class TelegramChannel(BaseChannel):
 
     def _start_typing(self, chat_id: str) -> None:
         """Start sending 'typing...' indicator for a chat."""
-        # Cancel any existing typing task for this chat
         self._stop_typing(chat_id)
         self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
 
@@ -738,7 +929,10 @@ class TelegramChannel(BaseChannel):
         """Repeatedly send 'typing' action until cancelled."""
         try:
             while self._app:
-                await self._app.bot.send_chat_action(chat_id=int(chat_id), action="typing")
+                await self._app.bot.send_chat_action(
+                    chat_id=int(chat_id),
+                    action=ChatAction.TYPING,
+                )
                 await asyncio.sleep(4)
         except asyncio.CancelledError:
             pass
@@ -746,8 +940,58 @@ class TelegramChannel(BaseChannel):
             logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Log polling / handler errors instead of silently swallowing them."""
+        """Log polling / handler errors."""
         logger.error("Telegram error: {}", context.error)
+
+    async def _on_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle callback queries from inline buttons."""
+        if not update.callback_query:
+            return
+        
+        query = update.callback_query
+        data = query.data or ""
+        
+        try:
+            await query.answer()
+        except Exception as e:
+            logger.warning(f"Failed to answer callback: {e}")
+        
+        if data.startswith("restart_gateway:"):
+            parts = data.split(":")
+            action = parts[1] if len(parts) > 1 else ""
+            force = parts[2] == "force" if len(parts) > 2 else False
+            
+            if action == "confirm":
+                await query.edit_message_text("🔄 Restarting gateway...")
+                
+                try:
+                    from nanobot.agent.tools.gateway import write_restart_marker
+                    import sys
+                    
+                    chat_id = str(update.effective_chat.id) if update.effective_chat else ""
+                    
+                    if chat_id:
+                        write_restart_marker(chat_id, "telegram", f"telegram:{chat_id}")
+                    
+                    cmd = [sys.executable, "-m", "nanobot", "gateway", "--force"]
+                    if force:
+                        cmd.append("--force")
+                    
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=None,
+                        stderr=None,
+                        start_new_session=True,
+                    )
+                    
+                    logger.info(f"Gateway restart triggered by user button click: PID {process.pid}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to restart gateway from callback: {e}")
+                    await query.edit_message_text(f"❌ Failed to restart: {e}")
+            
+            elif action == "cancel":
+                await query.edit_message_text("❌ Gateway restart cancelled.")
 
     def _get_extension(
         self,
@@ -774,3 +1018,59 @@ class TelegramChannel(BaseChannel):
             return "".join(Path(filename).suffixes)
 
         return ""
+
+    # Forum Topic Methods
+    
+    async def create_forum_topic(
+        self,
+        chat_id: int,
+        name: str,
+        icon_color: int | None = None,
+        icon_custom_emoji_id: str | None = None,
+    ) -> dict | None:
+        """Create a new forum topic (thread) in a chat."""
+        if not self._app:
+            return None
+        
+        try:
+            params = {
+                "chat_id": chat_id,
+                "name": name[:128],
+            }
+            if icon_color is not None:
+                params["icon_color"] = icon_color
+            if icon_custom_emoji_id:
+                params["icon_custom_emoji_id"] = icon_custom_emoji_id
+            
+            result = await self._app.bot._post("createForumTopic", params, api_kwargs=params)
+            
+            if result:
+                thread_id = result.get("message_thread_id")
+                self._thread_info[thread_id] = {
+                    "name": name,
+                    "icon_emoji_id": icon_custom_emoji_id,
+                    "chat_id": chat_id,
+                }
+                return result
+            return None
+        except Exception as e:
+            logger.error(f"Failed to create forum topic: {e}")
+            return None
+
+    async def get_or_create_thread_for_session(
+        self,
+        chat_id: int,
+        session_name: str,
+        session_key: str,
+    ) -> int | None:
+        """Get existing thread for a session, or create a new one."""
+        if session_key in self._session_threads:
+            return self._session_threads[session_key]
+        
+        result = await self.create_forum_topic(chat_id, session_name)
+        if result:
+            thread_id = result["message_thread_id"]
+            self._session_threads[session_key] = thread_id
+            return thread_id
+        
+        return None

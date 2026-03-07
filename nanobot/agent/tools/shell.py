@@ -42,7 +42,6 @@ class ExecTool(Tool):
     def name(self) -> str:
         return "exec"
 
-    _MAX_TIMEOUT = 600
     _MAX_OUTPUT = 10_000
 
     @property
@@ -64,12 +63,7 @@ class ExecTool(Tool):
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": (
-                        "Timeout in seconds. Increase for long-running commands "
-                        "like compilation or installation (default 60, max 600)."
-                    ),
-                    "minimum": 1,
-                    "maximum": 600,
+                    "description": f"Optional timeout in seconds (default: {self.timeout})",
                 },
             },
             "required": ["command"],
@@ -84,7 +78,7 @@ class ExecTool(Tool):
         if guard_error:
             return guard_error
 
-        effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
+        effective_timeout = timeout or self.timeout
 
         env = os.environ.copy()
         if self.path_append:

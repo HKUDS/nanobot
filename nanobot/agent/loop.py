@@ -332,6 +332,10 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
 
+    def _is_processing(self, session_key: str) -> bool:
+        """Check if a session is currently being processed."""
+        return False
+
     async def _process_message(
         self,
         msg: InboundMessage,

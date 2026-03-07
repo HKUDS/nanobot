@@ -66,6 +66,22 @@ class CronTool(Tool):
                     "description": "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00')",
                 },
                 "job_id": {"type": "string", "description": "Job ID (for remove)"},
+                "deliver_to": {
+                    "type": "string",
+                    "description": "Delivery target: 'agent', 'telegram', or 'both'",
+                },
+                "channel": {
+                    "type": "string",
+                    "description": "Channel for delivery (e.g. 'telegram')"
+                },
+                "to": {
+                    "type": "string",
+                    "description": "Recipient for delivery"
+                },
+                "model": {
+                    "type": "string",
+                    "description": "Model to use for this job (overrides default model)"
+                }
             },
             "required": ["action"],
         }
@@ -79,12 +95,16 @@ class CronTool(Tool):
         tz: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
-        **kwargs: Any,
+        deliver_to: str | None = None,
+        channel: str | None = None,
+        to: str | None = None,
+        model: str | None = None,
+        **kwargs: Any
     ) -> str:
         if action == "add":
             if self._in_cron_context.get():
                 return "Error: cannot schedule new jobs from within a cron job execution"
-            return self._add_job(message, every_seconds, cron_expr, tz, at)
+            return self._add_job(message, every_seconds, cron_expr, tz, at, deliver_to, channel, to, model)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -98,11 +118,22 @@ class CronTool(Tool):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
+        deliver_to: str | None,
+        channel: str | None,
+        to: str | None,
+        model: str | None = None,
     ) -> str:
         if not message:
             return "Error: message is required for add"
-        if not self._channel or not self._chat_id:
-            return "Error: no session context (channel/chat_id)"
+        
+        # deliver_to is REQUIRED
+        if not deliver_to:
+            return "Error: deliver_to is required. Must be 'agent', 'telegram', or 'both'"
+        
+        # Validate deliver_to value
+        if deliver_to not in ("agent", "telegram", "both"):
+            return f"Error: deliver_to must be 'agent', 'telegram', or 'both', got '{deliver_to}'"
+        
         if tz and not cron_expr:
             return "Error: tz can only be used with cron_expr"
         if tz:
@@ -131,15 +162,23 @@ class CronTool(Tool):
             delete_after = True
         else:
             return "Error: either every_seconds, cron_expr, or at is required"
-
+        
+        # Determine delivery target
+        deliver_channel = channel or self._channel
+        deliver_to_id = to or self._chat_id
+        
+        if deliver_to in ("telegram", "both") and (not deliver_channel or not deliver_to_id):
+            return "Error: channel and to are required when deliver_to is 'telegram' or 'both'"
+        
         job = self._cron.add_job(
             name=message[:30],
             schedule=schedule,
             message=message,
-            deliver=True,
-            channel=self._channel,
-            to=self._chat_id,
+            deliver_to=deliver_to,
+            channel=deliver_channel,
+            to=deliver_to_id,
             delete_after_run=delete_after,
+            model=model,
         )
         return f"Created job '{job.name}' (id: {job.id})"
 
