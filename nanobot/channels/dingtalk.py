@@ -70,19 +70,24 @@ class NanobotDingTalkHandler(CallbackHandler):
             sender_id = chatbot_msg.sender_staff_id or chatbot_msg.sender_id
             sender_name = chatbot_msg.sender_nick or "Unknown"
 
-            # Extract conversation info
             conversation_type = message.data.get("conversationType")
-            conversation_id = message.data.get("conversationId") or message.data.get("openConversationId")
-
-            if conversation_type == "2" and conversation_id:
-                sender_id = f"group:{conversation_id}"
+            conversation_id = (
+                message.data.get("conversationId")
+                or message.data.get("openConversationId")
+            )
 
             logger.info("Received DingTalk message from {} ({}): {}", sender_name, sender_id, content)
 
             # Forward to Nanobot via _on_message (non-blocking).
             # Store reference to prevent GC before task completes.
             task = asyncio.create_task(
-                self.channel._on_message(content, sender_id, sender_name)
+                self.channel._on_message(
+                    content,
+                    sender_id,
+                    sender_name,
+                    conversation_type,
+                    conversation_id,
+                )
             )
             self.channel._background_tasks.add(task)
             task.add_done_callback(self.channel._background_tasks.discard)
@@ -102,8 +107,8 @@ class DingTalkChannel(BaseChannel):
     Uses WebSocket to receive events via `dingtalk-stream` SDK.
     Uses direct HTTP API to send messages (SDK is mainly for receiving).
 
-    Note: Currently only supports private (1:1) chat. Group messages are
-    received but replies are sent back as private messages to the sender.
+    Supports both private (1:1) and group chats.
+    Group chat_id is stored with a "group:" prefix to route replies back.
     """
 
     name = "dingtalk"
@@ -435,7 +440,14 @@ class DingTalkChannel(BaseChannel):
                 f"[Attachment send failed: {filename}]",
             )
 
-    async def _on_message(self, content: str, sender_id: str, sender_name: str) -> None:
+    async def _on_message(
+        self,
+        content: str,
+        sender_id: str,
+        sender_name: str,
+        conversation_type: str | None = None,
+        conversation_id: str | None = None,
+    ) -> None:
         """Handle incoming message (called by NanobotDingTalkHandler).
 
         Delegates to BaseChannel._handle_message() which enforces allow_from
@@ -443,13 +455,16 @@ class DingTalkChannel(BaseChannel):
         """
         try:
             logger.info("DingTalk inbound: {} from {}", content, sender_name)
+            is_group = conversation_type == "2" and conversation_id
+            chat_id = f"group:{conversation_id}" if is_group else sender_id
             await self._handle_message(
                 sender_id=sender_id,
-                chat_id=sender_id,  # For private chat, chat_id == sender_id
+                chat_id=chat_id,
                 content=str(content),
                 metadata={
                     "sender_name": sender_name,
                     "platform": "dingtalk",
+                    "conversation_type": conversation_type,
                 },
             )
         except Exception as e:
