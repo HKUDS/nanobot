@@ -131,6 +131,21 @@ def test_get_extension_falls_back_to_original_filename() -> None:
     assert channel._get_extension("file", None, "archive.tar.gz") == ".tar.gz"
 
 
+def test_is_allowed_accepts_legacy_telegram_id_username_formats() -> None:
+    channel = TelegramChannel(TelegramConfig(allow_from=["12345", "alice", "67890|bob"]), MessageBus())
+
+    assert channel.is_allowed("12345|carol") is True
+    assert channel.is_allowed("99999|alice") is True
+    assert channel.is_allowed("67890|bob") is True
+
+
+def test_is_allowed_rejects_invalid_legacy_telegram_sender_shapes() -> None:
+    channel = TelegramChannel(TelegramConfig(allow_from=["alice"]), MessageBus())
+
+    assert channel.is_allowed("attacker|alice|extra") is False
+    assert channel.is_allowed("not-a-number|alice") is False
+
+
 @pytest.mark.asyncio
 async def test_send_progress_keeps_message_in_topic() -> None:
     config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
