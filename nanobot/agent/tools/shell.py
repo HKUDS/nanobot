@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, ToolResult
 
 
 class ExecTool(Tool):
@@ -62,13 +62,13 @@ class ExecTool(Tool):
             },
             "required": ["command"]
         }
-    
-    async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
+
+    async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str | ToolResult:
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
-        
+
         env = os.environ.copy()
         if self.path_append:
             env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
@@ -81,7 +81,7 @@ class ExecTool(Tool):
                 cwd=cwd,
                 env=env,
             )
-            
+
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
@@ -89,38 +89,79 @@ class ExecTool(Tool):
                 )
             except asyncio.TimeoutError:
                 process.kill()
-                # Wait for the process to fully terminate so pipes are
-                # drained and file descriptors are released.
                 try:
                     await asyncio.wait_for(process.wait(), timeout=5.0)
                 except asyncio.TimeoutError:
                     pass
-                return f"Error: Command timed out after {self.timeout} seconds"
-            
-            output_parts = []
-            
-            if stdout:
-                output_parts.append(stdout.decode("utf-8", errors="replace"))
-            
-            if stderr:
-                stderr_text = stderr.decode("utf-8", errors="replace")
-                if stderr_text.strip():
-                    output_parts.append(f"STDERR:\n{stderr_text}")
-            
-            if process.returncode != 0:
-                output_parts.append(f"\nExit code: {process.returncode}")
-            
-            result = "\n".join(output_parts) if output_parts else "(no output)"
-            
-            # Truncate very long output
-            max_len = 10000
-            if len(result) > max_len:
-                result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
-            
-            return result
-            
+
+                return ToolResult(
+                    content=f"Command timed out after {self.timeout} seconds",
+                    display="",  # No output to show for timeout
+                    display_type="exec_output",
+                )
+
+            # Decode output - keep exactly as command produced it
+            stdout_text = stdout.decode("utf-8", errors="replace") if stdout else ""
+            stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
+
+            # Combine stdout and stderr in their original form
+            # No processing, no filtering, no adding labels
+            combined = stdout_text
+            if stderr_text:
+                if combined:
+                    combined += stderr_text
+                else:
+                    combined = stderr_text
+
+            # Send raw output to LLM for context
+            content = combined if combined else "Command completed with no output"
+
+            return ToolResult(
+                content=content,  # Raw output for LLM
+                display=self._format_exec_output(combined),  # Formatted output for user
+                display_type="exec_output",
+            )
+
         except Exception as e:
             return f"Error executing command: {str(e)}"
+
+    def _format_exec_output(self, output: str) -> str:
+        """
+        Format command output with full-width background color.
+
+        Args:
+            output: Raw command output.
+
+        Returns:
+            Formatted string with ANSI color codes for terminal display.
+            Each line is padded with spaces to fill the terminal width.
+        """
+        if not output:
+            return ""
+
+        # ANSI color codes - dark gray background with dim foreground
+        BG_COLOR = "\x1b[48;2;26;26;26m"   # #1a1a1a
+        DIM_FG = "\x1b[38;2;150;150;150m"   # 暗灰色
+        RESET = "\x1b[0m"
+
+        # Get terminal width for full-line background
+        try:
+            terminal_width = os.get_terminal_size().columns
+        except OSError:
+            # Fallback if terminal size cannot be determined
+            terminal_width = 100
+
+        lines = []
+        for line in output.splitlines():
+            # Calculate visible content length (ANSI codes don't count)
+            content_len = len(line)
+            # Pad with spaces to fill terminal width
+            remaining = max(0, terminal_width - content_len)
+            # Apply background color and dim foreground, no trailing \n
+            padded = f"{line}{' ' * remaining}"
+            lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+
+        return "\n".join(lines) + "\n"
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
