@@ -71,6 +71,14 @@
 
 💎 **Easy-to-Use**: One-click to deploy and you're ready to go.
 
+### 🎯 Enhanced Capabilities
+
+📈 **Stock Market Analysis**: Access real-time stock quotes, historical data, and technical indicators using free financial APIs. Built-in data engineering modules for market analysis and trend detection.
+
+⚡ **Code Performance Analysis**: Profile and optimize code across Python, JavaScript, Java, and Go. Includes comprehensive performance metrics collection, benchmarking tools, and optimization recommendations.
+
+🧪 **Test Case Generation**: Intelligent test case suggestions for multiple frameworks (pytest, Jest, JUnit, Go). Automatically analyze code structure and generate comprehensive test suites covering edge cases, boundaries, and error scenarios.
+
 ## 🏗️ Architecture
 
 <p align="center">
