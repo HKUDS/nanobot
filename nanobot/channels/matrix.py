@@ -4,7 +4,7 @@ import asyncio
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import Any
 
 from loguru import logger
 
@@ -54,7 +54,7 @@ _DEFAULT_ATTACH_NAME = "attachment"
 _MSGTYPE_MAP = {"m.image": "image", "m.audio": "audio", "m.video": "video", "m.file": "file"}
 
 MATRIX_MEDIA_EVENT_FILTER = (RoomMessageMedia, RoomEncryptedMedia)
-MatrixMediaEvent: TypeAlias = RoomMessageMedia | RoomEncryptedMedia
+type MatrixMediaEvent = RoomMessageMedia | RoomEncryptedMedia
 
 MATRIX_MARKDOWN = create_markdown(
     escape=True,

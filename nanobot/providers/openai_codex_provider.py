@@ -243,7 +243,7 @@ def _prompt_cache_key(messages: list[dict[str, Any]]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-async def _iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], None]:
+async def _iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any]]:
     buffer: list[str] = []
     async for line in response.aiter_lines():
         if line == "":
