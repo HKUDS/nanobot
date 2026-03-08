@@ -8,7 +8,7 @@ import re
 import weakref
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from loguru import logger
 
@@ -109,8 +109,8 @@ class AgentLoop:
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+        self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
-        self._processing_lock = asyncio.Lock()
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -293,27 +293,57 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
 
+    def _resolve_session_key(self, msg: InboundMessage, session_key: str | None = None) -> str:
+        """Resolve the canonical session key for both chat and system messages."""
+        if session_key:
+            return session_key
+        if msg.channel == "system":
+            if ":" in msg.chat_id:
+                channel, chat_id = msg.chat_id.split(":", 1)
+                return f"{channel}:{chat_id}"
+            return f"cli:{msg.chat_id}"
+        return msg.session_key
+
+    def _get_session_lock(self, session_key: str) -> asyncio.Lock:
+        """Return the lock guarding a single conversation session."""
+        lock = self._session_locks.get(session_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[session_key] = lock
+        return lock
+
+    async def _process_with_session_lock(
+        self,
+        msg: InboundMessage,
+        session_key: str | None = None,
+        on_progress: Callable[[str], Awaitable[None]] | None = None,
+    ) -> OutboundMessage | None:
+        """Serialize processing within one session while allowing other sessions to run."""
+        key = self._resolve_session_key(msg, session_key=session_key)
+        async with self._get_session_lock(key):
+            return await self._process_message(msg, session_key=key, on_progress=on_progress)
+
     async def _dispatch(self, msg: InboundMessage) -> None:
-        """Process a message under the global lock."""
-        async with self._processing_lock:
-            try:
-                response = await self._process_message(msg)
-                if response is not None:
-                    await self.bus.publish_outbound(response)
-                elif msg.channel == "cli":
-                    await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel, chat_id=msg.chat_id,
-                        content="", metadata=msg.metadata or {},
-                    ))
-            except asyncio.CancelledError:
-                logger.info("Task cancelled for session {}", msg.session_key)
-                raise
-            except Exception:
-                logger.exception("Error processing message for session {}", msg.session_key)
+        """Process a message under a per-session lock."""
+        key = self._resolve_session_key(msg)
+        try:
+            response = await self._process_with_session_lock(msg, session_key=key)
+            if response is not None:
+                await self.bus.publish_outbound(response)
+            elif msg.channel == "cli":
                 await self.bus.publish_outbound(OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
-                    content="Sorry, I encountered an error.",
+                    content="", metadata=msg.metadata or {},
                 ))
+        except asyncio.CancelledError:
+            logger.info("Task cancelled for session {}", key)
+            raise
+        except Exception:
+            logger.exception("Error processing message for session {}", key)
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content="Sorry, I encountered an error.",
+            ))
 
     async def close_mcp(self) -> None:
         """Close MCP connections."""
@@ -358,7 +388,7 @@ class AgentLoop:
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
-        key = session_key or msg.session_key
+        key = self._resolve_session_key(msg, session_key=session_key)
         session = self.sessions.get_or_create(key)
 
         # Slash commands
@@ -394,7 +424,7 @@ class AgentLoop:
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands\n/account <name> — Switch to an AI profile\n/model <name> — Switch default model")
-                                  
+
         if cmd == "/account":
             keyboard = [
                 [{"text": "🔄 Switch Account", "callback_data": "/account_menu_switch"}],
@@ -402,30 +432,30 @@ class AgentLoop:
                 [{"text": "🗑️ Delete Account", "callback_data": "/account_menu_delete"}]
             ]
             return OutboundMessage(
-                channel=msg.channel, 
-                chat_id=msg.chat_id, 
+                channel=msg.channel,
+                chat_id=msg.chat_id,
                 content="⚙️ **Account Management**\nChoose an action below:",
                 metadata={"inline_keyboard": keyboard}
             )
-            
+
         if cmd == "/account_menu_switch":
             try:
                 from nanobot.config.profiles import ProfileManager
                 profiles = ProfileManager().list_profiles()
                 if not profiles:
                     return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="No AI account profiles found. Add one via terminal.")
-                
+
                 keyboard = []
                 for p in profiles:
                     keyboard.append([{"text": f"{p.name} ({p.model})", "callback_data": f"/account {p.name}"}])
-                
+
                 return OutboundMessage(
-                    channel=msg.channel, 
-                    chat_id=msg.chat_id, 
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
                     content="🔄 **Select an account to switch to:**",
                     metadata={"inline_keyboard": keyboard}
                 )
-            except Exception as e:
+            except Exception:
                 return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Error fetching profiles.")
 
         if cmd == "/account_menu_delete":
@@ -434,24 +464,24 @@ class AgentLoop:
                 profiles = ProfileManager().list_profiles()
                 if not profiles:
                     return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="No AI account profiles found.")
-                
+
                 keyboard = []
                 for p in profiles:
                     keyboard.append([{"text": f"❌ {p.name}", "callback_data": f"/rmaccount {p.name}"}])
-                
+
                 return OutboundMessage(
-                    channel=msg.channel, 
-                    chat_id=msg.chat_id, 
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
                     content="🗑️ **Select an account to remove:**",
                     metadata={"inline_keyboard": keyboard}
                 )
-            except Exception as e:
+            except Exception:
                 return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Error fetching profiles.")
 
         if cmd == "/account_menu_add":
             return OutboundMessage(
-                channel=msg.channel, 
-                chat_id=msg.chat_id, 
+                channel=msg.channel,
+                chat_id=msg.chat_id,
                 content="➕ **Add a New Account**\n\nTo add an account, open your computer terminal and type:\n\n`nanobot account add <Name> --model <Model> --api-key <Key> --api-base <URL>`\n\nExample:\n`nanobot account add zhipu4 --model zhipu/glm-5 --api-key sk-abc`"
             )
 
@@ -462,11 +492,11 @@ class AgentLoop:
                 profile = ProfileManager().get_profile(profile_name)
                 if not profile:
                     return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"❌ Profile '{profile_name}' not found.")
-                
-                from nanobot.config.loader import load_config, save_config
+
                 from nanobot.cli.commands import _make_provider
+                from nanobot.config.loader import load_config, save_config
                 config = load_config()
-                
+
                 # Setup provider block (if missing) and inject key/baseUrl
                 provider_name = config.get_provider_name(profile.model)
                 p = getattr(config.providers, provider_name, None)
@@ -475,17 +505,17 @@ class AgentLoop:
                 else:
                     p.api_key = profile.api_key
                     p.api_base = profile.api_base
-                
+
                 # Update default model
                 config.agents.defaults.model = profile.model
                 save_config(config)
-                
+
                 # Hot swap runtime properties
                 self.model = profile.model
                 self.provider = _make_provider(config)
                 self.subagents.provider = self.provider
                 self.subagents.model = self.model
-                
+
                 return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"✅ Switched to profile **{profile.name}** using model `{profile.model}`.")
             except Exception as e:
                 logger.error("Error switching account: {}", e)
@@ -497,17 +527,17 @@ class AgentLoop:
                 return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Please provide a model name. Usage: `/model <name>`\nExample: `/model zhipu/glm-5`")
             new_model = parts[1].strip()
             try:
-                from nanobot.config.loader import load_config, save_config
                 from nanobot.cli.commands import _make_provider
+                from nanobot.config.loader import load_config, save_config
                 config = load_config()
                 config.agents.defaults.model = new_model
                 save_config(config)
-                
+
                 self.model = new_model
                 self.provider = _make_provider(config)
                 self.subagents.provider = self.provider
                 self.subagents.model = self.model
-                
+
                 return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"✅ Switched default model to `{new_model}`.")
             except Exception as e:
                 logger.error("Error switching model: {}", e)
@@ -528,12 +558,12 @@ class AgentLoop:
             except Exception as e:
                 logger.error("Error removing account: {}", e)
                 return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"❌ Error removing account: {e}")
-                
+
                 self.model = new_model
                 self.provider = _make_provider(config)
                 self.subagents.provider = self.provider
                 self.subagents.model = self.model
-                
+
                 return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"✅ Switched default model to `{new_model}`.")
             except Exception as e:
                 logger.error("Error switching model: {}", e)
@@ -640,5 +670,9 @@ class AgentLoop:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        response = await self._process_with_session_lock(
+            msg,
+            session_key=session_key,
+            on_progress=on_progress,
+        )
         return response.content if response else ""
