@@ -50,8 +50,7 @@ body {
   display: flex;
   flex-direction: row;
   height: 100dvh;
-  max-width: 1100px;
-  margin: 0 auto;
+  width: 100%;
 }
 
 /* ── Sidebar ────────────────────────────────────────────────────────────── */
