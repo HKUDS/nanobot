@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+
+def _default_extra_kwargs_factory() -> dict[str, Any]:
+    return {}
 
 
 @dataclass(frozen=True)
@@ -13,6 +18,14 @@ class ChannelSpec:
     module_path: str
     class_name: str
     display_name: str = ""
+    extra_kwargs_factory: Callable[[], dict[str, Any]] = field(
+        default=_default_extra_kwargs_factory,
+    )
+
+    def __post_init__(self) -> None:
+        for field_name in ("name", "module_path", "class_name"):
+            if not getattr(self, field_name).strip():
+                raise ValueError(f"{field_name} must not be blank")
 
 
 class ChannelRegistry:
