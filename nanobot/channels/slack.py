@@ -82,6 +82,7 @@ class SlackChannel(BaseChannel):
             thread_ts = slack_meta.get("thread_ts")
             channel_type = slack_meta.get("channel_type")
             # Only reply in thread for channel/group messages; DMs don't use threads
+            use_thread = channel_type in ("channel", "group")
             thread_ts_param = thread_ts if use_thread else None
 
             # Slack rejects empty text payloads. Keep media-only messages media-only,
