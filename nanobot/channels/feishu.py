@@ -254,6 +254,12 @@ class FeishuChannel(BaseChannel):
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
 
+    @staticmethod
+    def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
+        """Register an event handler only when the SDK supports it."""
+        method = getattr(builder, method_name, None)
+        return method(handler) if callable(method) else builder
+
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
         if not FEISHU_AVAILABLE:
@@ -274,14 +280,24 @@ class FeishuChannel(BaseChannel):
             .app_secret(self.config.app_secret) \
             .log_level(lark.LogLevel.INFO) \
             .build()
-
-        # Create event handler (only register message receive, ignore other events)
-        event_handler = lark.EventDispatcherHandler.builder(
+        builder = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
             self.config.verification_token or "",
         ).register_p2_im_message_receive_v1(
             self._on_message_sync
-        ).build()
+        )
+        builder = self._register_optional_event(
+            builder, "register_p2_im_message_reaction_created_v1", self._on_reaction_created
+        )
+        builder = self._register_optional_event(
+            builder, "register_p2_im_message_message_read_v1", self._on_message_read
+        )
+        builder = self._register_optional_event(
+            builder,
+            "register_p2_im_chat_access_event_bot_p2p_chat_entered_v1",
+            self._on_bot_p2p_chat_entered,
+        )
+        event_handler = builder.build()
 
         # Create WebSocket client for long connection
         self._ws_client = lark.ws.Client(
@@ -842,7 +858,7 @@ class FeishuChannel(BaseChannel):
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
 
-    def _on_message_sync(self, data: "P2ImMessageReceiveV1") -> None:
+    def _on_message_sync(self, data: Any) -> None:
         """
         Sync handler for incoming messages (called from WebSocket thread).
         Schedules async handling in the main event loop.
@@ -850,7 +866,7 @@ class FeishuChannel(BaseChannel):
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self._on_message(data), self._loop)
 
-    async def _on_message(self, data: "P2ImMessageReceiveV1") -> None:
+    async def _on_message(self, data: Any) -> None:
         """Handle incoming message from Feishu."""
         try:
             event = data.event
@@ -954,3 +970,16 @@ class FeishuChannel(BaseChannel):
 
         except Exception as e:
             logger.error("Error processing Feishu message: {}", e)
+
+    def _on_reaction_created(self, data: Any) -> None:
+        """Ignore reaction events so they do not generate SDK noise."""
+        pass
+
+    def _on_message_read(self, data: Any) -> None:
+        """Ignore read events so they do not generate SDK noise."""
+        pass
+
+    def _on_bot_p2p_chat_entered(self, data: Any) -> None:
+        """Ignore p2p-enter events when a user opens a bot chat."""
+        logger.debug("Bot entered p2p chat (user opened chat window)")
+        pass

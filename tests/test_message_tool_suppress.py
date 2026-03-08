@@ -86,7 +86,6 @@ class TestMessageToolSuppressLogic:
         assert result is not None
         assert "Hello" in result.content
 
-    @pytest.mark.asyncio
     async def test_progress_hides_internal_reasoning(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
         tool_call = ToolCallRequest(id="call1", name="read_file", arguments={"path": "foo.txt"})
