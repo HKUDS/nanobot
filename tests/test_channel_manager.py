@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.dispatcher import OutboundDispatcher
+from nanobot.channels.factory import BuiltinChannelFactory
 from nanobot.channels.manager import ChannelManager
 from nanobot.config.schema import Config
 
@@ -27,7 +30,7 @@ class _LifecycleChannel(BaseChannel):
         self.stop_calls += 1
         self._running = False
 
-    async def send(self, message) -> None:
+    async def send(self, msg) -> None:
         return None
 
 
@@ -42,9 +45,10 @@ class _RecordingFactory:
 
 
 class _RecordingDispatcher:
-    def __init__(self):
+    def __init__(self, channels=None):
         self.started = asyncio.Event()
         self.cancelled = False
+        self.channels = {} if channels is None else channels
 
     async def run(self) -> None:
         self.started.set()
@@ -66,8 +70,8 @@ async def test_channel_manager_uses_injected_factory_and_dispatcher() -> None:
     manager = ChannelManager(
         config,
         bus,
-        channel_factory=factory,
-        dispatcher=dispatcher,
+        channel_factory=cast(BuiltinChannelFactory, factory),
+        dispatcher=cast(OutboundDispatcher, dispatcher),
     )
 
     await manager.start_all()
@@ -82,6 +86,24 @@ async def test_channel_manager_uses_injected_factory_and_dispatcher() -> None:
     await manager.stop_all()
 
 
+def test_channel_manager_rebinds_injected_dispatcher_to_final_channel_map() -> None:
+    bus = MessageBus()
+    config = Config()
+    channel = _LifecycleChannel(bus)
+    dispatcher = _RecordingDispatcher(channels={})
+
+    manager = ChannelManager(
+        config,
+        bus,
+        channel_factory=cast(BuiltinChannelFactory, _RecordingFactory({"telegram": channel})),
+        dispatcher=cast(OutboundDispatcher, dispatcher),
+    )
+
+    assert manager.dispatcher is dispatcher
+    assert dispatcher.channels is manager.channels
+    assert dispatcher.channels == {"telegram": channel}
+
+
 @pytest.mark.asyncio
 async def test_channel_manager_stop_all_stops_channels_and_cancels_dispatcher() -> None:
     bus = MessageBus()
@@ -91,8 +113,8 @@ async def test_channel_manager_stop_all_stops_channels_and_cancels_dispatcher() 
     manager = ChannelManager(
         config,
         bus,
-        channel_factory=_RecordingFactory({"telegram": channel}),
-        dispatcher=dispatcher,
+        channel_factory=cast(BuiltinChannelFactory, _RecordingFactory({"telegram": channel})),
+        dispatcher=cast(OutboundDispatcher, dispatcher),
     )
 
     await manager.start_all()

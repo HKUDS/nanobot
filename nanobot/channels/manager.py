@@ -42,6 +42,8 @@ class ChannelManager:
         self._init_channels()
         if self.dispatcher is None:
             self.dispatcher = OutboundDispatcher(self.config, self.bus, self.channels)
+        else:
+            self.dispatcher.channels = self.channels
 
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
