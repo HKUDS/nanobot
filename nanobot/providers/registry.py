@@ -109,6 +109,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
         supports_prompt_caching=True,
     ),
+
+    # Kilo: AI gateway, OpenAI-compatible interface.
+    ProviderSpec(
+        name="kilo",
+        keywords=("kilo",),
+        env_key="KILO_API_KEY",
+        display_name="Kilo",
+        litellm_prefix="openai",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="kilo",
+        default_api_base="https://api.kilo.ai/api/gateway",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+
     # AiHubMix: global gateway, OpenAI-compatible interface.
     # strip_model_prefix=True: it doesn't understand "anthropic/claude-3",
     # so we strip to bare "claude-3" then re-prefix as "openai/claude-3".
