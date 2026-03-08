@@ -52,6 +52,13 @@ def _get_file_type(file_path: str) -> int:
     ):
         return QQ_FILE_TYPE_IMAGE
 
+    # if ext in (".mp3", ".wav", ".ogg", ".m4a", ".aac") or (mime and mime.startswith("audio/")):
+    #     return QQ_FILE_TYPE_VOICE
+
+    # # 视频类型
+    # if ext in (".mp4", ".avi", ".mov", ".mkv", ".flv") or (mime and mime.startswith("video/")):
+    #     return QQ_FILE_TYPE_VIDEO
+
     # 默认文件类型
     return QQ_FILE_TYPE_FILE
 
@@ -137,13 +144,14 @@ class QQChannel(BaseChannel):
             return
 
         msg_id = msg.metadata.get("message_id")
-        self._msg_seq += 1
         msg_type = self._chat_type_cache.get(msg.chat_id, "c2c")
 
         # 发送富媒体文件
         is_group = msg_type == "group"
         for media_path in msg.media or []:
             await self._send_media(msg.chat_id, media_path, msg_id, is_group=is_group)
+
+        self._msg_seq += 1
 
         # 发送文本内容
         if msg.content and msg.content != "[empty message]":
@@ -181,7 +189,7 @@ class QQChannel(BaseChannel):
             logger.warning("QQ media file not found: {}", file_path)
             return False
 
-        base64_encoded_data = base64.b64encode(path.read_bytes()).decode("utf-8")
+        base64_encoded_data = base64.b64encode(path.read_bytes()).decode()
         file_type = _get_file_type(file_path)
         chat_type = "group" if is_group else "c2c"
 
