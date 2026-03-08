@@ -1,8 +1,10 @@
 from dataclasses import is_dataclass
+from typing import get_type_hints
 
 import pytest
 
 from nanobot.channels import ChannelRegistry, ChannelSpec
+from nanobot.config.schema import Config
 
 
 def test_channel_spec_and_registry_preserve_registration_order() -> None:
@@ -34,61 +36,64 @@ def test_channel_spec_and_registry_preserve_registration_order() -> None:
 
 
 def test_channel_spec_supports_extra_kwargs_factory() -> None:
-    config = {
-        "telegram": {"api_base": "https://example.invalid"},
-        "shared": {"proxy": "socks5://127.0.0.1:1080"},
-    }
+    config = Config()
+    config.channels.telegram.enabled = True
+    config.channels.telegram.proxy = "socks5://127.0.0.1:1080"
+    config.agents.defaults.workspace = "~/runtime-workspace"
+
     spec = ChannelSpec(
         name="telegram",
         module_path="nanobot.channels.telegram",
         class_name="TelegramChannel",
         extra_kwargs_factory=lambda runtime_config: {
-            "api_base": runtime_config["telegram"]["api_base"],
-            "proxy": runtime_config["shared"]["proxy"],
+            "proxy": runtime_config.channels.telegram.proxy,
+            "workspace": runtime_config.agents.defaults.workspace,
         },
     )
 
     assert spec.extra_kwargs_factory(config) == {
-        "api_base": "https://example.invalid",
         "proxy": "socks5://127.0.0.1:1080",
+        "workspace": "~/runtime-workspace",
     }
 
 
+def test_channel_spec_extra_kwargs_factory_is_typed_for_root_config() -> None:
+    extra_kwargs_factory_type = get_type_hints(ChannelSpec)["extra_kwargs_factory"]
+
+    assert "Config" in str(extra_kwargs_factory_type)
+
+
 @pytest.mark.parametrize(
-    ("field_name", "kwargs"),
+    ("field_name", "name", "module_path", "class_name"),
     [
         (
             "name",
-            {
-                "name": "",
-                "module_path": "nanobot.channels.telegram",
-                "class_name": "TelegramChannel",
-            },
+            "",
+            "nanobot.channels.telegram",
+            "TelegramChannel",
         ),
         (
             "module_path",
-            {
-                "name": "telegram",
-                "module_path": "",
-                "class_name": "TelegramChannel",
-            },
+            "telegram",
+            "",
+            "TelegramChannel",
         ),
         (
             "class_name",
-            {
-                "name": "telegram",
-                "module_path": "nanobot.channels.telegram",
-                "class_name": "",
-            },
+            "telegram",
+            "nanobot.channels.telegram",
+            "",
         ),
     ],
 )
 def test_channel_spec_rejects_blank_required_fields(
     field_name: str,
-    kwargs: dict[str, str],
+    name: str,
+    module_path: str,
+    class_name: str,
 ) -> None:
     with pytest.raises(ValueError, match=field_name):
-        ChannelSpec(**kwargs)
+        ChannelSpec(name=name, module_path=module_path, class_name=class_name)
 
 
 def test_channel_registry_rejects_duplicate_names() -> None:

@@ -5,20 +5,27 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from nanobot.config.schema import Config
 
-def _default_extra_kwargs_factory(config: Any) -> dict[str, Any]:
+
+def _default_extra_kwargs_factory(config: Config) -> dict[str, Any]:
+    """Return constructor kwargs derived from the root runtime config."""
     return {}
 
 
 @dataclass(frozen=True)
 class ChannelSpec:
-    """Metadata describing a built-in channel."""
+    """Metadata describing a built-in channel.
+
+    `extra_kwargs_factory` receives the root runtime `Config` object so future
+    factory code can derive constructor extras without hardcoded special cases.
+    """
 
     name: str
     module_path: str
     class_name: str
     display_name: str = ""
-    extra_kwargs_factory: Callable[[Any], dict[str, Any]] = field(
+    extra_kwargs_factory: Callable[[Config], dict[str, Any]] = field(
         default=_default_extra_kwargs_factory,
     )
 
