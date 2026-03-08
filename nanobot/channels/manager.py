@@ -24,19 +24,28 @@ class ChannelManager:
     - Route outbound messages
     """
 
-    def __init__(self, config: Config, bus: MessageBus):
+    def __init__(
+        self,
+        config: Config,
+        bus: MessageBus,
+        *,
+        channel_factory: BuiltinChannelFactory | None = None,
+        dispatcher: OutboundDispatcher | None = None,
+    ):
         self.config = config
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
-        self.dispatcher: OutboundDispatcher | None = None
+        self._channel_factory = channel_factory or BuiltinChannelFactory()
+        self.dispatcher: OutboundDispatcher | None = dispatcher
         self._dispatch_task: asyncio.Task | None = None
 
         self._init_channels()
-        self.dispatcher = OutboundDispatcher(self.config, self.bus, self.channels)
+        if self.dispatcher is None:
+            self.dispatcher = OutboundDispatcher(self.config, self.bus, self.channels)
 
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
-        self.channels = BuiltinChannelFactory().build_enabled_channels(
+        self.channels = self._channel_factory.build_enabled_channels(
             self.config,
             self.bus,
         )
