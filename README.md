@@ -301,7 +301,8 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
       "allowFrom": ["YOUR_USER_ID"],
-      "groupPolicy": "mention"
+      "groupPolicy": "mention",
+      "replyToMessage": false
     }
   }
 }
@@ -310,6 +311,11 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 > `groupPolicy` controls how the bot responds in group channels:
 > - `"mention"` (default) — Only respond when @mentioned
 > - `"open"` — Respond to all messages
+>
+> `replyToMessage` controls whether the bot uses Discord native replies for inbound messages:
+> - `false` (default) — Send a normal message reply
+> - `true` — Reply using Discord's native reply UI
+>
 > DMs always respond when the sender is in `allowFrom`.
 
 **5. Invite the bot**
