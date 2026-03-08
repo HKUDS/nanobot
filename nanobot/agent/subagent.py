@@ -35,7 +35,8 @@ class SubagentManager:
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
         default_max_iterations: int = 15,
-        parent_tools: ToolRegistry | None = None,
+        parent_mcp_tools: ToolRegistry | None = None,
+        disabled_tools: list[str] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.provider = provider
@@ -50,7 +51,8 @@ class SubagentManager:
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self.default_max_iterations = default_max_iterations
-        self._parent_tools = parent_tools
+        self._parent_mcp_tools = parent_mcp_tools
+        self._disabled_tools = disabled_tools or []
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
@@ -104,22 +106,21 @@ class SubagentManager:
             tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            if self.exec_config.enabled:
-                tools.register(ExecTool(
-                    working_dir=str(self.workspace),
-                    timeout=self.exec_config.timeout,
-                    restrict_to_workspace=self.restrict_to_workspace,
-                    path_append=self.exec_config.path_append,
-                ))
+            tools.register(ExecTool(
+                working_dir=str(self.workspace),
+                timeout=self.exec_config.timeout,
+                restrict_to_workspace=self.restrict_to_workspace,
+                path_append=self.exec_config.path_append,
+            ))
             tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
             tools.register(WebFetchTool(proxy=self.web_proxy))
-            if self._parent_tools:
-                from nanobot.agent.tools.mcp import MCPToolWrapper
-                for name in self._parent_tools.tool_names:
-                    tool = self._parent_tools.get(name)
-                    if isinstance(tool, MCPToolWrapper):
+            if self._parent_mcp_tools:
+                for name in self._parent_mcp_tools.tool_names:
+                    tool = self._parent_mcp_tools.get(name)
+                    if tool:
                         tools.register(tool)
                         logger.debug("Subagent [{}]: shared MCP tool '{}'", task_id, name)
+            tools.apply_disabled_filter(self._disabled_tools)
 
             system_prompt = self._build_subagent_prompt()
             messages: list[dict[str, Any]] = [

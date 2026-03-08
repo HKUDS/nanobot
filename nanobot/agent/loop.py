@@ -66,6 +66,8 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         subagent_max_iterations: int = 15,
+        disabled_tools: list[str] | None = None,
+        subagent_disabled_tools: list[str] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -83,10 +85,12 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self._disabled_tools = disabled_tools or []
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
+        self._mcp_tools = ToolRegistry()  # Unfiltered MCP tools for subagent inheritance
 
         self.subagents = SubagentManager(
             provider=provider,
@@ -101,7 +105,8 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
             default_max_iterations=subagent_max_iterations,
-            parent_tools=self.tools,
+            parent_mcp_tools=self._mcp_tools,
+            disabled_tools=subagent_disabled_tools or [],
         )
 
         self._running = False
@@ -121,19 +126,19 @@ class AgentLoop:
         allowed_dir = self.workspace if self.restrict_to_workspace else None
         for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        if self.exec_config.enabled:
-            self.tools.register(ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-                path_append=self.exec_config.path_append,
-            ))
+        self.tools.register(ExecTool(
+            working_dir=str(self.workspace),
+            timeout=self.exec_config.timeout,
+            restrict_to_workspace=self.restrict_to_workspace,
+            path_append=self.exec_config.path_append,
+        ))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        self.tools.apply_disabled_filter(self._disabled_tools)
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -145,6 +150,13 @@ class AgentLoop:
             self._mcp_stack = AsyncExitStack()
             await self._mcp_stack.__aenter__()
             await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
+            # Keep an unfiltered copy for subagent inheritance, then filter the main agent's tools.
+            from nanobot.agent.tools.mcp import MCPToolWrapper
+            for name in self.tools.tool_names:
+                tool = self.tools.get(name)
+                if isinstance(tool, MCPToolWrapper):
+                    self._mcp_tools.register(tool)
+            self.tools.apply_disabled_filter(self._disabled_tools)
             self._mcp_connected = True
         except Exception as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)

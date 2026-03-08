@@ -1,6 +1,9 @@
 """Tool registry for dynamic tool management."""
 
+from fnmatch import fnmatch
 from typing import Any
+
+from loguru import logger
 
 from nanobot.agent.tools.base import Tool
 
@@ -68,3 +71,15 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools
+
+    def apply_disabled_filter(self, patterns: list[str]) -> None:
+        """Remove tools whose names match any of the given patterns (exact or glob)."""
+        if not patterns:
+            return
+        to_remove = [
+            name for name in self._tools
+            if any(fnmatch(name, p) for p in patterns)
+        ]
+        for name in to_remove:
+            del self._tools[name]
+            logger.debug("Tool '{}' disabled by filter", name)

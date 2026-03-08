@@ -252,6 +252,8 @@ class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    disabled_tools: list[str] = Field(default_factory=list)  # Tool names/globs to disable for the main agent (e.g. ["exec", "mcp_*"])
+    subagent_disabled_tools: list[str] = Field(default_factory=list)  # Tool names/globs to disable for subagents
 
 
 class ProviderConfig(Base):
@@ -324,7 +326,6 @@ class WebToolsConfig(Base):
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
-    enabled: bool = True
     timeout: int = 60
     path_append: str = ""
 
