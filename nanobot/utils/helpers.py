@@ -1,6 +1,7 @@
 """Utility functions for nanobot."""
 
 import re
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -13,12 +14,17 @@ def ensure_dir(path: Path) -> Path:
 
 def get_data_path() -> Path:
     """~/.nanobot data directory."""
-    return ensure_dir(Path.home() / ".nanobot")
+    root = os.environ.get("NANOBOT_ROOT", "").strip()
+    base = Path(root).expanduser() if root else Path.home() / ".nanobot"
+    return ensure_dir(base)
 
 
 def get_workspace_path(workspace: str | None = None) -> Path:
     """Resolve and ensure workspace path. Defaults to ~/.nanobot/workspace."""
-    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
+    if workspace:
+        path = Path(workspace).expanduser()
+    else:
+        path = get_data_path() / "workspace"
     return ensure_dir(path)
 
 
@@ -29,6 +35,7 @@ def timestamp() -> str:
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
 
+
 def safe_filename(name: str) -> str:
     """Replace unsafe path characters with underscores."""
     return _UNSAFE_CHARS.sub("_", name).strip()
@@ -37,6 +44,7 @@ def safe_filename(name: str) -> str:
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
     """Sync bundled templates to workspace. Only creates missing files."""
     from importlib.resources import files as pkg_files
+
     try:
         tpl = pkg_files("nanobot") / "templates"
     except Exception:
@@ -62,6 +70,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
 
     if added and not silent:
         from rich.console import Console
+
         for name in added:
             Console().print(f"  [dim]Created {name}[/dim]")
     return added
