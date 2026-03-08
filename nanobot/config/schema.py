@@ -29,7 +29,9 @@ class TelegramConfig(Base):
     enabled: bool = False
     token: str = ""  # Bot token from @BotFather
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
-    proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
+    proxy: str | None = (
+        None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
+    )
     reply_to_message: bool = False  # If true, bot replies quote the original message
 
 
@@ -42,7 +44,9 @@ class FeishuConfig(Base):
     encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
     verification_token: str = ""  # Verification Token for event subscription (optional)
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
-    react_emoji: str = "THUMBSUP"  # Emoji type for message reactions (e.g. THUMBSUP, OK, DONE, SMILE)
+    react_emoji: str = (
+        "THUMBSUP"  # Emoji type for message reactions (e.g. THUMBSUP, OK, DONE, SMILE)
+    )
 
 
 class DingTalkConfig(Base):
@@ -72,9 +76,13 @@ class MatrixConfig(Base):
     access_token: str = ""
     user_id: str = ""  # @bot:matrix.org
     device_id: str = ""
-    e2ee_enabled: bool = True # Enable Matrix E2EE support (encryption + encrypted room handling).
-    sync_stop_grace_seconds: int = 2 # Max seconds to wait for sync_forever to stop gracefully before cancellation fallback.
-    max_media_bytes: int = 20 * 1024 * 1024 # Max attachment size accepted for Matrix media handling (inbound + outbound).
+    e2ee_enabled: bool = True  # Enable Matrix E2EE support (encryption + encrypted room handling).
+    sync_stop_grace_seconds: int = (
+        2  # Max seconds to wait for sync_forever to stop gracefully before cancellation fallback.
+    )
+    max_media_bytes: int = (
+        20 * 1024 * 1024
+    )  # Max attachment size accepted for Matrix media handling (inbound + outbound).
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention", "allowlist"] = "open"
     group_allow_from: list[str] = Field(default_factory=list)
@@ -105,7 +113,9 @@ class EmailConfig(Base):
     from_address: str = ""
 
     # Behavior
-    auto_reply_enabled: bool = True  # If false, inbound email is read but no automatic reply is sent
+    auto_reply_enabled: bool = (
+        True  # If false, inbound email is read but no automatic reply is sent
+    )
     poll_interval_seconds: int = 30
     mark_seen: bool = True
     max_body_chars: int = 12000
@@ -182,27 +192,32 @@ class QQConfig(Base):
     enabled: bool = False
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
-    allow_from: list[str] = Field(default_factory=list)  # Allowed user openids (empty = public access)
+    allow_from: list[str] = Field(
+        default_factory=list
+    )  # Allowed user openids (empty = public access)
+
 
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
+
     enabled: bool = False
     homeserver: str = "https://matrix.org"
     access_token: str = ""
-    user_id: str = ""                       # e.g. @bot:matrix.org
+    user_id: str = ""  # e.g. @bot:matrix.org
     device_id: str = ""
-    e2ee_enabled: bool = True               # end-to-end encryption support
-    sync_stop_grace_seconds: int = 2        # graceful sync_forever shutdown timeout
-    max_media_bytes: int = 20 * 1024 * 1024 # inbound + outbound attachment limit
+    e2ee_enabled: bool = True  # end-to-end encryption support
+    sync_stop_grace_seconds: int = 2  # graceful sync_forever shutdown timeout
+    max_media_bytes: int = 20 * 1024 * 1024  # inbound + outbound attachment limit
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention", "allowlist"] = "open"
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
 
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
-    send_progress: bool = True    # stream agent's text progress to the channel
+    send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
@@ -221,7 +236,9 @@ class AgentDefaults(Base):
 
     workspace: str = "~/.nanobot/workspace"
     model: str = "anthropic/claude-opus-4-5"
-    provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
+    provider: str = (
+        "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
+    )
     max_tokens: int = 8192
     temperature: float = 0.1
     max_tool_iterations: int = 40
@@ -258,8 +275,12 @@ class ProvidersConfig(Base):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
-    siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动) API gateway
-    volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎) API gateway
+    siliconflow: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # SiliconFlow (硅基流动) API gateway
+    volcengine: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # VolcEngine (火山引擎) API gateway
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
 
@@ -319,21 +340,64 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class PathsConfig(Base):
+    """Instance-level filesystem paths."""
+
+    root: str = "~/.nanobot"
+
+
+class ACPBackendConfig(Base):
+    """ACP backend process settings."""
+
+    command: str = "opencode"
+    args: list[str] = Field(default_factory=lambda: ["acp", "--print-logs", "--log-level", "WARN"])
+    cwd: str | None = None
+    env: dict[str, str] = Field(default_factory=dict)
+    protocol_version: int = 1
+    permissions_policy: Literal["strict", "trusted", "yolo"] = "strict"
+    startup_timeout_seconds: int = 20
+
+
+class DispatchConfig(Base):
+    """Runtime dispatch backend settings."""
+
+    backend: Literal["native", "acp"] = "native"
+    acp: ACPBackendConfig = Field(default_factory=ACPBackendConfig)
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
+    paths: PathsConfig = Field(default_factory=PathsConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    dispatch: DispatchConfig = Field(default_factory=DispatchConfig)
+
+    @property
+    def root_path(self) -> Path:
+        """Get expanded data root path."""
+        return Path(self.paths.root).expanduser()
 
     @property
     def workspace_path(self) -> Path:
-        """Get expanded workspace path."""
-        return Path(self.agents.defaults.workspace).expanduser()
+        """Get expanded workspace path using root-aware defaults."""
+        configured = Path(self.agents.defaults.workspace).expanduser()
+        default_workspace = Path("~/.nanobot/workspace").expanduser()
+        default_root = Path("~/.nanobot").expanduser()
 
-    def _match_provider(self, model: str | None = None) -> tuple["ProviderConfig | None", str | None]:
+        if configured.is_absolute():
+            if configured == default_workspace and self.root_path != default_root:
+                return self.root_path / "workspace"
+            return configured
+
+        return self.root_path / configured
+
+    def _match_provider(
+        self, model: str | None = None
+    ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import PROVIDERS
 

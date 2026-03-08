@@ -1,6 +1,6 @@
 [project]
 name = "nanobot-ai"
-version = "0.1.4.post3"
+version = "0.1.4.post4"
 description = "A lightweight personal AI assistant framework"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -41,6 +41,7 @@ dependencies = [
     "python-socks[asyncio]>=2.8.0,<3.0.0",
     "prompt-toolkit>=3.0.50,<4.0.0",
     "mcp>=1.26.0,<2.0.0",
+    "agent-client-protocol>=0.8.1,<1.0.0",
     "json-repair>=0.57.0,<1.0.0",
 ]
 
