@@ -38,6 +38,24 @@ function touchSession(id) {
   if (s) { s.updated = Date.now(); saveSessions(sessions); }
 }
 
+function pinSession(id) {
+  const sessions = getSessions();
+  const s = sessions.find(s => s.id === id);
+  if (s) { s.pinned = !s.pinned; saveSessions(sessions); renderSidebar(); }
+}
+
+function deleteSession(id) {
+  let sessions = getSessions().filter(s => s.id !== id);
+  saveSessions(sessions);
+  localStorage.removeItem('nanobot_history_' + id);
+  if (id === sessionId) {
+    sessionId = sessions.length > 0 ? sessions[0].id : createSession();
+    localStorage.setItem('nanobot_session', sessionId);
+    replayHistory(sessionId);
+  }
+  renderSidebar();
+}
+
 /* ── Session init ─────────────────────────────────────────────────────── */
 
 let sessionId;
@@ -140,13 +158,65 @@ function escapeHtml(str) {
 
 function renderSidebar() {
   const sessions = getSessions();
+  // Pinned sessions first, then by last updated
+  sessions.sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    return (b.updated || 0) - (a.updated || 0);
+  });
   sessionListEl.innerHTML = '';
   for (const s of sessions) {
-    const item = document.createElement('button');
-    item.className = 'session-item' + (s.id === sessionId ? ' active' : '');
-    item.textContent = s.name;
-    item.title = s.name;
-    item.addEventListener('click', () => switchSession(s.id));
+    const item = document.createElement('div');
+    item.className = 'session-item' + (s.id === sessionId ? ' active' : '') + (s.pinned ? ' pinned' : '');
+
+    const nameBtn = document.createElement('button');
+    nameBtn.className = 'session-name';
+    nameBtn.textContent = (s.pinned ? '📌 ' : '') + s.name;
+    nameBtn.title = s.name;
+    nameBtn.addEventListener('click', () => switchSession(s.id));
+
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'session-menu-btn';
+    menuBtn.setAttribute('aria-label', 'Session options');
+    menuBtn.textContent = '⋮';
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'session-dropdown hidden';
+
+    const pinItem = document.createElement('button');
+    pinItem.className = 'session-dropdown-item';
+    pinItem.textContent = s.pinned ? '📌 Unpin' : '📌 Pin';
+
+    const deleteItem = document.createElement('button');
+    deleteItem.className = 'session-dropdown-item danger';
+    deleteItem.textContent = '🗑 Delete';
+
+    dropdown.appendChild(pinItem);
+    dropdown.appendChild(deleteItem);
+
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.session-dropdown:not(.hidden)').forEach(d => {
+        if (d !== dropdown) d.classList.add('hidden');
+      });
+      dropdown.classList.toggle('hidden');
+    });
+
+    pinItem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      pinSession(s.id);
+      dropdown.classList.add('hidden');
+    });
+
+    deleteItem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteSession(s.id);
+      dropdown.classList.add('hidden');
+    });
+
+    item.appendChild(nameBtn);
+    item.appendChild(menuBtn);
+    item.appendChild(dropdown);
     sessionListEl.appendChild(item);
   }
 }
@@ -603,7 +673,7 @@ btnNew.addEventListener('click', newConversation);
 /* ── Init ─────────────────────────────────────────────────────────────── */
 
 document.addEventListener('click', () => {
-  document.querySelectorAll('.msg-dropdown:not(.hidden)').forEach(d => d.classList.add('hidden'));
+  document.querySelectorAll('.msg-dropdown:not(.hidden), .session-dropdown:not(.hidden)').forEach(d => d.classList.add('hidden'));
 });
 
 renderSidebar();

@@ -55,7 +55,7 @@ body {
 
 /* ── Sidebar ────────────────────────────────────────────────────────────── */
 #sidebar {
-  width: 220px;
+  width: 260px;
   flex-shrink: 0;
   background: var(--bg-surface);
   border-right: 1px solid var(--border);
@@ -92,10 +92,26 @@ body {
 }
 
 .session-item {
-  font-size: 13px;
-  padding: 7px 10px;
-  border: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
   border-radius: 8px;
+  padding: 2px 4px 2px 4px;
+  transition: background 0.15s;
+}
+
+.session-item:hover,
+.session-item.active {
+  background: var(--bg-hover);
+}
+
+.session-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  padding: 5px 6px;
+  border: none;
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
@@ -103,19 +119,81 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: background 0.15s, color 0.15s;
+  border-radius: 5px;
+  transition: color 0.15s;
 }
 
-.session-item:hover {
-  background: var(--bg-hover);
+.session-item:hover .session-name,
+.session-item.active .session-name {
   color: var(--text);
 }
 
-.session-item.active {
-  background: var(--bg-hover);
-  color: var(--text);
+.session-item.active .session-name {
   font-weight: 500;
 }
+
+.session-menu-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 15px;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.session-item:hover .session-menu-btn,
+.session-menu-btn:focus {
+  opacity: 1;
+}
+
+.session-menu-btn:hover {
+  background: var(--bg-active, rgba(255,255,255,0.12));
+  color: var(--text);
+}
+
+.session-dropdown {
+  position: absolute;
+  right: 4px;
+  top: calc(100% + 2px);
+  z-index: 200;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+  min-width: 140px;
+  padding: 4px;
+}
+
+.session-dropdown.hidden { display: none; }
+
+.session-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 7px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.session-dropdown-item:hover {
+  background: var(--bg-hover);
+}
+
+.session-dropdown-item.danger { color: #e05252; }
+.session-dropdown-item.danger:hover { background: rgba(224, 82, 82, 0.12); }
 
 #session-list::-webkit-scrollbar { width: 4px; }
 #session-list::-webkit-scrollbar-track { background: transparent; }
