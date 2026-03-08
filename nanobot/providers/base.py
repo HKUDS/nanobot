@@ -1,8 +1,17 @@
 """Base LLM provider interface."""
 
+from __future__ import annotations
+
+import asyncio
+import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
+
+import httpx
+from loguru import logger
+
+from nanobot.config.schema import LLMRetryConfig
 
 
 @dataclass
@@ -29,6 +38,21 @@ class LLMResponse:
         return len(self.tool_calls) > 0
 
 
+@dataclass
+class ProviderRequestError(Exception):
+    """Normalized provider failure with retry metadata."""
+
+    message: str
+    retryable: bool
+    status_code: int | None = None
+
+    def __post_init__(self) -> None:
+        super().__init__(self.message)
+
+    def __str__(self) -> str:
+        return self.message
+
+
 class LLMProvider(ABC):
     """
     Abstract base class for LLM providers.
@@ -37,9 +61,15 @@ class LLMProvider(ABC):
     while maintaining a consistent interface.
     """
 
-    def __init__(self, api_key: str | None = None, api_base: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        retry_config: LLMRetryConfig | None = None,
+    ):
         self.api_key = api_key
         self.api_base = api_base
+        self.retry_config = retry_config or LLMRetryConfig()
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -101,7 +131,6 @@ class LLMProvider(ABC):
             sanitized.append(clean)
         return sanitized
 
-    @abstractmethod
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -111,22 +140,122 @@ class LLMProvider(ABC):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
     ) -> LLMResponse:
-        """
-        Send a chat completion request.
-        
-        Args:
-            messages: List of message dicts with 'role' and 'content'.
-            tools: Optional list of tool definitions.
-            model: Model identifier (provider-specific).
-            max_tokens: Maximum tokens in response.
-            temperature: Sampling temperature.
-        
-        Returns:
-            LLMResponse with content and/or tool calls.
-        """
+        """Send a chat completion request with shared retry handling."""
+        attempts = self._max_attempts()
+        last_error: ProviderRequestError | None = None
+
+        for attempt in range(1, attempts + 1):
+            try:
+                return await self._chat_once(
+                    messages=messages,
+                    tools=tools,
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    reasoning_effort=reasoning_effort,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                error = exc if isinstance(exc, ProviderRequestError) else self._wrap_exception(
+                    exc,
+                    prefix=f"Error calling {self.provider_label}",
+                )
+                last_error = error
+
+            if not self._should_retry(last_error, attempt, attempts):
+                break
+
+            delay_s = self._retry_delay_seconds(attempt)
+            logger.warning(
+                "{} request failed (attempt {}/{}): {}. Retrying in {:.2f}s",
+                self.provider_label,
+                attempt,
+                attempts,
+                last_error,
+                delay_s,
+            )
+            await asyncio.sleep(delay_s)
+
+        return LLMResponse(
+            content=str(last_error) if last_error else f"Error calling {self.provider_label}",
+            finish_reason="error",
+        )
+
+    @abstractmethod
+    async def _chat_once(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+    ) -> LLMResponse:
+        """Provider-specific single-attempt request implementation."""
         pass
 
     @abstractmethod
     def get_default_model(self) -> str:
         """Get the default model for this provider."""
         pass
+
+    @property
+    def provider_label(self) -> str:
+        """Human-readable provider label used in logs and errors."""
+        name = type(self).__name__
+        return name[:-8] if name.endswith("Provider") else name
+
+    def _max_attempts(self) -> int:
+        if not self.retry_config.enabled:
+            return 1
+        return max(1, self.retry_config.max_attempts)
+
+    def _should_retry(
+        self,
+        error: ProviderRequestError | None,
+        attempt: int,
+        max_attempts: int,
+    ) -> bool:
+        return bool(error and error.retryable and attempt < max_attempts)
+
+    def _retry_delay_seconds(self, attempt: int) -> float:
+        initial_delay_ms = max(0, self.retry_config.initial_delay_ms)
+        max_delay_ms = max(initial_delay_ms, self.retry_config.max_delay_ms)
+        multiplier = max(1.0, self.retry_config.backoff_multiplier)
+        jitter_ratio = max(0.0, self.retry_config.jitter_ratio)
+
+        delay_ms = min(max_delay_ms, initial_delay_ms * (multiplier ** max(0, attempt - 1)))
+        if jitter_ratio:
+            jitter_span = delay_ms * jitter_ratio
+            delay_ms += random.uniform(-jitter_span, jitter_span)
+        return max(0.0, delay_ms / 1000.0)
+
+    def _status_error(self, message: str, status_code: int) -> ProviderRequestError:
+        return ProviderRequestError(
+            message=message,
+            retryable=status_code in set(self.retry_config.retryable_status_codes),
+            status_code=status_code,
+        )
+
+    def _wrap_exception(self, exc: Exception, *, prefix: str) -> ProviderRequestError:
+        status_code = self._extract_status_code(exc)
+        retryable = self._is_retryable_exception(exc, status_code)
+        detail = str(exc) or repr(exc)
+        return ProviderRequestError(
+            message=f"{prefix}: {detail}",
+            retryable=retryable,
+            status_code=status_code,
+        )
+
+    @staticmethod
+    def _extract_status_code(exc: Exception) -> int | None:
+        for candidate in (getattr(exc, "status_code", None), getattr(getattr(exc, "response", None), "status_code", None)):
+            if isinstance(candidate, int):
+                return candidate
+        return None
+
+    def _is_retryable_exception(self, exc: Exception, status_code: int | None = None) -> bool:
+        if status_code is not None:
+            return status_code in set(self.retry_config.retryable_status_codes)
+        return isinstance(exc, (asyncio.TimeoutError, httpx.TimeoutException, httpx.TransportError))

@@ -6,15 +6,22 @@ import uuid
 from typing import Any
 
 import json_repair
-from openai import AsyncOpenAI
+from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.config.schema import LLMRetryConfig
+from nanobot.providers.base import LLMProvider, LLMResponse, ProviderRequestError, ToolCallRequest
 
 
 class CustomProvider(LLMProvider):
 
-    def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1", default_model: str = "default"):
-        super().__init__(api_key, api_base)
+    def __init__(
+        self,
+        api_key: str = "no-key",
+        api_base: str = "http://localhost:8000/v1",
+        default_model: str = "default",
+        retry_config: LLMRetryConfig | None = None,
+    ):
+        super().__init__(api_key, api_base, retry_config=retry_config)
         self.default_model = default_model
         # Keep affinity stable for this provider instance to improve backend cache locality.
         self._client = AsyncOpenAI(
@@ -23,9 +30,9 @@ class CustomProvider(LLMProvider):
             default_headers={"x-session-affinity": uuid.uuid4().hex},
         )
 
-    async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
-                   model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
-                   reasoning_effort: str | None = None) -> LLMResponse:
+    async def _chat_once(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
+                         model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
+                         reasoning_effort: str | None = None) -> LLMResponse:
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
             "messages": self._sanitize_empty_content(messages),
@@ -38,8 +45,16 @@ class CustomProvider(LLMProvider):
             kwargs.update(tools=tools, tool_choice="auto")
         try:
             return self._parse(await self._client.chat.completions.create(**kwargs))
+        except APIStatusError as e:
+            raise ProviderRequestError(
+                message=f"Error calling Custom provider: {str(e)}",
+                retryable=e.status_code in set(self.retry_config.retryable_status_codes),
+                status_code=e.status_code,
+            ) from e
+        except (APITimeoutError, APIConnectionError) as e:
+            raise self._wrap_exception(e, prefix="Error calling Custom provider") from e
         except Exception as e:
-            return LLMResponse(content=f"Error: {e}", finish_reason="error")
+            raise self._wrap_exception(e, prefix="Error calling Custom provider") from e
 
     def _parse(self, response: Any) -> LLMResponse:
         choice = response.choices[0]

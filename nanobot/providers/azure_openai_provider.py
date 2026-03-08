@@ -9,7 +9,8 @@ from urllib.parse import urljoin
 import httpx
 import json_repair
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.config.schema import LLMRetryConfig
+from nanobot.providers.base import LLMProvider, LLMResponse, ProviderRequestError, ToolCallRequest
 
 _AZURE_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name"})
 
@@ -31,8 +32,9 @@ class AzureOpenAIProvider(LLMProvider):
         api_key: str = "",
         api_base: str = "",
         default_model: str = "gpt-5.2-chat",
+        retry_config: LLMRetryConfig | None = None,
     ):
-        super().__init__(api_key, api_base)
+        super().__init__(api_key, api_base, retry_config=retry_config)
         self.default_model = default_model
         self.api_version = "2024-10-21"
         
@@ -110,7 +112,7 @@ class AzureOpenAIProvider(LLMProvider):
 
         return payload
 
-    async def chat(
+    async def _chat_once(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
@@ -119,20 +121,7 @@ class AzureOpenAIProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
     ) -> LLMResponse:
-        """
-        Send a chat completion request to Azure OpenAI.
-
-        Args:
-            messages: List of message dicts with 'role' and 'content'.
-            tools: Optional list of tool definitions in OpenAI format.
-            model: Model identifier (used as deployment name).
-            max_tokens: Maximum tokens in response (mapped to max_completion_tokens).
-            temperature: Sampling temperature.
-            reasoning_effort: Optional reasoning effort parameter.
-
-        Returns:
-            LLMResponse with content and/or tool calls.
-        """
+        """Send a single chat completion request to Azure OpenAI."""
         deployment_name = model or self.default_model
         url = self._build_chat_url(deployment_name)
         headers = self._build_headers()
@@ -144,19 +133,18 @@ class AzureOpenAIProvider(LLMProvider):
             async with httpx.AsyncClient(timeout=60.0, verify=True) as client:
                 response = await client.post(url, headers=headers, json=payload)
                 if response.status_code != 200:
-                    return LLMResponse(
-                        content=f"Azure OpenAI API Error {response.status_code}: {response.text}",
-                        finish_reason="error",
+                    raise self._status_error(
+                        f"Azure OpenAI API Error {response.status_code}: {response.text}",
+                        response.status_code,
                     )
-                
+
                 response_data = response.json()
                 return self._parse_response(response_data)
 
+        except ProviderRequestError:
+            raise
         except Exception as e:
-            return LLMResponse(
-                content=f"Error calling Azure OpenAI: {repr(e)}",
-                finish_reason="error",
-            )
+            raise self._wrap_exception(e, prefix="Error calling Azure OpenAI") from e
 
     def _parse_response(self, response: dict[str, Any]) -> LLMResponse:
         """Parse Azure OpenAI response into our standard format."""

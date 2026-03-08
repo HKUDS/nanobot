@@ -6,12 +6,14 @@ import secrets
 import string
 from typing import Any
 
+import httpx
 import json_repair
 import litellm
 from litellm import acompletion
 from loguru import logger
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.config.schema import LLMRetryConfig
+from nanobot.providers.base import LLMProvider, LLMResponse, ProviderRequestError, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
 
 # Standard chat-completion message keys.
@@ -40,8 +42,9 @@ class LiteLLMProvider(LLMProvider):
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
+        retry_config: LLMRetryConfig | None = None,
     ):
-        super().__init__(api_key, api_base)
+        super().__init__(api_key, api_base, retry_config=retry_config)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
 
@@ -206,7 +209,7 @@ class LiteLLMProvider(LLMProvider):
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
         return sanitized
 
-    async def chat(
+    async def _chat_once(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
@@ -215,19 +218,7 @@ class LiteLLMProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
     ) -> LLMResponse:
-        """
-        Send a chat completion request via LiteLLM.
-
-        Args:
-            messages: List of message dicts with 'role' and 'content'.
-            tools: Optional list of tool definitions in OpenAI format.
-            model: Model identifier (e.g., 'anthropic/claude-sonnet-4-5').
-            max_tokens: Maximum tokens in response.
-            temperature: Sampling temperature.
-
-        Returns:
-            LLMResponse with content and/or tool calls.
-        """
+        """Send a single chat completion request via LiteLLM."""
         original_model = model or self.default_model
         model = self._resolve_model(original_model)
         extra_msg_keys = self._extra_msg_keys(original_model, model)
@@ -273,11 +264,16 @@ class LiteLLMProvider(LLMProvider):
             response = await acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
-            # Return error as content for graceful handling
-            return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
-                finish_reason="error",
-            )
+            status_code = self._extract_status_code(e)
+            if status_code is not None:
+                raise ProviderRequestError(
+                    message=f"Error calling LLM: {str(e)}",
+                    retryable=status_code in set(self.retry_config.retryable_status_codes),
+                    status_code=status_code,
+                ) from e
+            if isinstance(e, (httpx.TimeoutException, httpx.TransportError)):
+                raise self._wrap_exception(e, prefix="Error calling LLM") from e
+            raise self._wrap_exception(e, prefix="Error calling LLM") from e
 
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
