@@ -71,3 +71,21 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "Channel: cli" in user_content
     assert "Chat ID: direct" in user_content
     assert "Return exactly: OK" in user_content
+
+
+def test_runtime_context_tag_and_channel_fields_are_consistent() -> None:
+    """Runtime context should always start with the class tag and only include channel metadata when complete."""
+    base_runtime = ContextBuilder._build_runtime_context(channel=None, chat_id=None)
+    assert base_runtime.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG + "\n")
+    assert "Channel:" not in base_runtime
+    assert "Chat ID:" not in base_runtime
+
+    missing_chat_id = ContextBuilder._build_runtime_context(channel="cli", chat_id=None)
+    assert missing_chat_id.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG + "\n")
+    assert "Channel:" not in missing_chat_id
+    assert "Chat ID:" not in missing_chat_id
+
+    complete = ContextBuilder._build_runtime_context(channel="cli", chat_id="direct")
+    assert complete.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG + "\n")
+    assert "Channel: cli" in complete
+    assert "Chat ID: direct" in complete
