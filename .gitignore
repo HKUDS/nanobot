@@ -1,7 +1,6 @@
 .worktrees/
 .assets
 .env
-*.pyc
 dist/
 build/
 docs/
