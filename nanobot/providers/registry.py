@@ -162,6 +162,26 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+
+    # NanoGPT: gateway hosting models from many providers.
+    # User writes nanogpt/openai/gpt-5.2 → strip to openai/gpt-5.2 → nano-gpt/openai/gpt-5.2.
+    ProviderSpec(
+        name="nanogpt",
+        keywords=("nanogpt",),
+        env_key="NANOGPT_API_KEY",
+        display_name="NanoGPT",
+        litellm_prefix="nano-gpt",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="nano-gpt",
+        default_api_base="https://nano-gpt.com/api/v1",
+        strip_model_prefix=True,
+        model_overrides=(),
+    ),
+
     # === Standard providers (matched by model-name keywords) ===============
     # Anthropic: LiteLLM recognizes "claude-*" natively, no prefix needed.
     ProviderSpec(
