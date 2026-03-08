@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import mimetypes
 import os
 import re
 import threading
@@ -11,10 +12,11 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundAttachment, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import FeishuConfig
+from nanobot.utils.document_extractor import extract_document, is_supported_document
 
 import importlib.util
 
@@ -611,6 +613,7 @@ class FeishuChannel(BaseChannel):
         ".opus": "opus", ".mp4": "mp4", ".pdf": "pdf", ".doc": "doc", ".docx": "doc",
         ".xls": "xls", ".xlsx": "xls", ".ppt": "ppt", ".pptx": "ppt",
     }
+    _ATTACHMENT_EXTRACT_MAX_CHARS = 4000
 
     def _upload_image_sync(self, file_path: str) -> str | None:
         """Upload an image to Feishu and return the image_key."""
@@ -892,12 +895,22 @@ class FeishuChannel(BaseChannel):
             chat_type = message.chat_type
             msg_type = message.message_type
 
+            if not self.is_allowed(sender_id):
+                logger.warning(
+                    "Access denied for sender {} on channel {}. "
+                    "Add them to allowFrom list in config to grant access.",
+                    sender_id, self.name,
+                )
+                return
+
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
 
             # Parse content
             content_parts = []
             media_paths = []
+            attachments: list[InboundAttachment] = []
+            attachment_meta: list[dict[str, Any]] = []
 
             try:
                 content_json = json.loads(message.content) if message.content else {}
@@ -940,6 +953,48 @@ class FeishuChannel(BaseChannel):
 
                 content_parts.append(content_text)
 
+                if msg_type == "file" and file_path:
+                    is_document = is_supported_document(file_path)
+                    mime_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+                    attachment = InboundAttachment(
+                        kind="document" if is_document else "file",
+                        name=Path(file_path).name,
+                        local_path=file_path,
+                        source="feishu:file",
+                        mime_type=mime_type,
+                    )
+                    attachments.append(attachment)
+                    attachment_meta.append({
+                        "kind": attachment.kind,
+                        "path": file_path,
+                        "name": attachment.name,
+                        "mime": mime_type,
+                        "source": "feishu:file",
+                    })
+
+                if msg_type == "file" and file_path and is_supported_document(file_path):
+                    loop = asyncio.get_running_loop()
+                    extraction = await loop.run_in_executor(
+                        None, extract_document, file_path, self._ATTACHMENT_EXTRACT_MAX_CHARS
+                    )
+                    if extraction and attachments and attachment_meta:
+                        attachment = attachments[-1]
+                        attachment.extracted_text = extraction.text
+                        attachment.extracted_text_source = extraction.extractor
+                        attachment.extracted_text_truncated = extraction.truncated
+                        attachment.extraction_note = extraction.note
+                        if extraction.text:
+                            attachment_meta[-1]["text_excerpt"] = extraction.text
+                            attachment_meta[-1]["text_status"] = (
+                                "truncated" if extraction.truncated else "extracted"
+                            )
+                        else:
+                            attachment_meta[-1]["text_status"] = "unavailable"
+                        if extraction.note:
+                            attachment_meta[-1]["text_note"] = extraction.note
+                    elif attachment_meta:
+                        attachment_meta[-1]["text_status"] = "unavailable"
+
             elif msg_type in ("share_chat", "share_user", "interactive", "share_calendar_event", "system", "merge_forward"):
                 # Handle share cards and interactive messages
                 text = _extract_share_card_content(content_json, msg_type)
@@ -961,10 +1016,12 @@ class FeishuChannel(BaseChannel):
                 chat_id=reply_to,
                 content=content,
                 media=media_paths,
+                attachments=attachments,
                 metadata={
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
+                    "attachments": attachment_meta,
                 }
             )
 

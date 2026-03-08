@@ -42,8 +42,9 @@ dependencies = [
     "prompt-toolkit>=3.0.50,<4.0.0",
     "mcp>=1.26.0,<2.0.0",
     "json-repair>=0.57.0,<1.0.0",
-    "chardet>=3.0.2,<6.0.0",
+    "charset-normalizer>=3.4.0,<4.0.0",
     "openai>=2.8.0",
+    "pypdf>=5.3.0,<6.0.0",
 ]
 
 [project.optional-dependencies]

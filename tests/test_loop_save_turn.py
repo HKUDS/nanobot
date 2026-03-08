@@ -38,4 +38,25 @@ def test_save_turn_keeps_image_placeholder_after_runtime_strip() -> None:
         }],
         skip=0,
     )
-    assert session.messages[0]["content"] == [{"type": "text", "text": "[image]"}]
+    assert session.messages[0]["content"] == "[image]"
+
+
+def test_save_turn_strips_attachment_context_block() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:attachment")
+    runtime = ContextBuilder._RUNTIME_CONTEXT_TAG + "\nCurrent Time: now (UTC)"
+    attachment = ContextBuilder._ATTACHMENT_CONTEXT_TAG + '\n{"attachments":[{"name":"notes.pdf"}]}'
+
+    loop._save_turn(
+        session,
+        [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": runtime},
+                {"type": "text", "text": attachment},
+                {"type": "text", "text": "Summarize this."},
+            ],
+        }],
+        skip=0,
+    )
+    assert session.messages[0]["content"] == "Summarize this."

@@ -1,6 +1,7 @@
 """Context builder for assembling agent prompts."""
 
 import base64
+import json
 import mimetypes
 import platform
 import time
@@ -10,6 +11,7 @@ from typing import Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
+from nanobot.bus.events import InboundAttachment
 from nanobot.utils.helpers import detect_image_mime
 
 
@@ -18,6 +20,7 @@ class ContextBuilder:
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
+    _ATTACHMENT_CONTEXT_TAG = "[Attachment Context — metadata only, not user-authored text]"
 
     def __init__(self, workspace: Path):
         self.workspace = workspace
@@ -109,12 +112,13 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         current_message: str,
         skill_names: list[str] | None = None,
         media: list[str] | None = None,
+        attachments: list[InboundAttachment | dict[str, Any]] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id)
-        user_content = self._build_user_content(current_message, media)
+        user_content = self._build_user_content(current_message, media, attachments)
 
         # Merge runtime context and user content into a single user message
         # to avoid consecutive same-role messages that some providers reject.
@@ -129,13 +133,65 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             {"role": "user", "content": merged},
         ]
 
-    def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
-        if not media:
+    @classmethod
+    def _attachment_to_prompt_dict(cls, attachment: InboundAttachment | dict[str, Any]) -> dict[str, Any]:
+        """Normalize attachment metadata for prompt injection."""
+        if isinstance(attachment, InboundAttachment):
+            return attachment.to_prompt_dict()
+        if not isinstance(attachment, dict):
+            return {}
+        return {
+            key: value
+            for key, value in attachment.items()
+            if key in {
+                "kind",
+                "path",
+                "local_path",
+                "name",
+                "mime",
+                "mime_type",
+                "text_excerpt",
+                "text_status",
+                "text_note",
+                "extracted_text",
+                "extracted_text_source",
+                "extracted_text_truncated",
+                "extraction_note",
+                "source",
+            }
+            and value not in (None, "", [], {})
+            and value is not False
+        }
+
+    @classmethod
+    def _build_attachment_context(cls, attachments: list[InboundAttachment | dict[str, Any]] | None) -> str | None:
+        """Build a compact structured attachment metadata block for the user message."""
+        if not attachments:
+            return None
+        payload = {"attachments": [cls._attachment_to_prompt_dict(attachment) for attachment in attachments]}
+        payload["attachments"] = [item for item in payload["attachments"] if item]
+        if not payload["attachments"]:
+            return None
+        return cls._ATTACHMENT_CONTEXT_TAG + "\n" + json.dumps(payload, ensure_ascii=False)
+
+    @classmethod
+    def _is_metadata_text_block(cls, text: str) -> bool:
+        """Return True when a text block is runtime or attachment metadata, not user-authored chat text."""
+        return text.startswith(cls._RUNTIME_CONTEXT_TAG) or text.startswith(cls._ATTACHMENT_CONTEXT_TAG)
+
+    def _build_user_content(
+        self,
+        text: str,
+        media: list[str] | None,
+        attachments: list[InboundAttachment | dict[str, Any]] | None,
+    ) -> str | list[dict[str, Any]]:
+        """Build user message content with optional image and attachment context blocks."""
+        attachment_context = self._build_attachment_context(attachments)
+        if not media and not attachment_context:
             return text
 
-        images = []
-        for path in media:
+        images: list[dict[str, Any]] = []
+        for path in media or []:
             p = Path(path)
             if not p.is_file():
                 continue
@@ -147,9 +203,17 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             b64 = base64.b64encode(raw).decode()
             images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
 
-        if not images:
+        parts = list(images)
+        if attachment_context:
+            parts.append({"type": "text", "text": attachment_context})
+        if text:
+            parts.append({"type": "text", "text": text})
+
+        if not parts:
             return text
-        return images + [{"type": "text", "text": text}]
+        if not attachment_context and len(parts) == 1 and parts[0].get("type") == "text":
+            return parts[0]["text"]
+        return parts
 
     def add_tool_result(
         self, messages: list[dict[str, Any]],
