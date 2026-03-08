@@ -29,6 +29,7 @@ from rich.table import Table
 from rich.text import Text
 
 from nanobot import __logo__, __version__
+from nanobot.channels.policy import should_deliver_message
 from nanobot.config.paths import get_workspace_path
 from nanobot.config.schema import Config
 from nanobot.utils.helpers import sync_workspace_templates
@@ -535,10 +536,10 @@ def agent(
         return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
 
     async def _cli_progress(content: str, *, tool_hint: bool = False) -> None:
-        ch = agent_loop.channels_config
-        if ch and tool_hint and not ch.send_tool_hints:
-            return
-        if ch and not tool_hint and not ch.send_progress:
+        if not should_deliver_message(
+            agent_loop.channels_config,
+            {"_progress": True, "_tool_hint": tool_hint},
+        ):
             return
         console.print(f"  [dim]↳ {content}[/dim]")
 
@@ -589,13 +590,7 @@ def agent(
                     try:
                         msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
                         if msg.metadata.get("_progress"):
-                            is_tool_hint = msg.metadata.get("_tool_hint", False)
-                            ch = agent_loop.channels_config
-                            if ch and is_tool_hint and not ch.send_tool_hints:
-                                pass
-                            elif ch and not is_tool_hint and not ch.send_progress:
-                                pass
-                            else:
+                            if should_deliver_message(agent_loop.channels_config, msg.metadata):
                                 console.print(f"  [dim]↳ {msg.content}[/dim]")
                         elif not turn_done.is_set():
                             if msg.content:

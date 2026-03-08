@@ -151,7 +151,7 @@ def mock_agent_runtime(tmp_path):
          patch("nanobot.agent.loop.AgentLoop") as mock_agent_loop_cls:
 
         agent_loop = MagicMock()
-        agent_loop.channels_config = None
+        agent_loop.channels_config = config.channels
         agent_loop.process_direct = AsyncMock(return_value="mock-response")
         agent_loop.close_mcp = AsyncMock(return_value=None)
         mock_agent_loop_cls.return_value = agent_loop
@@ -265,6 +265,39 @@ def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime,
     assert mock_agent_runtime["config"].agents.defaults.workspace == str(workspace_path)
     assert mock_agent_runtime["sync_templates"].call_args.args == (workspace_path,)
     assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == workspace_path
+
+
+def test_agent_progress_output_respects_delivery_policy(mock_agent_runtime) -> None:
+    mock_agent_runtime["config"].channels.send_progress = False
+
+    async def _run_with_progress(_message, _session_id, on_progress):
+        await on_progress("Thinking...")
+        return "mock-response"
+
+    mock_agent_runtime["agent_loop"].process_direct.side_effect = _run_with_progress
+
+    with patch("nanobot.cli.commands.console.print") as mock_console_print:
+        result = runner.invoke(app, ["agent", "-m", "hello"])
+
+    assert result.exit_code == 0
+    assert [call.args for call in mock_console_print.call_args_list] == []
+
+
+def test_agent_tool_hint_output_respects_delivery_policy(mock_agent_runtime) -> None:
+    mock_agent_runtime["config"].channels.send_progress = True
+    mock_agent_runtime["config"].channels.send_tool_hints = False
+
+    async def _run_with_progress(_message, _session_id, on_progress):
+        await on_progress('read_file("foo.txt")', tool_hint=True)
+        return "mock-response"
+
+    mock_agent_runtime["agent_loop"].process_direct.side_effect = _run_with_progress
+
+    with patch("nanobot.cli.commands.console.print") as mock_console_print:
+        result = runner.invoke(app, ["agent", "-m", "hello"])
+
+    assert result.exit_code == 0
+    assert [call.args for call in mock_console_print.call_args_list] == []
 
 
 def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Path) -> None:

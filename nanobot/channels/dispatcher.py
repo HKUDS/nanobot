@@ -9,6 +9,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.policy import should_deliver_message
 from nanobot.config.schema import Config
 
 
@@ -26,13 +27,7 @@ class OutboundDispatcher:
         self.channels = channels
 
     def _should_dispatch(self, message: OutboundMessage) -> bool:
-        if not message.metadata.get("_progress"):
-            return True
-
-        if message.metadata.get("_tool_hint"):
-            return self.config.channels.send_tool_hints
-
-        return self.config.channels.send_progress
+        return should_deliver_message(self.config.channels, message.metadata)
 
     async def run(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""
