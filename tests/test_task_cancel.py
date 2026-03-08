@@ -21,8 +21,8 @@ def _make_loop():
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
          patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+         patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
     return loop, bus
 
@@ -104,7 +104,7 @@ class TestDispatch:
         assert out.content == "hi"
 
     @pytest.mark.asyncio
-    async def test_processing_lock_serializes(self):
+    async def test_session_lock_serializes_same_session(self):
         from nanobot.bus.events import InboundMessage, OutboundMessage
 
         loop, bus = _make_loop()
@@ -123,6 +123,59 @@ class TestDispatch:
         t1 = asyncio.create_task(loop._dispatch(msg1))
         t2 = asyncio.create_task(loop._dispatch(msg2))
         await asyncio.gather(t1, t2)
+        assert order == ["start-a", "end-a", "start-b", "end-b"]
+
+    @pytest.mark.asyncio
+    async def test_session_lock_allows_different_sessions_in_parallel(self):
+        from nanobot.bus.events import InboundMessage, OutboundMessage
+
+        loop, bus = _make_loop()
+        order = []
+        started = 0
+        both_started = asyncio.Event()
+
+        async def mock_process(m, **kwargs):
+            nonlocal started
+            order.append(f"start-{m.content}")
+            started += 1
+            if started == 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=0.2)
+            order.append(f"end-{m.content}")
+            return OutboundMessage(channel="test", chat_id=m.chat_id, content=m.content)
+
+        loop._process_message = mock_process
+        msg1 = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="a")
+        msg2 = InboundMessage(channel="test", sender_id="u1", chat_id="c2", content="b")
+
+        await asyncio.gather(
+            asyncio.create_task(loop._dispatch(msg1)),
+            asyncio.create_task(loop._dispatch(msg2)),
+        )
+
+        assert order[:2] == ["start-a", "start-b"] or order[:2] == ["start-b", "start-a"]
+
+    @pytest.mark.asyncio
+    async def test_process_direct_serializes_same_session(self):
+        from nanobot.bus.events import OutboundMessage
+
+        loop, bus = _make_loop()
+        order = []
+
+        async def mock_process(m, **kwargs):
+            order.append(f"start-{m.content}")
+            await asyncio.sleep(0.05)
+            order.append(f"end-{m.content}")
+            return OutboundMessage(channel="test", chat_id="c1", content=m.content)
+
+        loop._process_message = mock_process
+
+        result_a, result_b = await asyncio.gather(
+            loop.process_direct("a", session_key="test:c1", channel="test", chat_id="c1"),
+            loop.process_direct("b", session_key="test:c1", channel="test", chat_id="c1"),
+        )
+
+        assert (result_a, result_b) == ("a", "b")
         assert order == ["start-a", "end-a", "start-b", "end-b"]
 
 
