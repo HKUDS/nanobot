@@ -76,10 +76,13 @@ class ToolRegistry:
         """Remove tools whose names match any of the given patterns (exact or glob)."""
         if not patterns:
             return
+        logger.info("Applying disabled tool filter: patterns={}, registered={}", patterns, list(self._tools.keys()))
         to_remove = [
             name for name in self._tools
             if any(fnmatch(name, p) for p in patterns)
         ]
         for name in to_remove:
             del self._tools[name]
-            logger.debug("Tool '{}' disabled by filter", name)
+            logger.info("Tool '{}' disabled by filter", name)
+        if not to_remove:
+            logger.warning("Disabled tool filter matched nothing: patterns={}", patterns)
