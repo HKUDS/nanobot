@@ -1,5 +1,5 @@
-from email.message import EmailMessage
 from datetime import date
+from email.message import EmailMessage
 
 import pytest
 
@@ -366,3 +366,191 @@ def test_fetch_messages_between_dates_uses_imap_since_before_without_mark_seen(m
     assert fake.search_args is not None
     assert fake.search_args[1:] == ("SINCE", "06-Feb-2026", "BEFORE", "07-Feb-2026")
     assert fake.store_calls == []
+
+
+@pytest.mark.asyncio
+async def test_start_polls_once_then_stops_on_next_sleep(monkeypatch) -> None:
+    """Start runs polling loop and exits after stop condition is toggled."""
+    channel = EmailChannel(_make_config(), MessageBus())
+    calls = {"fetch": 0, "handle": 0}
+
+    def _fake_fetch():
+        calls["fetch"] += 1
+        return [
+            {
+                "sender": "alice@example.com",
+                "subject": "Loop subject",
+                "message_id": "<loop@example.com>",
+                "content": "loop body",
+                "metadata": {},
+            }
+        ]
+
+    async def _fake_handle(**_kwargs):
+        calls["handle"] += 1
+
+    async def _fake_sleep(_seconds: int):
+        channel._running = False
+
+    monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
+    monkeypatch.setattr(channel, "_handle_message", _fake_handle)
+    monkeypatch.setattr("nanobot.channels.email.asyncio.sleep", _fake_sleep)
+    await channel.start()
+
+    assert calls["fetch"] == 1
+    assert calls["handle"] == 1
+    assert channel.is_running is False
+    assert channel._last_subject_by_chat["alice@example.com"] == "Loop subject"
+    assert channel._last_message_id_by_chat["alice@example.com"] == "<loop@example.com>"
+
+
+@pytest.mark.asyncio
+async def test_stop_sets_running_false() -> None:
+    """Stop flips running state off."""
+    channel = EmailChannel(_make_config(), MessageBus())
+    channel._running = True
+    await channel.stop()
+    assert channel.is_running is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("imap_host", ""),
+        ("imap_username", ""),
+        ("imap_password", ""),
+        ("smtp_host", ""),
+        ("smtp_username", ""),
+        ("smtp_password", ""),
+    ],
+)
+def test_validate_config_fails_when_required_field_missing(field: str, value: str) -> None:
+    """Validation fails when a required config field is missing."""
+    cfg = _make_config()
+    setattr(cfg, field, value)
+    channel = EmailChannel(cfg, MessageBus())
+    assert channel._validate_config() is False
+
+
+def test_reply_subject_handles_existing_reply_and_custom_prefix() -> None:
+    """Reply subject keeps existing Re prefix and applies custom prefix otherwise."""
+    cfg = _make_config()
+    cfg.subject_prefix = "Antwort: "
+    channel = EmailChannel(cfg, MessageBus())
+    assert channel._reply_subject("Re: Existing") == "Re: Existing"
+    assert channel._reply_subject("Topic") == "Antwort: Topic"
+
+
+def test_reply_subject_falls_back_for_empty_subject() -> None:
+    """Reply subject falls back when base subject is empty."""
+    channel = EmailChannel(_make_config(), MessageBus())
+    assert channel._reply_subject("   ") == "Re: nanobot reply"
+
+
+def test_extract_uid_returns_empty_without_uid_header() -> None:
+    """UID extraction returns empty string when no UID exists."""
+    fetched = [(b"1 (BODY[] {12})", b"hello"), b")"]
+    assert EmailChannel._extract_uid(fetched) == ""
+
+
+def test_extract_uid_handles_bytearray_header() -> None:
+    """UID extraction supports bytearray header values."""
+    fetched = [(bytearray(b"5 (UID 777 BODY[] {12})"), b"hello"), b")"]
+    assert EmailChannel._extract_uid(fetched) == "777"
+
+
+def test_decode_header_value_falls_back_on_exception(monkeypatch) -> None:
+    """Header decoding returns raw value if decoding fails."""
+    monkeypatch.setattr("nanobot.channels.email.make_header", lambda _parts: (_ for _ in ()).throw(ValueError("bad")))
+    assert EmailChannel._decode_header_value("raw-subject") == "raw-subject"
+
+
+def test_smtp_send_uses_ssl_client_when_enabled(monkeypatch) -> None:
+    """SMTP send uses SSL transport when configured."""
+    msg = EmailMessage()
+    msg["From"] = "bot@example.com"
+    msg["To"] = "alice@example.com"
+    msg["Subject"] = "s"
+    msg.set_content("body")
+
+    class FakeSMTPSSL:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.logged_in = False
+            self.sent = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def login(self, _user: str, _pw: str):
+            self.logged_in = True
+
+        def send_message(self, _msg: EmailMessage):
+            self.sent = True
+
+    instances: list[FakeSMTPSSL] = []
+
+    def _factory(host: str, port: int, timeout: int = 30):
+        instance = FakeSMTPSSL(host, port, timeout=timeout)
+        instances.append(instance)
+        return instance
+
+    monkeypatch.setattr("nanobot.channels.email.smtplib.SMTP_SSL", _factory)
+    cfg = _make_config()
+    cfg.smtp_use_ssl = True
+    channel = EmailChannel(cfg, MessageBus())
+    channel._smtp_send(msg)
+
+    assert len(instances) == 1
+    assert instances[0].logged_in is True
+    assert instances[0].sent is True
+
+
+def test_smtp_send_skips_starttls_when_disabled(monkeypatch) -> None:
+    """SMTP send skips STARTTLS when smtp_use_tls is false."""
+    msg = EmailMessage()
+    msg["From"] = "bot@example.com"
+    msg["To"] = "alice@example.com"
+    msg["Subject"] = "s"
+    msg.set_content("body")
+
+    class FakeSMTP:
+        def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
+            self.started_tls = False
+            self.logged_in = False
+            self.sent = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self, context=None):
+            self.started_tls = True
+
+        def login(self, _user: str, _pw: str):
+            self.logged_in = True
+
+        def send_message(self, _msg: EmailMessage):
+            self.sent = True
+
+    instances: list[FakeSMTP] = []
+
+    def _factory(host: str, port: int, timeout: int = 30):
+        instance = FakeSMTP(host, port, timeout=timeout)
+        instances.append(instance)
+        return instance
+
+    monkeypatch.setattr("nanobot.channels.email.smtplib.SMTP", _factory)
+    cfg = _make_config()
+    cfg.smtp_use_tls = False
+    channel = EmailChannel(cfg, MessageBus())
+    channel._smtp_send(msg)
+
+    assert len(instances) == 1
+    assert instances[0].started_tls is False
+    assert instances[0].logged_in is True
+    assert instances[0].sent is True
