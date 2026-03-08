@@ -903,34 +903,96 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
 
 
-## Multiple Instances
+## 🧩 Multiple Instances
 
-Run multiple nanobot instances simultaneously, each with its own workspace and configuration.
+Run multiple nanobot instances simultaneously with separate configs and runtime data. Use `--config` as the main entrypoint, and optionally use `--workspace` to override the workspace for a specific run.
+
+### Quick Start
 
 ```bash
 # Instance A - Telegram bot
-nanobot gateway -w ~/.nanobot/botA -p 18791
+nanobot gateway --config ~/.nanobot-telegram/config.json
 
-# Instance B - Discord bot
-nanobot gateway -w ~/.nanobot/botB -p 18792
+# Instance B - Discord bot  
+nanobot gateway --config ~/.nanobot-discord/config.json
 
-# Instance C - Using custom config file
-nanobot gateway -w ~/.nanobot/botC -c ~/.nanobot/botC/config.json -p 18793
+# Instance C - Feishu bot with custom port
+nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
 ```
 
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--workspace` | `-w` | Workspace directory (default: `~/.nanobot/workspace`) |
-| `--config` | `-c` | Config file path (default: `~/.nanobot/config.json`) |
-| `--port` | `-p` | Gateway port (default: `18790`) |
+### Path Resolution
 
-Each instance has its own:
-- Workspace directory (MEMORY.md, HEARTBEAT.md, session files)
-- Cron jobs storage (`workspace/cron/jobs.json`)
-- Configuration (if using `--config`)
+When using `--config`, nanobot derives its runtime data directory from the config file location. The workspace still comes from `agents.defaults.workspace` unless you override it with `--workspace`.
 
+| Component | Resolved From | Example |
+|-----------|---------------|---------|
+| **Config** | `--config` path | `~/.nanobot-A/config.json` |
+| **Workspace** | `--workspace` or config | `~/.nanobot-A/workspace/` |
+| **Cron Jobs** | config directory | `~/.nanobot-A/cron/` |
+| **Media / runtime state** | config directory | `~/.nanobot-A/media/` |
 
-## CLI Reference
+### How It Works
+
+- `--config` selects which config file to load
+- By default, the workspace comes from `agents.defaults.workspace` in that config
+- If you pass `--workspace`, it overrides the workspace from the config file
+
+### Minimal Setup
+
+1. Copy your base config into a new instance directory.
+2. Set a different `agents.defaults.workspace` for that instance.
+3. Start the instance with `--config`.
+
+Example config:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.nanobot-telegram/workspace",
+      "model": "anthropic/claude-sonnet-4-6"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "YOUR_TELEGRAM_BOT_TOKEN"
+    }
+  },
+  "gateway": {
+    "port": 18790
+  }
+}
+```
+
+Start separate instances:
+
+```bash
+nanobot gateway --config ~/.nanobot-telegram/config.json
+nanobot gateway --config ~/.nanobot-discord/config.json
+```
+
+Override workspace for one-off runs when needed:
+
+```bash
+nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobot-telegram-test
+```
+
+### Common Use Cases
+
+- Run separate bots for Telegram, Discord, Feishu, and other platforms
+- Keep testing and production instances isolated
+- Use different models or providers for different teams
+- Serve multiple tenants with separate configs and runtime data
+
+### Notes
+
+- Each instance must use a different port if they run at the same time
+- Use a different workspace per instance if you want isolated memory, sessions, and skills
+- `--workspace` overrides the workspace defined in the config file
+- Cron jobs and runtime media/state are derived from the config directory
+
+## 💻 CLI Reference
 
 | Command | Description |
 |---------|-------------|

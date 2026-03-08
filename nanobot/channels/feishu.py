@@ -14,6 +14,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import FeishuConfig
 
 import importlib.util
@@ -732,8 +733,7 @@ class FeishuChannel(BaseChannel):
             (file_path, content_text) - file_path is None if download failed
         """
         loop = asyncio.get_running_loop()
-        media_dir = Path.home() / ".nanobot" / "media"
-        media_dir.mkdir(parents=True, exist_ok=True)
+        media_dir = get_media_dir("feishu")
 
         data, filename = None, None
 
