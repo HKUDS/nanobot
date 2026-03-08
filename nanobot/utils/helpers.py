@@ -1,8 +1,16 @@
 """Utility functions for nanobot."""
 
+from __future__ import annotations
+
 import re
 from datetime import datetime
 from pathlib import Path
+
+
+def ensure_dir(path: Path) -> Path:
+    """Ensure directory exists, return it."""
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def detect_image_mime(data: bytes) -> str | None:
@@ -18,10 +26,24 @@ def detect_image_mime(data: bytes) -> str | None:
     return None
 
 
-def ensure_dir(path: Path) -> Path:
-    """Ensure directory exists, return it."""
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def get_workspace_path(workspace: str | None = None) -> Path:
+    """Resolve and ensure workspace path. Defaults to configured workspace."""
+    if workspace:
+        return ensure_dir(Path(workspace).expanduser())
+
+    from nanobot.config.loader import load_config
+
+    return ensure_dir(load_config().workspace_path)
+
+
+def get_data_path(workspace: str | None = None) -> Path:
+    """Return the workspace root used as runtime root."""
+    return get_workspace_path(workspace)
+
+
+def get_data_dir(workspace: str | None = None) -> Path:
+    """Return the workspace root used as runtime root."""
+    return get_workspace_path(workspace)
 
 
 def timestamp() -> str:
@@ -31,46 +53,42 @@ def timestamp() -> str:
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
 
+
 def safe_filename(name: str) -> str:
     """Replace unsafe path characters with underscores."""
     return _UNSAFE_CHARS.sub("_", name).strip()
 
 
 def split_message(content: str, max_len: int = 2000) -> list[str]:
-    """
-    Split content into chunks within max_len, preferring line breaks.
-
-    Args:
-        content: The text content to split.
-        max_len: Maximum length per chunk (default 2000 for Discord compatibility).
-
-    Returns:
-        List of message chunks, each within max_len.
-    """
+    """Split content into chunks within max_len, preferring line breaks."""
     if not content:
         return []
     if len(content) <= max_len:
         return [content]
+
     chunks: list[str] = []
-    while content:
-        if len(content) <= max_len:
-            chunks.append(content)
+    remaining = content
+    while remaining:
+        if len(remaining) <= max_len:
+            chunks.append(remaining)
             break
-        cut = content[:max_len]
-        # Try to break at newline first, then space, then hard break
-        pos = cut.rfind('\n')
+
+        cut = remaining[:max_len]
+        pos = cut.rfind("\n")
         if pos <= 0:
-            pos = cut.rfind(' ')
+            pos = cut.rfind(" ")
         if pos <= 0:
             pos = max_len
-        chunks.append(content[:pos])
-        content = content[pos:].lstrip()
+        chunks.append(remaining[:pos])
+        remaining = remaining[pos:].lstrip()
+
     return chunks
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
     """Sync bundled templates to workspace. Only creates missing files."""
     from importlib.resources import files as pkg_files
+
     try:
         tpl = pkg_files("nanobot") / "templates"
     except Exception:
@@ -96,6 +114,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
 
     if added and not silent:
         from rich.console import Console
+
         for name in added:
             Console().print(f"  [dim]Created {name}[/dim]")
     return added

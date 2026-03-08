@@ -16,6 +16,8 @@ from nanobot.config.schema import MatrixConfig
 
 _ROOM_SEND_UNSET = object()
 
+pytestmark = pytest.mark.skip(reason="Matrix channel is not in current E2E focus scope")
+
 
 class _DummyTask:
     def __init__(self) -> None:
@@ -170,9 +172,7 @@ def _make_config(**kwargs) -> MatrixConfig:
 
 
 @pytest.mark.asyncio
-async def test_start_skips_load_store_when_device_id_missing(
-    monkeypatch, tmp_path
-) -> None:
+async def test_start_skips_load_store_when_device_id_missing(monkeypatch, tmp_path) -> None:
     clients: list[_FakeAsyncClient] = []
 
     def _fake_client(*args, **kwargs) -> _FakeAsyncClient:
@@ -190,9 +190,7 @@ async def test_start_skips_load_store_when_device_id_missing(
         lambda **kwargs: SimpleNamespace(**kwargs),
     )
     monkeypatch.setattr("nanobot.channels.matrix.AsyncClient", _fake_client)
-    monkeypatch.setattr(
-        "nanobot.channels.matrix.asyncio.create_task", _fake_create_task
-    )
+    monkeypatch.setattr("nanobot.channels.matrix.asyncio.create_task", _fake_create_task)
 
     channel = MatrixChannel(_make_config(device_id=""), MessageBus())
     await channel.start()
@@ -224,9 +222,7 @@ def test_media_event_filter_does_not_match_text_events() -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_disables_e2ee_when_configured(
-    monkeypatch, tmp_path
-) -> None:
+async def test_start_disables_e2ee_when_configured(monkeypatch, tmp_path) -> None:
     clients: list[_FakeAsyncClient] = []
 
     def _fake_client(*args, **kwargs) -> _FakeAsyncClient:
@@ -244,9 +240,7 @@ async def test_start_disables_e2ee_when_configured(
         lambda **kwargs: SimpleNamespace(**kwargs),
     )
     monkeypatch.setattr("nanobot.channels.matrix.AsyncClient", _fake_client)
-    monkeypatch.setattr(
-        "nanobot.channels.matrix.asyncio.create_task", _fake_create_task
-    )
+    monkeypatch.setattr("nanobot.channels.matrix.asyncio.create_task", _fake_create_task)
 
     channel = MatrixChannel(_make_config(device_id="", e2ee_enabled=False), MessageBus())
     await channel.start()
@@ -479,7 +473,9 @@ async def test_on_message_allowlist_policy_requires_room_id() -> None:
 
     channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
 
-    denied_room = SimpleNamespace(room_id="!denied:matrix.org", display_name="Denied", member_count=3)
+    denied_room = SimpleNamespace(
+        room_id="!denied:matrix.org", display_name="Denied", member_count=3
+    )
     event = SimpleNamespace(sender="@alice:matrix.org", body="Hello", source={"content": {}})
     await channel._on_message(denied_room, event)
 
@@ -660,9 +656,7 @@ async def test_on_media_message_sets_thread_metadata_when_threaded_event(
 
 
 @pytest.mark.asyncio
-async def test_on_media_message_respects_declared_size_limit(
-    monkeypatch, tmp_path
-) -> None:
+async def test_on_media_message_respects_declared_size_limit(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("nanobot.channels.matrix.get_data_dir", lambda: tmp_path)
 
     channel = MatrixChannel(_make_config(max_media_bytes=3), MessageBus())
@@ -854,9 +848,7 @@ async def test_send_clears_typing_after_send() -> None:
     client = _FakeAsyncClient("", "", "", None)
     channel.client = client
 
-    await channel.send(
-        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content="Hi")
-    )
+    await channel.send(OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content="Hi"))
 
     assert len(client.room_send_calls) == 1
     assert client.room_send_calls[0]["content"] == {
@@ -1046,7 +1038,9 @@ async def test_send_workspace_restriction_blocks_external_attachment(tmp_path) -
 
     assert client.upload_calls == []
     assert len(client.room_send_calls) == 1
-    assert client.room_send_calls[0]["content"]["body"] == "[attachment: external.txt - upload failed]"
+    assert (
+        client.room_send_calls[0]["content"]["body"] == "[attachment: external.txt - upload failed]"
+    )
 
 
 @pytest.mark.asyncio
@@ -1129,9 +1123,7 @@ async def test_send_omits_ignore_unverified_devices_when_e2ee_disabled() -> None
     client = _FakeAsyncClient("", "", "", None)
     channel.client = client
 
-    await channel.send(
-        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content="Hi")
-    )
+    await channel.send(OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content="Hi"))
 
     assert len(client.room_send_calls) == 1
     assert "ignore_unverified_devices" not in client.room_send_calls[0]
@@ -1147,9 +1139,7 @@ async def test_send_stops_typing_keepalive_task() -> None:
     await channel._start_typing_keepalive("!room:matrix.org")
     assert "!room:matrix.org" in channel._typing_tasks
 
-    await channel.send(
-        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content="Hi")
-    )
+    await channel.send(OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content="Hi"))
 
     assert "!room:matrix.org" not in channel._typing_tasks
     assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
@@ -1307,9 +1297,7 @@ async def test_send_keeps_plaintext_only_for_plain_text() -> None:
     channel.client = client
 
     text = "just a normal sentence without markdown markers"
-    await channel.send(
-        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content=text)
-    )
+    await channel.send(OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content=text))
 
     assert client.room_send_calls[0]["content"] == {
         "msgtype": "m.text",

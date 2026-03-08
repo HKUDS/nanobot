@@ -59,14 +59,32 @@ class BaseChannel(ABC):
         pass
 
     def is_allowed(self, sender_id: str) -> bool:
-        """Check if *sender_id* is permitted.  Empty list → deny all; ``"*"`` → allow all."""
+        """
+        Check if a sender is allowed to use this bot.
+
+        Args:
+            sender_id: The sender's identifier.
+
+        Returns:
+            True if allowed, False otherwise.
+        """
         allow_list = getattr(self.config, "allow_from", [])
+
         if not allow_list:
             logger.warning("{}: allow_from is empty — all access denied", self.name)
             return False
+
         if "*" in allow_list:
             return True
-        return str(sender_id) in allow_list
+
+        sender_str = str(sender_id)
+        if sender_str in allow_list:
+            return True
+        if "|" in sender_str:
+            for part in sender_str.split("|"):
+                if part and part in allow_list:
+                    return True
+        return False
 
     async def _handle_message(
         self,
@@ -94,7 +112,8 @@ class BaseChannel(ABC):
             logger.warning(
                 "Access denied for sender {} on channel {}. "
                 "Add them to allowFrom list in config to grant access.",
-                sender_id, self.name,
+                sender_id,
+                self.name,
             )
             return
 
@@ -106,6 +125,21 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=metadata or {},
             session_key_override=session_key,
+        )
+
+        content_preview = msg.content
+        if len(content_preview) > 240:
+            content_preview = f"{content_preview[:240]}..."
+        logger.debug(
+            "Inbound normalized [{}] sender={} chat={} session_key={} chars={} media_count={} metadata_keys={} content='{}'",
+            self.name,
+            msg.sender_id,
+            msg.chat_id,
+            msg.session_key,
+            len(msg.content),
+            len(msg.media),
+            sorted(msg.metadata.keys()),
+            content_preview,
         )
 
         await self.bus.publish_inbound(msg)

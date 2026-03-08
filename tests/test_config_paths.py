@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from nanobot.config.schema import Config
 from nanobot.config.paths import (
     get_bridge_install_dir,
     get_cli_history_path,
@@ -13,22 +14,26 @@ from nanobot.config.paths import (
 )
 
 
-def test_runtime_dirs_follow_config_path(monkeypatch, tmp_path: Path) -> None:
-    config_file = tmp_path / "instance-a" / "config.json"
-    monkeypatch.setattr("nanobot.config.paths.get_config_path", lambda: config_file)
+def test_runtime_dirs_follow_workspace_root(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path / "instance-a" / "workspace"
+    cfg = Config()
+    cfg.agents.defaults.workspace = str(workspace)
+    monkeypatch.setattr("nanobot.config.paths.load_config", lambda: cfg)
 
-    assert get_data_dir() == config_file.parent
-    assert get_runtime_subdir("cron") == config_file.parent / "cron"
-    assert get_cron_dir() == config_file.parent / "cron"
-    assert get_logs_dir() == config_file.parent / "logs"
+    assert get_data_dir() == workspace
+    assert get_runtime_subdir("cron") == workspace / "cron"
+    assert get_cron_dir() == workspace / "cron"
+    assert get_logs_dir() == workspace / "logs"
 
 
 def test_media_dir_supports_channel_namespace(monkeypatch, tmp_path: Path) -> None:
-    config_file = tmp_path / "instance-b" / "config.json"
-    monkeypatch.setattr("nanobot.config.paths.get_config_path", lambda: config_file)
+    workspace = tmp_path / "instance-b" / "workspace"
+    cfg = Config()
+    cfg.agents.defaults.workspace = str(workspace)
+    monkeypatch.setattr("nanobot.config.paths.load_config", lambda: cfg)
 
-    assert get_media_dir() == config_file.parent / "media"
-    assert get_media_dir("telegram") == config_file.parent / "media" / "telegram"
+    assert get_media_dir() == workspace / "media"
+    assert get_media_dir("telegram") == workspace / "media" / "telegram"
 
 
 def test_shared_and_legacy_paths_remain_global() -> None:
@@ -38,5 +43,6 @@ def test_shared_and_legacy_paths_remain_global() -> None:
 
 
 def test_workspace_path_is_explicitly_resolved() -> None:
-    assert get_workspace_path() == Path.home() / ".nanobot" / "workspace"
+    cfg = Config()
+    assert get_workspace_path(str(cfg.workspace_path)) == cfg.workspace_path
     assert get_workspace_path("~/custom-workspace") == Path.home() / "custom-workspace"

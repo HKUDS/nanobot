@@ -3,9 +3,9 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Base(BaseModel):
@@ -66,28 +66,6 @@ class DiscordConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
-    group_policy: Literal["mention", "open"] = "mention"
-
-
-class MatrixConfig(Base):
-    """Matrix (Element) channel configuration."""
-
-    enabled: bool = False
-    homeserver: str = "https://matrix.org"
-    access_token: str = ""
-    user_id: str = ""  # @bot:matrix.org
-    device_id: str = ""
-    e2ee_enabled: bool = True  # Enable Matrix E2EE support (encryption + encrypted room handling).
-    sync_stop_grace_seconds: int = (
-        2  # Max seconds to wait for sync_forever to stop gracefully before cancellation fallback.
-    )
-    max_media_bytes: int = (
-        20 * 1024 * 1024
-    )  # Max attachment size accepted for Matrix media handling (inbound + outbound).
-    allow_from: list[str] = Field(default_factory=list)
-    group_policy: Literal["open", "mention", "allowlist"] = "open"
-    group_allow_from: list[str] = Field(default_factory=list)
-    allow_room_mentions: bool = False
 
 
 class EmailConfig(Base):
@@ -199,6 +177,21 @@ class QQConfig(Base):
     )  # Allowed user openids (empty = public access)
 
 
+class MatrixConfig(Base):
+    """Matrix (Element) channel configuration."""
+
+    enabled: bool = False
+    homeserver: str = "https://matrix.org"
+    access_token: str = ""
+    user_id: str = ""  # e.g. @bot:matrix.org
+    device_id: str = ""
+    e2ee_enabled: bool = True  # end-to-end encryption support
+    sync_stop_grace_seconds: int = 2  # graceful sync_forever shutdown timeout
+    max_media_bytes: int = 20 * 1024 * 1024  # inbound + outbound attachment limit
+    allow_from: list[str] = Field(default_factory=list)
+    group_policy: Literal["open", "mention", "allowlist"] = "open"
+    group_allow_from: list[str] = Field(default_factory=list)
+    allow_room_mentions: bool = False
 
 
 class ChannelsConfig(Base):
@@ -251,7 +244,7 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
-    azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
+    azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -264,8 +257,12 @@ class ProvidersConfig(Base):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
-    siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
-    volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
+    siliconflow: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # SiliconFlow (硅基流动) API gateway
+    volcengine: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # VolcEngine (火山引擎) API gateway
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
 
@@ -295,9 +292,7 @@ class WebSearchConfig(Base):
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
-    proxy: str | None = (
-        None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
-    )
+    proxy: str | None = None
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
@@ -311,13 +306,13 @@ class ExecToolConfig(Base):
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
-    type: Literal["stdio", "sse", "streamableHttp"] | None = None  # auto-detected if omitted
+    type: Literal["stdio", "sse", "streamableHttp"] | None = None
     command: str = ""  # Stdio: command to run (e.g. "npx")
     args: list[str] = Field(default_factory=list)  # Stdio: command arguments
     env: dict[str, str] = Field(default_factory=dict)  # Stdio: extra env vars
-    url: str = ""  # HTTP/SSE: endpoint URL
-    headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
-    tool_timeout: int = 30  # seconds before a tool call is cancelled
+    url: str = ""  # HTTP: streamable HTTP endpoint URL
+    headers: dict[str, str] = Field(default_factory=dict)  # HTTP: Custom HTTP Headers
+    tool_timeout: int = 30  # Seconds before a tool call is cancelled
 
 
 class ToolsConfig(Base):
@@ -329,14 +324,46 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class PathsConfig(Base):
+    """Instance-level filesystem paths."""
+
+    root: str = "~/.nanobot"
+
+
+class ACPBackendConfig(Base):
+    """ACP backend process settings."""
+
+    command: str = "opencode"
+    args: list[str] = Field(default_factory=lambda: ["acp", "--print-logs", "--log-level", "WARN"])
+    cwd: str | None = None
+    env: dict[str, str] = Field(default_factory=dict)
+    protocol_version: int = 1
+    permissions_policy: Literal["strict", "trusted", "yolo"] = "strict"
+    startup_timeout_seconds: int = 20
+
+
+class DispatchConfig(Base):
+    """Runtime dispatch backend settings."""
+
+    backend: Literal["native", "acp"] = "native"
+    acp: ACPBackendConfig = Field(default_factory=ACPBackendConfig)
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
+    paths: PathsConfig = Field(default_factory=PathsConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    dispatch: DispatchConfig = Field(default_factory=DispatchConfig)
+
+    @property
+    def root_path(self) -> Path:
+        """Workspace is the single runtime root."""
+        return self.workspace_path
 
     @property
     def workspace_path(self) -> Path:
@@ -418,4 +445,4 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+    model_config = SettingsConfigDict()
