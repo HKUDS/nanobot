@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import weakref
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -107,7 +106,9 @@ class AgentLoop:
         self._mcp_connecting = False
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
-        self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+        # Use a plain dict so GC cannot reclaim a Lock while it is still logically
+        # "owned" by a session.  Entries are removed in _release_consolidation_lock().
+        self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
         self._register_default_tools()
@@ -364,23 +365,28 @@ class AgentLoop:
         if cmd == "/new":
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
             self._consolidating.add(session.key)
+            archival_note = ""
             try:
                 async with lock:
                     snapshot = session.messages[session.last_consolidated:]
                     if snapshot:
                         temp = Session(key=session.key)
                         temp.messages = list(snapshot)
-                        if not await self._consolidate_memory(temp, archive_all=True):
-                            return OutboundMessage(
-                                channel=msg.channel, chat_id=msg.chat_id,
-                                content="Memory archival failed, session not cleared. Please try again.",
-                            )
+                        ok = await self._consolidate_memory(temp, archive_all=True)
+                        if ok:
+                            # Persist the updated pointer so a restart won't re-consolidate.
+                            session.last_consolidated = len(session.messages)
+                            self.sessions.save(session)
+                        else:
+                            # LLM failed: write raw messages to HISTORY.md as fallback so
+                            # the conversation is not silently lost, then proceed to clear.
+                            logger.warning("/new LLM archival failed for {}, writing raw fallback", session.key)
+                            self._write_raw_history_fallback(session, snapshot)
+                            archival_note = " (archival used fallback — LLM unavailable)"
             except Exception:
                 logger.exception("/new archival failed for {}", session.key)
-                return OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content="Memory archival failed, session not cleared. Please try again.",
-                )
+                # Still fall through to clear the session; a stuck /new is worse than lost history.
+                archival_note = " (archival error — session cleared anyway)"
             finally:
                 self._consolidating.discard(session.key)
 
@@ -388,7 +394,7 @@ class AgentLoop:
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started.")
+                                  content=f"New session started.{archival_note}")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
@@ -401,7 +407,11 @@ class AgentLoop:
             async def _consolidate_and_unlock():
                 try:
                     async with lock:
-                        await self._consolidate_memory(session)
+                        ok = await self._consolidate_memory(session)
+                        if ok:
+                            # Persist the updated last_consolidated pointer so a
+                            # process restart does not re-consolidate the same messages.
+                            self.sessions.save(session)
                 finally:
                     self._consolidating.discard(session.key)
                     _task = asyncio.current_task()
@@ -493,6 +503,22 @@ class AgentLoop:
             session, self.provider, self.model,
             archive_all=archive_all, memory_window=self.memory_window,
         )
+
+    def _write_raw_history_fallback(self, session, messages: list) -> None:
+        """Write raw messages to HISTORY.md when LLM consolidation fails.
+
+        This ensures conversation content is never silently lost even when the
+        LLM is unavailable during /new archival.
+        """
+        from datetime import datetime as _dt
+        store = MemoryStore(self.workspace)
+        lines = [f"[{_dt.now().strftime('%Y-%m-%d %H:%M')}] /new fallback dump (LLM unavailable):"]
+        for m in messages:
+            if not m.get("content"):
+                continue
+            ts = m.get("timestamp", "?")[:16]
+            lines.append(f"  [{ts}] {m['role'].upper()}: {str(m['content'])[:200]}")
+        store.append_history("\n".join(lines))
 
     async def process_direct(
         self,
