@@ -16,16 +16,20 @@ from nanobot.config.schema import QQConfig
 
 try:
     import botpy
-    from botpy import Client
-    from botpy.http import Route
-    from botpy.message import C2CMessage
-    from botpy.types.message import Media
 
     QQ_AVAILABLE = True
 except ImportError:
     QQ_AVAILABLE = False
-    botpy = None
+    # botpy = None
     # C2CMessage = None
+    # GroupMessage = None
+    # Media = None
+
+if TYPE_CHECKING:
+    from botpy.message import C2CMessage, GroupMessage
+    from botpy.types.message import Media
+    from botpy import Client
+    from botpy.http import Route
 
 
 # QQ C2C 富媒体文件类型
@@ -48,13 +52,6 @@ def _get_file_type(file_path: str) -> int:
     ):
         return QQ_FILE_TYPE_IMAGE
 
-    # if ext in (".mp3", ".wav", ".ogg", ".m4a", ".aac") or (mime and mime.startswith("audio/")):
-    #     return QQ_FILE_TYPE_VOICE
-
-    # # 视频类型
-    # if ext in (".mp4", ".avi", ".mov", ".mkv", ".flv") or (mime and mime.startswith("video/")):
-    #     return QQ_FILE_TYPE_VIDEO
-
     # 默认文件类型
     return QQ_FILE_TYPE_FILE
 
@@ -72,10 +69,13 @@ def _make_bot_class(channel: "QQChannel") -> "type[Client]":
             logger.info("QQ bot ready: {}", self.robot.name)
 
         async def on_c2c_message_create(self, message: "C2CMessage"):
-            await channel._on_message(message)
+            await channel._on_message(message, is_group=False)
+
+        async def on_group_at_message_create(self, message: "GroupMessage"):
+            await channel._on_message(message, is_group=True)
 
         async def on_direct_message_create(self, message):
-            await channel._on_message(message)
+            await channel._on_message(message, is_group=False)
 
     return _Bot
 
@@ -91,6 +91,7 @@ class QQChannel(BaseChannel):
         self._client: "Client | None" = None
         self._processed_ids: deque = deque(maxlen=1000)
         self._msg_seq: int = 1  # 消息序列号，避免被 QQ API 去重
+        self._chat_type_cache: dict[str, str] = {}
 
     async def start(self) -> None:
         """Start the QQ bot."""
@@ -105,8 +106,7 @@ class QQChannel(BaseChannel):
         self._running = True
         BotClass = _make_bot_class(self)
         self._client = BotClass()
-
-        logger.info("QQ bot started (C2C private message)")
+        logger.info("QQ bot started (C2C & Group supported)")
         await self._run_bot()
 
     async def _run_bot(self) -> None:
@@ -137,31 +137,44 @@ class QQChannel(BaseChannel):
             return
 
         msg_id = msg.metadata.get("message_id")
-        self._msg_seq += 1  # 递增序列号避免去重
+        self._msg_seq += 1
+        msg_type = self._chat_type_cache.get(msg.chat_id, "c2c")
 
         # 发送富媒体文件
+        is_group = msg_type == "group"
         for media_path in msg.media or []:
-            await self._send_media(msg.chat_id, media_path, msg_id)
+            await self._send_media(msg.chat_id, media_path, msg_id, is_group=is_group)
 
         # 发送文本内容
         if msg.content and msg.content != "[empty message]":
             try:
-                await self._client.api.post_c2c_message(
-                    openid=msg.chat_id,
-                    msg_type=0,
-                    content=msg.content,
-                    msg_id=msg_id,
-                    msg_seq=self._msg_seq,
-                )
+                if msg_type == "group":
+                    await self._client.api.post_group_message(
+                        group_openid=msg.chat_id,
+                        msg_type=0,
+                        content=msg.content,
+                        msg_id=msg_id,
+                        msg_seq=self._msg_seq,
+                    )
+                else:
+                    await self._client.api.post_c2c_message(
+                        openid=msg.chat_id,
+                        msg_type=0,
+                        content=msg.content,
+                        msg_id=msg_id,
+                        msg_seq=self._msg_seq,
+                    )
             except Exception as e:
                 logger.error("Error sending QQ message: {}", e)
 
-    async def _send_media(self, chat_id: str, file_path: str, msg_id: str | None = None) -> bool:
-        """发送富媒体文件到QQ C2C.
+    async def _send_media(
+        self, chat_id: str, file_path: str, msg_id: str | None = None, is_group: bool = False
+    ) -> bool:
+        """发送富媒体文件到QQ (C2C或群聊).
 
         流程:
-        1. 调用 post_c2c_file 上传文件获取 Media 对象
-        2. 调用 post_c2c_message 发送富媒体消息 (msg_type=7)
+        1. 上传文件获取 Media 对象
+        2. 发送富媒体消息 (msg_type=7)
         """
         path = Path(file_path)
         if not path.is_file():
@@ -169,40 +182,50 @@ class QQChannel(BaseChannel):
             return False
 
         base64_encoded_data = base64.b64encode(path.read_bytes()).decode("utf-8")
-
         file_type = _get_file_type(file_path)
+        chat_type = "group" if is_group else "c2c"
 
         try:
             self._msg_seq += 1
 
             # 1. 上传文件获取 Media 对象
-            upload_result = await self.post_c2c_base64file(
-                openid=chat_id,
+            upload_result = await self._post_base64file(
+                chat_id=chat_id,
+                is_group=is_group,
                 file_type=file_type,
                 file_data=base64_encoded_data,
             )
 
             if not upload_result:
-                logger.error("QQ media upload failed: no response")
+                logger.error("QQ {} media upload failed: no response", chat_type)
                 return False
 
             # 2. 发送富媒体消息
-            await self._client.api.post_c2c_message(
-                openid=chat_id,
-                msg_type=7,  # 7 表示富媒体类型
-                msg_id=msg_id,
-                msg_seq=self._msg_seq,
-                media=upload_result,
-            )
+            if is_group:
+                await self._client.api.post_group_message(
+                    group_openid=chat_id,
+                    msg_type=7,
+                    msg_id=msg_id,
+                    msg_seq=self._msg_seq,
+                    media=upload_result,
+                )
+            else:
+                await self._client.api.post_c2c_message(
+                    openid=chat_id,
+                    msg_type=7,
+                    msg_id=msg_id,
+                    msg_seq=self._msg_seq,
+                    media=upload_result,
+                )
 
-            logger.debug("QQ media sent: {}", path.name)
+            logger.debug("QQ {} media sent: {}", chat_type, path.name)
             return True
 
         except Exception as e:
-            logger.error("Error sending QQ media {}: {}", path.name, e)
+            logger.error("Error sending QQ {} media {}: {}", chat_type, path.name, e)
             return False
 
-    async def _on_message(self, data: "C2CMessage") -> None:
+    async def _on_message(self, data: "C2CMessage | GroupMessage", is_group: bool = False) -> None:
         """Handle incoming message from QQ."""
         try:
             # Dedup by message ID
@@ -210,15 +233,22 @@ class QQChannel(BaseChannel):
                 return
             self._processed_ids.append(data.id)
 
-            author = data.author
-            user_id = str(getattr(author, "id", None) or getattr(author, "user_openid", "unknown"))
             content = (data.content or "").strip()
             if not content:
                 return
 
+            if is_group:
+                chat_id = data.group_openid
+                user_id = data.author.member_openid
+                self._chat_type_cache[chat_id] = "group"
+            else:
+                chat_id = str(getattr(data.author, 'id', None) or getattr(data.author, 'user_openid', 'unknown'))
+                user_id = chat_id
+                self._chat_type_cache[chat_id] = "c2c"
+
             await self._handle_message(
                 sender_id=user_id,
-                chat_id=user_id,
+                chat_id=chat_id,
                 content=content,
                 metadata={"message_id": data.id},
             )
@@ -227,23 +257,35 @@ class QQChannel(BaseChannel):
 
     # https://github.com/tencent-connect/botpy/issues/198
     # https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/send-receive/rich-media.html
-    async def post_c2c_base64file(
+    async def _post_base64file(
         self,
-        openid: str,
+        chat_id: str,
+        is_group: bool,
         file_type: int,
         file_data: str,
         srv_send_msg: bool = False,
-    ) -> Media:
-        """
-        上传/发送c2c图片
+    ) -> "Media":
+        """上传/发送 base64 编码的媒体文件.
 
         Args:
-          openid (str): 您要将消息发送到的用户的 ID
-          file_type (int): 媒体类型：1 图片png/jpg，2 视频mp4，3 语音silk，4 文件（暂不开放）
-          file_data (str): base64 编码的媒体数据
-          srv_send_msg (bool): 设置 true 会直接发送消息到目标端，且会占用主动消息频次
+          chat_id: 用户或群的 openid
+          is_group: 是否为群聊
+          file_type: 媒体类型：1 图片png/jpg，2 视频mp4，3 语音silk，4 文件（暂不开放）
+          file_data: base64 编码的媒体数据
+          srv_send_msg: 设置 true 会直接发送消息到目标端，且会占用主动消息频次
         """
-        payload = locals()
-        payload.pop("self", None)
-        route = Route("POST", "/v2/users/{openid}/files", openid=openid)
+        if is_group:
+            endpoint = "/v2/groups/{group_openid}/files"
+            id_key = "group_openid"
+        else:
+            endpoint = "/v2/users/{openid}/files"
+            id_key = "openid"
+
+        payload = {
+            id_key: chat_id,
+            "file_type": file_type,
+            "file_data": file_data,
+            "srv_send_msg": srv_send_msg,
+        }
+        route = Route("POST", endpoint, **{id_key: chat_id})
         return await self._client.api._http.request(route, json=payload)

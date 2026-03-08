@@ -74,7 +74,8 @@ class ChannelManager:
             try:
                 from nanobot.channels.feishu import FeishuChannel
                 self.channels["feishu"] = FeishuChannel(
-                    self.config.channels.feishu, self.bus
+                    self.config.channels.feishu, self.bus,
+                    groq_api_key=self.config.providers.groq.api_key,
                 )
                 logger.info("Feishu channel enabled")
             except ImportError as e:
