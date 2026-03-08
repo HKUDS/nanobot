@@ -31,6 +31,7 @@ class SubagentManager:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        allowed_directories: list[Path] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.provider = provider
@@ -42,6 +43,7 @@ class SubagentManager:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.allowed_directories = allowed_directories or []
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
     
@@ -90,11 +92,14 @@ class SubagentManager:
         try:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
-            allowed_dir = self.workspace if self.restrict_to_workspace else None
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            if self.restrict_to_workspace:
+                allowed_dirs = [self.workspace] + self.allowed_directories
+            else:
+                allowed_dirs = None
+            tools.register(ReadFileTool(workspace=self.workspace, allowed_dirs=allowed_dirs))
+            tools.register(WriteFileTool(workspace=self.workspace, allowed_dirs=allowed_dirs))
+            tools.register(EditFileTool(workspace=self.workspace, allowed_dirs=allowed_dirs))
+            tools.register(ListDirTool(workspace=self.workspace, allowed_dirs=allowed_dirs))
             tools.register(ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,

@@ -316,6 +316,7 @@ class ToolsConfig(Base):
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
+    allowed_directories: list[str] = Field(default_factory=list)  # Extra directories accessible when restrictToWorkspace is true
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
