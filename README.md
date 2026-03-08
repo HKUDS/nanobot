@@ -724,7 +724,10 @@ nanobot provider login openai-codex
 nanobot agent -m "Hello!"
 
 # Target a specific workspace/config locally
-nanobot agent -w ~/.nanobot/botA -c ~/.nanobot/botA/config.json -m "Hello!"
+nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello!"
+
+# One-off workspace override on top of that config
+nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -m "Hello!"
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
@@ -930,11 +933,15 @@ When using `--config`, nanobot derives its runtime data directory from the confi
 To open a CLI session against one of these instances locally:
 
 ```bash
-nanobot agent -w ~/.nanobot/botA -m "Hello from botA"
-nanobot agent -w ~/.nanobot/botC -c ~/.nanobot/botC/config.json
+nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello from Telegram instance"
+nanobot agent -c ~/.nanobot-discord/config.json -m "Hello from Discord instance"
+
+# Optional one-off workspace override
+nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
 ```
 
 > `nanobot agent` starts a local CLI agent using the selected workspace/config. It does not attach to or proxy through an already running `nanobot gateway` process.
+
 | Component | Resolved From | Example |
 |-----------|---------------|---------|
 | **Config** | `--config` path | `~/.nanobot-A/config.json` |
