@@ -24,18 +24,6 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
-def get_data_path() -> Path:
-    """Get nanobot data directory (derived from config path)."""
-    from nanobot.config.loader import get_data_dir
-    return ensure_dir(get_data_dir())
-
-
-def get_workspace_path(workspace: str | None = None) -> Path:
-    """Resolve and ensure workspace path. Defaults to ~/.nanobot/workspace."""
-    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
-    return ensure_dir(path)
-
-
 def timestamp() -> str:
     """Current ISO timestamp."""
     return datetime.now().isoformat()

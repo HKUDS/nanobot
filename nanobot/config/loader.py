@@ -23,14 +23,6 @@ def get_config_path() -> Path:
     return Path.home() / ".nanobot" / "config.json"
 
 
-def get_data_dir() -> Path:
-    """Get the nanobot data directory (derived from config path)."""
-    config_path = get_config_path()
-    # If config is ~/.nanobot-xxx/config.json, data dir is ~/.nanobot-xxx/
-    # If config is ~/.nanobot/config.json, data dir is ~/.nanobot/
-    return config_path.parent
-
-
 def load_config(config_path: Path | None = None) -> Config:
     """
     Load configuration from file or create default.
