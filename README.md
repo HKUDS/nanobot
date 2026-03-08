@@ -936,6 +936,14 @@ To open a CLI session against one of these instances locally:
 nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello from Telegram instance"
 nanobot agent -c ~/.nanobot-discord/config.json -m "Hello from Discord instance"
 
+# Inspect a specific instance from the CLI
+nanobot status --config ~/.nanobot-telegram/config.json
+nanobot status --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobot-telegram-test
+
+# Check or link channel state for a specific instance
+nanobot channels status --config ~/.nanobot-telegram/config.json
+nanobot channels login --config ~/.nanobot-whatsapp/config.json
+
 # Optional one-off workspace override
 nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
 ```
@@ -1009,6 +1017,7 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 - Use a different workspace per instance if you want isolated memory, sessions, and skills
 - `--workspace` overrides the workspace defined in the config file
 - Cron jobs and runtime media/state are derived from the config directory
+- `nanobot channels login --config ...` stores WhatsApp auth under the selected instance runtime directory
 
 ## 💻 CLI Reference
 
@@ -1023,9 +1032,13 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot agent --logs` | Show runtime logs during chat |
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
+| `nanobot status --config <config>` | Show status for a specific instance |
+| `nanobot status --config <config> --workspace <workspace>` | Show status with a one-off workspace override |
 | `nanobot provider login openai-codex` | OAuth login for providers |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
+| `nanobot channels login --config <config>` | Link WhatsApp for a specific instance |
 | `nanobot channels status` | Show channel status |
+| `nanobot channels status --config <config>` | Show channel status for a specific instance |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
