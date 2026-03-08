@@ -188,6 +188,66 @@ function appendBotSkeleton() {
   return { wrapper, bubble };
 }
 
+/* ── Message actions (⋮ dropdown) ─────────────────────────────────────── */
+
+function addMessageActions(el, index) {
+  const btn = document.createElement('button');
+  btn.className = 'msg-actions-btn';
+  btn.setAttribute('aria-label', 'Message options');
+  btn.textContent = '⋮';
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'msg-dropdown hidden';
+
+  const pinItem = document.createElement('button');
+  pinItem.className = 'msg-dropdown-item';
+
+  const deleteItem = document.createElement('button');
+  deleteItem.className = 'msg-dropdown-item danger';
+  deleteItem.innerHTML = '<span>🗑</span> Delete';
+
+  dropdown.appendChild(pinItem);
+  dropdown.appendChild(deleteItem);
+  el.appendChild(btn);
+  el.appendChild(dropdown);
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.msg-dropdown:not(.hidden)').forEach(d => {
+      if (d !== dropdown) d.classList.add('hidden');
+    });
+    const opening = dropdown.classList.contains('hidden');
+    dropdown.classList.toggle('hidden');
+    if (opening) {
+      const h = getHistory(sessionId);
+      pinItem.innerHTML = h[index]?.pinned
+        ? '<span>📌</span> Unpin'
+        : '<span>📌</span> Pin';
+    }
+  });
+
+  pinItem.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const h = getHistory(sessionId);
+    if (h[index]) {
+      h[index].pinned = !h[index].pinned;
+      saveHistory(sessionId, h);
+      el.classList.toggle('pinned', !!h[index].pinned);
+    }
+    dropdown.classList.add('hidden');
+  });
+
+  deleteItem.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (isStreaming) return;
+    const h = getHistory(sessionId);
+    h.splice(index, 1);
+    saveHistory(sessionId, h);
+    dropdown.classList.add('hidden');
+    replayHistory(sessionId);
+  });
+}
+
 /* ── Hint chips ───────────────────────────────────────────────────────── */
 
 function setupHintChip(chip, toolName, fullText) {
@@ -239,11 +299,14 @@ function replayHistory(id) {
     return;
   }
 
-  for (const msg of history) {
+  for (let i = 0; i < history.length; i++) {
+    const msg = history[i];
     if (msg.role === 'user') {
-      appendUserMessage(msg.content);
+      const div = appendUserMessage(msg.content);
+      if (msg.pinned) div.classList.add('pinned');
+      addMessageActions(div, i);
     } else {
-      const { bubble } = appendBotSkeleton();
+      const { wrapper, bubble } = appendBotSkeleton();
       if (msg.hints && msg.hints.length > 0) {
         const hintsEl = document.createElement('div');
         hintsEl.className = 'hints';
@@ -258,6 +321,8 @@ function replayHistory(id) {
       rendered.className = 'rendered-content';
       rendered.innerHTML = marked.parse(msg.content);
       bubble.appendChild(rendered);
+      if (msg.pinned) wrapper.classList.add('pinned');
+      addMessageActions(wrapper, i);
     }
   }
   scrollToBottom();
@@ -289,8 +354,19 @@ function parseSSEChunk(buffer) {
 async function sendMessage(text) {
   if (!text.trim() || isStreaming) return;
 
+  // Persist user turn first so we know the index before rendering
+  const history = getHistory(sessionId);
+  if (history.length === 0) {
+    renameSession(sessionId, text.length > 35 ? text.slice(0, 32) + '…' : text);
+    renderSidebar();
+  }
+  history.push({ role: 'user', content: text });
+  saveHistory(sessionId, history);
+  const userMsgIdx = history.length - 1;
+
   setStreaming(true);
-  appendUserMessage(text);
+  const userDiv = appendUserMessage(text);
+  addMessageActions(userDiv, userMsgIdx);
   const { wrapper, bubble } = appendBotSkeleton();
 
   // Active streaming section — always appended at end of bubble
@@ -322,17 +398,6 @@ async function sendMessage(text) {
     currentStreamEl.className = 'streaming-content';
     bubble.appendChild(currentStreamEl);
   }
-
-  // Name the session after the first message
-  const history = getHistory(sessionId);
-  if (history.length === 0) {
-    renameSession(sessionId, text.length > 35 ? text.slice(0, 32) + '…' : text);
-    renderSidebar();
-  }
-
-  // Persist user turn immediately
-  history.push({ role: 'user', content: text });
-  saveHistory(sessionId, history);
 
   try {
     abortController = new AbortController();
@@ -438,6 +503,7 @@ async function sendMessage(text) {
           const h = getHistory(sessionId);
           h.push({ role: 'bot', content: finalText, hints: collectedHints });
           saveHistory(sessionId, h);
+          addMessageActions(wrapper, h.length - 1);
           touchSession(sessionId);
           renderSidebar();
           return;
@@ -535,6 +601,10 @@ input.addEventListener('input', resizeInput);
 btnNew.addEventListener('click', newConversation);
 
 /* ── Init ─────────────────────────────────────────────────────────────── */
+
+document.addEventListener('click', () => {
+  document.querySelectorAll('.msg-dropdown:not(.hidden)').forEach(d => d.classList.add('hidden'));
+});
 
 renderSidebar();
 replayHistory(sessionId);

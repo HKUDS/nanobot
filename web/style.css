@@ -188,6 +188,74 @@ header {
   gap: 10px;
   margin-bottom: 20px;
   animation: fadein 0.15s ease;
+  position: relative;
+}
+
+/* ── Message actions (⋮ button + dropdown) ──────────────────────────────── */
+.msg-actions-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+  z-index: 10;
+  font-family: var(--font-sans);
+}
+.message:hover .msg-actions-btn,
+.msg-actions-btn:focus { opacity: 1; }
+.msg-actions-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+.msg-dropdown {
+  position: absolute;
+  top: 26px;
+  right: 2px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+  z-index: 200;
+  overflow: hidden;
+  min-width: 148px;
+}
+.msg-dropdown.hidden { display: none; }
+
+.msg-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 14px;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13.5px;
+  text-align: left;
+  font-family: var(--font-sans);
+  transition: background 0.1s;
+}
+.msg-dropdown-item:hover { background: var(--bg-hover); }
+.msg-dropdown-item.danger { color: #e05252; }
+.msg-dropdown-item.danger:hover { background: rgba(224,82,82,0.12); }
+
+/* Pinned message — left accent stripe */
+.message.pinned {
+  border-left: 3px solid var(--accent);
+  padding-left: 5px;
+  margin-left: -8px;
+  border-radius: 4px;
+}
+
+@media (max-width: 768px) {
+  .msg-actions-btn { opacity: 0.4; }
 }
 
 @keyframes fadein {
