@@ -380,8 +380,7 @@ class FeishuChannel(BaseChannel):
                         .build()
                     response = self._client.request(request)
                     if response.success():
-                        import json as _json
-                        data = _json.loads(response.raw.content.decode('utf-8'))
+                        data = json.loads(response.raw.content.decode('utf-8'))
                         return data.get("bot", {})
                     else:
                         logger.warning("Failed to fetch bot info: code={}, msg={}", response.code, response.msg)
@@ -427,8 +426,7 @@ class FeishuChannel(BaseChannel):
         # Fallback: check if @_all is in message content
         if hasattr(message, "content") and message.content:
             try:
-                import json as _json
-                content_json = _json.loads(message.content)
+                content_json = json.loads(message.content)
                 text = content_json.get("text", "")
                 if "@_all" in text:
                     logger.debug("_is_bot_mentioned: @_all found in content text, treating as mentioned")
