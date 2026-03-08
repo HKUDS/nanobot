@@ -26,17 +26,16 @@ def _make_session(message_count: int = 30, memory_window: int = 50):
     return session
 
 
-def _make_tool_response(history_entry, memory_update):
-    """Create an LLMResponse with a save_memory tool call."""
+def _make_tool_response(history_entry):
+    """Create an LLMResponse with a save_history tool call."""
     return LLMResponse(
         content=None,
         tool_calls=[
             ToolCallRequest(
                 id="call_1",
-                name="save_memory",
+                name="save_history",
                 arguments={
                     "history_entry": history_entry,
-                    "memory_update": memory_update,
                 },
             )
         ],
@@ -54,7 +53,6 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat = AsyncMock(
             return_value=_make_tool_response(
                 history_entry="[2026-01-01] User discussed testing.",
-                memory_update="# Memory\nUser likes testing.",
             )
         )
         session = _make_session(message_count=60)
@@ -64,7 +62,6 @@ class TestMemoryConsolidationTypeHandling:
         assert result is True
         assert store.history_file.exists()
         assert "[2026-01-01] User discussed testing." in store.history_file.read_text()
-        assert "User likes testing." in store.memory_file.read_text()
 
     @pytest.mark.asyncio
     async def test_dict_arguments_serialized_to_json(self, tmp_path: Path) -> None:
@@ -74,7 +71,6 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat = AsyncMock(
             return_value=_make_tool_response(
                 history_entry={"timestamp": "2026-01-01", "summary": "User discussed testing."},
-                memory_update={"facts": ["User likes testing"], "topics": ["testing"]},
             )
         )
         session = _make_session(message_count=60)
@@ -86,10 +82,6 @@ class TestMemoryConsolidationTypeHandling:
         history_content = store.history_file.read_text()
         parsed = json.loads(history_content.strip())
         assert parsed["summary"] == "User discussed testing."
-
-        memory_content = store.memory_file.read_text()
-        parsed_mem = json.loads(memory_content)
-        assert "User likes testing" in parsed_mem["facts"]
 
     @pytest.mark.asyncio
     async def test_string_arguments_as_raw_json(self, tmp_path: Path) -> None:
@@ -103,10 +95,9 @@ class TestMemoryConsolidationTypeHandling:
             tool_calls=[
                 ToolCallRequest(
                     id="call_1",
-                    name="save_memory",
+                    name="save_history",
                     arguments=json.dumps({
                         "history_entry": "[2026-01-01] User discussed testing.",
-                        "memory_update": "# Memory\nUser likes testing.",
                     }),
                 )
             ],
@@ -121,7 +112,7 @@ class TestMemoryConsolidationTypeHandling:
 
     @pytest.mark.asyncio
     async def test_no_tool_call_returns_false(self, tmp_path: Path) -> None:
-        """When LLM doesn't use the save_memory tool, return False."""
+        """When LLM doesn't use the save_history tool, return False."""
         store = MemoryStore(tmp_path)
         provider = AsyncMock()
         provider.chat = AsyncMock(
@@ -158,10 +149,9 @@ class TestMemoryConsolidationTypeHandling:
             tool_calls=[
                 ToolCallRequest(
                     id="call_1",
-                    name="save_memory",
+                    name="save_history",
                     arguments=[{
                         "history_entry": "[2026-01-01] User discussed testing.",
-                        "memory_update": "# Memory\nUser likes testing.",
                     }],
                 )
             ],
@@ -173,7 +163,6 @@ class TestMemoryConsolidationTypeHandling:
 
         assert result is True
         assert "User discussed testing." in store.history_file.read_text()
-        assert "User likes testing." in store.memory_file.read_text()
 
     @pytest.mark.asyncio
     async def test_list_arguments_empty_list_returns_false(self, tmp_path: Path) -> None:
@@ -186,7 +175,7 @@ class TestMemoryConsolidationTypeHandling:
             tool_calls=[
                 ToolCallRequest(
                     id="call_1",
-                    name="save_memory",
+                    name="save_history",
                     arguments=[],
                 )
             ],
@@ -209,7 +198,7 @@ class TestMemoryConsolidationTypeHandling:
             tool_calls=[
                 ToolCallRequest(
                     id="call_1",
-                    name="save_memory",
+                    name="save_history",
                     arguments=["string", "content"],
                 )
             ],
@@ -220,3 +209,28 @@ class TestMemoryConsolidationTypeHandling:
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
 
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_truncated_response_returns_false(self, tmp_path: Path) -> None:
+        """When LLM response is truncated (finish_reason='length'), return False."""
+        store = MemoryStore(tmp_path)
+        provider = AsyncMock()
+
+        response = LLMResponse(
+            content=None,
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_1",
+                    name="save_history",
+                    arguments={"history_entry": "[2026-01-01] Truncated..."},
+                )
+            ],
+            finish_reason="length",  # Response was truncated
+        )
+        provider.chat = AsyncMock(return_value=response)
+        session = _make_session(message_count=60)
+
+        result = await store.consolidate(session, provider, "test-model", memory_window=50)
+
+        assert result is False
+        assert not store.history_file.exists()

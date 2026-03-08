@@ -1,10 +1,13 @@
 """Skills loader for agent capabilities."""
 
+import importlib.util
 import json
 import os
 import re
 import shutil
 from pathlib import Path
+
+from loguru import logger
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
@@ -48,7 +51,11 @@ class SkillsLoader:
             for skill_dir in self.builtin_skills.iterdir():
                 if skill_dir.is_dir():
                     skill_file = skill_dir / "SKILL.md"
-                    if skill_file.exists() and not any(s["name"] == skill_dir.name for s in skills):
+                    if skill_file.exists():
+                        if any(s["name"] == skill_dir.name for s in skills):
+                            # Workspace skill overrides builtin
+                            logger.warning(f"Skill '{skill_dir.name}' in workspace overrides builtin skill")
+                            continue
                         skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "builtin"})
 
         # Filter by requirements
@@ -213,7 +220,10 @@ class SkillsLoader:
         content = self.load_skill(name)
         if not content:
             return None
+        return self._parse_frontmatter(content)
 
+    def _parse_frontmatter(self, content: str) -> dict | None:
+        """Parse YAML frontmatter from skill content."""
         if content.startswith("---"):
             match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
             if match:
@@ -224,5 +234,85 @@ class SkillsLoader:
                         key, value = line.split(":", 1)
                         metadata[key.strip()] = value.strip().strip('"\'')
                 return metadata
-
         return None
+
+    def get_cron_skills(self) -> list[dict]:
+        """
+        Get skills that have cron schedules defined in frontmatter.
+
+        If a workspace skill overrides a builtin skill, the cron field from
+        builtin is preserved unless workspace skill explicitly overrides it.
+
+        Returns:
+            List of dicts with 'name' and 'cron' (schedule expression).
+        """
+        result = []
+        for s in self.list_skills(filter_unavailable=True):
+            meta = self.get_skill_metadata(s["name"])
+            cron_expr = meta.get("cron") if meta else None
+
+            # If workspace skill overrides builtin but doesn't have cron,
+            # check if builtin has cron and use it (with warning)
+            if not cron_expr and s["source"] == "workspace":
+                builtin_meta = self._get_builtin_skill_metadata(s["name"])
+                if builtin_meta and builtin_meta.get("cron"):
+                    logger.warning(
+                        f"Skill '{s['name']}' in workspace overrides builtin but missing cron field. "
+                        f"Using builtin cron: {builtin_meta['cron']}"
+                    )
+                    cron_expr = builtin_meta["cron"]
+
+            if cron_expr:
+                result.append({
+                    "name": s["name"],
+                    "cron": cron_expr,
+                })
+        return result
+
+    def _get_builtin_skill_metadata(self, name: str) -> dict | None:
+        """Get metadata from builtin skill (used when workspace overrides)."""
+        if not self.builtin_skills:
+            return None
+        builtin_file = self.builtin_skills / name / "SKILL.md"
+        if not builtin_file.exists():
+            return None
+        content = builtin_file.read_text(encoding="utf-8")
+        return self._parse_frontmatter(content)
+
+    def register_cron_jobs(self, cron_service) -> None:
+        """
+        Register cron jobs for skills with cron in frontmatter.
+
+        Args:
+            cron_service: The CronService instance.
+        """
+        if not cron_service:
+            return
+
+        from nanobot.cron.types import CronSchedule
+
+        existing_names = {job.name for job in cron_service.list_jobs(include_disabled=True)}
+
+        for skill in self.get_cron_skills():
+            job_name = skill["name"]
+            if job_name in existing_names:
+                logger.debug(f"{job_name} has registered")
+                continue
+
+            schedule = CronSchedule(kind="cron", expr=skill["cron"], tz=None)
+            cron_service.add_job(
+                name=job_name,
+                schedule=schedule,
+                message=f"Run skill '{job_name}' scheduled task",
+            )
+            logger.info(f"Registered cron job for skill '{job_name}': {skill['cron']}")
+
+    async def run_init_hooks(self, agent_loop) -> None:
+        """
+        Run initialization for skills (register cron jobs, etc).
+
+        Args:
+            agent_loop: The AgentLoop instance.
+        """
+        # Register cron jobs from skill frontmatter
+        self.register_cron_jobs(agent_loop.cron_service)

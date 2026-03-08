@@ -1163,6 +1163,36 @@ nanobot/
 └── cli/            # 🖥️ Commands
 ```
 
+## Skills
+
+Skills are markdown files (SKILL.md) that teach the agent specific capabilities. Place them in `~/.nanobot/workspace/skills/<skill-name>/SKILL.md`.
+
+### Skill Frontmatter
+
+Skills support YAML frontmatter with optional fields:
+
+```yaml
+---
+name: my-skill
+description: What this skill does
+cron: "0 2 * * *"     # Optional: auto-register as scheduled task
+---
+```
+
+### Scheduled Skills (cron)
+
+Add a `cron` field to automatically run a skill on a schedule:
+
+```yaml
+---
+name: daily-report
+description: Generate daily report
+cron: "0 9 * * *"     # Every day at 9:00 AM
+---
+```
+
+The skill will be automatically registered when the agent starts. The job name matches the skill name, preventing duplicate registrations.
+
 ## 🤝 Contribute & Roadmap
 
 PRs welcome! The codebase is intentionally small and readable. 🤗
