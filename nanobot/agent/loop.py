@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import weakref
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -107,7 +106,9 @@ class AgentLoop:
         self._mcp_connecting = False
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
-        self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+        # Use a plain dict so GC cannot reclaim a Lock while it is still logically
+        # "owned" by a session.  Entries are removed in _release_consolidation_lock().
+        self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
         self._register_default_tools()
@@ -364,31 +365,37 @@ class AgentLoop:
         if cmd == "/new":
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
             self._consolidating.add(session.key)
+            archival_note = ""
+            # Capture snapshot boundaries before entering the lock so the except
+            # branch can reuse them without variable-scope issues.
+            snapshot_start = session.last_consolidated
+            snapshot_end = len(session.messages)
             try:
                 async with lock:
-                    snapshot = session.messages[session.last_consolidated:]
-                    if snapshot:
+                    if snapshot_end > snapshot_start:
                         temp = Session(key=session.key)
-                        temp.messages = list(snapshot)
-                        if not await self._consolidate_memory(temp, archive_all=True):
-                            return OutboundMessage(
-                                channel=msg.channel, chat_id=msg.chat_id,
-                                content="Memory archival failed, session not cleared. Please try again.",
-                            )
+                        temp.messages = list(session.messages[snapshot_start:snapshot_end])
+                        ok = await self._consolidate_memory(temp, archive_all=True)
+                        if ok:
+                            session.last_consolidated = snapshot_end
+                            self.sessions.save(session)
+                        else:
+                            logger.warning("/new LLM archival failed for {}, writing degraded backup", session.key)
+                            self._degraded_backup(session, snapshot_start, snapshot_end)
+                            archival_note = " (archival used fallback — LLM unavailable)"
             except Exception:
                 logger.exception("/new archival failed for {}", session.key)
-                return OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content="Memory archival failed, session not cleared. Please try again.",
-                )
+                self._degraded_backup(session, snapshot_start, snapshot_end)
+                archival_note = " (archival error — session cleared anyway)"
             finally:
                 self._consolidating.discard(session.key)
+                self._consolidation_locks.pop(session.key, None)
 
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started.")
+                                  content=f"New session started.{archival_note}")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
@@ -397,19 +404,32 @@ class AgentLoop:
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
             self._consolidating.add(session.key)
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
+            # Fix snapshot boundaries now so new messages appended during consolidation
+            # are not accidentally included in the degraded backup.
+            snapshot_start = session.last_consolidated
+            snapshot_end = len(session.messages)
 
             async def _consolidate_and_unlock():
                 try:
                     async with lock:
-                        await self._consolidate_memory(session)
+                        ok = await self._consolidate_memory(session)
+                        # Re-fetch session to avoid overwriting messages appended during consolidation.
+                        current = self.sessions.get_or_create(session.key)
+                        if ok:
+                            current.last_consolidated = session.last_consolidated
+                        else:
+                            # Consolidation failed: write degraded backup and advance pointer
+                            # so the same messages are not retried indefinitely.
+                            self._degraded_backup(session, snapshot_start, snapshot_end)
+                            current.last_consolidated = snapshot_end
+                        self.sessions.save(current)
                 finally:
                     self._consolidating.discard(session.key)
-                    _task = asyncio.current_task()
-                    if _task is not None:
-                        self._consolidation_tasks.discard(_task)
+                    self._consolidation_locks.pop(session.key, None)
 
             _task = asyncio.create_task(_consolidate_and_unlock())
             self._consolidation_tasks.add(_task)
+            _task.add_done_callback(self._consolidation_tasks.discard)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
@@ -493,6 +513,23 @@ class AgentLoop:
             session, self.provider, self.model,
             archive_all=archive_all, memory_window=self.memory_window,
         )
+
+    def _degraded_backup(self, session, start: int, end: int) -> None:
+        """Write raw messages to HISTORY.md when LLM consolidation fails.
+
+        Uses [DEGRADED BACKUP] marker so these entries are grep-searchable.
+        snapshot boundaries (start/end) are fixed by the caller to avoid
+        including messages appended after consolidation began.
+        """
+        from datetime import datetime as _dt
+        store = MemoryStore(self.workspace)
+        lines = [f"[{_dt.now().strftime('%Y-%m-%d %H:%M')}] [DEGRADED BACKUP] /new fallback dump (LLM unavailable):"]
+        for m in session.messages[start:end]:
+            if not m.get("content"):
+                continue
+            ts = m.get("timestamp", "?")[:16]
+            lines.append(f"  [{ts}] {m['role'].upper()}: {str(m['content'])[:200]}")
+        store.append_history("\n".join(lines))
 
     async def process_direct(
         self,
