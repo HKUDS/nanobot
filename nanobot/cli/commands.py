@@ -672,6 +672,15 @@ def channels_status():
         em_config
     )
 
+    # XMPP
+    xmpp = config.channels.xmpp
+    xmpp_config = xmpp.jid if xmpp.jid else "[dim]not configured[/dim]"
+    table.add_row(
+        "XMPP",
+        "✓" if xmpp.enabled else "✗",
+        xmpp_config
+    )
+
     console.print(table)
 
 
