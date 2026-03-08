@@ -38,7 +38,7 @@ except ImportError as e:
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.base import BaseChannel
-from nanobot.config.loader import get_data_dir
+from nanobot.config.paths import get_data_dir, get_media_dir
 from nanobot.utils.helpers import safe_filename
 
 TYPING_NOTICE_TIMEOUT_MS = 30_000
@@ -490,9 +490,7 @@ class MatrixChannel(BaseChannel):
         return False
 
     def _media_dir(self) -> Path:
-        d = get_data_dir() / "media" / "matrix"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        return get_media_dir("matrix")
 
     @staticmethod
     def _event_source_content(event: RoomMessage) -> dict[str, Any]:

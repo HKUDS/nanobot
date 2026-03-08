@@ -31,6 +31,7 @@ def get_data_dir() -> Path:
     return config_path.parent
 
 
+
 def load_config(config_path: Path | None = None) -> Config:
     """
     Load configuration from file or create default.
