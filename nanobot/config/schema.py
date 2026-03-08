@@ -199,6 +199,17 @@ class QQConfig(Base):
     )  # Allowed user openids (empty = public access)
 
 
+class HomeAssistantConfig(Base):
+    """Home Assistant channel configuration.
+
+    Nanobot connects to HA via WebSocket and acts as a conversation agent.
+    HA fires events for conversation requests, nanobot responds via events.
+    """
+
+    enabled: bool = False
+    url: str = "ws://localhost:8123/api/websocket"  # HA WebSocket URL
+    access_token: str = ""  # Long-lived access token from HA
+    allow_from: list[str] = Field(default_factory=lambda: ["*"])  # HA handles auth
 
 
 class ChannelsConfig(Base):
@@ -216,6 +227,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    homeassistant: HomeAssistantConfig = Field(default_factory=HomeAssistantConfig)
 
 
 class AgentDefaults(Base):
