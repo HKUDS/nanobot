@@ -33,6 +33,7 @@ class TelegramConfig(Base):
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )
     reply_to_message: bool = False  # If true, bot replies quote the original message
+    group_policy: Literal["open", "mention"] = "mention"  # "mention": respond only when @mentioned or replied to; "open": respond to all messages
 
 
 class FeishuConfig(Base):
