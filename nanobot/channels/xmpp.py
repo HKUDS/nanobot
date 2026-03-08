@@ -3,9 +3,11 @@
 import asyncio
 import fnmatch
 import mimetypes
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -17,9 +19,17 @@ except ImportError as e:
         "XMPP dependencies not installed. Run: pip install slixmpp"
     ) from e
 
+try:
+    import httpx
+except ImportError:
+    httpx = None
+
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.base import BaseChannel
 from nanobot.utils.helpers import safe_filename
+
+# Pattern to detect URLs in messages
+_URL_RE = re.compile(r'https?://[^\s<>"{}|\\^`\[\]]+')
 
 
 class XmppClient(ClientXMPP):
@@ -311,16 +321,22 @@ class XmppChannel(BaseChannel):
     """XMPP channel supporting direct messages and MUC rooms."""
 
     name = "xmpp"
+    MAX_HTTP_DOWNLOAD_BYTES = 20 * 1024 * 1024  # 20MB limit for HTTP downloads
 
     def __init__(self, config: Any, bus: Any):
         super().__init__(config, bus)
         self.client: XmppClient | None = None
         self._task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
+        self._http: Any = None
 
     async def start(self) -> None:
         """Start XMPP client and connect to server."""
         self._running = True
+
+        # Initialize HTTP client for downloading HTTP File Upload URLs
+        if httpx:
+            self._http = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
 
         # Build room list from config
         rooms = list(getattr(self.config, "rooms", []) or [])
@@ -372,6 +388,14 @@ class XmppChannel(BaseChannel):
                 await self._task
             except asyncio.CancelledError:
                 pass
+
+        # Close HTTP client
+        if self._http:
+            try:
+                await self._http.aclose()
+            except Exception:
+                pass
+            self._http = None
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send an outbound message with optional file attachments."""
@@ -485,6 +509,77 @@ class XmppChannel(BaseChannel):
             logger.error("SOCKS5 file transfer failed: {}", e)
             self.client.send_message(to_jid, f"[Failed to send file: {filename}]", mtype="chat")
 
+    async def _download_http_file(self, url: str, sender: str) -> tuple[str | None, str]:
+        """Download a file from HTTP URL and save locally. Returns (file_path, marker)."""
+        if not self._http:
+            return None, f"[attachment: URL download not available]"
+
+        try:
+            # Check URL size before downloading (HEAD request)
+            head_resp = await self._http.head(url)
+            content_length = head_resp.headers.get('content-length')
+            if content_length:
+                size = int(content_length)
+                if size > self.MAX_HTTP_DOWNLOAD_BYTES:
+                    return None, f"[attachment: URL file too large]"
+
+            # Download the file
+            resp = await self._http.get(url)
+            resp.raise_for_status()
+
+            # Check size after download
+            data = resp.content
+            if len(data) > self.MAX_HTTP_DOWNLOAD_BYTES:
+                return None, f"[attachment: URL file too large]"
+
+            # Determine filename and MIME type
+            parsed = urlparse(url)
+            filename = Path(parsed.path).name or "downloaded_file"
+            content_type = resp.headers.get('content-type', '')
+            mime = content_type.split(';')[0].strip() if content_type else None
+
+            # If no extension, try to add one from MIME type
+            if not Path(filename).suffix and mime:
+                ext = mimetypes.guess_extension(mime, strict=False)
+                if ext:
+                    filename = f"{filename}{ext}"
+
+            # Build safe path
+            file_path = self.client._build_file_path(sender, filename, mime)
+            file_path.write_bytes(data)
+
+            logger.info("Downloaded HTTP file from {} to {} ({} bytes)", url, file_path, len(data))
+            return str(file_path), f"[attachment: {file_path}]"
+
+        except Exception as e:
+            logger.warning("Failed to download HTTP file from {}: {}", url, e)
+            return None, f"[attachment: download failed - {url}]"
+
+    def _is_http_file_url(self, url: str) -> bool:
+        """Check if URL is likely an HTTP File Upload URL."""
+        parsed = urlparse(url)
+
+        # Must be HTTP(S)
+        if parsed.scheme not in ('http', 'https'):
+            return False
+
+        # Check if URL matches configured upload domain pattern
+        upload_domain = getattr(self.config, 'upload_domain', None)
+        if upload_domain:
+            if upload_domain.startswith('*.'):
+                # Wildcard subdomain match
+                domain_suffix = upload_domain[2:]
+                if parsed.hostname and (parsed.hostname.endswith(domain_suffix) or parsed.hostname == domain_suffix[1:]):
+                    return True
+            elif parsed.hostname == upload_domain:
+                return True
+
+        # Fallback: check if URL looks like a file (has extension or path component)
+        if parsed.path and '.' in Path(parsed.path).name:
+            return True
+
+        return False
+
     async def _handle_file_received(
         self, sender_jid: str, file_path: str, filename: str, mime_type: str
     ) -> None:
@@ -541,6 +636,19 @@ class XmppChannel(BaseChannel):
         if not body.strip():
             return
 
+        # Detect and download HTTP File Upload URLs
+        content_parts = [body]
+        media_paths: list[str] = []
+        urls = _URL_RE.findall(body)
+
+        for url in urls:
+            if self._is_http_file_url(url):
+                file_path, marker = await self._download_http_file(url, sender_jid)
+                if file_path:
+                    media_paths.append(file_path)
+                # Replace URL with marker in content
+                content_parts[0] = content_parts[0].replace(url, marker)
+
         # Start typing indicator
         await self._start_typing(sender_jid)
 
@@ -548,7 +656,8 @@ class XmppChannel(BaseChannel):
             await self._handle_message(
                 sender_id=sender_jid,
                 chat_id=sender_jid,
-                content=body,
+                content=content_parts[0],
+                media=media_paths,
                 metadata={"type": "direct", "jid": sender_jid},
             )
         except Exception:
@@ -570,6 +679,19 @@ class XmppChannel(BaseChannel):
         if not self._should_process_muc_message(room_jid, body):
             return
 
+        # Detect and download HTTP File Upload URLs
+        content_parts = [body]
+        media_paths: list[str] = []
+        urls = _URL_RE.findall(body)
+
+        for url in urls:
+            if self._is_http_file_url(url):
+                file_path, marker = await self._download_http_file(url, sender_jid)
+                if file_path:
+                    media_paths.append(file_path)
+                # Replace URL with marker in content
+                content_parts[0] = content_parts[0].replace(url, marker)
+
         # Start typing indicator
         await self._start_typing(room_jid)
 
@@ -577,7 +699,8 @@ class XmppChannel(BaseChannel):
             await self._handle_message(
                 sender_id=f"{room_jid}/{sender_nick}",
                 chat_id=room_jid,
-                content=body,
+                content=content_parts[0],
+                media=media_paths,
                 metadata={
                     "type": "muc",
                     "room": room_jid,

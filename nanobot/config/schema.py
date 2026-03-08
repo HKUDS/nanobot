@@ -202,6 +202,9 @@ class XmppConfig(Base):
     file_transfer_enabled: bool = True  # Enable XEP-0065 and XEP-0363 file transfers
     max_file_size_mb: int = 50  # Maximum file size in MB to accept
     allowed_file_types: list[str] = Field(default_factory=lambda: ["image/*", "video/*", "audio/*", "text/*", "application/pdf"])
+    # HTTP File Upload (XEP-0363) URL detection - optional domain pattern
+    # Examples: "upload.example.com" or "*.example.com" for subdomains
+    upload_domain: str = ""  # Domain to match for HTTP File Upload URLs
 
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
