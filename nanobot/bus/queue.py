@@ -50,7 +50,8 @@ class MessageBus:
 
     def decrement_background(self) -> None:
         """Decrement pending background task counter."""
-        self._pending_background -= 1
+        if self._pending_background > 0:
+            self._pending_background -= 1
 
     @property
     def has_pending_background(self) -> bool:

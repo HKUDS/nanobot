@@ -552,9 +552,11 @@ def agent(
                                 # For these types, use print() for better formatting control
                                 print(msg.content, end="")
                             else:
-                                # Render progress message as markdown
-                                body = Markdown(msg.content) if markdown else Text(msg.content)
-                                console.print(body)
+                                console.print(f"  [dim]↳ {msg.content}[/dim]")
+                        elif 'email' == msg.channel:
+                            # For email channel, print the response directly without waiting for turn_done
+                            console.print()
+                            _print_agent_response(msg.content, render_markdown=markdown)
                         elif not turn_done.is_set():
                             if msg.content:
                                 turn_response.append(msg.content)
