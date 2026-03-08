@@ -245,7 +245,7 @@ class FeishuChannel(BaseChannel):
 
     name = "feishu"
 
-    def __init__(self, config: FeishuConfig, bus: MessageBus, groq_api_key: str = "", whisper_model: str = "whisper-large-v3-turbo"):
+    def __init__(self, config: FeishuConfig, bus: MessageBus, groq_api_key: str = "", whisper_model: str = ""):
         super().__init__(config, bus)
         self.config: FeishuConfig = config
         self.groq_api_key = groq_api_key
