@@ -1,16 +1,18 @@
-"""Shell execution tool."""
+"""Shell execution tool with optional Docker sandbox."""
 
 import asyncio
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
 from nanobot.agent.tools.base import Tool
 
 
 class ExecTool(Tool):
-    """Tool to execute shell commands."""
+    """Tool to execute shell commands, optionally inside a Docker sandbox."""
 
     def __init__(
         self,
@@ -20,7 +22,9 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
+        sandbox: "SandboxConfig | None" = None,
     ):
+        from nanobot.config.schema import SandboxConfig
         self.timeout = timeout
         self.working_dir = working_dir
         self.deny_patterns = deny_patterns or [
@@ -37,6 +41,13 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+        self.sandbox = sandbox or SandboxConfig()
+
+        if self.sandbox.enabled and not self._docker_available():
+            logger.warning(
+                "Sandbox enabled but Docker is not available — "
+                "commands will run without sandbox"
+            )
 
     @property
     def name(self) -> str:
@@ -62,13 +73,19 @@ class ExecTool(Tool):
             },
             "required": ["command"]
         }
-    
+
     async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
-        
+
+        if self.sandbox.enabled and self._docker_available():
+            return await self._run_sandboxed(command, cwd)
+        return await self._run_direct(command, cwd)
+
+    async def _run_direct(self, command: str, cwd: str) -> str:
+        """Run command directly on the host."""
         env = os.environ.copy()
         if self.path_append:
             env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
@@ -81,7 +98,7 @@ class ExecTool(Tool):
                 cwd=cwd,
                 env=env,
             )
-            
+
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
@@ -96,31 +113,83 @@ class ExecTool(Tool):
                 except asyncio.TimeoutError:
                     pass
                 return f"Error: Command timed out after {self.timeout} seconds"
-            
-            output_parts = []
-            
-            if stdout:
-                output_parts.append(stdout.decode("utf-8", errors="replace"))
-            
-            if stderr:
-                stderr_text = stderr.decode("utf-8", errors="replace")
-                if stderr_text.strip():
-                    output_parts.append(f"STDERR:\n{stderr_text}")
-            
-            if process.returncode != 0:
-                output_parts.append(f"\nExit code: {process.returncode}")
-            
-            result = "\n".join(output_parts) if output_parts else "(no output)"
-            
-            # Truncate very long output
-            max_len = 10000
-            if len(result) > max_len:
-                result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
-            
-            return result
-            
+
+            return self._format_output(stdout, stderr, process.returncode)
+
         except Exception as e:
             return f"Error executing command: {str(e)}"
+
+    async def _run_sandboxed(self, command: str, cwd: str) -> str:
+        """Run command inside a Docker container."""
+        docker_cmd = self._build_docker_command(command, cwd)
+        timeout = self.sandbox.timeout or self.timeout
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *docker_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                return f"Error: Sandboxed command timed out after {timeout} seconds"
+
+            return self._format_output(stdout, stderr, process.returncode)
+
+        except Exception as e:
+            return f"Error executing sandboxed command: {str(e)}"
+
+    def _build_docker_command(self, command: str, cwd: str) -> list[str]:
+        """Build the docker run command list."""
+        args = [
+            "docker", "run", "--rm",
+            f"--memory={self.sandbox.memory_limit}",
+            f"--cpus={self.sandbox.cpu_limit}",
+            f"--network={self.sandbox.network}",
+        ]
+
+        if self.sandbox.mount_workspace and self.working_dir:
+            args.extend(["-v", f"{self.working_dir}:/workspace", "-w", "/workspace"])
+        else:
+            args.extend(["-w", "/workspace"])
+
+        args.extend([self.sandbox.image, "sh", "-c", command])
+        return args
+
+    @staticmethod
+    def _docker_available() -> bool:
+        """Check if Docker CLI is available on the system."""
+        return shutil.which("docker") is not None
+
+    @staticmethod
+    def _format_output(stdout: bytes, stderr: bytes, returncode: int) -> str:
+        """Format subprocess output into a result string."""
+        output_parts = []
+
+        if stdout:
+            output_parts.append(stdout.decode("utf-8", errors="replace"))
+
+        if stderr:
+            stderr_text = stderr.decode("utf-8", errors="replace")
+            if stderr_text.strip():
+                output_parts.append(f"STDERR:\n{stderr_text}")
+
+        if returncode != 0:
+            output_parts.append(f"\nExit code: {returncode}")
+
+        result = "\n".join(output_parts) if output_parts else "(no output)"
+
+        # Truncate very long output
+        max_len = 10000
+        if len(result) > max_len:
+            result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
+
+        return result
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
