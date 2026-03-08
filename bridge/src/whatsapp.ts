@@ -18,7 +18,6 @@ import qrcode from 'qrcode-terminal';
 import pino from 'pino';
 import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
-import { homedir } from 'os';
 import { randomBytes } from 'crypto';
 
 const VERSION = '0.1.0';
@@ -162,7 +161,7 @@ export class WhatsAppClient {
 
   private async downloadMedia(msg: any, mimetype?: string, fileName?: string): Promise<string | null> {
     try {
-      const mediaDir = join(homedir(), '.nanobot', 'media');
+      const mediaDir = join(this.options.authDir, '..', 'media');
       await mkdir(mediaDir, { recursive: true });
 
       const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer;
