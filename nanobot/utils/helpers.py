@@ -22,6 +22,18 @@ def get_workspace_path(workspace: str | None = None) -> Path:
     return ensure_dir(path)
 
 
+def get_log_dir(workspace: str | None = None) -> Path:
+    """Get the log directory for nanobot.
+
+    When *workspace* is provided the logs live inside that workspace,
+    keeping per-instance logs separate.  Otherwise falls back to the
+    global ``~/.nanobot/logs`` directory.
+    """
+    if workspace:
+        return ensure_dir(Path(workspace).expanduser() / "logs")
+    return ensure_dir(get_data_path() / "logs")
+
+
 def timestamp() -> str:
     """Current ISO timestamp."""
     return datetime.now().isoformat()
