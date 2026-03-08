@@ -60,6 +60,7 @@ class AgentLoop:
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
+        allowed_dirs: list[str] | None = None,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
@@ -77,6 +78,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.allowed_dirs = allowed_dirs or []
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -90,6 +92,7 @@ class AgentLoop:
             web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            allowed_dirs=self.allowed_dirs,
         )
 
         self._running = False
@@ -112,14 +115,20 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
+        allowed_dirs_list: list[Path] | None = None
+        if self.restrict_to_workspace:
+            allowed_dirs_list = [self.workspace.resolve()]
+            for dir_str in self.allowed_dirs:
+                allowed_dirs_list.append(Path(dir_str).expanduser().resolve())
+
         for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
+            self.tools.register(cls(workspace=self.workspace, allowed_dirs=allowed_dirs_list))
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
             path_append=self.exec_config.path_append,
+            allowed_dirs=allowed_dirs_list,
         ))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
