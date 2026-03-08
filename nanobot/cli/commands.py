@@ -449,6 +449,10 @@ def gateway(
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
     async def run():
+        # Start ClawLink identity HTTP server for network discovery
+        from nanobot.web.server import start_http_server
+        http_server = await start_http_server(host=config.gateway.host, port=port)
+
         try:
             await cron.start()
             await heartbeat.start()
@@ -459,6 +463,9 @@ def gateway(
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
+            if http_server is not None:
+                http_server.close()
+                await http_server.wait_closed()
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
