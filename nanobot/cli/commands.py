@@ -1,11 +1,13 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import json
 import os
-import signal
-from pathlib import Path
 import select
+import signal
 import sys
+from pathlib import Path
+from typing import Callable, Literal, cast
 
 import typer
 from rich.console import Console
@@ -18,9 +20,9 @@ from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.patch_stdout import patch_stdout
 
-from nanobot import __version__, __logo__
+from nanobot import __logo__, __version__
 from nanobot.config.schema import Config
-from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.helpers import get_workspace_path, sync_workspace_templates
 
 app = typer.Typer(
     name="nanobot",
@@ -37,6 +39,9 @@ EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 
 _PROMPT_SESSION: PromptSession | None = None
 _SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
+_CLI_CONFIG_PATH: Path | None = None
+_CLI_DISPATCHER_OVERRIDE: str | None = None
+_CLI_ACP_CONFIG_OVERRIDE: str | None = None
 
 
 def _flush_pending_tty_input() -> None:
@@ -145,13 +150,27 @@ def version_callback(value: bool):
 def main(
     version: bool = typer.Option(None, "--version", "-v", callback=version_callback, is_eager=True),
     config: str | None = typer.Option(None, "--config", help="Path to config.json"),
-    root: str | None = typer.Option(None, "--root", help="Instance root directory"),
+    dispatcher: str | None = typer.Option(
+        None, "--dispatcher", help="Runtime dispatcher: native|acp"
+    ),
+    acp_config: str | None = typer.Option(
+        None,
+        "--acp-config",
+        help="ACP override JSON string or JSON file path",
+    ),
 ):
     """nanobot - Personal AI Assistant."""
-    if root:
-        os.environ["NANOBOT_ROOT"] = str(Path(root).expanduser())
+    global _CLI_CONFIG_PATH, _CLI_DISPATCHER_OVERRIDE, _CLI_ACP_CONFIG_OVERRIDE
+
+    from nanobot.config.loader import set_config_path
+
     if config:
-        os.environ["NANOBOT_CONFIG"] = str(Path(config).expanduser())
+        _CLI_CONFIG_PATH = Path(config).expanduser().resolve()
+        set_config_path(_CLI_CONFIG_PATH)
+    if dispatcher:
+        _CLI_DISPATCHER_OVERRIDE = dispatcher.strip().lower()
+    if acp_config:
+        _CLI_ACP_CONFIG_OVERRIDE = acp_config
 
 
 # ============================================================================
@@ -164,7 +183,6 @@ def onboard():
     """Initialize nanobot configuration and workspace."""
     from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
-    from nanobot.utils.helpers import get_workspace_path
 
     config_path = get_config_path()
 
@@ -209,9 +227,10 @@ def onboard():
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
+    from nanobot.providers.custom_provider import CustomProvider
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
-    from nanobot.providers.custom_provider import CustomProvider
+    from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
@@ -229,9 +248,21 @@ def _make_provider(config: Config):
             default_model=model,
         )
 
+    # Azure OpenAI: direct Azure endpoint with deployment-style model.
+    if provider_name == "azure_openai":
+        if not p or not p.api_key or not p.api_base:
+            console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
+            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai")
+            raise typer.Exit(1)
+        return AzureOpenAIProvider(
+            api_key=p.api_key,
+            api_base=p.api_base,
+            default_model=model,
+        )
+
     from nanobot.providers.registry import find_by_name
 
-    spec = find_by_name(provider_name)
+    spec = find_by_name(provider_name) if provider_name else None
     if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers section")
@@ -246,6 +277,58 @@ def _make_provider(config: Config):
     )
 
 
+def _parse_acp_override(raw: str) -> dict[str, object]:
+    candidate = Path(raw).expanduser()
+    if candidate.exists() and candidate.is_file():
+        return json.loads(candidate.read_text(encoding="utf-8"))
+    return json.loads(raw)
+
+
+def _load_runtime_config(
+    config: str | None = None,
+    workspace: str | None = None,
+    dispatcher: str | None = None,
+    acp_config: str | None = None,
+) -> Config:
+    from nanobot.config.loader import load_config, set_config_path
+
+    effective_config = config
+    if effective_config is None and _CLI_CONFIG_PATH is not None:
+        effective_config = str(_CLI_CONFIG_PATH)
+
+    config_path = None
+    if effective_config:
+        config_path = Path(effective_config).expanduser().resolve()
+        if not config_path.exists():
+            console.print(f"[red]Error: Config file not found: {config_path}[/red]")
+            raise typer.Exit(1)
+        set_config_path(config_path)
+        console.print(f"[dim]Using config: {config_path}[/dim]")
+
+    loaded = load_config(config_path)
+
+    if workspace:
+        loaded.agents.defaults.workspace = workspace
+
+    dispatch_choice = (dispatcher or _CLI_DISPATCHER_OVERRIDE or "").strip().lower()
+    if dispatch_choice:
+        if dispatch_choice not in {"native", "acp"}:
+            console.print("[red]Error: --dispatcher must be 'native' or 'acp'.[/red]")
+            raise typer.Exit(1)
+        loaded.dispatch.backend = cast(Literal["native", "acp"], dispatch_choice)
+
+    acp_raw = acp_config or _CLI_ACP_CONFIG_OVERRIDE
+    if acp_raw:
+        try:
+            overrides = _parse_acp_override(acp_raw)
+            loaded.dispatch.acp = loaded.dispatch.acp.model_copy(update=overrides)
+        except Exception as exc:
+            console.print(f"[red]Error: invalid --acp-config override: {exc}[/red]")
+            raise typer.Exit(1) from exc
+
+    return loaded
+
+
 # ============================================================================
 # Gateway / Server
 # ============================================================================
@@ -254,18 +337,28 @@ def _make_provider(config: Config):
 @app.command()
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    dispatcher: str | None = typer.Option(
+        None, "--dispatcher", help="Runtime dispatcher: native|acp"
+    ),
+    acp_config: str | None = typer.Option(
+        None,
+        "--acp-config",
+        help="ACP override JSON string or JSON file path",
+    ),
 ):
     """Start the nanobot gateway."""
-    from nanobot.config.loader import load_config, get_data_dir
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
-    from nanobot.session.manager import SessionManager
+    from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
-    from nanobot.heartbeat.service import HeartbeatService
     from nanobot.dispatch import ACPDispatcher, NativeDispatcher
+    from nanobot.heartbeat.service import HeartbeatService
     from nanobot.providers.base import LLMProvider, LLMResponse
+    from nanobot.session.manager import SessionManager
 
     class _DisabledHeartbeatProvider(LLMProvider):
         async def chat(
@@ -275,8 +368,9 @@ def gateway(
             model: str | None = None,
             max_tokens: int = 4096,
             temperature: float = 0.7,
+            reasoning_effort: str | None = None,
         ) -> LLMResponse:
-            del messages, tools, model, max_tokens, temperature
+            del messages, tools, model, max_tokens, temperature, reasoning_effort
             return LLMResponse(content="", tool_calls=[])
 
         def get_default_model(self) -> str:
@@ -289,35 +383,39 @@ def gateway(
 
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
 
-    config = load_config()
-    sync_workspace_templates(config.workspace_path)
+    runtime_config = _load_runtime_config(config, workspace, dispatcher, acp_config)
+    sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     provider = None
-    needs_provider = config.dispatch.backend == "native" or config.gateway.heartbeat.enabled
+    needs_provider = (
+        runtime_config.dispatch.backend == "native" or runtime_config.gateway.heartbeat.enabled
+    )
     if needs_provider:
         try:
-            provider = _make_provider(config)
+            provider = _make_provider(runtime_config)
         except typer.Exit:
-            if config.dispatch.backend == "native":
+            if runtime_config.dispatch.backend == "native":
                 raise
             console.print(
                 "[yellow]Warning: No LLM provider configured, heartbeat is disabled for ACP backend.[/yellow]"
             )
     session_manager = (
-        SessionManager(config.workspace_path) if config.dispatch.backend == "native" else None
+        SessionManager(runtime_config.workspace_path)
+        if runtime_config.dispatch.backend == "native"
+        else None
     )
 
     # Create cron service first (callback set after agent creation)
-    cron_store_path = get_data_dir(config=config) / "cron" / "jobs.json"
+    cron_store_path = get_cron_dir() / "jobs.json"
     cron = CronService(cron_store_path)
 
-    if config.dispatch.backend == "acp":
+    if runtime_config.dispatch.backend == "acp":
         runtime = ACPDispatcher(
             bus=bus,
-            workspace=config.workspace_path,
-            acp_config=config.dispatch.acp,
-            mcp_servers=config.tools.mcp_servers,
-            channels_config=config.channels,
+            workspace=runtime_config.workspace_path,
+            acp_config=runtime_config.dispatch.acp,
+            mcp_servers=runtime_config.tools.mcp_servers,
+            channels_config=runtime_config.channels,
         )
     else:
         if provider is None:
@@ -325,7 +423,7 @@ def gateway(
         runtime = NativeDispatcher(
             bus=bus,
             provider=provider,
-            config=config,
+            config=runtime_config,
             cron_service=cron,
             session_manager=session_manager,
         )
@@ -354,7 +452,7 @@ def gateway(
     cron.on_job = on_cron_job
 
     # Create channel manager
-    channels = ChannelManager(config, bus)
+    channels = ChannelManager(runtime_config, bus)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -406,16 +504,16 @@ def gateway(
             OutboundMessage(channel=channel, chat_id=chat_id, content=response)
         )
 
-    hb_cfg = config.gateway.heartbeat
+    hb_cfg = runtime_config.gateway.heartbeat
     hb_enabled = hb_cfg.enabled and provider is not None
     if hb_cfg.enabled and provider is None:
         console.print(
             "[yellow]Warning: Heartbeat disabled because no provider is available.[/yellow]"
         )
     heartbeat = HeartbeatService(
-        workspace=config.workspace_path,
+        workspace=runtime_config.workspace_path,
         provider=provider or _DisabledHeartbeatProvider(),
-        model=config.agents.defaults.model,
+        model=runtime_config.agents.defaults.model,
         on_execute=on_heartbeat_execute,
         on_notify=on_heartbeat_notify,
         interval_s=hb_cfg.interval_s,
@@ -462,6 +560,16 @@ def gateway(
 def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    dispatcher: str | None = typer.Option(
+        None, "--dispatcher", help="Runtime dispatcher: native|acp"
+    ),
+    acp_config: str | None = typer.Option(
+        None,
+        "--acp-config",
+        help="ACP override JSON string or JSON file path",
+    ),
     markdown: bool = typer.Option(
         True, "--markdown/--no-markdown", help="Render assistant output as Markdown"
     ),
@@ -470,20 +578,22 @@ def agent(
     ),
 ):
     """Interact with the agent directly."""
-    from nanobot.config.loader import load_config, get_data_dir
     from nanobot.bus.queue import MessageBus
+    from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
     from nanobot.dispatch import ACPDispatcher, NativeDispatcher
     from loguru import logger
 
-    config = load_config()
-    sync_workspace_templates(config.workspace_path)
+    runtime_config = _load_runtime_config(config, workspace, dispatcher, acp_config)
+    sync_workspace_templates(runtime_config.workspace_path)
 
     bus = MessageBus()
-    provider = _make_provider(config) if config.dispatch.backend == "native" else None
+    provider = (
+        _make_provider(runtime_config) if runtime_config.dispatch.backend == "native" else None
+    )
 
     # Create cron service for tool usage (no callback needed for CLI unless running)
-    cron_store_path = get_data_dir(config=config) / "cron" / "jobs.json"
+    cron_store_path = get_cron_dir() / "jobs.json"
     cron = CronService(cron_store_path)
 
     if logs:
@@ -491,13 +601,13 @@ def agent(
     else:
         logger.disable("nanobot")
 
-    if config.dispatch.backend == "acp":
+    if runtime_config.dispatch.backend == "acp":
         runtime = ACPDispatcher(
             bus=bus,
-            workspace=config.workspace_path,
-            acp_config=config.dispatch.acp,
-            mcp_servers=config.tools.mcp_servers,
-            channels_config=config.channels,
+            workspace=runtime_config.workspace_path,
+            acp_config=runtime_config.dispatch.acp,
+            mcp_servers=runtime_config.tools.mcp_servers,
+            channels_config=runtime_config.channels,
         )
     else:
         if provider is None:
@@ -505,7 +615,7 @@ def agent(
         runtime = NativeDispatcher(
             bus=bus,
             provider=provider,
-            config=config,
+            config=runtime_config,
             cron_service=cron,
         )
 
@@ -711,9 +821,10 @@ def _get_bridge_dir() -> Path:
     """Get the bridge directory, setting it up if needed."""
     import shutil
     import subprocess
+    from nanobot.config.paths import get_bridge_install_dir
 
     # User's bridge location
-    user_bridge = Path.home() / ".nanobot" / "bridge"
+    user_bridge = get_bridge_install_dir()
 
     # Check if already built
     if (user_bridge / "dist" / "index.js").exists():
@@ -770,6 +881,7 @@ def channels_login():
     """Link device via QR code."""
     import subprocess
     from nanobot.config.loader import load_config
+    from nanobot.config.paths import get_runtime_subdir
 
     config = load_config()
     bridge_dir = _get_bridge_dir()
@@ -780,6 +892,7 @@ def channels_login():
     env = {**os.environ}
     if config.channels.whatsapp.bridge_token:
         env["BRIDGE_TOKEN"] = config.channels.whatsapp.bridge_token
+    env["AUTH_DIR"] = str(get_runtime_subdir("whatsapp-auth"))
 
     try:
         subprocess.run(["npm", "start"], cwd=bridge_dir, check=True, env=env)
@@ -787,229 +900,6 @@ def channels_login():
         console.print(f"[red]Bridge failed: {e}[/red]")
     except FileNotFoundError:
         console.print("[red]npm not found. Please install Node.js.[/red]")
-
-
-# ============================================================================
-# Cron Commands
-# ============================================================================
-
-cron_app = typer.Typer(help="Manage scheduled tasks")
-app.add_typer(cron_app, name="cron")
-
-
-@cron_app.command("list")
-def cron_list(
-    all: bool = typer.Option(False, "--all", "-a", help="Include disabled jobs"),
-):
-    """List scheduled jobs."""
-    from nanobot.config.loader import get_data_dir
-    from nanobot.cron.service import CronService
-
-    store_path = get_data_dir() / "cron" / "jobs.json"
-    service = CronService(store_path)
-
-    jobs = service.list_jobs(include_disabled=all)
-
-    if not jobs:
-        console.print("No scheduled jobs.")
-        return
-
-    table = Table(title="Scheduled Jobs")
-    table.add_column("ID", style="cyan")
-    table.add_column("Name")
-    table.add_column("Schedule")
-    table.add_column("Status")
-    table.add_column("Next Run")
-
-    import time
-    from datetime import datetime as _dt
-    from zoneinfo import ZoneInfo
-
-    for job in jobs:
-        # Format schedule
-        if job.schedule.kind == "every":
-            sched = f"every {(job.schedule.every_ms or 0) // 1000}s"
-        elif job.schedule.kind == "cron":
-            sched = (
-                f"{job.schedule.expr or ''} ({job.schedule.tz})"
-                if job.schedule.tz
-                else (job.schedule.expr or "")
-            )
-        else:
-            sched = "one-time"
-
-        # Format next run
-        next_run = ""
-        if job.state.next_run_at_ms:
-            ts = job.state.next_run_at_ms / 1000
-            try:
-                tz = ZoneInfo(job.schedule.tz) if job.schedule.tz else None
-                next_run = _dt.fromtimestamp(ts, tz).strftime("%Y-%m-%d %H:%M")
-            except Exception:
-                next_run = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
-
-        status = "[green]enabled[/green]" if job.enabled else "[dim]disabled[/dim]"
-
-        table.add_row(job.id, job.name, sched, status, next_run)
-
-    console.print(table)
-
-
-@cron_app.command("add")
-def cron_add(
-    name: str = typer.Option(..., "--name", "-n", help="Job name"),
-    message: str = typer.Option(..., "--message", "-m", help="Message for agent"),
-    every: int = typer.Option(None, "--every", "-e", help="Run every N seconds"),
-    cron_expr: str = typer.Option(None, "--cron", "-c", help="Cron expression (e.g. '0 9 * * *')"),
-    tz: str | None = typer.Option(
-        None, "--tz", help="IANA timezone for cron (e.g. 'America/Vancouver')"
-    ),
-    at: str = typer.Option(None, "--at", help="Run once at time (ISO format)"),
-    deliver: bool = typer.Option(False, "--deliver", "-d", help="Deliver response to channel"),
-    to: str = typer.Option(None, "--to", help="Recipient for delivery"),
-    channel: str = typer.Option(
-        None, "--channel", help="Channel for delivery (e.g. 'telegram', 'whatsapp')"
-    ),
-):
-    """Add a scheduled job."""
-    from nanobot.config.loader import get_data_dir
-    from nanobot.cron.service import CronService
-    from nanobot.cron.types import CronSchedule
-
-    if tz and not cron_expr:
-        console.print("[red]Error: --tz can only be used with --cron[/red]")
-        raise typer.Exit(1)
-
-    # Determine schedule type
-    if every:
-        schedule = CronSchedule(kind="every", every_ms=every * 1000)
-    elif cron_expr:
-        schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz)
-    elif at:
-        import datetime
-
-        dt = datetime.datetime.fromisoformat(at)
-        schedule = CronSchedule(kind="at", at_ms=int(dt.timestamp() * 1000))
-    else:
-        console.print("[red]Error: Must specify --every, --cron, or --at[/red]")
-        raise typer.Exit(1)
-
-    store_path = get_data_dir() / "cron" / "jobs.json"
-    service = CronService(store_path)
-
-    try:
-        job = service.add_job(
-            name=name,
-            schedule=schedule,
-            message=message,
-            deliver=deliver,
-            to=to,
-            channel=channel,
-        )
-    except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise typer.Exit(1) from e
-
-    console.print(f"[green]✓[/green] Added job '{job.name}' ({job.id})")
-
-
-@cron_app.command("remove")
-def cron_remove(
-    job_id: str = typer.Argument(..., help="Job ID to remove"),
-):
-    """Remove a scheduled job."""
-    from nanobot.config.loader import get_data_dir
-    from nanobot.cron.service import CronService
-
-    store_path = get_data_dir() / "cron" / "jobs.json"
-    service = CronService(store_path)
-
-    if service.remove_job(job_id):
-        console.print(f"[green]✓[/green] Removed job {job_id}")
-    else:
-        console.print(f"[red]Job {job_id} not found[/red]")
-
-
-@cron_app.command("enable")
-def cron_enable(
-    job_id: str = typer.Argument(..., help="Job ID"),
-    disable: bool = typer.Option(False, "--disable", help="Disable instead of enable"),
-):
-    """Enable or disable a job."""
-    from nanobot.config.loader import get_data_dir
-    from nanobot.cron.service import CronService
-
-    store_path = get_data_dir() / "cron" / "jobs.json"
-    service = CronService(store_path)
-
-    job = service.enable_job(job_id, enabled=not disable)
-    if job:
-        status = "disabled" if disable else "enabled"
-        console.print(f"[green]✓[/green] Job '{job.name}' {status}")
-    else:
-        console.print(f"[red]Job {job_id} not found[/red]")
-
-
-@cron_app.command("run")
-def cron_run(
-    job_id: str = typer.Argument(..., help="Job ID to run"),
-    force: bool = typer.Option(False, "--force", "-f", help="Run even if disabled"),
-):
-    """Manually run a job."""
-    from loguru import logger
-    from nanobot.config.loader import load_config, get_data_dir
-    from nanobot.cron.service import CronService
-    from nanobot.cron.types import CronJob
-    from nanobot.bus.queue import MessageBus
-    from nanobot.dispatch import ACPDispatcher, NativeDispatcher
-
-    logger.disable("nanobot")
-
-    config = load_config()
-    bus = MessageBus()
-    provider = _make_provider(config) if config.dispatch.backend == "native" else None
-    if config.dispatch.backend == "acp":
-        runtime = ACPDispatcher(
-            bus=bus,
-            workspace=config.workspace_path,
-            acp_config=config.dispatch.acp,
-            mcp_servers=config.tools.mcp_servers,
-            channels_config=config.channels,
-        )
-    else:
-        if provider is None:
-            raise RuntimeError("Native backend requires a configured provider")
-        runtime = NativeDispatcher(bus=bus, provider=provider, config=config)
-
-    store_path = get_data_dir(config=config) / "cron" / "jobs.json"
-    service = CronService(store_path)
-
-    result_holder = []
-
-    async def on_job(job: CronJob) -> str | None:
-        response = await runtime.process_direct(
-            job.payload.message,
-            session_key=f"cron:{job.id}",
-            channel=job.payload.channel or "cli",
-            chat_id=job.payload.to or "direct",
-        )
-        result_holder.append(response)
-        return response
-
-    service.on_job = on_job
-
-    async def run():
-        return await service.run_job(job_id, force=force)
-
-    success = asyncio.run(run())
-    asyncio.run(runtime.close())
-
-    if success:
-        console.print("[green]✓[/green] Job executed")
-        if result_holder:
-            _print_agent_response(result_holder[0], render_markdown=True)
-    else:
-        console.print(f"[red]Failed to run job {job_id}[/red]")
 
 
 # ============================================================================
@@ -1068,7 +958,7 @@ provider_app = typer.Typer(help="Manage providers")
 app.add_typer(provider_app, name="provider")
 
 
-_LOGIN_HANDLERS: dict[str, callable] = {}
+_LOGIN_HANDLERS: dict[str, Callable[[], None]] = {}
 
 
 def _register_login(name: str):

@@ -12,10 +12,22 @@ try:
     import nh3
     from mistune import create_markdown
     from nio import (
-        AsyncClient, AsyncClientConfig, ContentRepositoryConfigError,
-        DownloadError, InviteEvent, JoinError, MatrixRoom, MemoryDownloadResponse,
-        RoomEncryptedMedia, RoomMessage, RoomMessageMedia, RoomMessageText,
-        RoomSendError, RoomTypingError, SyncError, UploadError,
+        AsyncClient,
+        AsyncClientConfig,
+        ContentRepositoryConfigError,
+        DownloadError,
+        InviteEvent,
+        JoinError,
+        MatrixRoom,
+        MemoryDownloadResponse,
+        RoomEncryptedMedia,
+        RoomMessage,
+        RoomMessageMedia,
+        RoomMessageText,
+        RoomSendError,
+        RoomTypingError,
+        SyncError,
+        UploadError,
     )
     from nio.crypto.attachments import decrypt_attachment
     from nio.exceptions import EncryptionError
@@ -26,7 +38,7 @@ except ImportError as e:
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.base import BaseChannel
-from nanobot.config.loader import get_data_dir
+from nanobot.config.paths import get_data_dir, get_media_dir
 from nanobot.utils.helpers import safe_filename
 
 TYPING_NOTICE_TIMEOUT_MS = 30_000
@@ -350,7 +362,11 @@ class MatrixChannel(BaseChannel):
                 limit_bytes = await self._effective_media_limit_bytes()
                 for path in candidates:
                     if fail := await self._upload_and_send_attachment(
-                        msg.chat_id, path, limit_bytes, relates_to):
+                        room_id=msg.chat_id,
+                        path=path,
+                        limit_bytes=limit_bytes,
+                        relates_to=relates_to,
+                    ):
                         failures.append(fail)
             if failures:
                 text = f"{text.rstrip()}\n{chr(10).join(failures)}" if text.strip() else "\n".join(failures)
@@ -438,8 +454,7 @@ class MatrixChannel(BaseChannel):
                 await asyncio.sleep(2)
 
     async def _on_room_invite(self, room: MatrixRoom, event: InviteEvent) -> None:
-        allow_from = self.config.allow_from or []
-        if not allow_from or event.sender in allow_from:
+        if self.is_allowed(event.sender):
             await self.client.join(room.room_id)
 
     def _is_direct_room(self, room: MatrixRoom) -> bool:
@@ -475,9 +490,7 @@ class MatrixChannel(BaseChannel):
         return False
 
     def _media_dir(self) -> Path:
-        d = get_data_dir() / "media" / "matrix"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        return get_media_dir("matrix")
 
     @staticmethod
     def _event_source_content(event: RoomMessage) -> dict[str, Any]:
@@ -664,11 +677,13 @@ class MatrixChannel(BaseChannel):
         parts: list[str] = []
         if isinstance(body := getattr(event, "body", None), str) and body.strip():
             parts.append(body.strip())
-        parts.append(marker)
+        if marker:
+            parts.append(marker)
 
         await self._start_typing_keepalive(room.room_id)
         try:
             meta = self._base_metadata(room, event)
+            meta["attachments"] = []
             if attachment:
                 meta["attachments"] = [attachment]
             await self._handle_message(

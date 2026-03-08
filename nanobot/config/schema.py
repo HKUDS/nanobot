@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Base(BaseModel):
@@ -66,27 +66,6 @@ class DiscordConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
-
-
-class MatrixConfig(Base):
-    """Matrix (Element) channel configuration."""
-
-    enabled: bool = False
-    homeserver: str = "https://matrix.org"
-    access_token: str = ""
-    user_id: str = ""  # @bot:matrix.org
-    device_id: str = ""
-    e2ee_enabled: bool = True  # Enable Matrix E2EE support (encryption + encrypted room handling).
-    sync_stop_grace_seconds: int = (
-        2  # Max seconds to wait for sync_forever to stop gracefully before cancellation fallback.
-    )
-    max_media_bytes: int = (
-        20 * 1024 * 1024
-    )  # Max attachment size accepted for Matrix media handling (inbound + outbound).
-    allow_from: list[str] = Field(default_factory=list)
-    group_policy: Literal["open", "mention", "allowlist"] = "open"
-    group_allow_from: list[str] = Field(default_factory=list)
-    allow_room_mentions: bool = False
 
 
 class EmailConfig(Base):
@@ -181,6 +160,7 @@ class SlackConfig(Base):
     user_token_read_only: bool = True
     reply_in_thread: bool = True
     react_emoji: str = "eyes"
+    allow_from: list[str] = Field(default_factory=list)  # Allowed Slack user IDs (sender-level)
     group_policy: str = "mention"  # "mention", "open", "allowlist"
     group_allow_from: list[str] = Field(default_factory=list)  # Allowed channel IDs if allowlist
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
@@ -243,6 +223,7 @@ class AgentDefaults(Base):
     temperature: float = 0.1
     max_tool_iterations: int = 40
     memory_window: int = 100
+    reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
 
 
 class AgentsConfig(Base):
@@ -263,6 +244,7 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
+    azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -310,6 +292,7 @@ class WebSearchConfig(Base):
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
+    proxy: str | None = None
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
@@ -323,6 +306,7 @@ class ExecToolConfig(Base):
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
+    type: Literal["stdio", "sse", "streamableHttp"] | None = None
     command: str = ""  # Stdio: command to run (e.g. "npx")
     args: list[str] = Field(default_factory=list)  # Stdio: command arguments
     env: dict[str, str] = Field(default_factory=dict)  # Stdio: extra env vars
@@ -378,22 +362,13 @@ class Config(BaseSettings):
 
     @property
     def root_path(self) -> Path:
-        """Get expanded data root path."""
-        return Path(self.paths.root).expanduser()
+        """Workspace is the single runtime root."""
+        return self.workspace_path
 
     @property
     def workspace_path(self) -> Path:
-        """Get expanded workspace path using root-aware defaults."""
-        configured = Path(self.agents.defaults.workspace).expanduser()
-        default_workspace = Path("~/.nanobot/workspace").expanduser()
-        default_root = Path("~/.nanobot").expanduser()
-
-        if configured.is_absolute():
-            if configured == default_workspace and self.root_path != default_root:
-                return self.root_path / "workspace"
-            return configured
-
-        return self.root_path / configured
+        """Get expanded workspace path."""
+        return Path(self.agents.defaults.workspace).expanduser()
 
     def _match_provider(
         self, model: str | None = None
@@ -470,4 +445,4 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+    model_config = SettingsConfigDict()

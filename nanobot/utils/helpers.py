@@ -1,9 +1,10 @@
 """Utility functions for nanobot."""
 
+from __future__ import annotations
+
 import re
-import os
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 
 def ensure_dir(path: Path) -> Path:
@@ -12,20 +13,37 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
-def get_data_path() -> Path:
-    """~/.nanobot data directory."""
-    root = os.environ.get("NANOBOT_ROOT", "").strip()
-    base = Path(root).expanduser() if root else Path.home() / ".nanobot"
-    return ensure_dir(base)
+def detect_image_mime(data: bytes) -> str | None:
+    """Detect image MIME type from magic bytes, ignoring file extension."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 
 def get_workspace_path(workspace: str | None = None) -> Path:
-    """Resolve and ensure workspace path. Defaults to ~/.nanobot/workspace."""
+    """Resolve and ensure workspace path. Defaults to configured workspace."""
     if workspace:
-        path = Path(workspace).expanduser()
-    else:
-        path = get_data_path() / "workspace"
-    return ensure_dir(path)
+        return ensure_dir(Path(workspace).expanduser())
+
+    from nanobot.config.loader import load_config
+
+    return ensure_dir(load_config().workspace_path)
+
+
+def get_data_path(workspace: str | None = None) -> Path:
+    """Return the workspace root used as runtime root."""
+    return get_workspace_path(workspace)
+
+
+def get_data_dir(workspace: str | None = None) -> Path:
+    """Return the workspace root used as runtime root."""
+    return get_workspace_path(workspace)
 
 
 def timestamp() -> str:
@@ -39,6 +57,32 @@ _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
 def safe_filename(name: str) -> str:
     """Replace unsafe path characters with underscores."""
     return _UNSAFE_CHARS.sub("_", name).strip()
+
+
+def split_message(content: str, max_len: int = 2000) -> list[str]:
+    """Split content into chunks within max_len, preferring line breaks."""
+    if not content:
+        return []
+    if len(content) <= max_len:
+        return [content]
+
+    chunks: list[str] = []
+    remaining = content
+    while remaining:
+        if len(remaining) <= max_len:
+            chunks.append(remaining)
+            break
+
+        cut = remaining[:max_len]
+        pos = cut.rfind("\n")
+        if pos <= 0:
+            pos = cut.rfind(" ")
+        if pos <= 0:
+            pos = max_len
+        chunks.append(remaining[:pos])
+        remaining = remaining[pos:].lstrip()
+
+    return chunks
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:

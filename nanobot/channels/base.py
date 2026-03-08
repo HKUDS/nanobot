@@ -70,8 +70,11 @@ class BaseChannel(ABC):
         """
         allow_list = getattr(self.config, "allow_from", [])
 
-        # If no allow list, allow everyone
         if not allow_list:
+            logger.warning("{}: allow_from is empty — all access denied", self.name)
+            return False
+
+        if "*" in allow_list:
             return True
 
         sender_str = str(sender_id)
@@ -124,11 +127,11 @@ class BaseChannel(ABC):
             session_key_override=session_key,
         )
 
-        content_preview = msg.content.encode("unicode_escape", "ignore").decode("ascii")
+        content_preview = msg.content
         if len(content_preview) > 240:
             content_preview = f"{content_preview[:240]}..."
         logger.debug(
-            "Inbound normalized [{}] sender={} chat={} session_key={} chars={} media_count={} metadata_keys={} content_esc='{}'",
+            "Inbound normalized [{}] sender={} chat={} session_key={} chars={} media_count={} metadata_keys={} content='{}'",
             self.name,
             msg.sender_id,
             msg.chat_id,

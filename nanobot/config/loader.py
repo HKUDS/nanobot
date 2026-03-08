@@ -1,36 +1,26 @@
 """Configuration loading utilities."""
 
 import json
-import os
 from pathlib import Path
-from typing import Any
 
 from nanobot.config.schema import Config
-from nanobot.utils.helpers import ensure_dir
 
 
-def _apply_env_overrides(config: Config) -> Config:
-    root = os.environ.get("NANOBOT_ROOT", "").strip()
-    if root:
-        config.paths.root = root
-    return config
+# Global variable to store current config path (for multi-instance support)
+_current_config_path: Path | None = None
+
+
+def set_config_path(path: Path) -> None:
+    """Set the current config path (used to derive data directory)."""
+    global _current_config_path
+    _current_config_path = path
 
 
 def get_config_path() -> Path:
-    """Get config path from env override or default root."""
-    explicit = os.environ.get("NANOBOT_CONFIG", "").strip()
-    if explicit:
-        return Path(explicit).expanduser()
-
-    root = os.environ.get("NANOBOT_ROOT", "").strip()
-    root_path = Path(root).expanduser() if root else Path.home() / ".nanobot"
-    return root_path / "config.json"
-
-
-def get_data_dir(config: Config | None = None, config_path: Path | None = None) -> Path:
-    """Get the nanobot instance data directory."""
-    loaded = config or load_config(config_path=config_path)
-    return ensure_dir(loaded.root_path)
+    """Get the configuration file path."""
+    if _current_config_path:
+        return _current_config_path
+    return Path.home() / ".nanobot" / "config.json"
 
 
 def load_config(config_path: Path | None = None) -> Config:
@@ -50,16 +40,12 @@ def load_config(config_path: Path | None = None) -> Config:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             data = _migrate_config(data)
-            config = _apply_env_overrides(Config.model_validate(data))
-            os.environ["NANOBOT_ROOT"] = str(config.root_path)
-            return config
+            return Config.model_validate(data)
         except (json.JSONDecodeError, ValueError) as e:
             print(f"Warning: Failed to load config from {path}: {e}")
             print("Using default configuration.")
 
-    config = _apply_env_overrides(Config())
-    os.environ["NANOBOT_ROOT"] = str(config.root_path)
-    return config
+    return Config()
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
@@ -79,7 +65,7 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def _migrate_config(data: dict[str, Any]) -> dict[str, Any]:
+def _migrate_config(data: dict) -> dict:
     """Migrate old config formats to current."""
     # Move tools.exec.restrictToWorkspace → tools.restrictToWorkspace
     tools = data.get("tools", {})

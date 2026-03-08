@@ -128,6 +128,13 @@ class MemoryStore:
             # Some providers return arguments as a JSON string instead of dict
             if isinstance(args, str):
                 args = json.loads(args)
+            # Some providers return arguments as a list (handle edge case)
+            if isinstance(args, list):
+                if args and isinstance(args[0], dict):
+                    args = args[0]
+                else:
+                    logger.warning("Memory consolidation: unexpected arguments as empty or non-dict list")
+                    return False
             if not isinstance(args, dict):
                 logger.warning("Memory consolidation: unexpected arguments type {}", type(args).__name__)
                 return False
