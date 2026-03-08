@@ -1,0 +1,497 @@
+{
+  "blocks": [
+    {
+      "block_type": 4,
+      "heading2": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "根节点：技能教程"
+            }
+          }
+        ],
+        "style": {}
+      }
+    },
+    {
+      "block_type": 14,
+      "code": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "📚 技能教程 (Skill Tutorials)\n│\n├── 📖 项目概览\n│   ├── 项目简介\n│   ├── 快速开始\n│   ├── 写作规范 v2.0\n│   └── 技能索引 (49个)\n│\n├── 🔵 01. 飞书生态 (15个)\n│   ├── 01-feishu-doc-orchestrator ⭐\n│   ├── 02-feishu-wiki-orchestrator\n│   ├── 03-feishu-chat-extractor\n│   ├── 04-feishu-chat-monitor\n│   ├── 05-feishu-pdf-downloader\n│   ├── 06-feishu-doc-perm\n│   ├── 07-feishu-voice-sender\n│   ├── 08-feishu-video-sender\n│   ├── 09-feishu-card-parser\n│   ├── 10-feishu-group-welcome\n│   ├── 11-feishu-message-recall\n│   ├── 12-feishu-doc-converter\n│   ├── 13-feishu-doc-creator\n│   ├── 14-feishu-doc\n│   └── 15-feishu-bitable-field\n│\n├── 🎨 02. 内容生成 (10个)\n│   ├── 01-video-generation\n│   ├── 02-zhuoran-selfie\n│   ├── 03-zhuoran-video-selfie\n│   ├── 04-qizhuo-selfie\n│   ├── 05-clawra-selfie\n│   ├── 06-clawra-video-selfie\n│   ├── 07-baoyu-slide-deck\n│   ├── 08-long-form-writer\n│   ├── 09-infographic-generator\n│   └── 10-md-to-wechat\n│\n├── 📊 03. 数据处理 (8个)\n│   ├── 01-document-hub\n│   ├── 02-pdf\n│   ├── 03-image-ocr\n│   ├── 04-content-extractor\n│   ├── 05-wechat-article-fetcher\n│   ├── 06-twitter-scraper\n│   ├── 07-rss-feed\n│   └── 08-logic-validator\n│\n├── 🛠️ 04. 开发工具 (5个)\n│   ├── 01-gh-cli\n│   ├── 02-remotion-best-practices\n│   ├── 03-calendar\n│   ├── 04-find-skills\n│   └── 06-smart-shopping\n│\n├── 🔗 05. 外部集成 (6个)\n│   ├── 01-bright-data\n│   ├── 02-amap-navigator\n│   ├── 03-media_hub\n│   ├── 04-whisper-stt\n│   ├── 05-voice-clone\n│   └── 06-rss-feed\n│\n└── 🤖 06. AI Agent (5个)\n    ├── 01-security-hardening\n    ├── 02-skill-security-audit\n    ├── 03-secure-key-manager\n    ├── 04-security-drill\n    └── 05-logic-validator"
+            }
+          }
+        ],
+        "style": {
+          "language": 1
+        }
+      }
+    },
+    {
+      "block_type": 22,
+      "divider": {}
+    },
+    {
+      "block_type": 4,
+      "heading2": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "节点说明"
+            }
+          }
+        ],
+        "style": {}
+      }
+    },
+    {
+      "block_type": 5,
+      "heading3": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "项目概览"
+            }
+          }
+        ],
+        "style": {}
+      }
+    },
+    {
+      "block_type": 12,
+      "bullet": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "*项目简介: 项目背景、目标、特点",
+              "text_element_style": {
+                "bold": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "block_type": 12,
+      "bullet": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "*快速开始: 5分钟上手教程",
+              "text_element_style": {
+                "bold": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "block_type": 12,
+      "bullet": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "*写作规范 v2.0: ✅检查点、⚠️风险提示、表格转列表等规范",
+              "text_element_style": {
+                "bold": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "block_type": 12,
+      "bullet": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "*技能索引: 49个技能完整清单，含本地路径和使用方式",
+              "text_element_style": {
+                "bold": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "block_type": 5,
+      "heading3": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "分类说明"
+            }
+          }
+        ],
+        "style": {}
+      }
+    },
+    {
+      "type": "table",
+      "data": [
+        [
+          "分类",
+          "数量",
+          "核心功能",
+          "优先级"
+        ],
+        [
+          "飞书生态",
+          "15",
+          "文档/消息/群管理/权限",
+          "P0"
+        ],
+        [
+          "内容生成",
+          "10",
+          "视频/图片/写作/幻灯片",
+          "P1"
+        ],
+        [
+          "数据处理",
+          "8",
+          "PDF/OCR/爬取/提取",
+          "P1"
+        ],
+        [
+          "开发工具",
+          "5",
+          "GitHub/日历/技能发现",
+          "P2"
+        ],
+        [
+          "外部集成",
+          "6",
+          "地图/语音/RSS/爬虫",
+          "P2"
+        ],
+        [
+          "AI Agent",
+          "5",
+          "安全/审计/密钥管理",
+          "P2"
+        ]
+      ]
+    },
+    {
+      "block_type": 5,
+      "heading3": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "文档状态标记"
+            }
+          }
+        ],
+        "style": {}
+      }
+    },
+    {
+      "block_type": 12,
+      "bullet": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "⭐ 已完成深度教程（符合v2.0规范）"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "block_type": 12,
+      "bullet": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "📝 已创建初稿"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "block_type": 12,
+      "bullet": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "⏳ 待创建"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "block_type": 22,
+      "divider": {}
+    },
+    {
+      "block_type": 4,
+      "heading2": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "创建计划"
+            }
+          }
+        ],
+        "style": {}
+      }
+    },
+    {
+      "block_type": 5,
+      "heading3": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "第一阶段（本周）"
+            }
+          }
+        ],
+        "style": {}
+      }
+    },
+    {
+      "block_type": 17,
+      "todo": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "创建知识库根节点\"技能教程\""
+            }
+          }
+        ],
+        "style": {}
+      },
+      "done": false
+    },
+    {
+      "block_type": 17,
+      "todo": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "创建\"项目概览\"子节点"
+            }
+          }
+        ],
+        "style": {}
+      },
+      "done": false
+    },
+    {
+      "block_type": 17,
+      "todo": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "发布 feishu-doc-orchestrator 深度教程 ⭐"
+            }
+          }
+        ],
+        "style": {}
+      },
+      "done": false
+    },
+    {
+      "block_type": 5,
+      "heading3": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "第二阶段（下周）"
+            }
+          }
+        ],
+        "style": {}
+      }
+    },
+    {
+      "block_type": 17,
+      "todo": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "完成飞书生态分类（15个）"
+            }
+          }
+        ],
+        "style": {}
+      },
+      "done": false
+    },
+    {
+      "block_type": 17,
+      "todo": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "完成内容生成分类（10个）"
+            }
+          }
+        ],
+        "style": {}
+      },
+      "done": false
+    },
+    {
+      "block_type": 5,
+      "heading3": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "第三阶段（后续）"
+            }
+          }
+        ],
+        "style": {}
+      }
+    },
+    {
+      "block_type": 17,
+      "todo": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "完成其他分类（19个）"
+            }
+          }
+        ],
+        "style": {}
+      },
+      "done": false
+    },
+    {
+      "block_type": 17,
+      "todo": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "统一审核和优化"
+            }
+          }
+        ],
+        "style": {}
+      },
+      "done": false
+    },
+    {
+      "block_type": 22,
+      "divider": {}
+    },
+    {
+      "block_type": 4,
+      "heading2": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "GitHub 仓库"
+            }
+          }
+        ],
+        "style": {}
+      }
+    },
+    {
+      "block_type": 2,
+      "text": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "主仓库",
+              "text_element_style": {
+                "bold": true
+              }
+            }
+          },
+          {
+            "text_run": {
+              "content": ": https://github.com/wulaosiji/skills.git"
+            }
+          }
+        ],
+        "style": {}
+      }
+    },
+    {
+      "block_type": 2,
+      "text": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "本地路径",
+              "text_element_style": {
+                "bold": true
+              }
+            }
+          },
+          {
+            "text_run": {
+              "content": ": `01-Projects/skill-tutorials/`"
+            }
+          }
+        ],
+        "style": {}
+      }
+    },
+    {
+      "block_type": 22,
+      "divider": {}
+    },
+    {
+      "block_type": 2,
+      "text": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "创建时间: 2026-02-28"
+            }
+          }
+        ],
+        "style": {}
+      }
+    },
+    {
+      "block_type": 2,
+      "text": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "技能总数: 49个"
+            }
+          }
+        ],
+        "style": {}
+      }
+    },
+    {
+      "block_type": 2,
+      "text": {
+        "elements": [
+          {
+            "text_run": {
+              "content": "规范版本: v2.0"
+            }
+          }
+        ],
+        "style": {}
+      }
+    }
+  ],
+  "metadata": {
+    "heading_count": 10,
+    "table_count": 1,
+    "list_count": 7,
+    "code_count": 1,
+    "callout_count": 0,
+    "todo_count": 7,
+    "image_count": 0,
+    "total_blocks": 35
+  }
+}

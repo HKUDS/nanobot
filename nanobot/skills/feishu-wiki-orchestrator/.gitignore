@@ -1,0 +1,51 @@
+# 飞书配置文件（包含敏感信息）
+feishu-config.env
+feishu-token.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 虚拟环境
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 日志和数据文件
+CREATED_DOCS.md
+created_docs.json
+playwright_data/
+workflow/
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 测试文件
+test_output/
+*.log

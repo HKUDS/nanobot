@@ -1,0 +1,64 @@
+# 高密度信息大图生成结果
+# 主题: 奇卓 - 守护型 AI 助手与技能全景
+# 风格: 坐标蓝图·波普实验室
+# 生成时间: 2026-02-25T11:41:14.604324
+============================================================
+
+## 视觉坐标系统
+
+图片1 → 核心主题：奇卓 - 守护型 AI 助手与技能全景
+├─ 坐标 A-01：核心对比（品牌阵列/对比区）
+├─ 坐标 B-05：关键参数（核心参数/刻度区）
+├─ 坐标 C-12：结构拆解（结构拆解/细节图）
+├─ 坐标 D-03：流程步骤（流程/时间轴区）
+├─ 坐标 E-08：实战案例（案例/应用场景区）
+├─ 坐标 F-11：行动指南（总结/行动指南区）
+└─ 右下角小字：模板by WaytoAGI
+
+## 生图 Prompt
+
+```
+Create a high-density, professional information design infographic for Xiaohongshu about「奇卓 - 守护型 AI 助手与技能全景」.
+
+=== CRITICAL STYLE REQUIREMENTS (SYSTEMIC & EXPERIMENTAL) ===
+
+【COLOR PALETTE - 坐标蓝图·波普实验室】
+- BACKGROUND: #F2F2F2
+- SYSTEMIC BASE: #B8D8BE for major functional blocks
+- HIGH-ALERT ACCENT: #E91E63 for critical warnings
+- MARKER HIGHLIGHTS: #FFF200 for keywords
+- LINE ART: #2D2926 for technical grids
+
+【TYPOGRAPHY - DATA VISUALIZATION】
+- TITLES: Bold, condensed sans-serif (Oswald/Bebas Neue style)
+- BODY: Clean, technical sans-serif (Roboto/Inter style)
+- DATA: Monospaced for numbers (JetBrains Mono)
+
+【COMPOSITION - VISUAL COORDINATES】
+- Strict Grid System: 12-column blueprint-grid logic
+- Module Isolation: Each coordinate module visually distinct
+- Connecting Lines: Thin, dashed technical lines
+- Whitespace: Engineered negative space with blueprint lines
+
+【CONTENT LAYOUT - HIGH DENSITY】
+- No Paragraphs: All text in bullet points, diagrams, or short labels
+- Data Hierarchy: Font size/weight shows importance
+- Corner Details: "FIG.1-A", "SCALE 1:50", "CONFIDENTIAL"
+
+【FINAL OUTPUT REQUIREMENTS】
+- Aspect Ratio: 2:3 (Portrait)
+- Resolution: Minimum 2K (2048px width)
+- Style: "Infographic," "Technical Illustration," "Blueprint," "Pop Art"
+- Mood: "Precise," "Analytical," "Bold," "Experimental"
+
+CONTENT TO VISUALIZE:
+图片1 → 核心主题：奇卓 - 守护型 AI 助手与技能全景
+├─ 坐标 A-01：核心对比（品牌阵列/对比区）
+├─ 坐标 B-05：关键参数（核心参数/刻度区）
+├─ 坐标 C-12：结构拆解（结构拆解/细节图）
+├─ 坐标 D-03：流程步骤（流程/时间轴区）
+├─ 坐标 E-08：实战案例（案例/应用场景区）
+├─ 坐标 F-11：行动指南（总结/行动指南区）
+└─ 右下角小字：模板by WaytoAGI
+
+```

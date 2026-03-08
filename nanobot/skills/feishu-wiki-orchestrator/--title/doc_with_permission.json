@@ -1,0 +1,12 @@
+{
+  "title": "~/.nanobot/workspace/01-Projects/daily-report/02-output/AI日报_2026-02-23_晚报.md",
+  "created_at": "2026-02-23T20:03:43.310800",
+  "permission": {
+    "collaborator_added": false,
+    "user_has_full_control": false,
+    "collaborator_id": "ou_5f3a4a920dc39a8d1835fd0085afef50"
+  },
+  "errors": [
+    "创建文档失败: HTTPSConnectionPool(host='open.feishu.cn', port=443): Max retries exceeded with url: /open-apis/auth/v3/tenant_access_token/internal (Caused by SSLError(SSLEOFError(8, 'EOF occurred in violation of protocol (_ssl.c:1129)')))"
+  ]
+}

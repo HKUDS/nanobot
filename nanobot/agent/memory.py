@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from nanobot.utils.helpers import ensure_dir
 
 if TYPE_CHECKING:
+    from nanobot.openviking.client import VikingClient
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session
 
@@ -65,6 +66,28 @@ class MemoryStore:
     def get_memory_context(self) -> str:
         long_term = self.read_long_term()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
+
+    # ------------------------------------------------------------------
+    # OpenViking semantic memory
+    # ------------------------------------------------------------------
+
+    async def get_viking_memory_context(
+        self, current_message: str, viking_client: VikingClient,
+    ) -> str:
+        """Fetch relevant memories from OpenViking for the current message."""
+        try:
+            return await viking_client.get_viking_memory_context(current_message)
+        except Exception as e:
+            logger.warning("OpenViking memory context failed: {}", e)
+            return ""
+
+    async def get_viking_user_profile(self, viking_client: VikingClient) -> str:
+        """Fetch user profile from OpenViking."""
+        try:
+            return await viking_client.get_viking_user_profile()
+        except Exception as e:
+            logger.warning("OpenViking user profile failed: {}", e)
+            return ""
 
     async def consolidate(
         self,

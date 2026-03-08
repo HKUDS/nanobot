@@ -1,0 +1,19 @@
+{
+  "_comment": "OCR Skill 配置文件",
+  
+  "ocr_engine": "paddle",
+  "_ocr_engine_help": "可选: paddle(本地/免费) | baidu(云端/需申请) | tencent(云端/待实现)",
+  
+  "language": "ch_sim",
+  "_language_help": "可选: ch_sim(简体中文) | ch_tra(繁体中文) | en(英文) | japan(日文) | korean(韩文)",
+  
+  "save_temp": false,
+  "_save_temp_help": "是否保存OCR临时文件",
+  
+  "baidu_api_key": "",
+  "baidu_secret_key": "",
+  "_baidu_help": "百度OCR API密钥，申请地址: https://cloud.baidu.com/product/ocr",
+  
+  "code_detection": true,
+  "_code_detection_help": "是否自动检测并格式化代码截图"
+}
