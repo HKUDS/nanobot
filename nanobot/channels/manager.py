@@ -216,6 +216,9 @@ class ChannelManager:
                 )
 
                 if msg.metadata.get("_progress"):
+                    # When streaming is active, drafts handle live updates — skip progress messages
+                    if msg.metadata.get("_on_stream"):
+                        continue
                     if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
                         continue
                     if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:

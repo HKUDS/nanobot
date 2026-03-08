@@ -237,11 +237,6 @@ class TelegramChannel(BaseChannel):
             logger.error("Invalid chat_id: {}", msg.chat_id)
             return
 
-        # Clear any active streaming draft before sending the final message
-        on_stream = msg.metadata.get("_on_stream")
-        if on_stream and hasattr(on_stream, "draft_id"):
-            await self.send_draft(on_stream.chat_id, " ", on_stream.draft_id)
-
         reply_params = None
         if self.config.reply_to_message:
             reply_to_message_id = msg.metadata.get("message_id")
