@@ -1,10 +1,11 @@
 [project]
-name = "nanobot-ai"
+name = "nanobot-ai-tng"
 version = "0.1.4.post4"
-description = "A lightweight personal AI assistant framework"
+description = "A lightweight personal AI assistant framework (fork with Alexa, additional providers, and subagent improvements)"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
+    {name = "David Markey"},
     {name = "nanobot contributors"}
 ]
 keywords = ["ai", "agent", "chatbot"]

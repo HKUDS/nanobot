@@ -1,9 +1,10 @@
 <div align="center">
   <img src="nanobot_logo.png" alt="nanobot" width="500">
-  <h1>nanobot: Ultra-Lightweight Personal AI Assistant</h1>
+  <h1>nanobot-tng: Ultra-Lightweight Personal AI Assistant</h1>
+  <p><em>A soft fork of <a href="https://github.com/HKUDS/nanobot">HKUDS/nanobot</a> — tracking upstream and adding features until they are merged back.</em></p>
   <p>
-    <a href="https://pypi.org/project/nanobot-ai/"><img src="https://img.shields.io/pypi/v/nanobot-ai" alt="PyPI"></a>
-    <a href="https://pepy.tech/project/nanobot-ai"><img src="https://static.pepy.tech/badge/nanobot-ai" alt="Downloads"></a>
+    <a href="https://pypi.org/project/nanobot-ai-tng/"><img src="https://img.shields.io/pypi/v/nanobot-ai-tng" alt="PyPI"></a>
+    <a href="https://pepy.tech/project/nanobot-ai-tng"><img src="https://static.pepy.tech/badge/nanobot-ai-tng" alt="Downloads"></a>
     <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
     <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/Feishu-Group-E9DBFC?style=flat&logo=feishu&logoColor=white" alt="Feishu"></a>
@@ -17,6 +18,36 @@
 ⚡️ Delivers core agent functionality with **99% fewer lines of code** than OpenClaw.
 
 📏 Real-time line count: run `bash core_agent_lines.sh` to verify anytime.
+
+## 🍴 Fork Changes
+
+This is a fork of [HKUDS/nanobot](https://github.com/HKUDS/nanobot) with the following additions:
+
+### Amazon Alexa Channel
+- New channel: Amazon Alexa Custom Skill integration via the nanobot gateway
+- Voice channel hint injection for faster, more concise LLM responses
+- `Dialog.ElicitSlot` for FallbackIntent to recover unmatched utterances
+- Includes en-GB and en-US interaction models, skill templates, and a deployment script (`alexa-skill/`)
+
+### Additional Provider Gateways
+- **Fireworks AI** — gateway with prompt caching support
+- **Parasail** — gateway with prompt caching support
+
+### Subagent Improvements
+- Subagent iteration exhaustion is now reported as a **failure with a progress summary** (what was done, what remains) instead of silently succeeding
+- Configurable `subagentMaxIterations` setting under `agents.defaults` (default: 15)
+- Parent MCP tools are automatically shared with subagents
+
+### Prompt Caching
+- `x-session-affinity` header on the custom provider for backend cache locality
+- DEBUG-level logging of prompt cache hit/miss statistics
+
+### Configuration & Extensibility
+- `tools.exec.enabled` config flag (default: `true`) to disable shell/exec access entirely
+- Webhook endpoint (`POST /notify`) for ingesting external events into the message bus
+- Gateway config supports `webhookSecret`, `webhookChannel`, and `webhookChatId`
+
+---
 
 ## 📢 News
 
@@ -103,10 +134,22 @@
 
 ## 📦 Install
 
+**Install from PyPI** (TNG fork)
+
+```bash
+pip install nanobot-ai-tng
+```
+
+**Install with [uv](https://github.com/astral-sh/uv)**
+
+```bash
+uv tool install nanobot-ai-tng
+```
+
 **Install from source** (latest features, recommended for development)
 
 ```bash
-git clone https://github.com/HKUDS/nanobot.git
+git clone https://github.com/dmarkey/nanobot.git
 cd nanobot
 pip install -e .
 ```
@@ -114,13 +157,13 @@ pip install -e .
 **Install with [uv](https://github.com/astral-sh/uv)** (stable, fast)
 
 ```bash
-uv tool install nanobot-ai
+uv tool install nanobot-ai-tng
 ```
 
 **Install from PyPI** (stable)
 
 ```bash
-pip install nanobot-ai
+pip install nanobot-ai-tng
 ```
 
 ### Update to latest version
@@ -128,14 +171,14 @@ pip install nanobot-ai
 **PyPI / pip**
 
 ```bash
-pip install -U nanobot-ai
+pip install -U nanobot-ai-tng
 nanobot --version
 ```
 
 **uv**
 
 ```bash
-uv tool upgrade nanobot-ai
+uv tool upgrade nanobot-ai-tng
 nanobot --version
 ```
 
@@ -208,6 +251,7 @@ Connect nanobot to your favorite chat platform.
 | **Slack** | Bot token + App-Level token |
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
+| **Alexa** | Alexa Developer account + skill deployment (see `alexa-skill/`) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -356,7 +400,7 @@ nanobot gateway
 Install Matrix dependencies first:
 
 ```bash
-pip install nanobot-ai[matrix]
+pip install nanobot-ai-tng[matrix]
 ```
 
 **1. Create/choose a Matrix account**
@@ -721,6 +765,8 @@ Config file: `~/.nanobot/config.json`
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
+| `fireworks` | LLM (Fireworks AI gateway) | [fireworks.ai](https://fireworks.ai) |
+| `parasail` | LLM (Parasail gateway) | [parasail.io](https://parasail.io) |
 
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>
