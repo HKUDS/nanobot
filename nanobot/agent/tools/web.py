@@ -45,7 +45,7 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
+    """Search the web using SearXNG (self-hosted) or Brave Search API as fallback."""
 
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
@@ -58,33 +58,63 @@ class WebSearchTool(Tool):
         "required": ["query"]
     }
 
-    def __init__(self, api_key: str | None = None, max_results: int = 5, proxy: str | None = None):
+    def __init__(self, api_key: str | None = None, max_results: int = 5, proxy: str | None = None,
+                 searxng_url: str | None = None):
         self._init_api_key = api_key
         self.max_results = max_results
         self.proxy = proxy
+        self.searxng_url = searxng_url or os.environ.get("SEARXNG_URL", "")
 
     @property
     def api_key(self) -> str:
-        """Resolve API key at call time so env/config changes are picked up."""
         return self._init_api_key or os.environ.get("BRAVE_API_KEY", "")
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        if not self.api_key:
-            return (
-                "Error: Brave Search API key not configured. Set it in "
-                "~/.nanobot/config.json under tools.web.search.apiKey "
-                "(or export BRAVE_API_KEY), then restart the gateway."
-            )
+        n = min(max(count or self.max_results, 1), 10)
+        if self.searxng_url:
+            return await self._searxng(query, n)
+        if self.api_key:
+            return await self._brave(query, n)
+        return (
+            "Error: No search backend configured. Set tools.web.search.searxngUrl in "
+            "~/.nanobot/config.json (e.g. 'http://localhost:8888') or provide a Brave API key."
+        )
 
+    async def _searxng(self, query: str, n: int) -> str:
         try:
-            n = min(max(count or self.max_results, 1), 10)
-            logger.debug("WebSearch: {}", "proxy enabled" if self.proxy else "direct connection")
+            logger.debug("WebSearch via SearXNG: {}", self.searxng_url)
+            async with httpx.AsyncClient(proxy=self.proxy) as client:
+                r = await client.get(
+                    f"{self.searxng_url.rstrip('/')}/search",
+                    params={"q": query, "format": "json", "pageno": 1},
+                    headers={"Accept": "application/json"},
+                    timeout=10.0,
+                )
+                r.raise_for_status()
+
+            results = r.json().get("results", [])[:n]
+            if not results:
+                return f"No results for: {query}"
+
+            lines = [f"Results for: {query}\n"]
+            for i, item in enumerate(results, 1):
+                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
+                if snippet := item.get("content"):
+                    lines.append(f"   {snippet}")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error("SearXNG search error: {}", e)
+            return f"Error: {e}"
+
+    async def _brave(self, query: str, n: int) -> str:
+        try:
+            logger.debug("WebSearch via Brave: {}", "proxy enabled" if self.proxy else "direct")
             async with httpx.AsyncClient(proxy=self.proxy) as client:
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
                     params={"q": query, "count": n},
                     headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
-                    timeout=10.0
+                    timeout=10.0,
                 )
                 r.raise_for_status()
 
@@ -116,12 +146,11 @@ class WebFetchTool(Tool):
         "properties": {
             "url": {"type": "string", "description": "URL to fetch"},
             "extractMode": {"type": "string", "enum": ["markdown", "text"], "default": "markdown"},
-            "maxChars": {"type": "integer", "minimum": 100}
         },
         "required": ["url"]
     }
 
-    def __init__(self, max_chars: int = 50000, proxy: str | None = None):
+    def __init__(self, max_chars: int = 12000, proxy: str | None = None):
         self.max_chars = max_chars
         self.proxy = proxy
 

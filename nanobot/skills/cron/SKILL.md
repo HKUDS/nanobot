@@ -1,6 +1,7 @@
 ---
 name: cron
 description: Schedule reminders and recurring tasks.
+always: true
 ---
 
 # Cron
@@ -25,9 +26,10 @@ Dynamic task (agent executes each time):
 cron(action="add", message="Check HKUDS/nanobot GitHub stars and report", every_seconds=600)
 ```
 
-One-time scheduled task (compute ISO datetime from current time):
+One-time scheduled task (use relative time — no need to know current time):
 ```
-cron(action="add", message="Remind me about the meeting", at="<ISO datetime>")
+cron(action="add", message="Remind me about the meeting", at="in 30 minutes")
+cron(action="add", message="Daily standup", at="in 8 hours")
 ```
 
 Timezone-aware cron:
@@ -50,7 +52,9 @@ cron(action="remove", job_id="abc123")
 | every day at 8am | cron_expr: "0 8 * * *" |
 | weekdays at 5pm | cron_expr: "0 17 * * 1-5" |
 | 9am Vancouver time daily | cron_expr: "0 9 * * *", tz: "America/Vancouver" |
-| at a specific time | at: ISO datetime string (compute from current time) |
+| in 5 minutes | at: "in 5 minutes" |
+| in 2 hours | at: "in 2 hours" |
+| at a specific time | at: "2026-03-07T21:30:00" |
 
 ## Timezone
 

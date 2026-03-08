@@ -16,6 +16,7 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.sysmon import SysmonTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -59,6 +60,7 @@ class AgentLoop:
         reasoning_effort: str | None = None,
         brave_api_key: str | None = None,
         web_proxy: str | None = None,
+        searxng_url: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
@@ -79,6 +81,7 @@ class AgentLoop:
         self.reasoning_effort = reasoning_effort
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
+        self.searxng_url = searxng_url
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -96,6 +99,7 @@ class AgentLoop:
             reasoning_effort=reasoning_effort,
             brave_api_key=brave_api_key,
             web_proxy=web_proxy,
+            searxng_url=searxng_url,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
@@ -123,8 +127,9 @@ class AgentLoop:
             restrict_to_workspace=self.restrict_to_workspace,
             path_append=self.exec_config.path_append,
         ))
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
+        self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy, searxng_url=self.searxng_url))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
+        self.tools.register(SysmonTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
@@ -218,8 +223,11 @@ class AgentLoop:
                     }
                     for tc in response.tool_calls
                 ]
+                suppress = getattr(self.provider, "suppress_tools_param", False)
+                # Strip think blocks before storing — they balloon context across tool iterations
+                asst_content = self._strip_think(response.content) or ("..." if suppress else None)
                 messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts,
+                    messages, asst_content, None if suppress else tool_call_dicts,
                     reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
@@ -229,9 +237,13 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
-                    )
+                    if getattr(self.provider, "suppress_tools_param", False):
+                        # No tool role messages — feed result back as a user message
+                        messages.append({"role": "user", "content": f"[Tool result: {tool_call.name}] {result}"})
+                    else:
+                        messages = self.context.add_tool_result(
+                            messages, tool_call.id, tool_call.name, result
+                        )
             else:
                 clean = self._strip_think(response.content)
                 # Don't persist error responses to session history — they can

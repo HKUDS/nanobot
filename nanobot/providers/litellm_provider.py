@@ -40,10 +40,12 @@ class LiteLLMProvider(LLMProvider):
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
+        suppress_tools_param: bool = False,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self.suppress_tools_param = suppress_tools_param
 
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -265,7 +267,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs["reasoning_effort"] = reasoning_effort
             kwargs["drop_params"] = True
         
-        if tools:
+        if tools and not self.suppress_tools_param:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
@@ -315,6 +317,11 @@ class LiteLLMProvider(LLMProvider):
                 arguments=args,
             ))
 
+        # Fallback: some models (e.g. Qwen via Ollama/vLLM) embed tool-call JSON
+        # in the text content instead of the structured tool_calls field.
+        if not tool_calls and content:
+            tool_calls, content = self._extract_text_tool_calls(content)
+
         usage = {}
         if hasattr(response, "usage") and response.usage:
             usage = {
@@ -334,6 +341,68 @@ class LiteLLMProvider(LLMProvider):
             reasoning_content=reasoning_content,
             thinking_blocks=thinking_blocks,
         )
+
+    @staticmethod
+    def _extract_text_tool_calls(content: str) -> tuple[list[ToolCallRequest], str | None]:
+        """Parse tool calls embedded as JSON or XML in text content.
+
+        Returns (tool_calls, remaining_content). If the entire content is a
+        tool-call envelope the remaining content is set to None so the agent
+        loop doesn't forward raw JSON/XML to the user.
+        """
+        import re
+
+        # Try XML format: <tool_call><function=name><parameter=key>value</parameter>...</function></tool_call>
+        # Model may omit closing </function> tag, so match up to </tool_call> or end of string.
+        xml_match = re.search(r"<tool_call>", content)
+        if xml_match:
+            calls = []
+            xml_body = content[xml_match.start():]
+            for fn_match in re.finditer(
+                r"<function=(\w+)>(.*?)(?:</function>|</tool_call>|\Z)",
+                xml_body,
+                re.DOTALL,
+            ):
+                name = fn_match.group(1)
+                body = fn_match.group(2)
+                arguments = {}
+                for param in re.finditer(r"<?parameter=(\w+)>(.*?)</parameter>", body, re.DOTALL):
+                    arguments[param.group(1)] = param.group(2).strip()
+                if arguments:
+                    calls.append(ToolCallRequest(id=_short_tool_id(), name=name, arguments=arguments))
+            if calls:
+                logger.info("_parse_response: extracted {} XML-embedded tool call(s): {}",
+                            len(calls), [c.name for c in calls])
+                preamble = content[:xml_match.start()].strip() or None
+                return calls, preamble
+
+        # Fall back to JSON format
+        match = re.search(r"[{\[]", content)
+        if not match:
+            return [], content
+        json_start = match.start()
+        candidate = content[json_start:].strip()
+        try:
+            parsed = json_repair.loads(candidate)
+        except Exception:
+            return [], content
+        candidates = parsed if isinstance(parsed, list) else [parsed]
+        calls = []
+        for obj in candidates:
+            if (isinstance(obj, dict)
+                    and isinstance(obj.get("name"), str)
+                    and isinstance(obj.get("arguments"), dict)):
+                calls.append(ToolCallRequest(
+                    id=_short_tool_id(),
+                    name=obj["name"],
+                    arguments=obj["arguments"],
+                ))
+        if calls:
+            logger.info("_parse_response: extracted {} text-embedded tool call(s): {}",
+                        len(calls), [c.name for c in calls])
+            preamble = content[:json_start].strip() or None
+            return calls, preamble
+        return [], content
 
     def get_default_model(self) -> str:
         """Get the default model."""

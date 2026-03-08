@@ -63,7 +63,7 @@ class CronTool(Tool):
                 },
                 "at": {
                     "type": "string",
-                    "description": "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00')",
+                    "description": "One-time execution time. Use relative (e.g. 'in 5 minutes', 'in 2 hours', 'in 1 day') or ISO datetime (e.g. '2026-02-12T10:30:00').",
                 },
                 "job_id": {"type": "string", "description": "Job ID (for remove)"},
             },
@@ -120,12 +120,11 @@ class CronTool(Tool):
         elif cron_expr:
             schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz)
         elif at:
-            from datetime import datetime
+            from datetime import datetime, timezone
 
-            try:
-                dt = datetime.fromisoformat(at)
-            except ValueError:
-                return f"Error: invalid ISO datetime format '{at}'. Expected format: YYYY-MM-DDTHH:MM:SS"
+            dt = self._parse_at(at)
+            if dt is None:
+                return f"Error: invalid 'at' value '{at}'. Use ISO datetime (2026-03-07T21:30:00) or relative time (in 5 minutes, in 2 hours, in 1 day)."
             at_ms = int(dt.timestamp() * 1000)
             schedule = CronSchedule(kind="at", at_ms=at_ms)
             delete_after = True
@@ -149,6 +148,28 @@ class CronTool(Tool):
             return "No scheduled jobs."
         lines = [f"- {j.name} (id: {j.id}, {j.schedule.kind})" for j in jobs]
         return "Scheduled jobs:\n" + "\n".join(lines)
+
+    @staticmethod
+    def _parse_at(at: str):
+        """Parse ISO datetime or relative time string like 'in 5 minutes', 'in 2 hours', 'in 1 day'."""
+        import re
+        from datetime import datetime, timedelta, timezone
+
+        # Try ISO first
+        try:
+            return datetime.fromisoformat(at)
+        except ValueError:
+            pass
+
+        # Try relative: "in N minutes/hours/days/seconds"
+        m = re.match(r"in\s+(\d+)\s+(second|minute|hour|day)s?", at.strip(), re.I)
+        if m:
+            n, unit = int(m.group(1)), m.group(2).lower()
+            delta = {"second": timedelta(seconds=n), "minute": timedelta(minutes=n),
+                     "hour": timedelta(hours=n), "day": timedelta(days=n)}[unit]
+            return datetime.now(timezone.utc) + delta
+
+        return None
 
     def _remove_job(self, job_id: str | None) -> str:
         if not job_id:

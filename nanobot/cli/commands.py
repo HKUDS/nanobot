@@ -261,6 +261,7 @@ def _make_provider(config: Config):
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=provider_name,
+        suppress_tools_param=p.suppress_tools_param if p else False,
     )
 
 
@@ -334,6 +335,7 @@ def gateway(
         reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
         web_proxy=config.tools.web.proxy or None,
+        searxng_url=config.tools.web.search.searxng_url or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -519,6 +521,7 @@ def agent(
         reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
         web_proxy=config.tools.web.proxy or None,
+        searxng_url=config.tools.web.search.searxng_url or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,

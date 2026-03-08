@@ -292,6 +292,8 @@ class DiscordChannel(BaseChannel):
         media_paths: list[str] = []
         media_dir = get_media_dir("discord")
 
+        _TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".toml", ".log"}
+
         for attachment in payload.get("attachments") or []:
             url = attachment.get("url")
             filename = attachment.get("filename") or "attachment"
@@ -302,13 +304,19 @@ class DiscordChannel(BaseChannel):
                 content_parts.append(f"[attachment: {filename} - too large]")
                 continue
             try:
-                media_dir.mkdir(parents=True, exist_ok=True)
-                file_path = media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
                 resp = await self._http.get(url)
                 resp.raise_for_status()
-                file_path.write_bytes(resp.content)
-                media_paths.append(str(file_path))
-                content_parts.append(f"[attachment: {file_path}]")
+                ext = Path(filename).suffix.lower()
+                if ext in _TEXT_EXTENSIONS:
+                    # Inline text file content directly into the message
+                    text = resp.content.decode("utf-8", errors="replace")
+                    content_parts.append(f"[file: {filename}]\n{text}\n[end of file]")
+                else:
+                    media_dir.mkdir(parents=True, exist_ok=True)
+                    file_path = media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
+                    file_path.write_bytes(resp.content)
+                    media_paths.append(str(file_path))
+                    content_parts.append(f"[attachment: {file_path}]")
             except Exception as e:
                 logger.warning("Failed to download Discord attachment: {}", e)
                 content_parts.append(f"[attachment: {filename} - download failed]")

@@ -49,12 +49,56 @@ class CustomProvider(LLMProvider):
                             arguments=json_repair.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments)
             for tc in (msg.tool_calls or [])
         ]
+        content = msg.content
+        # Fallback: some models (e.g. Qwen via Ollama) output tool-call JSON in
+        # the text content instead of the structured tool_calls field.
+        if not tool_calls and content:
+            tool_calls, content = self._extract_text_tool_calls(content)
         u = response.usage
         return LLMResponse(
-            content=msg.content, tool_calls=tool_calls, finish_reason=choice.finish_reason or "stop",
+            content=content, tool_calls=tool_calls, finish_reason=choice.finish_reason or "stop",
             usage={"prompt_tokens": u.prompt_tokens, "completion_tokens": u.completion_tokens, "total_tokens": u.total_tokens} if u else {},
             reasoning_content=getattr(msg, "reasoning_content", None) or None,
         )
+
+    @staticmethod
+    def _extract_text_tool_calls(content: str) -> tuple[list[ToolCallRequest], str | None]:
+        """Parse tool calls embedded as JSON in text content.
+
+        Returns (tool_calls, remaining_content). If the entire content is a
+        tool-call envelope the remaining content is set to None so the agent
+        loop doesn't forward raw JSON to the user.
+        """
+        import re
+
+        # Find the first { or [ in the content — models sometimes emit preamble text.
+        match = re.search(r"[{\[]", content)
+        if not match:
+            return [], content
+        json_start = match.start()
+        candidate = content[json_start:].strip()
+
+        try:
+            parsed = json_repair.loads(candidate)
+        except Exception:
+            return [], content
+
+        candidates = parsed if isinstance(parsed, list) else [parsed]
+        calls = []
+        for obj in candidates:
+            if (isinstance(obj, dict)
+                    and isinstance(obj.get("name"), str)
+                    and isinstance(obj.get("arguments"), dict)):
+                calls.append(ToolCallRequest(
+                    id=f"txt_{uuid.uuid4().hex[:8]}",
+                    name=obj["name"],
+                    arguments=obj["arguments"],
+                ))
+        if calls:
+            # Keep any preamble text before the JSON as the content, or None if nothing useful.
+            preamble = content[:json_start].strip() or None
+            return calls, preamble
+        return [], content
 
     def get_default_model(self) -> str:
         return self.default_model

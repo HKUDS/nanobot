@@ -245,6 +245,7 @@ class ProviderConfig(Base):
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    suppress_tools_param: bool = False  # Don't send tools in API call; rely on text extraction
 
 
 class ProvidersConfig(Base):
@@ -290,6 +291,7 @@ class WebSearchConfig(Base):
 
     api_key: str = ""  # Brave Search API key
     max_results: int = 5
+    searxng_url: str = ""  # SearXNG instance URL, e.g. "http://localhost:8888"
 
 
 class WebToolsConfig(Base):
