@@ -44,6 +44,8 @@ class FeishuConfig(Base):
     encrypt_key: str = ""  # Encrypt Key for event subscription (optional)
     verification_token: str = ""  # Verification Token for event subscription (optional)
     allow_from: list[str] = Field(default_factory=list)  # Allowed user open_ids
+    group_policy: Literal["open", "mention", "allowlist"] = "open"  # Group chat response policy
+    group_allow_from: list[str] = Field(default_factory=list)  # Allowed group chat_ids (for allowlist policy)
     react_emoji: str = (
         "THUMBSUP"  # Emoji type for message reactions (e.g. THUMBSUP, OK, DONE, SMILE)
     )

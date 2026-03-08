@@ -254,6 +254,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._bot_open_id: str | None = None  # Bot's own open_id for mention detection
 
     @staticmethod
     def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
@@ -337,6 +338,9 @@ class FeishuChannel(BaseChannel):
         logger.info("Feishu bot started with WebSocket long connection")
         logger.info("No public IP required - using WebSocket to receive events")
 
+        # Fetch bot open_id for mention detection (must complete before processing messages)
+        await self._fetch_bot_info()
+
         # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
@@ -351,6 +355,103 @@ class FeishuChannel(BaseChannel):
         """
         self._running = False
         logger.info("Feishu bot stopped")
+
+    # --- Group chat mention filtering ---
+
+    GROUP_MENTION_REQUIRED_TYPES = {"text", "audio", "sticker"}
+
+    async def _fetch_bot_info(self) -> None:
+        """Fetch bot's own open_id via /open-apis/bot/v3/info with retry."""
+        max_retries = 3
+        retry_delay = 2  # seconds
+
+        for attempt in range(max_retries):
+            try:
+                import lark_oapi as lark
+                from lark_oapi import AccessTokenType, HttpMethod
+
+                loop = asyncio.get_event_loop()
+
+                def _get_bot_info():
+                    request = lark.BaseRequest.builder() \
+                        .http_method(HttpMethod.GET) \
+                        .uri("/open-apis/bot/v3/info/") \
+                        .token_types({AccessTokenType.TENANT}) \
+                        .build()
+                    response = self._client.request(request)
+                    if response.success():
+                        import json as _json
+                        data = _json.loads(response.raw.content.decode('utf-8'))
+                        return data.get("bot", {})
+                    else:
+                        logger.warning("Failed to fetch bot info: code={}, msg={}", response.code, response.msg)
+                        return {}
+
+                bot_info = await loop.run_in_executor(None, _get_bot_info)
+                self._bot_open_id = bot_info.get("open_id")
+                if self._bot_open_id:
+                    logger.info("Feishu bot open_id: {}", self._bot_open_id)
+                    return  # Success, exit retry loop
+                else:
+                    logger.warning("Could not determine bot open_id (attempt {}/{})", attempt + 1, max_retries)
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay)
+            except Exception as e:
+                logger.error("Error fetching bot info (attempt {}/{}): {}", attempt + 1, max_retries, e)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+
+        logger.error("Failed to fetch bot open_id after {} attempts, mention filtering will use defensive fallback", max_retries)
+
+    def _is_bot_mentioned(self, message) -> bool:
+        """Check if the bot is mentioned in the message."""
+        if not self._bot_open_id:
+            logger.warning("_is_bot_mentioned: bot_open_id not set, treating as mentioned (defensive fallback)")
+            return True
+
+        # Primary check: mentions array
+        if hasattr(message, "mentions") and message.mentions:
+            for mention in message.mentions:
+                # @All (key "@_all") means all bots should respond
+                if hasattr(mention, "key") and mention.key == "@_all":
+                    logger.debug("_is_bot_mentioned: @All detected, treating as mentioned")
+                    return True
+                if hasattr(mention, "id") and mention.id:
+                    mention_open_id = mention.id.open_id if hasattr(mention.id, "open_id") else str(mention.id)
+                    logger.debug("_is_bot_mentioned: checking mention_open_id={} vs bot_open_id={}", mention_open_id, self._bot_open_id)
+                    if mention_open_id == self._bot_open_id:
+                        return True
+                else:
+                    logger.debug("_is_bot_mentioned: mention has no id attribute")
+
+        # Fallback: check if @_all is in message content
+        if hasattr(message, "content") and message.content:
+            try:
+                import json as _json
+                content_json = _json.loads(message.content)
+                text = content_json.get("text", "")
+                if "@_all" in text:
+                    logger.debug("_is_bot_mentioned: @_all found in content text, treating as mentioned")
+                    return True
+            except (ValueError, TypeError):
+                pass
+
+        logger.debug("_is_bot_mentioned: bot not mentioned")
+        return False
+
+    def _should_respond_in_group(self, message) -> bool:
+        """Check if the bot should respond to a group message based on group_policy."""
+        policy = self.config.group_policy
+        if policy == "open":
+            return True
+        elif policy == "mention":
+            msg_type = message.message_type
+            if msg_type not in self.GROUP_MENTION_REQUIRED_TYPES:
+                return True  # Non-text types (file, image, etc.) always pass
+            return self._is_bot_mentioned(message)
+        elif policy == "allowlist":
+            return message.chat_id in self.config.group_allow_from
+        return True
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
@@ -891,6 +992,17 @@ class FeishuChannel(BaseChannel):
             chat_id = message.chat_id
             chat_type = message.chat_type
             msg_type = message.message_type
+
+            logger.info("Message received: chat_type={}, chat_id={}, msg_type={}, mentions={}, bot_open_id={}",
+                        chat_type, chat_id, msg_type,
+                        [(m.id.open_id if m.id and hasattr(m.id, "open_id") else m.id) for m in (message.mentions or [])],
+                        self._bot_open_id)
+
+            # Group chat mention filtering
+            if chat_type == "group" and not self._should_respond_in_group(message):
+                logger.debug("Skipping group message (policy={}, type={}): chat={}, sender={}",
+                             self.config.group_policy, msg_type, chat_id, sender_id)
+                return
 
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
