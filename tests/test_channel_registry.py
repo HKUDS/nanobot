@@ -26,7 +26,7 @@ def test_channel_spec_and_registry_preserve_registration_order() -> None:
     assert telegram.module_path == "nanobot.channels.telegram"
     assert telegram.class_name == "TelegramChannel"
     assert telegram.display_name == ""
-    assert telegram.extra_kwargs_factory() == {}
+    assert telegram.extra_kwargs_factory(object()) == {}
     assert discord.display_name == "Discord"
     assert registry.get("telegram") is telegram
     assert registry.get("discord") is discord
@@ -34,14 +34,24 @@ def test_channel_spec_and_registry_preserve_registration_order() -> None:
 
 
 def test_channel_spec_supports_extra_kwargs_factory() -> None:
+    config = {
+        "telegram": {"api_base": "https://example.invalid"},
+        "shared": {"proxy": "socks5://127.0.0.1:1080"},
+    }
     spec = ChannelSpec(
-        name="matrix",
-        module_path="nanobot.channels.matrix",
-        class_name="MatrixChannel",
-        extra_kwargs_factory=lambda: {"client_name": "nanobot"},
+        name="telegram",
+        module_path="nanobot.channels.telegram",
+        class_name="TelegramChannel",
+        extra_kwargs_factory=lambda runtime_config: {
+            "api_base": runtime_config["telegram"]["api_base"],
+            "proxy": runtime_config["shared"]["proxy"],
+        },
     )
 
-    assert spec.extra_kwargs_factory() == {"client_name": "nanobot"}
+    assert spec.extra_kwargs_factory(config) == {
+        "api_base": "https://example.invalid",
+        "proxy": "socks5://127.0.0.1:1080",
+    }
 
 
 @pytest.mark.parametrize(

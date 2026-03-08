@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 
-def _default_extra_kwargs_factory() -> dict[str, Any]:
+def _default_extra_kwargs_factory(config: Any) -> dict[str, Any]:
     return {}
 
 
@@ -18,7 +18,7 @@ class ChannelSpec:
     module_path: str
     class_name: str
     display_name: str = ""
-    extra_kwargs_factory: Callable[[], dict[str, Any]] = field(
+    extra_kwargs_factory: Callable[[Any], dict[str, Any]] = field(
         default=_default_extra_kwargs_factory,
     )
 
