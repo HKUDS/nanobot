@@ -43,7 +43,7 @@ This is a fork of [HKUDS/nanobot](https://github.com/HKUDS/nanobot) with the fol
 - DEBUG-level logging of prompt cache hit/miss statistics
 
 ### Configuration & Extensibility
-- `tools.exec.enabled` config flag (default: `true`) to disable shell/exec access entirely
+- `agents.disabled_tools` config list to disable specific tools (e.g. `["exec"]` to remove shell access)
 - Webhook endpoint (`POST /notify`) for ingesting external events into the message bus
 - Gateway config supports `webhookSecret`, `webhookChannel`, and `webhookChatId`
 
