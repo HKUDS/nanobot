@@ -36,7 +36,7 @@ class LLMProvider(ABC):
     Implementations should handle the specifics of each provider's API
     while maintaining a consistent interface.
     """
-    
+
     def __init__(self, api_key: str | None = None, api_base: str | None = None):
         self.api_key = api_key
         self.api_base = api_base
@@ -78,9 +78,29 @@ class LLMProvider(ABC):
                     result.append(clean)
                     continue
 
+            if isinstance(content, dict):
+                clean = dict(msg)
+                clean["content"] = [content]
+                result.append(clean)
+                continue
+
             result.append(msg)
         return result
-    
+
+    @staticmethod
+    def _sanitize_request_messages(
+        messages: list[dict[str, Any]],
+        allowed_keys: frozenset[str],
+    ) -> list[dict[str, Any]]:
+        """Keep only provider-safe message keys and normalize assistant content."""
+        sanitized = []
+        for msg in messages:
+            clean = {k: v for k, v in msg.items() if k in allowed_keys}
+            if clean.get("role") == "assistant" and "content" not in clean:
+                clean["content"] = None
+            sanitized.append(clean)
+        return sanitized
+
     @abstractmethod
     async def chat(
         self,
@@ -105,7 +125,7 @@ class LLMProvider(ABC):
             LLMResponse with content and/or tool calls.
         """
         pass
-    
+
     @abstractmethod
     def get_default_model(self) -> str:
         """Get the default model for this provider."""

@@ -11,7 +11,7 @@ from nanobot.agent.tools.base import Tool
 
 class ExecTool(Tool):
     """Tool to execute shell commands."""
-    
+
     def __init__(
         self,
         timeout: int = 60,
@@ -37,15 +37,15 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
-    
+
     @property
     def name(self) -> str:
         return "exec"
-    
+
     @property
     def description(self) -> str:
         return "Execute a shell command and return its output. Use with caution."
-    
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
