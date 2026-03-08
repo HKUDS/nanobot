@@ -199,8 +199,6 @@ class QQConfig(Base):
     )  # Allowed user openids (empty = public access)
 
 
-
-
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -251,7 +249,9 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
-    azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
+    azure_openai: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -280,7 +280,7 @@ class HeartbeatConfig(Base):
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
-    host: str = "0.0.0.0"
+    host: str = "0.0.0.0"  # noqa: S104 — intentional: bind all interfaces for container/gateway use
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
@@ -366,16 +366,19 @@ class Config(BaseSettings):
         # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
-            if p and model_prefix and normalized_prefix == spec.name:
-                if spec.is_oauth or p.api_key:
-                    return p, spec.name
+            if (
+                p
+                and model_prefix
+                and normalized_prefix == spec.name
+                and (spec.is_oauth or p.api_key)
+            ):
+                return p, spec.name
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
-            if p and any(_kw_matches(kw) for kw in spec.keywords):
-                if spec.is_oauth or p.api_key:
-                    return p, spec.name
+            if p and any(_kw_matches(kw) for kw in spec.keywords) and (spec.is_oauth or p.api_key):
+                return p, spec.name
 
         # Fallback: gateways first, then others (follows registry order)
         # OAuth providers are NOT valid fallbacks — they require explicit model selection

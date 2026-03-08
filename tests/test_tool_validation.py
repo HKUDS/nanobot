@@ -104,8 +104,8 @@ def test_exec_extract_absolute_paths_ignores_relative_posix_segments() -> None:
 def test_exec_extract_absolute_paths_captures_posix_absolute_paths() -> None:
     cmd = "cat /tmp/data.txt > /tmp/out.txt"
     paths = ExecTool._extract_absolute_paths(cmd)
-    assert "/tmp/data.txt" in paths
-    assert "/tmp/out.txt" in paths
+    assert "/tmp/data.txt" in paths  # noqa: S108 — test fixture path
+    assert "/tmp/out.txt" in paths  # noqa: S108 — test fixture path
 
 
 # --- cast_params tests ---

@@ -41,12 +41,10 @@ class BaseChannel(ABC):
         2. Listens for incoming messages
         3. Forwards messages to the bus via _handle_message()
         """
-        pass
 
     @abstractmethod
     async def stop(self) -> None:
         """Stop the channel and clean up resources."""
-        pass
 
     @abstractmethod
     async def send(self, msg: OutboundMessage) -> None:
@@ -56,7 +54,6 @@ class BaseChannel(ABC):
         Args:
             msg: The message to send.
         """
-        pass
 
     def is_allowed(self, sender_id: str) -> bool:
         """Check if *sender_id* is permitted.  Empty list → deny all; ``"*"`` → allow all."""
@@ -94,7 +91,8 @@ class BaseChannel(ABC):
             logger.warning(
                 "Access denied for sender {} on channel {}. "
                 "Add them to allowFrom list in config to grant access.",
-                sender_id, self.name,
+                sender_id,
+                self.name,
             )
             return
 

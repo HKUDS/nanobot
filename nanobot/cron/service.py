@@ -4,9 +4,10 @@ import asyncio
 import json
 import time
 import uuid
+from collections.abc import Callable, Coroutine
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Coroutine
+from typing import Any
 
 from loguru import logger
 
@@ -33,6 +34,7 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
             from zoneinfo import ZoneInfo
 
             from croniter import croniter
+
             # Use caller-provided reference time for deterministic scheduling
             base_time = now_ms / 1000
             tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
@@ -66,7 +68,7 @@ class CronService:
     def __init__(
         self,
         store_path: Path,
-        on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None
+        on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None,
     ):
         self.store_path = store_path
         self.on_job = on_job
@@ -88,9 +90,8 @@ class CronService:
         if self.store_path.exists():
             try:
                 data = json.loads(self.store_path.read_text(encoding="utf-8"))
-                jobs = []
-                for j in data.get("jobs", []):
-                    jobs.append(CronJob(
+                jobs = [
+                    CronJob(
                         id=j["id"],
                         name=j["name"],
                         enabled=j.get("enabled", True),
@@ -117,7 +118,9 @@ class CronService:
                         created_at_ms=j.get("createdAtMs", 0),
                         updated_at_ms=j.get("updatedAtMs", 0),
                         delete_after_run=j.get("deleteAfterRun", False),
-                    ))
+                    )
+                    for j in data.get("jobs", [])
+                ]
                 self._store = CronStore(jobs=jobs)
             except Exception as e:
                 logger.warning("Failed to load cron store: {}", e)
@@ -166,12 +169,12 @@ class CronService:
                     "deleteAfterRun": j.delete_after_run,
                 }
                 for j in self._store.jobs
-            ]
+            ],
         }
 
         self.store_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         self._last_mtime = self.store_path.stat().st_mtime
-    
+
     async def start(self) -> None:
         """Start the cron service."""
         self._running = True
@@ -179,7 +182,9 @@ class CronService:
         self._recompute_next_runs()
         self._save_store()
         self._arm_timer()
-        logger.info("Cron service started with {} jobs", len(self._store.jobs if self._store else []))
+        logger.info(
+            "Cron service started with {} jobs", len(self._store.jobs if self._store else [])
+        )
 
     def stop(self) -> None:
         """Stop the cron service."""
@@ -201,8 +206,9 @@ class CronService:
         """Get the earliest next run time across all jobs."""
         if not self._store:
             return None
-        times = [j.state.next_run_at_ms for j in self._store.jobs
-                 if j.enabled and j.state.next_run_at_ms]
+        times = [
+            j.state.next_run_at_ms for j in self._store.jobs if j.enabled and j.state.next_run_at_ms
+        ]
         return min(times) if times else None
 
     def _arm_timer(self) -> None:
@@ -232,7 +238,8 @@ class CronService:
 
         now = _now_ms()
         due_jobs = [
-            j for j in self._store.jobs
+            j
+            for j in self._store.jobs
             if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
         ]
 
@@ -248,9 +255,8 @@ class CronService:
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
 
         try:
-            response = None
             if self.on_job:
-                response = await self.on_job(job)
+                await self.on_job(job)
 
             job.state.last_status = "ok"
             job.state.last_error = None
@@ -281,7 +287,7 @@ class CronService:
         """List all jobs."""
         store = self._load_store()
         jobs = store.jobs if include_disabled else [j for j in store.jobs if j.enabled]
-        return sorted(jobs, key=lambda j: j.state.next_run_at_ms or float('inf'))
+        return sorted(jobs, key=lambda j: j.state.next_run_at_ms or float("inf"))
 
     def add_job(
         self,

@@ -1,0 +1,68 @@
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  # ── general hygiene ──────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]  # allow custom YAML tags (GitHub Actions)
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: detect-private-key
+      - id: check-case-conflict
+      - id: check-symlinks
+      - id: check-executables-have-shebangs
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: no-commit-to-branch
+        args: [--branch=main]
+
+  # ── Python linting & formatting ──────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.4
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  # ── security: secrets detection ──────────────────────────────────
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+        exclude: (\.lock|\.svg|\.png|\.jpg|\.gif)$
+
+  # ── security: bandit ─────────────────────────────────────────────
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.3
+    hooks:
+      - id: bandit
+        args: [-c, pyproject.toml, -r]
+        additional_dependencies: ["bandit[toml]"]
+        files: ^nanobot/
+
+  # ── pre-push: full test + typecheck ──────────────────────────────
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (pre-push)
+        entry: uv run pytest --tb=short -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+      - id: typecheck
+        name: type check (pre-push)
+        entry: uv run ty check
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

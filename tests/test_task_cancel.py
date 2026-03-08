@@ -19,9 +19,11 @@ def _make_loop():
     workspace = MagicMock()
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
+    with (
+        patch("nanobot.agent.loop.ContextBuilder"),
+        patch("nanobot.agent.loop.SessionManager"),
+        patch("nanobot.agent.loop.SubagentManager") as MockSubMgr,  # noqa: N806
+    ):
         MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
     return loop, bus
@@ -107,7 +109,7 @@ class TestDispatch:
     async def test_processing_lock_serializes(self):
         from nanobot.bus.events import InboundMessage, OutboundMessage
 
-        loop, bus = _make_loop()
+        loop, _bus = _make_loop()
         order = []
 
         async def mock_process(m, **kwargs):

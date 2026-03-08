@@ -37,7 +37,7 @@ class ToolRegistry:
 
     async def execute(self, name: str, params: dict[str, Any]) -> str:
         """Execute a tool by name with given parameters."""
-        _HINT = "\n\n[Analyze the error above and try a different approach.]"
+        _HINT = "\n\n[Analyze the error above and try a different approach.]"  # noqa: N806
 
         tool = self._tools.get(name)
         if not tool:
@@ -46,7 +46,7 @@ class ToolRegistry:
         try:
             # Attempt to cast parameters to match schema types
             params = tool.cast_params(params)
-            
+
             # Validate parameters
             errors = tool.validate_params(params)
             if errors:
@@ -56,7 +56,7 @@ class ToolRegistry:
                 return result + _HINT
             return result
         except Exception as e:
-            return f"Error executing {name}: {str(e)}" + _HINT
+            return f"Error executing {name}: {e!s}" + _HINT
 
     @property
     def tool_names(self) -> list[str]:

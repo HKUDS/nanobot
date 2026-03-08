@@ -25,19 +25,16 @@ class Tool(ABC):
     @abstractmethod
     def name(self) -> str:
         """Tool name used in function calls."""
-        pass
 
     @property
     @abstractmethod
     def description(self) -> str:
         """Description of what the tool does."""
-        pass
 
     @property
     @abstractmethod
     def parameters(self) -> dict[str, Any]:
         """JSON Schema for tool parameters."""
-        pass
 
     @abstractmethod
     async def execute(self, **kwargs: Any) -> str:
@@ -50,7 +47,6 @@ class Tool(ABC):
         Returns:
             String result of the tool execution.
         """
-        pass
 
     def cast_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """Apply safe schema-driven casts before validation."""
@@ -84,7 +80,12 @@ class Tool(ABC):
             return val
         if target_type == "integer" and isinstance(val, int) and not isinstance(val, bool):
             return val
-        if target_type in self._TYPE_MAP and target_type not in ("boolean", "integer", "array", "object"):
+        if target_type in self._TYPE_MAP and target_type not in (
+            "boolean",
+            "integer",
+            "array",
+            "object",
+        ):
             expected = self._TYPE_MAP[target_type]
             if isinstance(val, expected):
                 return val
@@ -134,11 +135,13 @@ class Tool(ABC):
         t, label = schema.get("type"), path or "parameter"
         if t == "integer" and (not isinstance(val, int) or isinstance(val, bool)):
             return [f"{label} should be integer"]
-        if t == "number" and (
-            not isinstance(val, self._TYPE_MAP[t]) or isinstance(val, bool)
-        ):
+        if t == "number" and (not isinstance(val, self._TYPE_MAP[t]) or isinstance(val, bool)):
             return [f"{label} should be number"]
-        if t in self._TYPE_MAP and t not in ("integer", "number") and not isinstance(val, self._TYPE_MAP[t]):
+        if (
+            t in self._TYPE_MAP
+            and t not in ("integer", "number")
+            and not isinstance(val, self._TYPE_MAP[t])
+        ):
             return [f"{label} should be {t}"]
 
         errors = []
@@ -156,9 +159,11 @@ class Tool(ABC):
                 errors.append(f"{label} must be at most {schema['maxLength']} chars")
         if t == "object":
             props = schema.get("properties", {})
-            for k in schema.get("required", []):
-                if k not in val:
-                    errors.append(f"missing required {path + '.' + k if path else k}")
+            errors.extend(
+                f"missing required {path + '.' + k if path else k}"
+                for k in schema.get("required", [])
+                if k not in val
+            )
             for k, v in val.items():
                 if k in props:
                     errors.extend(self._validate(v, props[k], path + "." + k if path else k))

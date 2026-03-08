@@ -10,7 +10,24 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
+  # ── pre-commit (runs all hooks in one shot) ──────────────────────
+  pre-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen
+      - uses: pre-commit/action@v3.0.1
+
+  # ── lint (ruff check + format) ───────────────────────────────────
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -25,11 +42,12 @@ jobs:
         run: uv sync --frozen
 
       - name: Ruff check
-        run: uv run ruff check .
+        run: uv run ruff check --output-format=github .
 
       - name: Ruff format check
         run: uv run ruff format --check .
 
+  # ── type check ───────────────────────────────────────────────────
   typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -45,11 +63,14 @@ jobs:
 
       - name: Type check
         run: uv run ty check
-        continue-on-error: true  # TODO: remove once type errors are fixed
 
+  # ── tests + coverage ────────────────────────────────────────────
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
@@ -58,18 +79,25 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --frozen --all-extras
+        run: uv sync --frozen --all-extras --python ${{ matrix.python-version }}
 
       - name: Run tests with coverage
-        run: uv run pytest --tb=short -q --cov=nanobot --cov-report=xml --cov-report=term-missing
+        run: |
+          uv run pytest \
+            --tb=short -q \
+            --cov=nanobot \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=30
 
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report
+          name: coverage-report-${{ matrix.python-version }}
           path: coverage.xml
 
+  # ── security audit ──────────────────────────────────────────────
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -86,22 +114,32 @@ jobs:
         run: uv sync --frozen
 
       - name: Bandit security linting
-        run: uv run bandit -r nanobot/ -c pyproject.toml || true
-        continue-on-error: true  # TODO: remove once bandit is configured
+        run: uv run bandit -r nanobot/ -c pyproject.toml -f json -o bandit-report.json || true
+
+      - name: Bandit check (fail on high severity)
+        run: |
+          uv run bandit -r nanobot/ -c pyproject.toml -ll -ii
 
       - name: pip-audit dependency check
-        run: uv run pip-audit
-        continue-on-error: true  # TODO: remove once all vulns are addressed
+        run: uv run pip-audit --strict --desc
 
       - name: Check for secrets in code
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@v3.88.26
         with:
           extra_args: --only-verified
 
+      - name: Upload bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+  # ── build ───────────────────────────────────────────────────────
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [lint, test]
+    needs: [lint, typecheck, test, security, pre-commit]
     steps:
       - uses: actions/checkout@v4
 
@@ -112,12 +150,16 @@ jobs:
       - name: Build package
         run: uv build
 
+      - name: Verify package metadata
+        run: uv run python -m tarfile -l dist/*.tar.gz | head -20
+
       - name: Upload dist
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
+  # ── workflow lint ───────────────────────────────────────────────
   actionlint:
     runs-on: ubuntu-latest
     timeout-minutes: 5

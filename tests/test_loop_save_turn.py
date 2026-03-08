@@ -29,13 +29,15 @@ def test_save_turn_keeps_image_placeholder_after_runtime_strip() -> None:
 
     loop._save_turn(
         session,
-        [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": runtime},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
-            ],
-        }],
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": runtime},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                ],
+            }
+        ],
         skip=0,
     )
     assert session.messages[0]["content"] == [{"type": "text", "text": "[image]"}]

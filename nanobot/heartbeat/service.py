@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Coroutine
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+    from pathlib import Path
+
     from nanobot.providers.base import LLMProvider
 
 _HEARTBEAT_TOOL = [
@@ -89,11 +91,17 @@ class HeartbeatService:
         """
         response = await self.provider.chat(
             messages=[
-                {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
-                {"role": "user", "content": (
-                    "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
-                    f"{content}"
-                )},
+                {
+                    "role": "system",
+                    "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision.",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
+                        f"{content}"
+                    ),
+                },
             ],
             tools=_HEARTBEAT_TOOL,
             model=self.model,

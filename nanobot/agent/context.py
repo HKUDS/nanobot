@@ -4,7 +4,7 @@ import base64
 import mimetypes
 import platform
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -84,7 +84,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
     @staticmethod
     def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
-        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        now = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M (%A)")
         tz = time.strftime("%Z") or "UTC"
         lines = [f"Current Time: {now} ({tz})"]
         if channel and chat_id:
@@ -121,7 +121,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         if isinstance(user_content, str):
             merged = f"{runtime_ctx}\n\n{user_content}"
         else:
-            merged = [{"type": "text", "text": runtime_ctx}] + user_content
+            merged = [{"type": "text", "text": runtime_ctx}, *user_content]
 
         return [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
@@ -149,18 +149,24 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
         if not images:
             return text
-        return images + [{"type": "text", "text": text}]
+        return [*images, {"type": "text", "text": text}]
 
     def add_tool_result(
-        self, messages: list[dict[str, Any]],
-        tool_call_id: str, tool_name: str, result: str,
+        self,
+        messages: list[dict[str, Any]],
+        tool_call_id: str,
+        tool_name: str,
+        result: str,
     ) -> list[dict[str, Any]]:
         """Add a tool result to the message list."""
-        messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
+        messages.append(
+            {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result}
+        )
         return messages
 
     def add_assistant_message(
-        self, messages: list[dict[str, Any]],
+        self,
+        messages: list[dict[str, Any]],
         content: str | None,
         tool_calls: list[dict[str, Any]] | None = None,
         reasoning_content: str | None = None,

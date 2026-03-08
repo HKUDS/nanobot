@@ -15,9 +15,12 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
 
 # Standard chat-completion message keys.
-_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
+_ALLOWED_MSG_KEYS = frozenset(
+    {"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"}
+)
 _ANTHROPIC_EXTRA_KEYS = frozenset({"thinking_blocks"})
 _ALNUM = string.ascii_letters + string.digits
+
 
 def _short_tool_id() -> str:
     """Generate a 9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
@@ -27,7 +30,7 @@ def _short_tool_id() -> str:
 class LiteLLMProvider(LLMProvider):
     """
     LLM provider using LiteLLM for multi-provider support.
-    
+
     Supports OpenRouter, Anthropic, OpenAI, Gemini, MiniMax, and many other providers through
     a unified interface.  Provider-specific logic is driven by the registry
     (see providers/registry.py) — no if-elif chains needed here.
@@ -92,7 +95,7 @@ class LiteLLMProvider(LLMProvider):
             # Gateway mode: apply gateway prefix, skip provider-specific prefixes
             prefix = self._gateway.litellm_prefix
             if self._gateway.strip_model_prefix:
-                model = model.split("/")[-1]
+                model = model.rsplit("/", maxsplit=1)[-1]
             if prefix and not model.startswith(f"{prefix}/"):
                 model = f"{prefix}/{model}"
             return model
@@ -134,7 +137,9 @@ class LiteLLMProvider(LLMProvider):
             if msg.get("role") == "system":
                 content = msg["content"]
                 if isinstance(content, str):
-                    new_content = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+                    new_content = [
+                        {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}
+                    ]
                 else:
                     new_content = list(content)
                     new_content[-1] = {**new_content[-1], "cache_control": {"type": "ephemeral"}}
@@ -163,7 +168,11 @@ class LiteLLMProvider(LLMProvider):
     def _extra_msg_keys(original_model: str, resolved_model: str) -> frozenset[str]:
         """Return provider-specific extra keys to preserve in request messages."""
         spec = find_by_model(original_model) or find_by_model(resolved_model)
-        if (spec and spec.name == "anthropic") or "claude" in original_model.lower() or resolved_model.startswith("anthropic/"):
+        if (
+            (spec and spec.name == "anthropic")
+            or "claude" in original_model.lower()
+            or resolved_model.startswith("anthropic/")
+        ):
             return _ANTHROPIC_EXTRA_KEYS
         return frozenset()
 
@@ -174,10 +183,12 @@ class LiteLLMProvider(LLMProvider):
             return tool_call_id
         if len(tool_call_id) == 9 and tool_call_id.isalnum():
             return tool_call_id
-        return hashlib.sha1(tool_call_id.encode()).hexdigest()[:9]
+        return hashlib.sha1(tool_call_id.encode()).hexdigest()[:9]  # noqa: S324 — not used for security, just for ID shortening
 
     @staticmethod
-    def _sanitize_messages(messages: list[dict[str, Any]], extra_keys: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
+    def _sanitize_messages(
+        messages: list[dict[str, Any]], extra_keys: frozenset[str] = frozenset()
+    ) -> list[dict[str, Any]]:
         """Strip non-standard keys and ensure assistant messages have a content key."""
         allowed = _ALLOWED_MSG_KEYS | extra_keys
         sanitized = LLMProvider._sanitize_request_messages(messages, allowed)
@@ -202,7 +213,7 @@ class LiteLLMProvider(LLMProvider):
                     normalized_tool_calls.append(tc_clean)
                 clean["tool_calls"] = normalized_tool_calls
 
-            if "tool_call_id" in clean and clean["tool_call_id"]:
+            if clean.get("tool_call_id"):
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
         return sanitized
 
@@ -241,7 +252,9 @@ class LiteLLMProvider(LLMProvider):
 
         kwargs: dict[str, Any] = {
             "model": model,
-            "messages": self._sanitize_messages(self._sanitize_empty_content(messages), extra_keys=extra_msg_keys),
+            "messages": self._sanitize_messages(
+                self._sanitize_empty_content(messages), extra_keys=extra_msg_keys
+            ),
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
@@ -260,11 +273,11 @@ class LiteLLMProvider(LLMProvider):
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
-        
+
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
             kwargs["drop_params"] = True
-        
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
@@ -275,7 +288,7 @@ class LiteLLMProvider(LLMProvider):
         except Exception as e:
             # Return error as content for graceful handling
             return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
+                content=f"Error calling LLM: {e!s}",
                 finish_reason="error",
             )
 
@@ -299,8 +312,11 @@ class LiteLLMProvider(LLMProvider):
                 content = msg.content
 
         if len(response.choices) > 1:
-            logger.debug("LiteLLM response has {} choices, merged {} tool_calls",
-                         len(response.choices), len(raw_tool_calls))
+            logger.debug(
+                "LiteLLM response has {} choices, merged {} tool_calls",
+                len(response.choices),
+                len(raw_tool_calls),
+            )
 
         tool_calls = []
         for tc in raw_tool_calls:
@@ -309,11 +325,13 @@ class LiteLLMProvider(LLMProvider):
             if isinstance(args, str):
                 args = json_repair.loads(args)
 
-            tool_calls.append(ToolCallRequest(
-                id=_short_tool_id(),
-                name=tc.function.name,
-                arguments=args,
-            ))
+            tool_calls.append(
+                ToolCallRequest(
+                    id=_short_tool_id(),
+                    name=tc.function.name,
+                    arguments=args,
+                )
+            )
 
         usage = {}
         if hasattr(response, "usage") and response.usage:

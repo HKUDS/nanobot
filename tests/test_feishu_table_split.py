@@ -69,8 +69,7 @@ def test_two_tables_split_into_two_groups() -> None:
 
 def test_three_tables_split_into_three_groups() -> None:
     tables = [
-        {"tag": "table", "columns": [], "rows": [{"c0": f"t{i}"}], "page_size": 1}
-        for i in range(3)
+        {"tag": "table", "columns": [], "rows": [{"c0": f"t{i}"}], "page_size": 1} for i in range(3)
     ]
     els = tables[:]
     result = split(els)

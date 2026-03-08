@@ -3,7 +3,7 @@
 import json
 import shutil
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,8 +26,8 @@ class Session:
 
     key: str  # channel:chat_id
     messages: list[dict[str, Any]] = field(default_factory=list)
-    created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
 
@@ -36,15 +36,15 @@ class Session:
         msg = {
             "role": role,
             "content": content,
-            "timestamp": datetime.now().isoformat(),
-            **kwargs
+            "timestamp": datetime.now(tz=UTC).isoformat(),
+            **kwargs,
         }
         self.messages.append(msg)
-        self.updated_at = datetime.now()
+        self.updated_at = datetime.now(tz=UTC)
 
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input, aligned to a user turn."""
-        unconsolidated = self.messages[self.last_consolidated:]
+        unconsolidated = self.messages[self.last_consolidated :]
         sliced = unconsolidated[-max_messages:]
 
         # Drop leading non-user messages to avoid orphaned tool_result blocks
@@ -66,7 +66,7 @@ class Session:
         """Clear all messages and reset session to initial state."""
         self.messages = []
         self.last_consolidated = 0
-        self.updated_at = datetime.now()
+        self.updated_at = datetime.now(tz=UTC)
 
 
 class SessionManager:
@@ -134,8 +134,8 @@ class SessionManager:
             last_consolidated = 0
 
             with open(path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
+                for raw_line in f:
+                    line = raw_line.strip()
                     if not line:
                         continue
 
@@ -143,7 +143,11 @@ class SessionManager:
 
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
-                        created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
+                        created_at = (
+                            datetime.fromisoformat(data["created_at"])
+                            if data.get("created_at")
+                            else None
+                        )
                         last_consolidated = data.get("last_consolidated", 0)
                     else:
                         messages.append(data)
@@ -151,9 +155,9 @@ class SessionManager:
             return Session(
                 key=key,
                 messages=messages,
-                created_at=created_at or datetime.now(),
+                created_at=created_at or datetime.now(tz=UTC),
                 metadata=metadata,
-                last_consolidated=last_consolidated
+                last_consolidated=last_consolidated,
             )
         except Exception as e:
             logger.warning("Failed to load session {}: {}", key, e)
@@ -170,7 +174,7 @@ class SessionManager:
                 "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(),
                 "metadata": session.metadata,
-                "last_consolidated": session.last_consolidated
+                "last_consolidated": session.last_consolidated,
             }
             f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
             for msg in session.messages:
@@ -200,13 +204,15 @@ class SessionManager:
                         data = json.loads(first_line)
                         if data.get("_type") == "metadata":
                             key = data.get("key") or path.stem.replace("_", ":", 1)
-                            sessions.append({
-                                "key": key,
-                                "created_at": data.get("created_at"),
-                                "updated_at": data.get("updated_at"),
-                                "path": str(path)
-                            })
-            except Exception:
+                            sessions.append(
+                                {
+                                    "key": key,
+                                    "created_at": data.get("created_at"),
+                                    "updated_at": data.get("updated_at"),
+                                    "path": str(path),
+                                }
+                            )
+            except Exception:  # noqa: S112 — skip corrupt session files during listing
                 continue
 
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)

@@ -23,6 +23,7 @@ import os
 import sys
 from typing import Any
 
+import httpx
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool

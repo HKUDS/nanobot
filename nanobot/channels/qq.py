@@ -1,6 +1,7 @@
 """QQ channel implementation using botpy SDK."""
 
 import asyncio
+import contextlib
 from collections import deque
 from typing import TYPE_CHECKING
 
@@ -58,9 +59,9 @@ class QQChannel(BaseChannel):
     def __init__(self, config: QQConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: QQConfig = config
-        self._client: "botpy.Client | None" = None
+        self._client: botpy.Client | None = None
         self._processed_ids: deque = deque(maxlen=1000)
-        self._msg_seq: int = 1  # 消息序列号，避免被 QQ API 去重
+        self._msg_seq: int = 1  # msg sequence number, avoids QQ API dedup
         self._chat_type_cache: dict[str, str] = {}
 
     async def start(self) -> None:
@@ -74,7 +75,7 @@ class QQChannel(BaseChannel):
             return
 
         self._running = True
-        BotClass = _make_bot_class(self)
+        BotClass = _make_bot_class(self)  # noqa: N806
         self._client = BotClass()
         logger.info("QQ bot started (C2C & Group supported)")
         await self._run_bot()
@@ -94,10 +95,8 @@ class QQChannel(BaseChannel):
         """Stop the QQ bot."""
         self._running = False
         if self._client:
-            try:
+            with contextlib.suppress(Exception):
                 await self._client.close()
-            except Exception:
-                pass
         logger.info("QQ bot stopped")
 
     async def send(self, msg: OutboundMessage) -> None:
@@ -146,7 +145,10 @@ class QQChannel(BaseChannel):
                 user_id = data.author.member_openid
                 self._chat_type_cache[chat_id] = "group"
             else:
-                chat_id = str(getattr(data.author, 'id', None) or getattr(data.author, 'user_openid', 'unknown'))
+                chat_id = str(
+                    getattr(data.author, "id", None)
+                    or getattr(data.author, "user_openid", "unknown")
+                )
                 user_id = chat_id
                 self._chat_type_cache[chat_id] = "c2c"
 

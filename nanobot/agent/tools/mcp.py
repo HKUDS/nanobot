@@ -36,12 +36,13 @@ class MCPToolWrapper(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
+
         try:
             result = await asyncio.wait_for(
                 self._session.call_tool(self._original_name, arguments=kwargs),
                 timeout=self._tool_timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("MCP tool '{}' timed out after {}s", self._name, self._tool_timeout)
             return f"(MCP tool call timed out after {self._tool_timeout}s)"
         parts = []
@@ -83,12 +84,14 @@ async def connect_mcp_servers(
                 )
                 read, write = await stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
+
                 def httpx_client_factory(
                     headers: dict[str, str] | None = None,
                     timeout: httpx.Timeout | None = None,
                     auth: httpx.Auth | None = None,
+                    _cfg: object = cfg,
                 ) -> httpx.AsyncClient:
-                    merged_headers = {**(cfg.headers or {}), **(headers or {})}
+                    merged_headers = {**(_cfg.headers or {}), **(headers or {})}
                     return httpx.AsyncClient(
                         headers=merged_headers or None,
                         follow_redirects=True,
@@ -106,7 +109,7 @@ async def connect_mcp_servers(
                     httpx.AsyncClient(
                         headers=cfg.headers or None,
                         follow_redirects=True,
-                        timeout=None,
+                        timeout=None,  # noqa: S113 — intentional: defer to higher-level tool timeout
                     )
                 )
                 read, write, _ = await stack.enter_async_context(

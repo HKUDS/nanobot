@@ -79,7 +79,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         litellm_prefix="",
         is_direct=True,
     ),
-
     # === Azure OpenAI (direct API calls with API version 2024-10-21) =====
     ProviderSpec(
         name="azure_openai",

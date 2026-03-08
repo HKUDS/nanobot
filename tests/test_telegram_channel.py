@@ -132,7 +132,9 @@ def test_get_extension_falls_back_to_original_filename() -> None:
 
 
 def test_is_allowed_accepts_legacy_telegram_id_username_formats() -> None:
-    channel = TelegramChannel(TelegramConfig(allow_from=["12345", "alice", "67890|bob"]), MessageBus())
+    channel = TelegramChannel(
+        TelegramConfig(allow_from=["12345", "alice", "67890|bob"]), MessageBus()
+    )
 
     assert channel.is_allowed("12345|carol") is True
     assert channel.is_allowed("99999|alice") is True

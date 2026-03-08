@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import datetime as real_datetime
-from pathlib import Path
 import datetime as datetime_module
+from datetime import UTC
+from datetime import datetime as real_datetime
+from typing import TYPE_CHECKING
 
 from nanobot.agent.context import ContextBuilder
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 class _FakeDatetime(real_datetime):
-    current = real_datetime(2026, 2, 24, 13, 59)
+    current = real_datetime(2026, 2, 24, 13, 59, tzinfo=UTC)
 
     @classmethod
     def now(cls, tz=None):  # type: ignore[override]
@@ -30,10 +34,10 @@ def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) ->
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
-    _FakeDatetime.current = real_datetime(2026, 2, 24, 13, 59)
+    _FakeDatetime.current = real_datetime(2026, 2, 24, 13, 59, tzinfo=UTC)
     prompt1 = builder.build_system_prompt()
 
-    _FakeDatetime.current = real_datetime(2026, 2, 24, 14, 0)
+    _FakeDatetime.current = real_datetime(2026, 2, 24, 14, 0, tzinfo=UTC)
     prompt2 = builder.build_system_prompt()
 
     assert prompt1 == prompt2

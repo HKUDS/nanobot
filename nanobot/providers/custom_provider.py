@@ -12,8 +12,12 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 
 class CustomProvider(LLMProvider):
-
-    def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1", default_model: str = "default"):
+    def __init__(
+        self,
+        api_key: str = "no-key",
+        api_base: str = "http://localhost:8000/v1",
+        default_model: str = "default",
+    ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         # Keep affinity stable for this provider instance to improve backend cache locality.
@@ -23,9 +27,15 @@ class CustomProvider(LLMProvider):
             default_headers={"x-session-affinity": uuid.uuid4().hex},
         )
 
-    async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
-                   model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
-                   reasoning_effort: str | None = None) -> LLMResponse:
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+    ) -> LLMResponse:
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
             "messages": self._sanitize_empty_content(messages),
@@ -45,17 +55,29 @@ class CustomProvider(LLMProvider):
         choice = response.choices[0]
         msg = choice.message
         tool_calls = [
-            ToolCallRequest(id=tc.id, name=tc.function.name,
-                            arguments=json_repair.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments)
+            ToolCallRequest(
+                id=tc.id,
+                name=tc.function.name,
+                arguments=json_repair.loads(tc.function.arguments)
+                if isinstance(tc.function.arguments, str)
+                else tc.function.arguments,
+            )
             for tc in (msg.tool_calls or [])
         ]
         u = response.usage
         return LLMResponse(
-            content=msg.content, tool_calls=tool_calls, finish_reason=choice.finish_reason or "stop",
-            usage={"prompt_tokens": u.prompt_tokens, "completion_tokens": u.completion_tokens, "total_tokens": u.total_tokens} if u else {},
+            content=msg.content,
+            tool_calls=tool_calls,
+            finish_reason=choice.finish_reason or "stop",
+            usage={
+                "prompt_tokens": u.prompt_tokens,
+                "completion_tokens": u.completion_tokens,
+                "total_tokens": u.total_tokens,
+            }
+            if u
+            else {},
             reasoning_content=getattr(msg, "reasoning_content", None) or None,
         )
 
     def get_default_model(self) -> str:
         return self.default_model
-

@@ -56,18 +56,20 @@ async def test_decide_returns_skip_when_no_tool_call(tmp_path) -> None:
 async def test_trigger_now_executes_when_decision_is_run(tmp_path) -> None:
     (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
 
-    provider = DummyProvider([
-        LLMResponse(
-            content="",
-            tool_calls=[
-                ToolCallRequest(
-                    id="hb_1",
-                    name="heartbeat",
-                    arguments={"action": "run", "tasks": "check open tasks"},
-                )
-            ],
-        )
-    ])
+    provider = DummyProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="hb_1",
+                        name="heartbeat",
+                        arguments={"action": "run", "tasks": "check open tasks"},
+                    )
+                ],
+            )
+        ]
+    )
 
     called_with: list[str] = []
 
@@ -91,18 +93,20 @@ async def test_trigger_now_executes_when_decision_is_run(tmp_path) -> None:
 async def test_trigger_now_returns_none_when_decision_is_skip(tmp_path) -> None:
     (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
 
-    provider = DummyProvider([
-        LLMResponse(
-            content="",
-            tool_calls=[
-                ToolCallRequest(
-                    id="hb_1",
-                    name="heartbeat",
-                    arguments={"action": "skip"},
-                )
-            ],
-        )
-    ])
+    provider = DummyProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="hb_1",
+                        name="heartbeat",
+                        arguments={"action": "skip"},
+                    )
+                ],
+            )
+        ]
+    )
 
     async def _on_execute(tasks: str) -> str:
         return tasks

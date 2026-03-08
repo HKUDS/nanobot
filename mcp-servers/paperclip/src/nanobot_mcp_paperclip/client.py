@@ -124,15 +124,11 @@ class PaperclipClient:
     async def get_issue(self, issue_id: str) -> dict[str, Any]:
         return await self._get(f"/api/issues/{issue_id}")
 
-    async def update_issue(
-        self, issue_id: str, **fields: Any
-    ) -> dict[str, Any]:
+    async def update_issue(self, issue_id: str, **fields: Any) -> dict[str, Any]:
         return await self._patch(f"/api/issues/{issue_id}", json=fields)
 
     async def add_comment(self, issue_id: str, text: str) -> dict[str, Any]:
-        return await self._post(
-            f"/api/issues/{issue_id}/comments", json={"text": text}
-        )
+        return await self._post(f"/api/issues/{issue_id}/comments", json={"text": text})
 
     # ── costs ────────────────────────────────────────────────────────
 
@@ -211,9 +207,7 @@ class PaperclipClient:
     async def list_approvals(self) -> list[dict[str, Any]]:
         return await self._get(self._co("/approvals"))
 
-    async def create_approval(
-        self, *, type_: str, **fields: Any
-    ) -> dict[str, Any]:
+    async def create_approval(self, *, type_: str, **fields: Any) -> dict[str, Any]:
         body = {"type": type_, **fields}
         return await self._post(self._co("/approvals"), json=body)
 
