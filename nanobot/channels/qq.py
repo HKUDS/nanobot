@@ -16,20 +16,20 @@ from nanobot.config.schema import QQConfig
 
 try:
     import botpy
+    from botpy import Client
+    from botpy.http import Route
 
     QQ_AVAILABLE = True
 except ImportError:
     QQ_AVAILABLE = False
-    # botpy = None
-    # C2CMessage = None
-    # GroupMessage = None
-    # Media = None
+    botpy = None
+    C2CMessage = None
+    GroupMessage = None
+    Media = None
 
 if TYPE_CHECKING:
     from botpy.message import C2CMessage, GroupMessage
     from botpy.types.message import Media
-    from botpy import Client
-    from botpy.http import Route
 
 
 # QQ C2C 富媒体文件类型
@@ -242,7 +242,10 @@ class QQChannel(BaseChannel):
                 user_id = data.author.member_openid
                 self._chat_type_cache[chat_id] = "group"
             else:
-                chat_id = str(getattr(data.author, 'id', None) or getattr(data.author, 'user_openid', 'unknown'))
+                chat_id = str(
+                    getattr(data.author, "id", None)
+                    or getattr(data.author, "user_openid", "unknown")
+                )
                 user_id = chat_id
                 self._chat_type_cache[chat_id] = "c2c"
 
