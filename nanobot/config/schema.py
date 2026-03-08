@@ -216,6 +216,16 @@ class ChannelsConfig(Base):
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
+class ContextEditingConfig(Base):
+    """Configuration for pre-send prompt budgeting and context editing."""
+
+    enabled: bool = True
+    max_prompt_tokens: int = 12_000
+    keep_recent_messages: int = 12
+    keep_recent_tool_messages: int = 2
+    max_tool_chars: int = 240
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -226,6 +236,7 @@ class AgentDefaults(Base):
     temperature: float = 0.1
     max_tool_iterations: int = 40
     memory_window: int = 100
+    context_editing: ContextEditingConfig = Field(default_factory=ContextEditingConfig)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
 
 

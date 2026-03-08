@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.context_editor import ContextEditor
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
@@ -28,7 +29,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig
+    from nanobot.config.schema import ChannelsConfig, ContextEditingConfig, ExecToolConfig
     from nanobot.cron.service import CronService
 
 
@@ -63,9 +64,10 @@ class AgentLoop:
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
+        context_editing: ContextEditingConfig | None = None,
         channels_config: ChannelsConfig | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ContextEditingConfig, ExecToolConfig
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -78,10 +80,12 @@ class AgentLoop:
         self.reasoning_effort = reasoning_effort
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
+        self.context_editing = context_editing or ContextEditingConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
         self.context = ContextBuilder(workspace)
+        self.context_editor = ContextEditor(self.context_editing)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -187,9 +191,10 @@ class AgentLoop:
 
         while iteration < self.max_iterations:
             iteration += 1
+            prepared_messages = self.context_editor.prepare(messages)
 
             response = await self.provider.chat(
-                messages=messages,
+                messages=prepared_messages,
                 tools=self.tools.get_definitions(),
                 model=self.model,
                 temperature=self.temperature,
