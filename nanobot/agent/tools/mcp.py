@@ -34,8 +34,9 @@ class MCPToolWrapper(Tool):
     def parameters(self) -> dict[str, Any]:
         return self._parameters
 
-async def execute(self, **kwargs: Any) -> str:
+    async def execute(self, **kwargs: Any) -> str:
         from mcp import types
+
         try:
             result = await asyncio.wait_for(
                 self._session.call_tool(self._original_name, arguments=kwargs),
@@ -51,17 +52,23 @@ async def execute(self, **kwargs: Any) -> str:
             if task is not None and task.cancelling() > 0:
                 raise
             logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
-            return f"(MCP tool call was cancelled)"
+            return "(MCP tool call was cancelled)"
         except Exception as exc:
-            logger.warning("MCP tool '{}' failed: {}: {}", self._name, type(exc).__name__, exc)
+            logger.exception(
+                "MCP tool '{}' failed: {}: {}",
+                self._name,
+                type(exc).__name__,
+                exc,
+            )
             return f"(MCP tool call failed: {type(exc).__name__})"
+
         parts = []
         for block in result.content:
             if isinstance(block, types.TextContent):
                 parts.append(block.text)
             else:
                 parts.append(str(block))
-        return "\n".join(parts) or "(no output)
+        return "\n".join(parts) or "(no output)"
 
 
 async def connect_mcp_servers(
