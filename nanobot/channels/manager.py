@@ -7,9 +7,9 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.dispatcher import OutboundDispatcher
 from nanobot.channels.factory import BuiltinChannelFactory
 from nanobot.config.schema import Config
 
@@ -28,9 +28,11 @@ class ChannelManager:
         self.config = config
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
+        self.dispatcher: OutboundDispatcher | None = None
         self._dispatch_task: asyncio.Task | None = None
 
         self._init_channels()
+        self.dispatcher = OutboundDispatcher(self.config, self.bus, self.channels)
 
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
@@ -63,7 +65,8 @@ class ChannelManager:
             return
 
         # Start outbound dispatcher
-        self._dispatch_task = asyncio.create_task(self._dispatch_outbound())
+        if self.dispatcher is not None:
+            self._dispatch_task = asyncio.create_task(self.dispatcher.run())
 
         # Start channels
         tasks = []
@@ -93,37 +96,6 @@ class ChannelManager:
                 logger.info("Stopped {} channel", name)
             except Exception as e:
                 logger.error("Error stopping {}: {}", name, e)
-
-    async def _dispatch_outbound(self) -> None:
-        """Dispatch outbound messages to the appropriate channel."""
-        logger.info("Outbound dispatcher started")
-
-        while True:
-            try:
-                msg = await asyncio.wait_for(self.bus.consume_outbound(), timeout=1.0)
-
-                if msg.metadata.get("_progress"):
-                    if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
-                        continue
-                    if (
-                        not msg.metadata.get("_tool_hint")
-                        and not self.config.channels.send_progress
-                    ):
-                        continue
-
-                channel = self.channels.get(msg.channel)
-                if channel:
-                    try:
-                        await channel.send(msg)
-                    except Exception as e:
-                        logger.error("Error sending to {}: {}", msg.channel, e)
-                else:
-                    logger.warning("Unknown channel: {}", msg.channel)
-
-            except asyncio.TimeoutError:
-                continue
-            except asyncio.CancelledError:
-                break
 
     def get_channel(self, name: str) -> BaseChannel | None:
         """Get a channel by name."""
