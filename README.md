@@ -903,7 +903,7 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
 
 
-## Multiple Instances
+## 🧩 Multiple Instances
 
 Run multiple nanobot instances simultaneously with separate configs and runtime data. Use `--config` as the main entrypoint, and optionally use `--workspace` to override the workspace for a specific run.
 
@@ -992,7 +992,7 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 - `--workspace` overrides the workspace defined in the config file
 - Cron jobs and runtime media/state are derived from the config directory
 
-## CLI Reference
+## 💻 CLI Reference
 
 | Command | Description |
 |---------|-------------|
