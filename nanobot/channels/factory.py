@@ -31,18 +31,29 @@ class BuiltinChannelFactory:
 
             try:
                 module = importlib.import_module(spec.module_path)
-                channel_cls = getattr(module, spec.class_name)
-                channels[spec.name] = channel_cls(
-                    channel_config,
-                    bus,
-                    **spec.extra_kwargs_factory(config),
-                )
-                logger.info("{} channel enabled", spec.display_name or spec.name.title())
-            except (ImportError, AttributeError) as e:
+            except ImportError as e:
                 logger.warning(
                     "{} channel not available: {}",
                     spec.display_name or spec.name.title(),
                     e,
                 )
+                continue
+
+            try:
+                channel_cls = getattr(module, spec.class_name)
+            except AttributeError as e:
+                logger.warning(
+                    "{} channel not available: {}",
+                    spec.display_name or spec.name.title(),
+                    e,
+                )
+                continue
+
+            channels[spec.name] = channel_cls(
+                channel_config,
+                bus,
+                **spec.extra_kwargs_factory(config),
+            )
+            logger.info("{} channel enabled", spec.display_name or spec.name.title())
 
         return channels

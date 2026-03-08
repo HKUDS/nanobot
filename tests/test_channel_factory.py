@@ -134,6 +134,40 @@ def test_builtin_channel_factory_skips_channel_when_class_is_missing(monkeypatch
     ]
 
 
+def test_builtin_channel_factory_does_not_hide_constructor_attribute_errors(monkeypatch) -> None:
+    from nanobot.channels.factory import BuiltinChannelFactory
+    from nanobot.channels.registry import ChannelRegistry, ChannelSpec
+
+    class BrokenTelegramChannel(_StubChannel):
+        def __init__(self, config, bus, **kwargs):
+            raise AttributeError("constructor bug")
+
+    registry = ChannelRegistry()
+    registry.register(
+        ChannelSpec(
+            name="telegram",
+            module_path="nanobot.channels.telegram",
+            class_name="BrokenTelegramChannel",
+            display_name="Telegram",
+        )
+    )
+
+    monkeypatch.setattr(
+        "nanobot.channels.factory.importlib.import_module",
+        lambda _module_path: SimpleNamespace(BrokenTelegramChannel=BrokenTelegramChannel),
+    )
+
+    config = Config()
+    config.channels.telegram.enabled = True
+
+    try:
+        BuiltinChannelFactory(registry).build_enabled_channels(config, MessageBus())
+    except AttributeError as error:
+        assert str(error) == "constructor bug"
+    else:
+        raise AssertionError("expected constructor AttributeError to surface")
+
+
 def test_channel_manager_builds_channels_through_factory(monkeypatch) -> None:
     calls = []
     bus = MessageBus()
