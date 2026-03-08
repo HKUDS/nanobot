@@ -66,36 +66,25 @@ class MemoryStore:
         long_term = self.read_long_term()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
 
-    async def consolidate(
+    async def consolidate_chunk(
         self,
-        session: Session,
+        messages: list[dict],
         provider: LLMProvider,
         model: str,
-        *,
-        archive_all: bool = False,
-        memory_window: int = 50,
-    ) -> bool:
-        """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
+    ) -> tuple[bool, str | None]:
+        """Consolidate a chunk of messages into MEMORY.md + HISTORY.md via LLM tool call.
 
-        Returns True on success (including no-op), False on failure.
+        Returns (success, None).
+
+        - success: True on success (including no-op), False on failure.
+        - The second return value is reserved for future use (e.g. RAG-style summaries) and is
+          always None in the current implementation.
         """
-        if archive_all:
-            old_messages = session.messages
-            keep_count = 0
-            logger.info("Memory consolidation (archive_all): {} messages", len(session.messages))
-        else:
-            keep_count = memory_window // 2
-            if len(session.messages) <= keep_count:
-                return True
-            if len(session.messages) - session.last_consolidated <= 0:
-                return True
-            old_messages = session.messages[session.last_consolidated:-keep_count]
-            if not old_messages:
-                return True
-            logger.info("Memory consolidation: {} to consolidate, {} keep", len(old_messages), keep_count)
+        if not messages:
+            return True, None
 
         lines = []
-        for m in old_messages:
+        for m in messages:
             if not m.get("content"):
                 continue
             tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
@@ -113,7 +102,19 @@ class MemoryStore:
         try:
             response = await provider.chat(
                 messages=[
-                    {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a memory consolidation agent.\n"
+                            "Your job is to:\n"
+                            "1) Append a concise but grep-friendly entry to HISTORY.md summarizing key events, decisions and topics.\n"
+                            "   - Write 1 paragraph of 2–5 sentences that starts with [YYYY-MM-DD HH:MM].\n"
+                            "   - Include concrete names, IDs and numbers so it is easy to search with grep.\n"
+                            "2) Update long-term MEMORY.md with stable facts and user preferences as markdown, including all existing facts plus new ones.\n"
+                            "3) Optionally return a short context_summary (1–3 sentences) that will replace the raw messages in future dialogue history.\n\n"
+                            "Always call the save_memory tool with history_entry, memory_update and (optionally) context_summary."
+                        ),
+                    },
                     {"role": "user", "content": prompt},
                 ],
                 tools=_SAVE_MEMORY_TOOL,
@@ -122,7 +123,7 @@ class MemoryStore:
 
             if not response.has_tool_calls:
                 logger.warning("Memory consolidation: LLM did not call save_memory, skipping")
-                return False
+                return False, None
 
             args = response.tool_calls[0].arguments
             # Some providers return arguments as a JSON string instead of dict
@@ -134,10 +135,10 @@ class MemoryStore:
                     args = args[0]
                 else:
                     logger.warning("Memory consolidation: unexpected arguments as empty or non-dict list")
-                    return False
+                    return False, None
             if not isinstance(args, dict):
                 logger.warning("Memory consolidation: unexpected arguments type {}", type(args).__name__)
-                return False
+                return False, None
 
             if entry := args.get("history_entry"):
                 if not isinstance(entry, str):
@@ -149,9 +150,8 @@ class MemoryStore:
                 if update != current_memory:
                     self.write_long_term(update)
 
-            session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
-            logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)
-            return True
+            logger.info("Memory consolidation done for {} messages", len(messages))
+            return True, None
         except Exception:
             logger.exception("Memory consolidation failed")
-            return False
+            return False, None

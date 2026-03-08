@@ -189,11 +189,22 @@ class SlackConfig(Base):
 
 
 class QQConfig(Base):
-    """QQ channel configuration using botpy SDK."""
+    """QQ channel configuration.
+    
+    Supports two implementations:
+    1. Official botpy SDK: requires app_id and secret
+    2. OneBot protocol: requires api_url (and optionally ws_reverse_url, bot_qq, access_token)
+    """
 
     enabled: bool = False
+    # Official botpy SDK fields
     app_id: str = ""  # 机器人 ID (AppID) from q.qq.com
     secret: str = ""  # 机器人密钥 (AppSecret) from q.qq.com
+    # OneBot protocol fields
+    api_url: str = ""  # OneBot HTTP API URL (e.g. "http://localhost:5700")
+    ws_reverse_url: str = ""  # OneBot WebSocket reverse URL (e.g. "ws://localhost:8080/ws/reverse")
+    bot_qq: int | None = None  # Bot's QQ number (for filtering self messages)
+    access_token: str = ""  # Optional access token for OneBot API
     allow_from: list[str] = Field(
         default_factory=list
     )  # Allowed user openids (empty = public access)
@@ -226,10 +237,18 @@ class AgentDefaults(Base):
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
-    max_tokens: int = 8192
+    # 原生上下文最大窗口（通常对应模型的 max_input_tokens / max_context_tokens）
+    # 默认按照主流大模型（如 GPT-4o、Claude 3.x 等）的 128k 上下文给一个宽松上限，实际应根据所选模型文档手动调整。
+    max_tokens_input: int = 128_000
+    # 默认单次回复的最大输出 token 上限（调用时可按需要再做截断或比例分配）
+    # 8192 足以覆盖大多数实际对话/工具使用场景，同样可按需手动调整。
+    max_tokens_output: int = 8192
+    # 会话历史压缩触发比例：当估算的输入 token 使用量 >= maxTokensInput * compressionStartRatio 时开始压缩。
+    compression_start_ratio: float = 0.7
+    # 会话历史压缩目标比例：每轮压缩后尽量把估算的输入 token 使用量压到 maxTokensInput * compressionTargetRatio 附近。
+    compression_target_ratio: float = 0.4
     temperature: float = 0.1
     max_tool_iterations: int = 40
-    memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
 
 
