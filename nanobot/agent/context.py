@@ -123,9 +123,12 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
+        # Re-hydrate image references in history so the model can "see" them again
+        hydrated_history = self._hydrate_image_refs(history)
+
         return [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
-            *history,
+            *hydrated_history,
             {"role": "user", "content": merged},
         ]
 
@@ -150,6 +153,44 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         if not images:
             return text
         return images + [{"type": "text", "text": text}]
+
+    @staticmethod
+    def _hydrate_image_refs(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Re-inject base64 image data for [image_ref:path] markers in history."""
+        import re
+        _REF_PATTERN = re.compile(r'^\[image_ref:(.+)\]$')
+
+        result = []
+        for msg in history:
+            content = msg.get("content")
+            if msg.get("role") != "user" or not isinstance(content, list):
+                result.append(msg)
+                continue
+
+            new_content = []
+            changed = False
+            for block in content:
+                if block.get("type") == "text":
+                    m = _REF_PATTERN.match(block.get("text", ""))
+                    if m:
+                        img_path = m.group(1)
+                        p = Path(img_path)
+                        mime, _ = mimetypes.guess_type(img_path)
+                        if p.is_file() and mime and mime.startswith("image/"):
+                            b64 = base64.b64encode(p.read_bytes()).decode()
+                            new_content.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{mime};base64,{b64}"}
+                            })
+                            changed = True
+                            continue
+                new_content.append(block)
+
+            if changed:
+                result.append({**msg, "content": new_content})
+            else:
+                result.append(msg)
+        return result
 
     def add_tool_result(
         self, messages: list[dict[str, Any]],

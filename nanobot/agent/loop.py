@@ -477,7 +477,20 @@ class AgentLoop:
                             continue  # Strip runtime context from multimodal messages
                         if (c.get("type") == "image_url"
                                 and c.get("image_url", {}).get("url", "").startswith("data:image/")):
-                            filtered.append({"type": "text", "text": "[image]"})
+                            # Store path reference so images can be re-injected on future turns.
+                            img_path = None
+                            for tc in content:
+                                if tc.get("type") == "text":
+                                    txt = tc.get("text", "")
+                                    import re
+                                    m = re.search(r'\[image:\s*(.+?)\]', txt)
+                                    if m:
+                                        img_path = m.group(1)
+                                        break
+                            if img_path:
+                                filtered.append({"type": "text", "text": f"[image_ref:{img_path}]"})
+                            else:
+                                filtered.append({"type": "text", "text": "[image]"})
                         else:
                             filtered.append(c)
                     if not filtered:
