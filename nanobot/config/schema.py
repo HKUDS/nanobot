@@ -230,6 +230,7 @@ class AgentDefaults(Base):
     max_tokens: int = 8192
     temperature: float = 0.1
     max_tool_iterations: int = 40
+    subagent_max_iterations: int = 15
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
 
@@ -284,6 +285,9 @@ class GatewayConfig(Base):
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    webhook_secret: str = ""  # Bearer token for webhook auth; empty = auto-generate ephemeral
+    webhook_channel: str = ""  # Default destination channel for webhook messages
+    webhook_chat_id: str = ""  # Default destination chat ID for webhook messages
 
 
 class WebSearchConfig(Base):
@@ -305,6 +309,7 @@ class WebToolsConfig(Base):
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
+    enabled: bool = True
     timeout: int = 60
     path_append: str = ""
 

@@ -303,6 +303,7 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
+    from nanobot.api.webhook import WebhookServer
     from nanobot.session.manager import SessionManager
 
     if verbose:
@@ -341,6 +342,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        subagent_max_iterations=config.agents.defaults.subagent_max_iterations,
     )
 
     # Set cron callback (needs agent)
@@ -449,8 +451,23 @@ def gateway(
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
+    # Create webhook server
+    gw = config.gateway
+    webhook = WebhookServer(
+        bus=bus,
+        host=gw.host,
+        port=gw.port,
+        secret=gw.webhook_secret,
+        default_channel=gw.webhook_channel,
+        default_chat_id=gw.webhook_chat_id,
+    )
+    console.print(f"[green]✓[/green] Webhook: http://{gw.host}:{gw.port}/notify")
+    if webhook.ephemeral:
+        console.print(f"  [dim]Token (ephemeral): {webhook.secret}[/dim]")
+
     async def run():
         try:
+            await webhook.start()
             await cron.start()
             await heartbeat.start()
             await asyncio.gather(
@@ -461,6 +478,7 @@ def gateway(
             console.print("\nShutting down...")
         finally:
             await agent.close_mcp()
+            await webhook.stop()
             heartbeat.stop()
             cron.stop()
             agent.stop()
@@ -525,6 +543,7 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        subagent_max_iterations=config.agents.defaults.subagent_max_iterations,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
