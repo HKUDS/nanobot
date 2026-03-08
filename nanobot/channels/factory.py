@@ -38,7 +38,7 @@ class BuiltinChannelFactory:
                     **spec.extra_kwargs_factory(config),
                 )
                 logger.info("{} channel enabled", spec.display_name or spec.name.title())
-            except ImportError as e:
+            except (ImportError, AttributeError) as e:
                 logger.warning(
                     "{} channel not available: {}",
                     spec.display_name or spec.name.title(),

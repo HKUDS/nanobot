@@ -95,6 +95,45 @@ def test_builtin_channel_factory_builds_enabled_channels(monkeypatch) -> None:
     ]
 
 
+def test_builtin_channel_factory_skips_channel_when_class_is_missing(monkeypatch) -> None:
+    from nanobot.channels.factory import BuiltinChannelFactory
+    from nanobot.channels.registry import ChannelRegistry, ChannelSpec
+
+    warnings = []
+    registry = ChannelRegistry()
+    registry.register(
+        ChannelSpec(
+            name="telegram",
+            module_path="nanobot.channels.telegram",
+            class_name="MissingTelegramChannel",
+            display_name="Telegram",
+        )
+    )
+
+    monkeypatch.setattr(
+        "nanobot.channels.factory.importlib.import_module",
+        lambda _module_path: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.factory.logger.warning",
+        lambda message, display_name, error: warnings.append((message, display_name, str(error))),
+    )
+
+    config = Config()
+    config.channels.telegram.enabled = True
+
+    channels = BuiltinChannelFactory(registry).build_enabled_channels(config, MessageBus())
+
+    assert channels == {}
+    assert warnings == [
+        (
+            "{} channel not available: {}",
+            "Telegram",
+            "'types.SimpleNamespace' object has no attribute 'MissingTelegramChannel'",
+        )
+    ]
+
+
 def test_channel_manager_builds_channels_through_factory(monkeypatch) -> None:
     calls = []
     bus = MessageBus()
