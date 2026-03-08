@@ -8,6 +8,7 @@ authors = [
     {name = "David Markey"},
     {name = "nanobot contributors"}
 ]
+readme = "README.md"
 keywords = ["ai", "agent", "chatbot"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -16,6 +17,11 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
+
+[project.urls]
+Homepage = "https://github.com/dmarkey/nanobot"
+Repository = "https://github.com/dmarkey/nanobot"
+Issues = "https://github.com/dmarkey/nanobot/issues"
 
 dependencies = [
     "typer>=0.20.0,<1.0.0",
