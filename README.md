@@ -760,7 +760,7 @@ Run your own model with vLLM or any OpenAI-compatible server, then add to config
 
 **1. Start the server** (example):
 ```bash
-vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
+vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000 --enable-prefix-caching
 ```
 
 **2. Add to config** (partial — merge into `~/.nanobot/config.json`):
@@ -787,6 +787,9 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
   }
 }
 ```
+
+> Recommended for distributed vLLM workers: keep sticky routing by session so each chat keeps hitting the same worker cache.
+> nanobot sends `x-session-affinity` derived from session ID on model requests.
 
 </details>
 

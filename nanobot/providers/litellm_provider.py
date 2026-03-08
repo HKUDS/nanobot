@@ -49,6 +49,8 @@ class LiteLLMProvider(LLMProvider):
         # provider_name (from config key) is the primary signal;
         # api_key / api_base are fallback for auto-detection.
         self._gateway = find_gateway(provider_name, api_key, api_base)
+        self._is_vllm = self._gateway is not None and self._gateway.name == "vllm"
+        self._vllm_notice_emitted = False
 
         # Configure environment variables
         if api_key:
@@ -159,6 +161,25 @@ class LiteLLMProvider(LLMProvider):
                     kwargs.update(overrides)
                     return
 
+    def _build_extra_headers(self, session_id: str | None) -> dict[str, str] | None:
+        """Merge user headers with a stable session-affinity key for sticky routing."""
+        headers = dict(self.extra_headers)
+        # Inject affinity only for vLLM path where cache-aware sticky routing is documented.
+        affinity = self._session_affinity(session_id) if self._is_vllm else None
+        if affinity:
+            headers.setdefault("x-session-affinity", affinity)
+        return headers or None
+
+    def _emit_vllm_cache_guidance_once(self) -> None:
+        """Emit one-time vLLM guidance for prefix caching and sticky routing."""
+        if self._vllm_notice_emitted or not self._is_vllm:
+            return
+        self._vllm_notice_emitted = True
+        logger.warning(
+            "vLLM provider detected. Ensure --enable-prefix-caching is enabled and route the same session "
+            "to the same worker (nanobot sends x-session-affinity when session_id is available)."
+        )
+
     @staticmethod
     def _extra_msg_keys(original_model: str, resolved_model: str) -> frozenset[str]:
         """Return provider-specific extra keys to preserve in request messages."""
@@ -214,6 +235,7 @@ class LiteLLMProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        session_id: str | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -231,6 +253,7 @@ class LiteLLMProvider(LLMProvider):
         original_model = model or self.default_model
         model = self._resolve_model(original_model)
         extra_msg_keys = self._extra_msg_keys(original_model, model)
+        self._emit_vllm_cache_guidance_once()
 
         if self._supports_cache_control(original_model):
             messages, tools = self._apply_cache_control(messages, tools)
@@ -257,9 +280,9 @@ class LiteLLMProvider(LLMProvider):
         if self.api_base:
             kwargs["api_base"] = self.api_base
 
-        # Pass extra headers (e.g. APP-Code for AiHubMix)
-        if self.extra_headers:
-            kwargs["extra_headers"] = self.extra_headers
+        # Pass extra headers (e.g. APP-Code for AiHubMix, x-session-affinity for sticky routing)
+        if headers := self._build_extra_headers(session_id):
+            kwargs["extra_headers"] = headers
         
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
