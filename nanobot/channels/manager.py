@@ -150,6 +150,22 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
 
+        # Web UI channel (FastAPI + WebSocket, zero npm)
+        if self.config.channels.webui.enabled:
+            try:
+                from nanobot.channels.webui import WebUIChannel
+                self.channels["webui"] = WebUIChannel(
+                    self.config.channels.webui,
+                    self.bus,
+                )
+                logger.info(
+                    "WebUI channel enabled — http://{}:{}",
+                    self.config.channels.webui.host,
+                    self.config.channels.webui.port,
+                )
+            except ImportError as e:
+                logger.warning("WebUI channel not available (install fastapi uvicorn): {}", e)
+
         self._validate_allow_from()
 
     def _validate_allow_from(self) -> None:
