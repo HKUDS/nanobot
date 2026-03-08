@@ -62,27 +62,14 @@ Skills with available="false" need dependencies installed first - you can try in
         platform_policy = ""
         if system == "Windows":
             platform_policy = """## Platform Policy (Windows)
-- You are running on Windows. Shell commands executed via the `exec` tool run under the default Windows shell (PowerShell or cmd.exe) unless you explicitly invoke another shell.
-- Prefer UTF-8 for file I/O and command output. If terminal output is garbled/mojibake, retry with:
-  - PowerShell: `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; <command>`
-  - cmd.exe: `chcp 65001 >NUL & <command>`
-- Do NOT assume GNU tools like `grep`, `sed`, `awk` exist. Prefer Windows built-ins:
-  - Search text: `findstr /i "keyword" path\\to\\file`
-  - List files: `dir`
-  - Show file: `type path\\to\\file`
-- When in doubt, prefer the file tools (`read_file`, `list_dir`) over shell for portability and reliability.
-"""
-        elif system == "Darwin":
-            platform_policy = """## Platform Policy (macOS)
-- You are running on macOS. Prefer POSIX tools and UTF-8.
-- Use forward-slash paths. Prefer `ls`, `cat`, `grep`, `find` for filesystem and text operations.
-- When in doubt, prefer the file tools (`read_file`, `list_dir`) over shell for portability and reproducibility.
+- You are running on Windows. Do not assume GNU tools like `grep`, `sed`, or `awk` exist.
+- Prefer Windows-native commands or file tools when they are more reliable.
+- If terminal output is garbled, retry with UTF-8 output enabled.
 """
         else:
-            platform_policy = """## Platform Policy (Linux)
-- You are running on Linux. Prefer POSIX tools and UTF-8.
-- Use forward-slash paths. Prefer `ls`, `cat`, `grep`, `find` for filesystem and text operations.
-- When in doubt, prefer the file tools (`read_file`, `list_dir`) over shell for portability and reproducibility.
+            platform_policy = """## Platform Policy (POSIX)
+- You are running on a POSIX system. Prefer UTF-8 and standard shell tools.
+- Use file tools when they are simpler or more reliable than shell commands.
 """
 
         return f"""# nanobot 🐈

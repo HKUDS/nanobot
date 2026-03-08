@@ -13,16 +13,17 @@ always: true
 
 ## Search Past Events
 
-**Recommended approach (cross-platform):**
-- Use `read_file` to read `memory/HISTORY.md`, then search in-memory
-- This is the most reliable and portable method on all platforms
+Choose the search method based on file size:
 
-**Alternative (if you need command-line search):**
+- Small `memory/HISTORY.md`: use `read_file`, then search in-memory
+- Large or long-lived `memory/HISTORY.md`: use the `exec` tool for targeted search
+
+Examples:
 - **Linux/macOS:** `grep -i "keyword" memory/HISTORY.md`
 - **Windows:** `findstr /i "keyword" memory\HISTORY.md`
-- **Python (cross-platform):** `python -c "import re; content=open('memory/HISTORY.md', encoding='utf-8').read(); print('\n'.join([l for l in content.split('\n') if 'keyword' in l.lower()][-20:]))"`
+- **Cross-platform Python:** `python -c "from pathlib import Path; text = Path('memory/HISTORY.md').read_text(encoding='utf-8'); print('\n'.join([l for l in text.splitlines() if 'keyword' in l.lower()][-20:]))"`
 
-Use the `exec` tool to run these commands. For complex searches, prefer `read_file` + in-memory filtering.
+Prefer targeted command-line search for large history files.
 
 ## When to Update MEMORY.md
 
