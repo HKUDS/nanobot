@@ -13,6 +13,7 @@ from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
+from nanobot.providers.retry import with_retry
 
 # Standard chat-completion message keys.
 _ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
@@ -270,7 +271,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tool_choice"] = "auto"
 
         try:
-            response = await acompletion(**kwargs)
+            response = await with_retry(acompletion, **kwargs)
             return self._parse_response(response)
         except Exception as e:
             # Return error as content for graceful handling
