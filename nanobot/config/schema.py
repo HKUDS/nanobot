@@ -199,6 +199,23 @@ class QQConfig(Base):
     )  # Allowed user openids (empty = public access)
 
 
+class WeComConfig(Base):
+    """Enterprise WeChat (WeCom) channel configuration."""
+
+    enabled: bool = False
+    corp_id: str = ""  # Enterprise ID from WeCom admin
+    agent_id: int = 0  # Agent ID from WeCom admin
+    corp_secret: str = ""  # Agent Secret from WeCom admin
+    token: str = ""  # Verification Token from WeCom callback settings
+    encoding_aes_key: str = ""  # Encoding AES Key from WeCom callback settings
+    callback_port: int = 18791  # Local port for webhook callback server
+    callback_path: str = "/wecom/callback"  # Webhook callback path
+    api_base: str | None = None  # Custom API base URL (optional)
+    allow_from: list[str] = Field(
+        default_factory=list
+    )  # Allowed user IDs or department IDs
+
+
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
 
@@ -230,6 +247,7 @@ class ChannelsConfig(Base):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    wecom: WeComConfig = Field(default_factory=WeComConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
