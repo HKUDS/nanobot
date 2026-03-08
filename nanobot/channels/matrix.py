@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import mimetypes
+import time
 from pathlib import Path
 from typing import Any, TypeAlias
 
@@ -157,10 +158,12 @@ class MatrixChannel(BaseChannel):
         self._workspace = workspace.expanduser().resolve() if workspace else None
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
+        self._startup_time_ms: int = 0  # set in start(); events before this are ignored
 
     async def start(self) -> None:
         """Start Matrix client and begin sync loop."""
         self._running = True
+        self._startup_time_ms = int(time.time() * 1000)
         _configure_nio_logging_bridge()
 
         store_path = get_data_dir() / "matrix-store"
@@ -476,6 +479,10 @@ class MatrixChannel(BaseChannel):
 
     def _should_process_message(self, room: MatrixRoom, event: RoomMessage) -> bool:
         """Apply sender and room policy checks."""
+        # Ignore messages sent before this startup — avoids re-processing history on restart.
+        ts = getattr(event, "server_timestamp", None)
+        if isinstance(ts, (int, float)) and ts < self._startup_time_ms:
+            return False
         if not self.is_allowed(event.sender):
             return False
         if self._is_direct_room(room):
