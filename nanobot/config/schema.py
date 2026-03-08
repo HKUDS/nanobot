@@ -199,8 +199,6 @@ class QQConfig(Base):
     )  # Allowed user openids (empty = public access)
 
 
-
-
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -233,10 +231,26 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
 
 
+class ModeConfig(Base):
+    """Configuration for agent mode."""
+
+    model: str = "anthropic/claude-opus-4-5"
+    describe: str = "This is a description of the mode."
+
+
+class AgentModes(Base):
+    """Configuration for agent modes."""
+
+    enabled: bool = False
+    default_mode: str = "auto"
+    models: dict[str, ModeConfig] = Field(default_factory=dict)
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    modes: AgentModes = Field(default_factory=AgentModes)
 
 
 class ProviderConfig(Base):
@@ -251,7 +265,9 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
-    azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
+    azure_openai: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
