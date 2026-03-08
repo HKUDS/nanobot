@@ -10,12 +10,9 @@ class ChannelSpec:
     """Metadata describing a built-in channel."""
 
     name: str
-    module: str
+    module_path: str
+    class_name: str
     display_name: str = ""
-
-    @property
-    def label(self) -> str:
-        return self.display_name or self.name.title()
 
 
 class ChannelRegistry:
