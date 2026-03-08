@@ -1,0 +1,79 @@
+[
+  {
+    "id": "enforcement_check",
+    "name": "Memory Enforcement Analysis",
+    "estimated_cost": 0.90,
+    "priority": 1,
+    "prompt": "Review today's session transcripts against AGENTS.md and MEMORY.md.\n\nCheck for violations:\n1. Did I execute load-context.py at session start as required?\n2. Did I read files in the correct order (SOUL → USER → context → MEMORY)?\n3. Did I skip reading MEMORY.md in group chats (security requirement)?\n4. Did I write important decisions/context to diary files?\n5. Did I use \"mental notes\" instead of writing to files?\n6. Did I follow the documented workflows and conventions?\n7. Did I miss any mandatory skill reads when tasks matched their descriptions?\n\nBe brutally honest. Flag every violation with:\n- What I did wrong\n- What I should have done\n- Impact/risk level (low/medium/high)\n\nOutput specific examples with timestamps/session IDs.\n\n**YOU MUST use the `write` tool to save your report.** Call write(path='memory/sandman/2026-01-31-enforcement_check.md', content='YOUR_FULL_REPORT_HERE'). Do not just describe what you would write—actually write the file."
+  },
+  {
+    "id": "pattern_detection",
+    "name": "Detect patterns across recent sessions",
+    "estimated_cost": 1.00,
+    "priority": 2,
+    "prompt": "Analyze the past 3 days of diary entries and identify:\n1. Recurring topics or questions\n2. Workflow friction points\n3. Tools/models that worked well vs. poorly\n4. Any emerging patterns in behavior or focus\n\nOutput a concise summary with actionable insights.\n\n**YOU MUST use the `write` tool to save your report.** Call write(path='memory/sandman/2026-01-31-pattern_detection.md', content='YOUR_FULL_REPORT_HERE'). Do not just describe what you would write—actually write the file."
+  },
+  {
+    "id": "memory_consistency",
+    "name": "Check memory system consistency",
+    "estimated_cost": 0.70,
+    "priority": 3,
+    "prompt": "Review MEMORY.md and recent diary entries for:\n1. Contradictions or outdated information\n2. Missing cross-references\n3. Information that should be in sticky-notes\n4. Gaps in documentation\n\nOutput specific recommendations for fixes.\n\n**YOU MUST use the `write` tool to save your report.** Call write(path='memory/sandman/2026-01-31-memory_consistency.md', content='YOUR_FULL_REPORT_HERE'). Do not just describe what you would write—actually write the file."
+  },
+  {
+    "id": "project_status",
+    "name": "Update project status summaries",
+    "estimated_cost": 0.60,
+    "priority": 4,
+    "prompt": "Based on recent diary entries, update the status of active projects:\n- PsiSurferLab\n- Kascade Wilds\n- TulpaTalk\n- Air Quality Systems\n\nFor each: current status, recent progress, blockers, next steps.\n\n**YOU MUST use the `write` tool to save your report.** Call write(path='memory/sandman/2026-01-31-project_status.md', content='YOUR_FULL_REPORT_HERE'). Do not just describe what you would write—actually write the file."
+  },
+  {
+    "id": "self_analysis",
+    "name": "Analyze own performance",
+    "estimated_cost": 0.80,
+    "priority": 5,
+    "prompt": "Review recent sessions and identify:\n1. Where I (Deva) failed to follow instructions\n2. Token waste or inefficient tool use\n3. Missed context or opportunities\n4. Areas for improvement\n\nBe brutally honest. Output specific examples and fixes.\n\n**YOU MUST use the `write` tool to save your report.** Call write(path='memory/sandman/2026-01-31-self_analysis.md', content='YOUR_FULL_REPORT_HERE'). Do not just describe what you would write—actually write the file."
+  },
+  {
+    "id": "optimization_proposals",
+    "name": "Propose workflow optimizations",
+    "estimated_cost": 1.00,
+    "priority": 6,
+    "prompt": "Based on all patterns detected, propose 3-5 specific optimizations to:\n1. Workflow efficiency\n2. Memory system improvements\n3. Automation opportunities\n4. Cost reduction strategies\n\nInclude implementation steps for each.\n\n**YOU MUST use the `write` tool to save your report.** Call write(path='memory/sandman/2026-01-31-optimization_proposals.md', content='YOUR_FULL_REPORT_HERE'). Do not just describe what you would write—actually write the file."
+  },
+  {
+    "id": "security_threats",
+    "name": "MoltThreats Security Check",
+    "estimated_cost": 0.50,
+    "priority": 7,
+    "prompt": "Perform security threat analysis using MoltThreats:\n\n1. Fetch latest protection feed: `python3 skills/molthreats/scripts/fetch-feed.py`\n2. Review feed for new high/critical threats since last check\n3. Check if any threats match our current setup (tools, skills, workflows)\n4. Update memory/security/security.md with:\n   - Last sync timestamp\n   - Count of active protections\n   - List of high/critical threats\n   - Any threats requiring immediate action\n5. Report new threats worth attention (especially CRITICAL severity)\n\n**Output format:**\n- New threats count (if any)\n- High/critical threats summary (title + action required)\n- Any recommended changes to workflows or configurations\n\n**YOU MUST use the `write` tool to save your report.** Call write(path='memory/sandman/2026-01-31-security_threats.md', content='YOUR_FULL_REPORT_HERE'). Do not just describe what you would write—actually write the file."
+  },
+  {
+    "id": "user_enrichment",
+    "name": "User Profile Enrichment",
+    "estimated_cost": 0.80,
+    "priority": 8,
+    "prompt": "Extract user profile details from recent sessions and propose USER.md updates.\n\nSTEP 1: Semantic searches\nRun these queries using load-context-semantic.py (--top-k 5 --min-score 0.4):\n1. 'user preferences and likes dislikes'\n2. 'personal context identity background'\n3. 'habits patterns routines'\n4. 'current priorities and active goals'\n5. 'values beliefs worldview'\n6. 'frustrations pain points friction'\n\nSTEP 2: Extract facts\nIdentify concrete user facts (preferences, behaviors, explicit statements).\nFilter out: one-off events, vague impressions, outdated info.\nKeep: timeless patterns, explicit self-descriptions, repeated behaviors.\n\nSTEP 3: Map to USER.md sections\nCategories: Current Priorities, Core Systems & Interests, Temperament, Values, Project Themes, Communication Preferences, Working Style.\n\nSTEP 4: Generate diff proposals\nFor each: section, action (ADD/REFINE), proposed text, evidence (session ID/date/quote).\n\n**CRITICAL SAFETY:** No auto-apply to USER.md (human review required). Preserve manually-curated content. Flag conflicts.\n\nOutput: memory/sandman/YYYY-MM-DD-user_profile_enrichment.md\n\n**YOU MUST use the `write` tool to save your report.**"
+  },
+  {
+    "id": "memory_updates",
+    "name": "Memory File Update Proposals",
+    "estimated_cost": 0.90,
+    "priority": 9,
+    "prompt": "Analyze recent diary entries and propose updates to core memory files.\n\nSTEP 1: Scan last 7 days\nRead: memory/diary/2026/daily/ (last 7 files), memory/diary/2026/weekly/current.md\n\nExtract: ✅ Major decisions ('decided to', 'switching to')\n✅ Milestones ('shipped', 'completed', 'achieved')\n✅ Patterns ('always', 'never', 'consistently')\n✅ Changes ('new workflow', 'updated process')\n✅ Lessons ('discovered that', 'realized')\n❌ Skip: routine updates, trivia\n\nSTEP 2: Classify targets\nMEMORY.md: milestones, key decisions, core shifts\nSticky-notes: technical facts, project status, health data, references\nAGENTS.md: workflow improvements, automation lessons, rules, postmortems\n\nFilter: timeless → sticky-note, milestone → MEMORY.md, process → AGENTS.md\n\nSTEP 3: Generate diffs\nFor each change: target file, section, action (APPEND/UPDATE/REMOVE), diff (+/-), source reference, confidence (HIGH/MEDIUM/LOW).\n\n**CRITICAL SAFETY:** NEVER auto-apply changes. All updates staged for human review. Preserve [MANUAL] sections.\n\nOutput: memory/sandman/YYYY-MM-DD-memory_file_updates.md\n\n**YOU MUST use the `write` tool to save your report.**"
+  },
+  {
+    "id": "memory_compression",
+    "name": "MEMORY.md Compression and Archiving",
+    "estimated_cost": 0.02,
+    "priority": 10,
+    "prompt": "Compress redundant content in MEMORY.md while preserving critical information.\n\nSTEP 1: Analyze MEMORY.md\n- Count current tokens (target: 6,000-8,000)\n- Parse sections and identify compressible entries\n- Protected: Identity, Core Patterns, Values, Active Projects, tagged [KEEP]/[CORE]\n- Compressible: milestones >6 months old, redundant lessons, verbose details\n- Archivable: milestones >1 year old\n\nSTEP 2: Generate compression plan\n- Compress by date precision reduction (YYYY-MM-DD → YYYY-MM)\n- Merge redundant similar lessons\n- Detail removal (keep outcome, archive process)\n- Reference conversion (full text → sticky-note link)\n\nSTEP 3: Archive full details\nWrite/append to memory/.memory-archive.md with full details of compressed/removed entries\n\nSTEP 4: Create staged report\nOutput: memory/sandman/YYYY-MM-DD-memory_compression.md\nReport: compression summary, proposed changes (diff format), application instructions.\n**Critical:** Archive file first, then compress, human verification required.\n\n**YOU MUST use the `write` tool to save your report.**\n**Archive file:** append to memory/.memory-archive.md"
+  },
+  {
+    "id": "moltbook_intelligence",
+    "name": "Moltbook Collective Intelligence Analysis",
+    "estimated_cost": 0.60,
+    "priority": 11,
+    "prompt": "Analyze Moltbook community posts from last 24 hours and synthesize intelligence report.\n\nSTEP 1: Fetch posts\nCredentials: ~/.config/moltbook/credentials.json\nAPI calls:\n- GET /api/v1/posts?sort=hot&limit=25\n- GET /api/v1/posts?sort=new&limit=25\n\nFilter: score >10, comments >5, recent (<24h)\n❌ Spam/off-topic, score <5, old posts\n\nSTEP 2: Categorize insights\nExtract from high-signal posts:\n🔥 Trending topics (themes across posts)\n🛠️ Technical insights (solutions, optimizations)\n⚠️ Common problems (bugs, frustrations)\n💡 Innovations (novel implementations)\n🚫 Warnings (pitfalls, deprecated features)\n\nFilter: ✅ Actionable + generalizable + relevant\n❌ Bot drama, redundant, social-only\n\nSTEP 3: Synthesize report\nFormat:\n## Community Vibe\n[Overall sentiment/trends]\n\n## Trending Topics (Top 3-5)\n[Topic, description, relevance, post refs]\n\n## Technical Insights\n[Insight + takeaway]\n\n## Common Problems\n[Problem + affected count + workarounds]\n\n## Innovation Spotlight\n[Novel projects + adaptations]\n\n## Warnings\n[What to avoid + why]\n\n## Actionable Takeaways\n[3-5 specific actions]\n\n**Quality:** Select genuinely useful info only. Be selective.\n\n**Error handling:** API unreachable → skip, report in summary. Credentials missing → instructions to setup.\n\n**Privacy:** Read-only, no posting private data.\n\nOutput: memory/sandman/YYYY-MM-DD-moltbook_intelligence.md\n\n**YOU MUST use the `write` tool to save your report.**"
+  }
+]
