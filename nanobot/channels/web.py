@@ -45,6 +45,8 @@ class WebChannel(BaseChannel):
         self._runner: web.AppRunner | None = None
         # chat_id (session UUID) → asyncio.Queue for proactive bus messages
         self._queues: dict[str, asyncio.Queue] = {}
+        # chat_id → active agent asyncio.Task (for stop support)
+        self._agent_tasks: dict[str, asyncio.Task] = {}
 
     # ------------------------------------------------------------------
     # BaseChannel interface
@@ -56,6 +58,7 @@ class WebChannel(BaseChannel):
         self._app.router.add_get("/", self._handle_index)
         self._app.router.add_get("/{filename}", self._handle_static)
         self._app.router.add_post("/api/chat", self._handle_chat)
+        self._app.router.add_post("/api/stop", self._handle_stop)
         self._app.router.add_get("/api/health", self._handle_health)
 
         self._runner = web.AppRunner(self._app, access_log=None)
@@ -117,6 +120,21 @@ class WebChannel(BaseChannel):
             raise web.HTTPNotFound()
         mime, _ = mimetypes.guess_type(str(path))
         return web.Response(body=path.read_bytes(), content_type=mime or "application/octet-stream")
+
+    async def _handle_stop(self, request: web.Request) -> web.Response:
+        """Cancel the active agent task for a session."""
+        try:
+            data = await request.json()
+        except Exception:
+            raise web.HTTPBadRequest(reason="Expected JSON body")
+        session_id: str = data.get("session_id", "")
+        task = self._agent_tasks.get(session_id)
+        if task and not task.done():
+            task.cancel()
+        return web.Response(
+            text=json.dumps({"ok": True}),
+            content_type="application/json",
+        )
 
     async def _handle_health(self, request: web.Request) -> web.Response:
         return web.Response(
@@ -184,6 +202,7 @@ class WebChannel(BaseChannel):
                 await q.put(("error", str(exc)))
 
         agent_task = asyncio.create_task(run_agent())
+        self._agent_tasks[session_id] = agent_task
 
         # Prepare SSE response
         response = web.StreamResponse(headers={
@@ -249,5 +268,6 @@ class WebChannel(BaseChannel):
             agent_task.cancel()
         finally:
             self._queues.pop(session_id, None)
+            self._agent_tasks.pop(session_id, None)
 
         return response

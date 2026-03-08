@@ -387,6 +387,12 @@ header {
 #btn-send:hover { background: var(--accent-dim); }
 #btn-send:disabled { opacity: 0.35; cursor: not-allowed; }
 
+#btn-send .icon-stop { display: none; }
+#btn-send.stopping .icon-send { display: none; }
+#btn-send.stopping .icon-stop { display: block; }
+#btn-send.stopping { background: #c0392b; }
+#btn-send.stopping:hover { background: #a93226; }
+
 /* ── Empty state ────────────────────────────────────────────────────────── */
 #empty-state {
   display: flex;

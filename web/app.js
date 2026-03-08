@@ -55,6 +55,7 @@ let sessionId;
 /* ── State ────────────────────────────────────────────────────────────── */
 
 let isStreaming = false;
+let abortController = null;
 
 /* ── DOM refs ─────────────────────────────────────────────────────────── */
 
@@ -97,8 +98,24 @@ function scrollToBottom() {
 
 function setStreaming(active) {
   isStreaming = active;
-  btnSend.disabled = active;
-  input.disabled   = active;
+  input.disabled = active;
+  if (active) {
+    btnSend.classList.add('stopping');
+    btnSend.setAttribute('aria-label', 'Stop');
+  } else {
+    btnSend.classList.remove('stopping');
+    btnSend.setAttribute('aria-label', 'Send');
+    abortController = null;
+  }
+}
+
+function stopGeneration() {
+  if (abortController) abortController.abort();
+  fetch('/api/stop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId }),
+  }).catch(() => {});
 }
 
 function resizeInput() {
@@ -318,10 +335,12 @@ async function sendMessage(text) {
   saveHistory(sessionId, history);
 
   try {
+    abortController = new AbortController();
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: text, session_id: sessionId }),
+      signal: abortController.signal,
     });
 
     if (!res.ok) throw new Error(`Server returned ${res.status}`);
@@ -450,10 +469,20 @@ async function sendMessage(text) {
 
   } catch (err) {
     currentStreamEl.remove();
-    const errEl = document.createElement('div');
-    errEl.className = 'error-bubble';
-    errEl.textContent = '⚠ ' + err.message;
-    bubble.appendChild(errEl);
+    if (err.name === 'AbortError') {
+      // User stopped — render whatever was streamed so far
+      if (tokenBuffer.trim()) {
+        const rendered = document.createElement('div');
+        rendered.className = 'rendered-content';
+        rendered.innerHTML = marked.parse(tokenBuffer);
+        bubble.appendChild(rendered);
+      }
+    } else {
+      const errEl = document.createElement('div');
+      errEl.className = 'error-bubble';
+      errEl.textContent = '⚠ ' + err.message;
+      bubble.appendChild(errEl);
+    }
     scrollToBottom();
   } finally {
     setStreaming(false);
@@ -478,6 +507,13 @@ function newConversation() {
 }
 
 /* ── Event listeners ──────────────────────────────────────────────────── */
+
+btnSend.addEventListener('click', (e) => {
+  if (isStreaming) {
+    e.preventDefault();
+    stopGeneration();
+  }
+});
 
 form.addEventListener('submit', (e) => {
   e.preventDefault();
