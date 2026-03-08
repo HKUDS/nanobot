@@ -1,9 +1,12 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import json
 import hashlib
 import os
 import secrets
 import string
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import json_repair
@@ -206,6 +209,129 @@ class LiteLLMProvider(LLMProvider):
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
         return sanitized
 
+    @staticmethod
+    def _classify_call_type(messages: list[dict[str, Any]]) -> str:
+        """
+        Best-effort classification of LLM calls for debug logging separation.
+
+        Returns one of: "normal", "memory", "subagent", "cron".
+        This is intentionally heuristic and must never affect runtime behavior.
+        """
+        for msg in messages:
+            if msg.get("role") != "system":
+                continue
+            content = msg.get("content")
+            if not isinstance(content, str):
+                continue
+            c = content.lower()
+            # Memory consolidation agent system prompt
+            if "memory consolidation agent" in c:
+                return "memory"
+            # Subagent system prompt marker(s)
+            if "# subagent" in c or "subagent spawned" in c:
+                return "subagent"
+            # Cron system prompt marker
+            if "[cron job]" in c:
+                return "cron"
+        return "normal"
+
+    def _debug_log_prompt(
+        self,
+        original_model: str,
+        resolved_model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+    ) -> None:
+        """Persist the latest prompt to ~/.nanobot/debug/prompts(.<type>).log (overwrites each call)."""
+        try:
+            call_type = self._classify_call_type(messages)
+            base = Path.home() / ".nanobot" / "debug"
+            base.mkdir(parents=True, exist_ok=True)
+            path = base / ("prompts.log" if call_type == "normal" else f"prompts.{call_type}.log")
+
+            ts = datetime.now().isoformat()
+            sep = "=" * 80
+            lines: list[str] = [f"{sep}\n", f"{ts}  model={original_model}  resolved={resolved_model}\n\n"]
+            lines.append("=== MESSAGES ===\n\n")
+            for idx, msg in enumerate(messages, start=1):
+                role = msg.get("role", "?")
+                content = msg.get("content")
+                tool_calls = msg.get("tool_calls")
+                tc_hint = ""
+                if isinstance(tool_calls, list) and tool_calls:
+                    names = []
+                    for tc in tool_calls:
+                        if isinstance(tc, dict):
+                            fn = tc.get("function", {})
+                            if isinstance(fn, dict):
+                                name = fn.get("name")
+                                if isinstance(name, str) and name:
+                                    names.append(name)
+                    if names:
+                        tc_hint = f" (tool_calls: {', '.join(names)})"
+                lines.append(f"[{idx}] {role}{tc_hint}:\n")
+                if isinstance(content, str):
+                    for line in content.splitlines():
+                        lines.append(f"    {line}\n")
+                else:
+                    pretty = json.dumps(content, ensure_ascii=False, indent=2, default=str)
+                    for line in pretty.splitlines():
+                        lines.append(f"    {line}\n")
+                lines.append("\n")
+
+            lines.append("=== TOOLS (definitions) ===\n")
+            for t in tools or []:
+                fn = t.get("function", {}) if isinstance(t, dict) else {}
+                name = fn.get("name", "") if isinstance(fn, dict) else ""
+                desc = fn.get("description", "") if isinstance(fn, dict) else ""
+                lines.append(f"- {name}: {desc}\n")
+            lines.append("\n")
+
+            path.write_text("".join(lines), encoding="utf-8")
+        except Exception:
+            return
+
+    def _debug_log_response(
+        self,
+        original_model: str,
+        resolved_model: str,
+        request_messages: list[dict[str, Any]],
+        response: Any,
+    ) -> None:
+        """Persist the latest raw response to ~/.nanobot/debug/responses(.<type>).log (overwrites each call)."""
+        try:
+            call_type = self._classify_call_type(request_messages)
+            base = Path.home() / ".nanobot" / "debug"
+            base.mkdir(parents=True, exist_ok=True)
+            path = base / ("responses.log" if call_type == "normal" else f"responses.{call_type}.log")
+
+            ts = datetime.now().isoformat()
+            sep = "=" * 80
+
+            try:
+                if hasattr(response, "model_dump"):
+                    data = response.model_dump()
+                elif hasattr(response, "dict"):
+                    data = response.dict()  # type: ignore[call-arg]
+                else:
+                    data = response
+                body = json.dumps(data, ensure_ascii=False, indent=2, default=str)
+            except Exception:
+                body = str(response)
+
+            text = "".join(
+                [
+                    f"{sep}\n",
+                    f"{ts}  model={original_model}  resolved={resolved_model}\n\n",
+                    "=== RAW RESPONSE ===\n\n",
+                    body,
+                    "\n",
+                ]
+            )
+            path.write_text(text, encoding="utf-8")
+        except Exception:
+            return
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -269,8 +395,12 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
+        # Debug logging (best-effort; never affects runtime behavior)
+        self._debug_log_prompt(original_model, model, kwargs["messages"], kwargs.get("tools"))
+
         try:
             response = await acompletion(**kwargs)
+            self._debug_log_response(original_model, model, kwargs["messages"], response)
             return self._parse_response(response)
         except Exception as e:
             # Return error as content for graceful handling
