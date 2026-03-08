@@ -1,5 +1,6 @@
 """Configuration schema using Pydantic."""
 
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -351,8 +352,9 @@ class Config(BaseSettings):
 
         forced = self.agents.defaults.provider
         if forced != "auto":
-            p = getattr(self.providers, forced, None)
-            return (p, forced) if p else (None, None)
+            canonical_forced = _canonical_provider_name(forced)
+            p = getattr(self.providers, canonical_forced, None)
+            return (p, canonical_forced) if p else (None, None)
 
         model_lower = (model or self.agents.defaults.model).lower()
         model_normalized = model_lower.replace("-", "_")
@@ -419,3 +421,9 @@ class Config(BaseSettings):
         return None
 
     model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+
+
+def _canonical_provider_name(name: str) -> str:
+    """Normalize provider aliases like openaiCodex/openai-codex to openai_codex."""
+    collapsed = re.sub(r"(?<!^)(?=[A-Z])", "_", name).replace("-", "_")
+    return collapsed.lower()

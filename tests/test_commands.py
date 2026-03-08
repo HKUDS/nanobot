@@ -8,7 +8,11 @@ from typer.testing import CliRunner
 from nanobot.cli.commands import app
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
-from nanobot.providers.openai_codex_provider import _strip_model_prefix
+from nanobot.providers.openai_codex_provider import (
+    OpenAICodexProvider,
+    _build_responses_url,
+    _strip_model_prefix,
+)
 from nanobot.providers.registry import find_by_model
 
 runner = CliRunner()
@@ -110,6 +114,13 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     assert config.get_provider_name() == "openai_codex"
 
 
+def test_config_forced_provider_accepts_camel_case_alias():
+    config = Config()
+    config.agents.defaults.provider = "openaiCodex"
+
+    assert config.get_provider_name("openai-codex/gpt-5.1-codex") == "openai_codex"
+
+
 def test_find_by_model_prefers_explicit_prefix_over_generic_codex_keyword():
     spec = find_by_model("github-copilot/gpt-5.3-codex")
 
@@ -128,3 +139,24 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_openai_codex_build_responses_url_supports_common_api_base_styles():
+    assert _build_responses_url("https://example.com/responses") == "https://example.com/responses"
+    assert _build_responses_url("https://example.com/v1") == "https://example.com/v1/responses"
+    assert _build_responses_url("https://example.com") == "https://example.com/v1/responses"
+
+
+def test_make_provider_passes_openai_codex_api_credentials():
+    from nanobot.cli.commands import _make_provider
+
+    config = Config()
+    config.agents.defaults.model = "openai-codex/gpt-5.1-codex"
+    config.providers.openai_codex.api_key = "test-key"
+    config.providers.openai_codex.api_base = "https://example.com/v1"
+
+    provider = _make_provider(config)
+
+    assert isinstance(provider, OpenAICodexProvider)
+    assert provider.api_key == "test-key"
+    assert provider.api_base == "https://example.com/v1"
