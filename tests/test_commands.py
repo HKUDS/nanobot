@@ -128,3 +128,38 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_config_matches_atomgit_when_provider_explicitly_set():
+    config = Config.model_validate({
+        "agents": {"defaults": {"model": "zai/glm-5", "provider": "atomgit"}},
+        "providers": {"atomgit": {"apiKey": "test-key"}},
+    })
+
+    assert config.get_provider_name() == "atomgit"
+    p = config.get_provider()
+    assert p is not None
+    assert p.api_key == "test-key"
+
+
+def test_config_atomgit_uses_default_api_base_when_not_configured():
+    from nanobot.providers.atomgit_provider import AtomGitProvider
+
+    config = Config.model_validate({
+        "agents": {"defaults": {"model": "zai/glm-5", "provider": "atomgit"}},
+        "providers": {"atomgit": {"apiKey": "test-key"}},
+    })
+
+    p = config.get_provider()
+    assert p is not None
+    api_base = p.api_base or AtomGitProvider.DEFAULT_API_BASE
+    assert api_base == AtomGitProvider.DEFAULT_API_BASE
+
+
+def test_config_atomgit_falls_back_when_only_provider_with_key():
+    config = Config.model_validate({
+        "agents": {"defaults": {"model": "zai/glm-5"}},
+        "providers": {"atomgit": {"apiKey": "test-key"}},
+    })
+
+    assert config.get_provider_name("zai/glm-5") == "atomgit"
