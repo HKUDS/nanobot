@@ -215,19 +215,10 @@ class AgentLoop:
                     # When end_turn is in this batch, we'll send final_content once at the end;
                     # don't send the same content as progress to avoid duplicate messages.
                     end_turn_in_batch = any(tc.name == "end_turn" for tc in response.tool_calls)
-
-                    thoughts = [
-                        self._strip_think(response.content),
-                        response.reasoning_content,
-                        *(
-                            f"Thinking [{b.get('signature', '...')}]:\n{b.get('thought', '...')}"
-                            for b in (response.thinking_blocks or [])
-                            if isinstance(b, dict) and "signature" in b
-                        ),
-                    ]
-                    combined_thoughts = "\n\n".join(filter(None, thoughts))
-                    if combined_thoughts and not end_turn_in_batch:
-                        await on_progress(combined_thoughts)
+                    thought = self._strip_think(response.content)
+                    
+                    if thought and not end_turn_in_batch:
+                        await on_progress(thought)
                     await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
                 tool_call_dicts = [
