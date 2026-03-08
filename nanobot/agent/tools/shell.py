@@ -20,6 +20,7 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
+        allowed_dirs: list[Path] | Path | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -37,6 +38,14 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+
+        # Normalize allowed_dirs
+        self._allowed_dirs: list[Path] | None = None
+        if allowed_dirs is not None:
+            if isinstance(allowed_dirs, Path):
+                self._allowed_dirs = [allowed_dirs.resolve()]
+            else:
+                self._allowed_dirs = [d.resolve() for d in allowed_dirs]
 
     @property
     def name(self) -> str:
@@ -158,7 +167,10 @@ class ExecTool(Tool):
             if "..\\" in cmd or "../" in cmd:
                 return "Error: Command blocked by safety guard (path traversal detected)"
 
-            cwd_path = Path(cwd).resolve()
+            # Use allowed_dirs if provided, otherwise just cwd
+            allowed_list = self._allowed_dirs
+            if allowed_list is None:
+                allowed_list = [Path(cwd).resolve()]
 
             for raw in self._extract_absolute_paths(cmd):
                 try:
@@ -166,8 +178,18 @@ class ExecTool(Tool):
                     p = Path(expanded).expanduser().resolve()
                 except Exception:
                     continue
-                if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
-                    return "Error: Command blocked by safety guard (path outside working dir)"
+                if p.is_absolute():
+                    allowed = False
+                    for allowed_dir in allowed_list:
+                        try:
+                            p.relative_to(allowed_dir)
+                            allowed = True
+                            break
+                        except ValueError:
+                            continue
+                    if not allowed:
+                        dirs_str = ", ".join(str(d) for d in allowed_list)
+                        return f"Error: Command blocked by safety guard (path outside allowed directories: {dirs_str})"
 
         return None
 
