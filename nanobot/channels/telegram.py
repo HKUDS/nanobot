@@ -15,7 +15,7 @@ from telegram.request import HTTPXRequest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import TelegramConfig
+from nanobot.config.schema import TelegramConfig, TranscriptionConfig
 from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
@@ -167,11 +167,11 @@ class TelegramChannel(BaseChannel):
         self,
         config: TelegramConfig,
         bus: MessageBus,
-        groq_api_key: str = "",
+        transcription_config: TranscriptionConfig | None = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
-        self.groq_api_key = groq_api_key
+        self.transcription_config = transcription_config
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -198,6 +198,10 @@ class TelegramChannel(BaseChannel):
 
         return sid in allow_list or username in allow_list
 
+        # Eagerly instantiate transcriber to allow preloading (if enabled)
+        from nanobot.providers.transcription import get_transcription_provider
+        self._transcriber = get_transcription_provider(self.transcription_config)
+
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
         if not self.config.token:
@@ -205,6 +209,10 @@ class TelegramChannel(BaseChannel):
             return
 
         self._running = True
+
+        # Trigger transcription warmup (e.g. for MLX models)
+        if self._transcriber:
+            await self._transcriber.preload()
 
         # Build the application with larger connection pool to avoid pool-timeout on long runs
         req = HTTPXRequest(
@@ -548,9 +556,10 @@ class TelegramChannel(BaseChannel):
 
                 # Handle voice transcription
                 if media_type == "voice" or media_type == "audio":
-                    from nanobot.providers.transcription import GroqTranscriptionProvider
-                    transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
-                    transcription = await transcriber.transcribe(file_path)
+                    transcription = None
+                    if self._transcriber:
+                        transcription = await self._transcriber.transcribe(file_path)
+                        
                     if transcription:
                         logger.info("Transcribed {}: {}...", media_type, transcription[:50])
                         content_parts.append(f"[transcription: {transcription}]")

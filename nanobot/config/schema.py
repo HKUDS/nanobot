@@ -329,6 +329,17 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class TranscriptionConfig(Base):
+    """Transcription configuration."""
+
+    enabled: bool = True
+    provider: str = "groq"  # groq, openai, or any litellm provider
+    model: str = "whisper-large-v3"
+    api_key: str = ""
+    api_base: str | None = None
+    preload: bool = False
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -337,6 +348,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
 
     @property
     def workspace_path(self) -> Path:
