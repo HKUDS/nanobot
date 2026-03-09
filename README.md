@@ -737,6 +737,65 @@ nanobot gateway
 
 </details>
 
+<details>
+<summary><b>Endpoint</b></summary>
+
+Provide a OpenAI /v1/responses interface, allowing connecting external channels.
+
+**1. Install dependencies
+
+```
+pip install flask[async]
+```
+
+**2. Configure**
+
+> - `host` is 127.0.0.1 by default. Set it to 0.0.0.0 to listen on all interfaces.
+> - `port` defaults to 8080. Set it to the port you want the server to listen on.
+
+```json
+{
+  "channels": {
+    "endpoint": {
+      "enabled": true,
+      "host": "0.0.0.0",
+      "port": 8080
+    }
+  }
+}
+```
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+**3. Test**
+
+```
+curl -X POST "http://localhost:8080/v1/responses" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "model": "agent-v1",
+       "messages": [
+         {
+           "role": "user",
+           "content": "Who are you?"
+         }
+       ],
+       "user": "test-user"
+     }'
+```
+
+**4. Example external channel **
+
+```
+python tests/test_endpoint_webchat_server.py
+```
+
+</details>
+
 ## 🌐 Agent Social Network
 
 🐈 nanobot is capable of linking to the agent social network (agent community). **Just send one message and your nanobot joins automatically!**
