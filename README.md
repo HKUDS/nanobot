@@ -58,6 +58,51 @@ nanobot gateway
 | ml_quant | ML量化方法论 - 特征工程, 过拟合防范 |
 | portfolio_optimization | 组合优化 - Markowitz, 风险平价 |
 
+## 配套工具
+
+QuantBot 提供以下内置工具，辅助量化研究工作：
+
+| 工具 | 说明 |
+|------|------|
+| quant_data | 实时获取 A 股行情、北向资金、行业板块、融资融券等数据 |
+| db_reader | 从本地 SQLite 数据库读取历史数据（每日自动更新） |
+| qlib_backtest | 基于 Qlib 的策略回测框架 |
+| paper_trading | 模拟交易，实时监控策略绩效 |
+| strategy_git | 策略版本管理，记录变更历史 |
+
+### 本地数据库
+
+数据存储在项目目录 `config/data/market_data.db`，每日 20:00 自动更新：
+
+```bash
+# 手动更新数据
+cd /path/to/QuantBot && python3 scripts/db_daily_update.py
+```
+
+**数据库表结构：**
+- `daily_quotes` - 个股日行情
+- `index_quotes` - 指数日行情
+- `north_fund_flow` - 北向资金流向
+- `margin_trading` - 融资融券
+- `industry_quotes` - 行业板块涨跌
+
+### Cron 定时任务
+
+配置定时数据更新（编辑 crontab）：
+
+```bash
+# 每日 20:00 更新市场数据
+0 20 * * 1-5 cd $QUANTBOT_DIR && python3 scripts/db_daily_update.py
+```
+
+参考配置见 `config/crontab.example`。
+
+### 策略开发流程
+
+```
+quant_data (获取数据) → qlib_backtest (回测验证) → paper_trading (模拟交易) → strategy_git (版本管理)
+```
+
 ## 外部Skills
 
 通过 ClawHub 安装:
