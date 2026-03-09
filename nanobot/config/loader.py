@@ -1,7 +1,9 @@
 """Configuration loading utilities."""
 
 import json
+import os
 from pathlib import Path
+from typing import Any
 
 from nanobot.config.schema import Config
 
@@ -40,6 +42,9 @@ def load_config(config_path: Path | None = None) -> Config:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             data = _migrate_config(data)
+            env_overrides = _load_env_overrides()
+            if env_overrides:
+                data = _deep_merge(data, env_overrides)
             return Config.model_validate(data)
         except (json.JSONDecodeError, ValueError) as e:
             print(f"Warning: Failed to load config from {path}: {e}")
@@ -73,3 +78,45 @@ def _migrate_config(data: dict) -> dict:
     if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
         tools["restrictToWorkspace"] = exec_cfg.pop("restrictToWorkspace")
     return data
+
+
+def _load_env_overrides() -> dict[str, Any]:
+    """Collect NANOBOT_* environment overrides into a nested config dict."""
+    prefix = "NANOBOT_"
+    overrides: dict[str, Any] = {}
+
+    for key, raw_value in os.environ.items():
+        if not key.startswith(prefix):
+            continue
+
+        path = [part.lower() for part in key[len(prefix):].split("__") if part]
+        if not path:
+            continue
+
+        current = overrides
+        for part in path[:-1]:
+            current = current.setdefault(part, {})
+        current[path[-1]] = _parse_env_value(raw_value)
+
+    return overrides
+
+
+def _parse_env_value(value: str) -> Any:
+    """Parse JSON-like environment values while keeping plain strings intact."""
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+def _deep_merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge env overrides onto config file data."""
+    merged = dict(base)
+
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+
+    return merged
