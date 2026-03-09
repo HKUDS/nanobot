@@ -6,6 +6,7 @@ import asyncio
 import re
 import time
 import unicodedata
+from collections import OrderedDict
 
 from loguru import logger
 from telegram import BotCommand, ReplyParameters, Update
@@ -177,6 +178,7 @@ class TelegramChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
+        self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
 
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -408,6 +410,17 @@ class TelegramChannel(BaseChannel):
 
         message = update.message
         user = update.effective_user
+        
+        # Deduplication check
+        message_id = str(message.message_id)
+        if message_id in self._processed_message_ids:
+            return
+        self._processed_message_ids[message_id] = None
+        
+        # Trim cache
+        while len(self._processed_message_ids) > 1000:
+            self._processed_message_ids.popitem(last=False)
+
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
 
