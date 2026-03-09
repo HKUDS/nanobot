@@ -1,0 +1,55 @@
+{
+  "notification": {
+    "enabled": true,
+    "channels": {
+      "feishu": {
+        "enabled": false,
+        "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_WEBHOOK_ID",
+        "mention": ["13800138000"]  # 飞书用户手机号，@特定用户
+      },
+      "telegram": {
+        "enabled": false,
+        "bot_token": "YOUR_BOT_TOKEN",
+        "chat_id": "YOUR_CHAT_ID"
+      },
+      "email": {
+        "enabled": false,
+        "smtp_server": "smtp.example.com",
+        "smtp_port": 465,
+        "username": "your_email@example.com",
+        "password": "your_password",
+        "to": ["recipient@example.com"]
+      }
+    },
+    "levels": {
+      "level_1": {
+        "name": "紧急通知",
+        "description": "需要立即处理",
+        "channels": ["feishu", "telegram"],
+        "triggers": [
+          "策略衰减超过50%",
+          "重大政策变化",
+          "模拟持仓单日亏损超过阈值"
+        ]
+      },
+      "level_2": {
+        "name": "日常通知",
+        "description": "每日简报",
+        "channels": ["feishu"],
+        "triggers": [
+          "每日收盘简报",
+          "每周周报"
+        ]
+      },
+      "level_3": {
+        "name": "汇总通知",
+        "description": "定期汇总",
+        "channels": ["feishu"],
+        "triggers": [
+          "月度报告",
+          "量化社区学习成果"
+        ]
+      }
+    }
+  }
+}

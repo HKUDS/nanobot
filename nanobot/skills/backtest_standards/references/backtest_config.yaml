@@ -1,0 +1,43 @@
+# 回测配置模板
+# 复制此文件并根据需要修改参数
+
+# 策略基本信息
+strategy:
+  name: "示例策略"
+  version: "v1.0"
+  description: "策略描述"
+
+# 回测参数
+backtest:
+  # 回测区间
+  start_date: "2019-01-01"
+  end_date: "2024-12-31"
+
+  # 初始资金
+  initial_capital: 1000000
+
+  # 股票池
+  universe: "000300"  # 沪深300
+
+  # 交易成本（保守假设）
+  commission_rate: 0.0003  # 万分之0.3（单边）
+  stamp_duty: 0.001       # 千分之一（仅卖出）
+  slippage: 0.0005         # 万分之0.5
+
+# 风控参数
+risk:
+  # 最大回撤限制
+  max_drawdown: 0.20  # 20%
+
+  # 单票仓位限制
+  max_position: 0.10  # 10%
+
+  # 单日最大换手
+  max_daily_turnover: 0.20  # 20%
+
+# 策略特定参数
+parameters:
+  # 示例参数
+  lookback_period: 20
+  holding_period: 10
+  signal_threshold: 0.5
