@@ -125,6 +125,44 @@ class TestDispatch:
         await asyncio.gather(t1, t2)
         assert order == ["start-a", "end-a", "start-b", "end-b"]
 
+    @pytest.mark.asyncio
+    async def test_run_interrupts_previous_task_for_same_session(self):
+        from nanobot.bus.events import InboundMessage
+
+        loop, bus = _make_loop()
+        loop._connect_mcp = AsyncMock(return_value=None)
+
+        started_first = asyncio.Event()
+        cancelled_first = asyncio.Event()
+        started_second = asyncio.Event()
+
+        async def fake_dispatch(msg):
+            if msg.content == "first":
+                started_first.set()
+                try:
+                    await asyncio.sleep(60)
+                except asyncio.CancelledError:
+                    cancelled_first.set()
+                    raise
+            else:
+                started_second.set()
+
+        loop._dispatch = fake_dispatch
+
+        runner = asyncio.create_task(loop.run())
+        await bus.publish_inbound(InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="first"))
+        await asyncio.wait_for(started_first.wait(), timeout=1.0)
+
+        await bus.publish_inbound(InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="second"))
+
+        notice = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        assert "interrupted" in notice.content.lower()
+        await asyncio.wait_for(cancelled_first.wait(), timeout=1.0)
+        await asyncio.wait_for(started_second.wait(), timeout=1.0)
+
+        loop.stop()
+        await asyncio.wait_for(runner, timeout=1.0)
+
 
 class TestSubagentCancellation:
     @pytest.mark.asyncio
