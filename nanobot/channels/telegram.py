@@ -174,6 +174,7 @@ class TelegramChannel(BaseChannel):
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
         self._app: Application | None = None
+        self._bot_username: str | None = None  # Stored on startup for mention detection
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
         self._media_group_buffers: dict[str, dict] = {}
@@ -242,6 +243,7 @@ class TelegramChannel(BaseChannel):
 
         # Get bot info and register command menu
         bot_info = await self._app.bot.get_me()
+        self._bot_username = bot_info.username
         logger.info("Telegram bot @{} connected", bot_info.username)
 
         try:
@@ -487,6 +489,31 @@ class TelegramChannel(BaseChannel):
             session_key=self._derive_topic_session_key(message),
         )
 
+    def _should_respond_in_group(self, message) -> bool:
+        """Check whether the bot should respond to a group message based on group_policy."""
+        policy = self.config.group_policy
+
+        if policy == "open":
+            return True
+
+        if policy == "allowlist":
+            return str(message.chat_id) in self.config.group_allow_from
+
+        # policy == "mention"
+        # Check if the message is a reply to one of the bot's messages
+        if message.reply_to_message and message.reply_to_message.from_user:
+            if message.reply_to_message.from_user.is_bot and self._bot_username:
+                if message.reply_to_message.from_user.username == self._bot_username:
+                    return True
+
+        # Check if the bot is @mentioned in the text
+        if self._bot_username:
+            text = message.text or message.caption or ""
+            if f"@{self._bot_username}" in text:
+                return True
+
+        return False
+
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:
@@ -497,6 +524,10 @@ class TelegramChannel(BaseChannel):
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
         self._remember_thread_context(message)
+
+        # Apply group policy filter for non-private chats
+        if message.chat.type != "private" and not self._should_respond_in_group(message):
+            return
 
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
