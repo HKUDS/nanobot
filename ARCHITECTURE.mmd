@@ -1,63 +1,3 @@
-# Nanobot Architecture
-
-This document summarizes the runtime architecture implemented in the current repository.
-
-## Rendered Diagram
-
-![Nanobot architecture](./nanobot_arch.svg)
-
-## Basic Graph
-
-```mermaid
-flowchart LR
-    User["User"]
-    Channels["Input Channels\nTelegram / Discord / Slack / WhatsApp / Email / Matrix / CLI"]
-    ChannelMgr["ChannelManager"]
-    Bus["MessageBus\nInbound / Outbound queues"]
-    Heartbeat["HeartbeatService\nreads HEARTBEAT.md"]
-    Cron["CronService"]
-    Agent["AgentLoop"]
-    Context["ContextBuilder"]
-    Session["SessionManager\nsessions/*.jsonl"]
-    Memory["MemoryStore\nmemory/MEMORY.md\nmemory/PINNED.md\nmemory/HISTORY.md"]
-    Skills["SkillsLoader\nworkspace skills + builtin skills"]
-    Provider["LLM Provider"]
-    Tools["ToolRegistry"]
-    Web["Web tools\nweb_search / web_fetch"]
-    MCP["MCP tools\nconnected external servers"]
-    Local["Local tools\nfiles / shell / message / spawn / cron"]
-    Subagents["SubagentManager"]
-
-    User --> Channels
-    Channels --> ChannelMgr
-    ChannelMgr --> Bus
-    Bus --> Agent
-    Heartbeat --> Agent
-    Cron --> Agent
-
-    Agent --> Context
-    Context --> Session
-    Context --> Memory
-    Context --> Skills
-
-    Agent --> Provider
-    Provider --> Agent
-
-    Agent --> Tools
-    Tools --> Web
-    Tools --> MCP
-    Tools --> Local
-    Tools --> Subagents
-
-    Agent --> Bus
-    Bus --> ChannelMgr
-    ChannelMgr --> Channels
-    Channels --> User
-```
-
-## Styled Graph
-
-```mermaid
 flowchart TB
     classDef input fill:#FFF1C9,stroke:#9B6B00,color:#2B1C00,stroke-width:1px;
     classDef runtime fill:#DCEEFF,stroke:#185A9D,color:#0B2742,stroke-width:1px;
@@ -129,12 +69,3 @@ flowchart TB
     Bus --> ChannelMgr
     ChannelMgr --> Telegram
     ChannelMgr --> OtherChannels
-```
-
-## Notes
-
-- Input arrives through chat channels, then `ChannelManager` routes it onto the `MessageBus`.
-- `AgentLoop` is the central orchestrator: it builds prompt context, calls the provider, executes tool calls, and publishes responses.
-- Context is assembled from session history, workspace memory files, bootstrap files like `AGENTS.md`, and installed skills.
-- Tooling is split between local tools, web tools, and dynamically connected MCP tools.
-- Heartbeat and cron can trigger the same core agent loop without a human message.
