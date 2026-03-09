@@ -129,6 +129,11 @@ class CustomProvider(LLMProvider):
                 content += text_delta
                 await on_text_delta(text_delta)
                 streamed_output = True
+            else:
+                reasoning_delta = getattr(delta, "reasoning_content", None)
+                if reasoning_delta:
+                    await on_text_delta(reasoning_delta)
+                    streamed_output = True
 
             for tc in getattr(delta, "tool_calls", None) or []:
                 index = getattr(tc, "index", 0) or 0
@@ -195,6 +200,11 @@ class CustomProvider(LLMProvider):
                     content += text_delta
                     await on_text_delta(text_delta)
                     streamed_output = True
+                else:
+                    reasoning_delta = delta.get("reasoning_content")
+                    if reasoning_delta:
+                        await on_text_delta(reasoning_delta)
+                        streamed_output = True
 
                 for tc in delta.get("tool_calls") or []:
                     index = tc.get("index", 0) or 0
