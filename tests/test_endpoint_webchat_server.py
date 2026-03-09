@@ -21,24 +21,28 @@ HTML_PAGE = """<!doctype html>
     .panel { overflow: hidden; display: flex; flex-direction: column; height: 100%; }
     .chats { border-right: 1px solid var(--line); }
     .panel h2 { margin: 0; padding: 16px; font-size: 14px; border-bottom: 1px solid var(--line); }
-    #chat-list { list-style: none; overflow-y: auto; flex: 1; padding: 0; }
-    #chat-list li { padding: 12px 16px; border-bottom: 1px solid #7f7f7f5f; cursor: pointer; }
-    #chat-list li.active { border-left: 3px solid var(--accent); }
+    #chat-list { list-style: none; overflow-y: auto; flex: 1; padding: 0; margin: 0; }
+    #chat-list li { padding: 12px 16px; border-bottom: 1px solid #7f7f7f5f; cursor: pointer; transition: background .2s; }
+    #chat-list li:hover { background: #7f7f7f1a; }
+    #chat-list li.active { border-left: 3px solid var(--accent); background: #7f7f7f2a; }
     form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
-    textarea { flex: 1; border-radius: 6px; border: 1px solid var(--line); padding: 8px; }
-    button { cursor: pointer; background: var(--accent); border: none; border-radius: 6px; padding: 8px 16px; }
+    textarea { flex: 1; border-radius: 6px; border: 1px solid var(--line); padding: 8px; font: inherit; }
+    button { cursor: pointer; background: var(--accent); border: none; border-radius: 6px; padding: 8px 16px; color: white; font-weight: 600; }
+    button:hover { background: var(--accent-dim); }
     #messages { padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; flex: 1; }
-    .msg { max-width: 80%; border-radius: 12px; padding: 10px; border: 1px solid var(--line); }
-    .user { align-self: flex-end; background: #94a1b933; }
-    .assistant { align-self: flex-start; background: #7f7f7f1f; }
+    .msg { max-width: 80%; border-radius: 12px; padding: 10px 14px; border: 1px solid var(--line); line-height: 1.4; }
+    .user { align-self: flex-end; background: #94a1b933; border-bottom-right-radius: 4px; }
+    .assistant { align-self: flex-start; background: #7f7f7f1f; border-bottom-left-radius: 4px; }
+    .system { align-self: center; font-size: 12px; opacity: 0.7; font-style: italic; border: none; background: none; }
+    .error { color: #f87171; border-color: #f87171; }
   </style>
 </head>
 <body>
   <main class="shell">
     <section class="panel chats">
-      <h2>Endpoint webchat Test</h2>
+      <h2>Chats</h2>
       <ul id="chat-list"></ul>
-      <form id="new-chat-form"><input id="chat-title" placeholder="Session Name" required /><button type="submit">Start</button></form>
+      <form id="new-chat-form"><input id="chat-title" placeholder="Session Name" required style="flex:1; padding:8px; border-radius:6px; border:1px solid var(--line);" /><button type="submit">New</button></form>
     </section>
     <section class="panel chat">
       <div id="messages"></div>
@@ -51,55 +55,133 @@ HTML_PAGE = """<!doctype html>
 
   <script>
     let activeId = null;
+    let sessions = JSON.parse(localStorage.getItem('endpoint_sessions') || '[]');
     const endpointUrl = "/v1/responses";
 
-    const addMsg = (role, content) => {
+    const addMsgToUI = (role, content, isError = false) => {
       const el = document.createElement('div');
-      el.className = `msg ${role}`;
+      el.className = `msg ${role} ${isError ? 'error' : ''}`;
       el.textContent = content;
       document.getElementById('messages').appendChild(el);
+      document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+    };
+
+    const saveHistory = (id, history) => {
+      localStorage.setItem(`history_${id}`, JSON.stringify(history));
+    };
+
+    const getHistory = (id) => {
+      return JSON.parse(localStorage.getItem(`history_${id}`) || '[]');
+    };
+
+    const selectSession = (id) => {
+      activeId = id;
+      renderSessions();
+      const messagesContainer = document.getElementById('messages');
+      messagesContainer.innerHTML = '';
+
+      const history = getHistory(id);
+      if (history.length === 0) {
+        addMsgToUI('system', 'New session started.');
+      } else {
+        history.forEach(m => addMsgToUI(m.role, m.content));
+      }
+    };
+
+    const renderSessions = () => {
+      const list = document.getElementById('chat-list');
+      list.innerHTML = '';
+      sessions.forEach(s => {
+        const li = document.createElement('li');
+        li.textContent = s.title;
+        if (s.id === activeId) li.className = 'active';
+        li.onclick = () => selectSession(s.id);
+        list.appendChild(li);
+      });
+      localStorage.setItem('endpoint_sessions', JSON.stringify(sessions));
     };
 
     document.getElementById('new-chat-form').onsubmit = (e) => {
       e.preventDefault();
-      activeId = Date.now().toString(16);
-      const li = document.createElement('li');
-      li.textContent = document.getElementById('chat-title').value;
-      li.className = 'active';
-      document.getElementById('chat-list').appendChild(li);
-      document.getElementById('messages').innerHTML = '';
+      const title = document.getElementById('chat-title').value;
+      const id = 'sess_' + Date.now().toString(16);
+      sessions.unshift({ id, title });
+      document.getElementById('chat-title').value = '';
+      selectSession(id);
     };
 
     document.getElementById('send-form').onsubmit = async (e) => {
       e.preventDefault();
-      const content = document.getElementById('prompt').value;
-      addMsg('user', content);
-      document.getElementById('prompt').value = '';
+      if (!activeId) {
+        alert("Please select or create a session first.");
+        return;
+      }
+
+      const promptEl = document.getElementById('prompt');
+      const content = promptEl.value.trim();
+      if (!content) return;
+
+      const sendBtn = document.getElementById('send-btn');
+      promptEl.value = '';
+      promptEl.disabled = true;
+      sendBtn.disabled = true;
+
+      const history = getHistory(activeId);
+
+      // Find the last assistant response to get the previous_response_id
+      const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant' && m.id);
+      const prevId = lastAssistantMsg ? lastAssistantMsg.id : undefined;
+
+      addMsgToUI('user', content);
+      history.push({ role: 'user', content });
+      saveHistory(activeId, history);
 
       try {
         const r = await fetch(endpointUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            messages: [{role: 'user', content}],
-            user: "test-user"
+            input: content,
+            user: "web-test-user",
+            previous_response_id: prevId
           })
         });
         const data = await r.json();
+
+        if (!r.ok) throw new Error(data.error || 'Server error');
+
         let reply = '';
         if (data.output && Array.isArray(data.output)) {
           const msgItem = data.output.find(item => item.type === 'message');
           if (msgItem && msgItem.content && Array.isArray(msgItem.content)) {
-            // Find the first text part in the content array
             const textPart = msgItem.content.find(c => c.type === 'text');
             if (textPart) reply = textPart.text;
           }
         }
-        addMsg('assistant', reply || 'Error: No output text');
+
+        if (reply) {
+          addMsgToUI('assistant', reply);
+          history.push({ role: 'assistant', content: reply, id: data.id });
+          saveHistory(activeId, history);
+        } else {
+          addMsgToUI('system', 'No output received.', true);
+        }
+
       } catch (err) {
-        addMsg('system', 'Connection failed: ' + err.message);
+        addMsgToUI('system', 'Error: ' + err.message, true);
+      } finally {
+        promptEl.disabled = false;
+        sendBtn.disabled = false;
+        promptEl.focus();
       }
     };
+
+    // Initial load
+    if (sessions.length > 0) {
+      selectSession(sessions[0].id);
+    } else {
+      renderSessions();
+    }
   </script>
 </body>
 </html>
