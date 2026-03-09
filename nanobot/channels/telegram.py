@@ -15,6 +15,7 @@ from telegram.request import HTTPXRequest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import TelegramConfig
 from nanobot.utils.helpers import split_message
 
@@ -536,10 +537,7 @@ class TelegramChannel(BaseChannel):
                     getattr(media_file, 'mime_type', None),
                     getattr(media_file, 'file_name', None),
                 )
-                # Save to workspace/media/
-                from pathlib import Path
-                media_dir = Path.home() / ".nanobot" / "media"
-                media_dir.mkdir(parents=True, exist_ok=True)
+                media_dir = get_media_dir("telegram")
 
                 file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
                 await file.download_to_drive(str(file_path))
