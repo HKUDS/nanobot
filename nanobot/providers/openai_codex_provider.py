@@ -15,6 +15,7 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_ORIGINATOR = "nanobot"
+MAX_TOOL_CALL_ID_LEN = 64
 
 
 class OpenAICodexProvider(LLMProvider):
@@ -221,6 +222,19 @@ def _split_tool_call_id(tool_call_id: Any) -> tuple[str, str | None]:
     return "call_0", None
 
 
+def _compose_tool_call_id(call_id: str, item_id: str | None) -> str:
+    """Build a provider-compatible tool_call_id (<= 64 chars for Responses API)."""
+    composite = f"{call_id}|{item_id}" if item_id else call_id
+    if len(composite) <= MAX_TOOL_CALL_ID_LEN:
+        return composite
+    if len(call_id) <= MAX_TOOL_CALL_ID_LEN:
+        return call_id
+    # Keep deterministic uniqueness when both IDs are too long.
+    suffix = hashlib.sha256(composite.encode("utf-8")).hexdigest()[:12]
+    keep = MAX_TOOL_CALL_ID_LEN - len(suffix) - 1
+    return f"{call_id[:keep]}_{suffix}"
+
+
 def _prompt_cache_key(messages: list[dict[str, Any]]) -> str:
     raw = json.dumps(messages, ensure_ascii=True, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -289,7 +303,7 @@ async def _consume_sse(response: httpx.Response) -> tuple[str, list[ToolCallRequ
                     args = {"raw": args_raw}
                 tool_calls.append(
                     ToolCallRequest(
-                        id=f"{call_id}|{buf.get('id') or item.get('id') or 'fc_0'}",
+                        id=_compose_tool_call_id(call_id, buf.get("id") or item.get("id") or "fc_0"),
                         name=buf.get("name") or item.get("name"),
                         arguments=args,
                     )
