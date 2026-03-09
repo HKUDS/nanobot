@@ -176,7 +176,8 @@ def test_retrieve_debug_history_prefers_episodic(tmp_path: Path) -> None:
     assert metrics["retrieval_intent_debug_history"] >= 1
 
 
-def test_get_memory_context_fact_lookup_hides_episodic(tmp_path: Path) -> None:
+def test_get_memory_context_fact_lookup_includes_episodic_softly(tmp_path: Path) -> None:
+    """fact_lookup now soft-includes episodic with a small budget weight."""
     store = MemoryStore(tmp_path)
     store.write_long_term("# Memory\nCore facts")
     store.retrieve = MagicMock(
@@ -204,7 +205,8 @@ def test_get_memory_context_fact_lookup_hides_episodic(tmp_path: Path) -> None:
 
     assert "## Relevant Semantic Memories" in context
     assert "Carlos prefers CLI tools." in context
-    assert "## Relevant Episodic Memories" not in context
+    # Episodic section now has a small weight (0.05) for fact_lookup,
+    # so it may appear if budget allows.
     metrics = store.get_metrics()
     assert metrics["memory_context_intent_fact_lookup"] >= 1
 

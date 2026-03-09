@@ -454,6 +454,10 @@ class MemoryStore:
             "what did we try",
             "correction",
             "corrected",
+            "post-mortem",
+            "postmortem",
+            "root cause",
+            "outage",
         )
         reflection_markers = (
             "reflect", "reflection", "lesson", "learned", "retrospective",
@@ -3340,6 +3344,40 @@ class MemoryStore:
                 counts["retrieval_returned_unknown"] += 1
         return final, {"intent": intent, "retrieved_count": len(retrieved), "counts": counts}
 
+    # ------------------------------------------------------------------
+    # Query entity extraction via entity-index lookup
+    # ------------------------------------------------------------------
+
+    def _build_entity_index(self, events: list[dict[str, Any]]) -> set[str]:
+        """Collect all unique entity strings from events into a lowercase set."""
+        index: set[str] = set()
+        for evt in events:
+            for e in evt.get("entities") or []:
+                if isinstance(e, str) and e.strip():
+                    index.add(e.strip().lower())
+        return index
+
+    def _extract_query_entities(
+        self, query: str, entity_index: set[str],
+    ) -> set[str]:
+        """Extract entities from a query by matching tokens against known entities.
+
+        Complements the capitalization-based ``_extract_entities`` by handling
+        lowercase queries like "who are alice and bob".  Matches unigrams and
+        bigrams against the entity index built from events.
+        """
+        words = re.findall(r"[a-z0-9][\w-]*", query.lower())
+        matched: set[str] = set()
+        for w in words:
+            if w in entity_index:
+                matched.add(w)
+        # Also check bigrams (e.g. "github actions", "knowledge graph")
+        for i in range(len(words) - 1):
+            bigram = f"{words[i]} {words[i + 1]}"
+            if bigram in entity_index:
+                matched.add(bigram)
+        return matched
+
     def _build_graph_context_lines(
         self,
         query: str,
@@ -3352,6 +3390,12 @@ class MemoryStore:
         scanning triples stored in local events.
         """
         query_entities = {e.lower() for e in self.extractor._extract_entities(query)}
+
+        # Also extract entities via index lookup (handles lowercase queries).
+        events = self.read_events(limit=200)
+        entity_index = self._build_entity_index(events)
+        query_entities |= self._extract_query_entities(query, entity_index)
+
         for item in retrieved:
             for e in item.get("entities") or []:
                 if isinstance(e, str) and e.strip():
@@ -3369,7 +3413,6 @@ class MemoryStore:
             )
 
         # Supplement with local event triples (may add context Neo4j lacks).
-        events = self.read_events(limit=200)
         for evt in events:
             for triple in evt.get("triples") or []:
                 subj = str(triple.get("subject", "")).strip()
@@ -3603,12 +3646,12 @@ class MemoryStore:
     # are relative — they're normalised to sum to 1.0 during allocation.
     _SECTION_PRIORITY_WEIGHTS: dict[str, dict[str, float]] = {
         "fact_lookup": {
-            "long_term": 0.30,
-            "profile": 0.25,
+            "long_term": 0.28,
+            "profile": 0.23,
             "semantic": 0.20,
-            "episodic": 0.00,
+            "episodic": 0.05,
             "reflection": 0.00,
-            "graph": 0.20,
+            "graph": 0.19,
             "unresolved": 0.05,
         },
         "debug_history": {
@@ -3639,12 +3682,12 @@ class MemoryStore:
             "unresolved": 0.10,
         },
         "constraints_lookup": {
-            "long_term": 0.20,
-            "profile": 0.30,
-            "semantic": 0.25,
-            "episodic": 0.00,
+            "long_term": 0.19,
+            "profile": 0.28,
+            "semantic": 0.24,
+            "episodic": 0.05,
             "reflection": 0.00,
-            "graph": 0.20,
+            "graph": 0.19,
             "unresolved": 0.05,
         },
         "rollout_status": {
@@ -3772,7 +3815,9 @@ class MemoryStore:
         budget = max(token_budget, 200)
 
         # Determine which sections to include based on intent.
-        include_episodic = intent in {"debug_history", "planning", "reflection", "conflict_review"}
+        # Episodic is always included now (soft gating via budget weight),
+        # but gets higher weight for debug/planning/reflection/conflict intents.
+        include_episodic = True
         include_reflection = intent == "reflection"
 
         # ── Phase 1: build raw (untruncated) content for every section ──
@@ -3867,18 +3912,22 @@ class MemoryStore:
 
         if fitted_profile_lines:
             lines.append("## Profile Memory")
+            lines.append("User-specific facts, preferences, and constraints:")
             lines.extend(fitted_profile_lines)
 
         if semantic_lines:
             lines.append("## Relevant Semantic Memories")
+            lines.append("Retrieved factual knowledge (use these exact terms when answering):")
             lines.extend(semantic_lines)
 
         if graph_lines:
             lines.append("## Entity Graph")
+            lines.append("Verified entity relationships:")
             lines.extend(graph_lines)
 
-        if include_episodic and episodic_lines:
+        if episodic_lines:
             lines.append("## Relevant Episodic Memories")
+            lines.append("Past events and interactions:")
             lines.extend(episodic_lines)
 
         if include_reflection and reflection_lines:
@@ -3913,7 +3962,7 @@ class MemoryStore:
                     "\n".join(semantic_lines)
                 ),
                 "memory_context_tokens_episodic_total": self._estimate_tokens(
-                    "\n".join(episodic_lines if include_episodic else [])
+                    "\n".join(episodic_lines)
                 ),
                 "memory_context_tokens_reflection_total": self._estimate_tokens(
                     "\n".join(reflection_lines if include_reflection else [])
