@@ -1,7 +1,7 @@
 # QuantBot - 量化研究员配置
 
 <div align="center">
-  <h1>QuantBot</h1>
+  <img src="quantbot_logo.png" alt="QuantBot" width="200"/>
   <p>将 <a href="https://github.com/HKUDS/nanobot">nanobot</a> 定制化为量化研究员专用 AI 助手</p>
 </div>
 
