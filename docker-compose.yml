@@ -22,6 +22,26 @@ services:
           cpus: '0.25'
           memory: 256M
   
+  neo4j:
+    container_name: nanobot-neo4j
+    image: neo4j:5-community
+    restart: unless-stopped
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/nanobot_graph
+    volumes:
+      - neo4j-data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+
   nanobot-cli:
     <<: *common-config
     profiles:
@@ -29,3 +49,6 @@ services:
     command: ["status"]
     stdin_open: true
     tty: true
+
+volumes:
+  neo4j-data:

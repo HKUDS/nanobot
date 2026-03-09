@@ -225,6 +225,75 @@ class MemoryExtractor:
         "fact": 0.45,
     }
 
+    # ------------------------------------------------------------------
+    # Heuristic triple extraction
+    # ------------------------------------------------------------------
+
+    # Pattern → (subject group, predicate, object group)
+    _TRIPLE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+        (re.compile(r"(\b\w[\w\s]{0,30}?)\s+works?\s+on\s+(\b\w[\w\s]{0,30})", re.I), "WORKS_ON"),
+        (re.compile(r"(\b\w[\w\s]{0,30}?)\s+works?\s+with\s+(\b\w[\w\s]{0,30})", re.I), "WORKS_WITH"),
+        (re.compile(r"(\b\w[\w\s]{0,30}?)\s+uses?\s+(\b\w[\w\s]{0,30})", re.I), "USES"),
+        (re.compile(r"(\b\w[\w\s]{0,30}?)\s+(?:is|are)\s+(?:in|at|from)\s+(\b\w[\w\s]{0,30})", re.I), "LOCATED_IN"),
+        (re.compile(r"(\b\w[\w\s]{0,30}?)\s+(?:caused|causes)\s+(\b\w[\w\s]{0,30})", re.I), "CAUSED_BY"),
+        (re.compile(r"(\b\w[\w\s]{0,30}?)\s+depends?\s+on\s+(\b\w[\w\s]{0,30})", re.I), "DEPENDS_ON"),
+        (re.compile(r"(\b\w[\w\s]{0,30}?)\s+owns?\s+(\b\w[\w\s]{0,30})", re.I), "OWNS"),
+        (re.compile(r"(\b\w[\w\s]{0,30}?)\s+(?:is|are)\s+constrained\s+by\s+(\b\w[\w\s]{0,30})", re.I), "CONSTRAINED_BY"),
+    ]
+
+    @classmethod
+    def _extract_triples_heuristic(
+        cls,
+        summary: str,
+        entities: list[str],
+        event_type: str,
+    ) -> list[dict[str, str | float]]:
+        """Extract subject-predicate-object triples from text via patterns.
+
+        Also infers triples from entity pairs when the event type implies a
+        relationship (e.g. *relationship* → WORKS_WITH between first two entities).
+        """
+        triples: list[dict[str, str | float]] = []
+        seen: set[tuple[str, str, str]] = set()
+
+        # Pattern-based extraction
+        for pattern, predicate in cls._TRIPLE_PATTERNS:
+            for match in pattern.finditer(summary):
+                subj = match.group(1).strip()
+                obj = match.group(2).strip()
+                if not subj or not obj or len(subj) < 2 or len(obj) < 2:
+                    continue
+                key = (subj.lower(), predicate, obj.lower())
+                if key not in seen:
+                    seen.add(key)
+                    triples.append({
+                        "subject": subj,
+                        "predicate": predicate,
+                        "object": obj,
+                        "confidence": 0.55,
+                    })
+
+        # Infer from entity pairs + event type
+        _type_predicates: dict[str, str] = {
+            "relationship": "WORKS_WITH",
+            "task": "WORKS_ON",
+            "decision": "RELATED_TO",
+        }
+        if event_type in _type_predicates and len(entities) >= 2:
+            pred = _type_predicates[event_type]
+            subj, obj = entities[0], entities[1]
+            key = (subj.lower(), pred, obj.lower())
+            if key not in seen:
+                seen.add(key)
+                triples.append({
+                    "subject": subj,
+                    "predicate": pred,
+                    "object": obj,
+                    "confidence": 0.45,
+                })
+
+        return triples[:10]
+
     def heuristic_extract_events(
         self,
         old_messages: list[dict[str, Any]],
@@ -262,6 +331,7 @@ class MemoryExtractor:
             summary = text if len(text) <= 220 else text[:217] + "..."
             entities = self._extract_entities(text)
             confidence = self._TYPE_CONFIDENCE.get(event_type, 0.45)
+            triples = self._extract_triples_heuristic(text, entities, event_type)
             source_span = [source_start + offset, source_start + offset]
             event = self.coerce_event(
                 {
@@ -271,6 +341,7 @@ class MemoryExtractor:
                     "entities": entities,
                     "salience": 0.55,
                     "confidence": confidence,
+                    "triples": triples,
                 },
                 source_span=source_span,
             )

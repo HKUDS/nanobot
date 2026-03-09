@@ -34,6 +34,7 @@ from nanobot.utils.helpers import ensure_dir
 
 from .constants import _SAVE_MEMORY_TOOL
 from .extractor import MemoryExtractor
+from .graph import KnowledgeGraph
 from .mem0_adapter import _Mem0Adapter, _Mem0RuntimeInfo
 from .persistence import MemoryPersistence
 from .reranker import DEFAULT_MODEL as _DEFAULT_RERANKER_MODEL
@@ -95,6 +96,17 @@ class MemoryStore:
         self.rollout = self._load_rollout_config()
         if isinstance(rollout_overrides, dict):
             self._apply_rollout_overrides(rollout_overrides)
+
+        # In-memory metrics collector — must be initialised before
+        # _ensure_vector_health() which records metrics.
+        from nanobot.agent.metrics import MetricsCollector
+
+        self._metrics = MetricsCollector(
+            self.metrics_file,
+            flush_interval_s=60.0,
+            defaults=self._default_metrics(),
+        )
+
         self._ensure_vector_health()
 
         # Cross-encoder re-ranker (Step 7)
@@ -105,14 +117,29 @@ class MemoryStore:
             alpha=reranker_alpha,
         )
 
-        # In-memory metrics collector (Step 9)
-        from nanobot.agent.metrics import MetricsCollector
-
-        self._metrics = MetricsCollector(
-            self.metrics_file,
-            flush_interval_s=60.0,
-            defaults=self._default_metrics(),
-        )
+        # Knowledge graph (Neo4j) — graceful degradation when disabled or
+        # neo4j package is not installed.
+        graph_enabled = self.rollout.get("graph_enabled", False)
+        env_graph = os.environ.get("NANOBOT_GRAPH_ENABLED")
+        if env_graph is not None:
+            graph_enabled = env_graph.lower() in ("1", "true", "yes")
+        if graph_enabled:
+            graph_uri = (
+                os.environ.get("NANOBOT_GRAPH_NEO4J_URI")
+                or str(self.rollout.get("graph_neo4j_uri", "bolt://localhost:7687"))
+            )
+            graph_auth = (
+                os.environ.get("NANOBOT_GRAPH_NEO4J_AUTH")
+                or str(self.rollout.get("graph_neo4j_auth", "neo4j/nanobot_graph"))
+            )
+            graph_db = (
+                os.environ.get("NANOBOT_GRAPH_NEO4J_DATABASE")
+                or str(self.rollout.get("graph_neo4j_database", "neo4j"))
+            )
+            self.graph = KnowledgeGraph(uri=graph_uri, auth=graph_auth, database=graph_db)
+        else:
+            self.graph = KnowledgeGraph()  # disabled — all methods return empty
+            self.graph.enabled = False
 
     @staticmethod
     def _utc_now_iso() -> str:
@@ -132,6 +159,26 @@ class MemoryStore:
     @staticmethod
     def _tokenize(value: str) -> set[str]:
         return {t for t in re.findall(r"[a-zA-Z0-9_\-]+", value.lower()) if len(t) > 1}
+
+    # Stopwords excluded when extracting query keywords for graph lookups.
+    _GRAPH_QUERY_STOPWORDS = frozenset({
+        "the", "this", "that", "then", "than", "they", "them", "there", "these", "those",
+        "what", "when", "where", "which", "while", "who", "whom", "whose", "why", "how",
+        "also", "and", "but", "for", "from", "into", "just", "like", "not", "only",
+        "some", "such", "very", "will", "with", "would", "could", "should", "about",
+        "after", "before", "been", "being", "have", "here", "more", "most", "much",
+        "over", "same", "still", "each", "even", "every", "other", "are", "was",
+        "were", "had", "has", "does", "did", "any", "its", "can", "may",
+        "is", "it", "an", "or", "no", "do", "so", "if", "my", "me",
+        "his", "her", "our", "your", "their", "a", "of", "in", "on", "to", "at", "by",
+        "currently", "involved", "caused", "resolved", "apply",
+    })
+
+    @classmethod
+    def _extract_query_keywords(cls, query: str) -> set[str]:
+        """Extract significant keywords from a query for graph entity lookup."""
+        tokens = {t for t in re.findall(r"[a-zA-Z0-9_\-]+", query.lower()) if len(t) > 2}
+        return tokens - cls._GRAPH_QUERY_STOPWORDS
 
     @staticmethod
     def _to_str_list(value: Any) -> list[str]:
@@ -408,7 +455,10 @@ class MemoryStore:
             "correction",
             "corrected",
         )
-        reflection_markers = ("reflect", "reflection", "lesson", "learned", "retrospective")
+        reflection_markers = (
+            "reflect", "reflection", "lesson", "learned", "retrospective",
+            "insight", "insights",
+        )
         planning_markers = (
             "plan",
             "next step",
@@ -439,14 +489,14 @@ class MemoryStore:
         conflict_markers = ("conflict", "needs_user", "unresolved decision")
         rollout_markers = ("rollout", "router", "shadow mode", "memory behavior enabled")
 
+        if any(marker in text for marker in reflection_markers):
+            return "reflection"
         if any(marker in text for marker in rollout_markers):
             return "rollout_status"
         if any(marker in text for marker in conflict_markers):
             return "conflict_review"
         if any(marker in text for marker in constraints_markers):
             return "constraints_lookup"
-        if any(marker in text for marker in reflection_markers):
-            return "reflection"
         if any(marker in text for marker in debug_markers):
             return "debug_history"
         if any(marker in text for marker in architecture_markers):
@@ -2148,6 +2198,33 @@ class MemoryStore:
                 self._record_metrics(write_totals)
         return written
 
+    async def _ingest_graph_triples(self, events: list[dict[str, Any]]) -> int:
+        """Feed triples from events into the knowledge graph (async).
+
+        Returns the number of triples ingested.  No-op when graph is disabled.
+        """
+        if not self.graph.enabled:
+            return 0
+
+        from .ontology import Triple
+
+        total = 0
+        for event in events:
+            raw_triples = event.get("triples")
+            if not isinstance(raw_triples, list) or not raw_triples:
+                continue
+            event_id = str(event.get("id", ""))
+            timestamp = str(event.get("timestamp", ""))
+            parsed = [Triple.from_dict(t, source_event_id=event_id) for t in raw_triples]
+            parsed = [t for t in parsed if t.subject and t.object]
+            if parsed:
+                await self.graph.ingest_event_triples(event_id, parsed, timestamp=timestamp)
+                total += len(parsed)
+
+        if total > 0:
+            self._record_metric("graph_triples_ingested", total)
+        return total
+
     def read_profile(self) -> dict[str, Any]:
         data = self.persistence.read_json(self.profile_file)
         if isinstance(data, dict):
@@ -2663,6 +2740,21 @@ class MemoryStore:
         if not event_id:
             event_id = self._build_event_id(event_type, summary, timestamp)
 
+        # Parse optional triples (knowledge-graph edges).
+        raw_triples = raw.get("triples")
+        triples: list[dict[str, Any]] = []
+        if isinstance(raw_triples, list):
+            for t in raw_triples:
+                if isinstance(t, dict) and t.get("subject") and t.get("object"):
+                    triples.append({
+                        "subject": str(t["subject"]).strip(),
+                        "predicate": str(t.get("predicate", "RELATED_TO")).strip(),
+                        "object": str(t["object"]).strip(),
+                        "confidence": min(
+                            max(self._safe_float(t.get("confidence"), confidence), 0.0), 1.0
+                        ),
+                    })
+
         return {
             "id": event_id,
             "timestamp": timestamp,
@@ -2682,6 +2774,7 @@ class MemoryStore:
             "evidence_refs": metadata.get("evidence_refs", []),
             "status": status,
             "metadata": metadata,
+            "triples": triples,
         }
 
     def retrieve(
@@ -2706,9 +2799,24 @@ class MemoryStore:
                 m in q_lower for m in ("supersede", "stale", "older fact", "replaced")
             )
 
+            # Graph query augmentation: expand search terms with related entities.
+            augmented_query = query
+            if self.graph.enabled:
+                query_keywords = self._extract_query_keywords(query)
+                if query_keywords:
+                    neo4j_related = self.graph.get_related_entity_names_sync(
+                        query_keywords, depth=2,
+                    )
+                    # Append related entity names to the query for BM25 matching.
+                    extra_terms = neo4j_related - query_keywords
+                    if extra_terms:
+                        augmented_query = query + " " + " ".join(
+                            t.replace("-", " ").replace("_", " ") for t in extra_terms
+                        )
+
             candidates = _local_retrieve(
                 events,
-                query,
+                augmented_query,
                 top_k=candidate_k,
                 recency_half_life_days=half_life,
                 include_superseded=wants_superseded,
@@ -2732,6 +2840,25 @@ class MemoryStore:
                 candidates.extend(fallback)
 
             # Apply intent-based type boosts and metadata enrichment.
+            graph_boost = 0.15 if self.graph.enabled else 0.0
+            query_entities = {e.lower() for e in self.extractor._extract_entities(query)}
+            graph_entity_names: set[str] = set()
+            if graph_boost > 0 and query_entities:
+                # Collect entity names related to query entities from event triples.
+                for evt in events:
+                    for triple in evt.get("triples") or []:
+                        subj = str(triple.get("subject", "")).lower()
+                        obj = str(triple.get("object", "")).lower()
+                        if subj in query_entities:
+                            graph_entity_names.add(obj)
+                        elif obj in query_entities:
+                            graph_entity_names.add(subj)
+                # Augment with Neo4j graph neighbors when available.
+                neo4j_related = self.graph.get_related_entity_names_sync(
+                    query_entities, depth=2,
+                )
+                graph_entity_names |= neo4j_related
+
             for item in candidates:
                 memory_type = self._memory_type_for_item(item)
                 item["memory_type"] = memory_type
@@ -2745,7 +2872,16 @@ class MemoryStore:
                 type_boost = float(policy.get("type_boost", {}).get(memory_type, 0.0))
                 stability = str(item.get("stability", "medium")).lower()
                 stability_boost = {"high": 0.03, "medium": 0.01, "low": -0.02}.get(stability, 0.0)
-                item["score"] = base_score + type_boost + stability_boost
+                # Graph expansion boost: boost events that mention entities
+                # related to query entities via the knowledge graph.
+                g_boost = 0.0
+                if graph_entity_names:
+                    item_entities = {
+                        e.lower() for e in (item.get("entities") or []) if isinstance(e, str)
+                    }
+                    if item_entities & graph_entity_names:
+                        g_boost = graph_boost
+                item["score"] = base_score + type_boost + stability_boost + g_boost
             candidates.sort(key=lambda x: x.get("score", 0.0), reverse=True)
             results = candidates[:top_k]
             self._record_metric("retrieval_queries", 1)
@@ -2839,6 +2975,17 @@ class MemoryStore:
             if str(item).strip()
         }
         max_summary_chars = int(self.rollout.get("memory_fallback_max_summary_chars", 280) or 280)
+
+        # Compute graph-expanded terms (used for supplementary BM25 pass below).
+        graph_extra_terms: set[str] = set()
+        if self.graph.enabled:
+            query_keywords = self._extract_query_keywords(query)
+            if query_keywords:
+                neo4j_related = self.graph.get_related_entity_names_sync(
+                    query_keywords, depth=2,
+                )
+                graph_extra_terms = neo4j_related - query_keywords
+
         search_result = self.mem0.search(
             query,
             top_k=candidate_k,
@@ -2890,6 +3037,34 @@ class MemoryStore:
                     "provenance": {"canonical_id": "rollout_status_snapshot", "source_span": None},
                 }
             )
+
+        # Supplementary BM25 pass: pull in events matching graph-related entities
+        # that mem0 vector search may have missed.
+        if graph_extra_terms and retrieved is not None:
+            retrieved_ids = {str(r.get("id", "")) for r in retrieved}
+            graph_query = query + " " + " ".join(
+                t.replace("-", " ").replace("_", " ") for t in graph_extra_terms
+            )
+            events = self.read_events()
+            bm25_supplement = _local_retrieve(
+                events,
+                graph_query,
+                top_k=candidate_k,
+                recency_half_life_days=float(policy.get("half_life_days", 60.0)),
+                include_superseded=False,
+            )
+            for item in bm25_supplement:
+                eid = str(item.get("id", ""))
+                if eid and eid not in retrieved_ids:
+                    # Mark source as graph-augmented BM25
+                    reason = item.get("retrieval_reason", {})
+                    if not isinstance(reason, dict):
+                        reason = {}
+                    reason["provider"] = "bm25_graph"
+                    item["retrieval_reason"] = reason
+                    retrieved.append(item)
+                    retrieved_ids.add(eid)
+
         if not retrieved:
             return [], {
                 "intent": intent,
@@ -2955,10 +3130,11 @@ class MemoryStore:
             topic = str(item.get("topic", "")).strip().lower()
             summary = str(item.get("summary", ""))
             event_status = str(item.get("status", "")).strip().lower()
-            task_or_decision_like = event_type in {"task", "decision"} or topic in {
+            task_or_decision_like = event_type in {"task", "decision", "relationship"} or topic in {
                 "task_progress",
                 "project",
                 "planning",
+                "relationship",
             }
             planning_like = task_or_decision_like or self._contains_any(
                 summary, ("plan", "next step", "roadmap", "milestone")
@@ -2970,7 +3146,11 @@ class MemoryStore:
                 )
                 or event_type == "decision"
             )
-            if routing_hints["focus_task_decision"] and not task_or_decision_like:
+            if (
+                routing_hints["focus_task_decision"]
+                and not task_or_decision_like
+                and intent != "debug_history"
+            ):
                 continue
             if routing_hints["focus_planning"] and not planning_like:
                 continue
@@ -2980,7 +3160,10 @@ class MemoryStore:
                 status=event_status,
                 summary=summary,
                 requires_open=bool(routing_hints["requires_open"]),
-                requires_resolved=bool(routing_hints["requires_resolved"]),
+                # debug_history needs the full timeline (failures + resolutions).
+                requires_resolved=(
+                    bool(routing_hints["requires_resolved"]) and intent != "debug_history"
+                ),
             ):
                 continue
             if intent == "constraints_lookup":
@@ -3156,6 +3339,68 @@ class MemoryStore:
             else:
                 counts["retrieval_returned_unknown"] += 1
         return final, {"intent": intent, "retrieved_count": len(retrieved), "counts": counts}
+
+    def _build_graph_context_lines(
+        self,
+        query: str,
+        retrieved: list[dict[str, Any]],
+        max_tokens: int = 100,
+    ) -> list[str]:
+        """Build entity relationship summary lines from Neo4j and local event triples.
+
+        Queries the knowledge graph first (when available), then falls back to
+        scanning triples stored in local events.
+        """
+        query_entities = {e.lower() for e in self.extractor._extract_entities(query)}
+        for item in retrieved:
+            for e in item.get("entities") or []:
+                if isinstance(e, str) and e.strip():
+                    query_entities.add(e.strip().lower())
+
+        if not query_entities:
+            return []
+
+        # Collect relevant triples — Neo4j first, then local event fallback.
+        rel_triples: list[tuple[str, str, str]] = []
+
+        if self.graph.enabled:
+            rel_triples.extend(
+                self.graph.get_triples_for_entities_sync(query_entities)
+            )
+
+        # Supplement with local event triples (may add context Neo4j lacks).
+        events = self.read_events(limit=200)
+        for evt in events:
+            for triple in evt.get("triples") or []:
+                subj = str(triple.get("subject", "")).strip()
+                pred = str(triple.get("predicate", "")).strip()
+                obj = str(triple.get("object", "")).strip()
+                if not subj or not pred or not obj:
+                    continue
+                if subj.lower() in query_entities or obj.lower() in query_entities:
+                    rel_triples.append((subj, pred, obj))
+
+        if not rel_triples:
+            return []
+
+        # Deduplicate and format as compact lines, respecting token budget
+        seen: set[tuple[str, str, str]] = set()
+        graph_lines: list[str] = []
+        total_chars = 0
+        max_chars = max_tokens * 4
+
+        for subj, pred, obj in rel_triples:
+            key = (subj.lower(), pred, obj.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            line = f"- {subj} → {pred} → {obj}"
+            if total_chars + len(line) > max_chars:
+                break
+            graph_lines.append(line)
+            total_chars += len(line)
+
+        return graph_lines
 
     def _profile_section_lines(
         self, profile: dict[str, Any], max_items_per_section: int = 6
@@ -3456,6 +3701,13 @@ class MemoryStore:
         if include_reflection and reflection_lines:
             lines.append("## Relevant Reflection Memories")
             lines.extend(reflection_lines)
+
+        # Entity graph context — surface relationship chains for query entities.
+        if self.graph.enabled and query:
+            graph_ctx = self._build_graph_context_lines(query, retrieved, max_tokens=100)
+            if graph_ctx:
+                lines.append("## Entity Graph")
+                lines.extend(graph_ctx)
 
         unresolved = self._recent_unresolved(self.read_events(limit=60), max_items=6)
         if include_episodic and unresolved:
@@ -4076,6 +4328,7 @@ class MemoryStore:
                 source_start=source_start,
             )
             events_written = self.append_events(events)
+            await self._ingest_graph_triples(events)
             profile_added, _, profile_touched = self._apply_profile_updates(
                 profile,
                 profile_updates,

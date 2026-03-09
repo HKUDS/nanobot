@@ -568,6 +568,7 @@ def test_reindex_reports_not_ok_when_no_vector_or_get_all_rows(tmp_path: Path) -
 def test_vector_health_marks_degraded_when_history_exists_but_no_vectors(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path)
     store.mem0.enabled = True
+    store.mem0.search = MagicMock(return_value=[])  # type: ignore[method-assign]
     store._history_row_count = MagicMock(return_value=10)  # type: ignore[method-assign]
     store._vector_points_count = MagicMock(return_value=0)  # type: ignore[method-assign]
     store._mem0_get_all_rows = MagicMock(return_value=[])  # type: ignore[method-assign]

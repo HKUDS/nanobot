@@ -28,7 +28,9 @@ Architecture
 """
 
 from .extractor import MemoryExtractor
+from .graph import KnowledgeGraph
 from .mem0_adapter import _Mem0Adapter, _Mem0RuntimeInfo
+from .ontology import Entity, EntityType, Relationship, RelationType, Triple, classify_entity_type
 from .persistence import MemoryPersistence
 from .reranker import CrossEncoderReranker
 from .store import MemoryStore
@@ -38,6 +40,13 @@ __all__ = [
     "MemoryExtractor",
     "MemoryPersistence",
     "CrossEncoderReranker",
+    "KnowledgeGraph",
     "_Mem0Adapter",
     "_Mem0RuntimeInfo",
+    "Entity",
+    "EntityType",
+    "RelationType",
+    "Relationship",
+    "Triple",
+    "classify_entity_type",
 ]

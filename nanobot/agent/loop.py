@@ -173,6 +173,10 @@ class AgentLoop:
                 "max_avg_memory_context_tokens": config.memory_rollout_gate_max_avg_memory_context_tokens,
                 "max_history_fallback_ratio": config.memory_rollout_gate_max_history_fallback_ratio,
             },
+            "graph_enabled": config.graph_enabled,
+            "graph_neo4j_uri": config.graph_neo4j_uri,
+            "graph_neo4j_auth": config.graph_neo4j_auth,
+            "graph_neo4j_database": config.graph_neo4j_database,
         }
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()

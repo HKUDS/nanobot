@@ -57,6 +57,24 @@ _SAVE_EVENTS_TOOL = [
                                 "salience": {"type": "number"},
                                 "confidence": {"type": "number"},
                                 "ttl_days": {"type": "integer"},
+                                "triples": {
+                                    "type": "array",
+                                    "description": (
+                                        "Entity relationship triples extracted from this event. "
+                                        "Predicates: WORKS_ON, WORKS_WITH, USES, LOCATED_IN, "
+                                        "CAUSED_BY, RELATED_TO, OWNS, DEPENDS_ON, CONSTRAINED_BY."
+                                    ),
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "subject": {"type": "string"},
+                                            "predicate": {"type": "string"},
+                                            "object": {"type": "string"},
+                                            "confidence": {"type": "number"},
+                                        },
+                                        "required": ["subject", "predicate", "object"],
+                                    },
+                                },
                             },
                             "required": ["type", "summary"],
                         },

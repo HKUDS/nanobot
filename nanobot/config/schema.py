@@ -224,6 +224,12 @@ class AgentDefaults(Base):
     tool_result_max_chars: int = 2000
     tool_result_context_tokens: int = 500
 
+    # Knowledge graph
+    graph_enabled: bool = False
+    graph_neo4j_uri: str = "bolt://localhost:7687"
+    graph_neo4j_auth: str = "neo4j/nanobot_graph"
+    graph_neo4j_database: str = "neo4j"
+
 
 class AgentConfig(Base):
     """Unified agent runtime configuration.
@@ -284,6 +290,12 @@ class AgentConfig(Base):
     # Per-message timeout (seconds); 0 = no timeout
     message_timeout: int = 300
 
+    # Knowledge graph
+    graph_enabled: bool = False
+    graph_neo4j_uri: str = "bolt://localhost:7687"
+    graph_neo4j_auth: str = "neo4j/nanobot_graph"
+    graph_neo4j_database: str = "neo4j"
+
     # Tools
     restrict_to_workspace: bool = False
 
@@ -318,6 +330,10 @@ class AgentConfig(Base):
             "memory_rollout_gate_max_history_fallback_ratio": defaults.memory_rollout_gate_max_history_fallback_ratio,
             "tool_result_max_chars": defaults.tool_result_max_chars,
             "tool_result_context_tokens": defaults.tool_result_context_tokens,
+            "graph_enabled": defaults.graph_enabled,
+            "graph_neo4j_uri": defaults.graph_neo4j_uri,
+            "graph_neo4j_auth": defaults.graph_neo4j_auth,
+            "graph_neo4j_database": defaults.graph_neo4j_database,
         }
         data.update(overrides)
         return cls(**data)  # type: ignore[arg-type]

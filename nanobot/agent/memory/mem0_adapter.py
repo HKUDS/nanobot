@@ -37,7 +37,6 @@ class _Mem0Adapter:
         self._local_mem0_dir: Path | None = None
         self._fallback_enabled = True
         self._fallback_candidates: list[tuple[str, dict[str, Any], int]] = [
-            ("fastembed", {"model": "BAAI/bge-small-en-v1.5"}, 384),
             ("huggingface", {"model": "sentence-transformers/all-MiniLM-L6-v2"}, 384),
         ]
         self.last_add_mode = "unknown"
@@ -114,6 +113,41 @@ class _Mem0Adapter:
                     os.environ.setdefault(key, value)
             except Exception:
                 continue
+        # Also load provider API keys from nanobot config.json so mem0 can use them.
+        self._load_api_keys_from_config()
+
+    _ENV_KEY_MAP: dict[str, str] = {
+        "openai": "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "groq": "GROQ_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+    }
+
+    def _load_api_keys_from_config(self) -> None:
+        """Extract provider API keys from ~/.nanobot/config.json into env vars."""
+        config_path = Path.home() / ".nanobot" / "config.json"
+        if not config_path.exists():
+            return
+        try:
+            cfg = json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        providers = cfg.get("providers")
+        if not isinstance(providers, dict):
+            return
+        for name, env_key in self._ENV_KEY_MAP.items():
+            prov = providers.get(name)
+            if isinstance(prov, dict):
+                # Config may use camelCase (apiKey) or snake_case (api_key)
+                key = prov.get("api_key", "") or prov.get("apiKey", "")
+                if key:
+                    os.environ.setdefault(env_key, key)
+
+    @staticmethod
+    def _build_llm_config() -> dict[str, Any]:
+        """Build a mem0 LLM config using litellm (inherits env vars set by nanobot)."""
+        return {"provider": "litellm", "config": {"model": "openai/gpt-4o-mini"}}
 
     def _init_client(self) -> None:
         self._load_env_candidates()
@@ -190,6 +224,7 @@ class _Mem0Adapter:
                 # Force local writable persistence instead of ~/.mem0/*
                 self.client = Mem0Memory.from_config(
                     {
+                        "llm": self._build_llm_config(),
                         "history_db_path": str(local_mem0_dir / "history.db"),
                         "vector_store": {
                             "provider": "qdrant",
@@ -228,6 +263,7 @@ class _Mem0Adapter:
             try:
                 self.client = Mem0Memory.from_config(
                     {
+                        "llm": self._build_llm_config(),
                         "embedder": {"provider": provider, "config": embedder_cfg},
                         "vector_store": {
                             "provider": "qdrant",

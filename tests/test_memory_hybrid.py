@@ -148,7 +148,7 @@ class TestHybridMemoryStore:
         )
         assert len(retrieved) >= 1
         assert retrieved[0]["summary"].lower().find("oauth2") >= 0
-        assert retrieved[0]["retrieval_reason"]["provider"] == "bm25"
+        assert retrieved[0]["retrieval_reason"]["provider"] in ("bm25", "mem0")
         assert retrieved[0]["provenance"]["canonical_id"] == retrieved[0]["id"]
 
         report = store.verify_memory(stale_days=90)
@@ -485,6 +485,7 @@ class TestHybridMemoryStore:
 
     def test_conflict_list_and_resolve(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
+        store.mem0.enabled = False  # Test local-only conflict resolution
         profile = store.read_profile()
         profile["constraints"] = ["Use dark mode"]
 
@@ -592,6 +593,7 @@ class TestHybridMemoryStore:
 
     def test_retrieval_prefers_keep_new_resolved_fact(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
+        store.mem0.enabled = False  # Test local-only conflict resolution
         events = [
             {
                 "id": "region-old",
@@ -651,6 +653,7 @@ class TestHybridMemoryStore:
 
     def test_semantic_dedup_merges_events_and_keeps_provenance(self, tmp_path: Path) -> None:
         store = MemoryStore(tmp_path, embedding_provider="hash")
+        store.mem0.enabled = False  # Test local dedup (mem0 generates its own IDs)
 
         written_1 = store.append_events(
             [
@@ -749,6 +752,7 @@ class TestHybridMemoryStore:
     def test_local_keyword_retrieval_without_mem0(self, tmp_path: Path) -> None:
         """When mem0 is unavailable, retrieve() uses local keyword matching."""
         store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="sqlite")
+        store.mem0.enabled = False  # Explicitly disable mem0 for this test
         store.append_events(
             [
                 {
@@ -775,6 +779,7 @@ class TestHybridMemoryStore:
     def test_keyword_retrieval_with_recency(self, tmp_path: Path) -> None:
         """Recency weighting should boost recent events of same type over old ones."""
         store = MemoryStore(tmp_path, embedding_provider="hash", vector_backend="faiss")
+        store.mem0.enabled = False  # Test local recency scoring (mem0 ordering differs)
         store.append_events(
             [
                 {
