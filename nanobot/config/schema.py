@@ -32,6 +32,13 @@ class TelegramConfig(Base):
     proxy: str | None = None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     reply_to_message: bool = False  # If true, bot replies quote the original message
 
+    # Webhook mode (optional — requires `pip install "python-telegram-bot[webhooks]"`)
+    mode: Literal["polling", "webhook"] = "polling"
+    webhook_url: str = ""  # Public HTTPS URL, e.g. "https://bot.example.com/webhook/telegram"
+    webhook_listen: str = "127.0.0.1"  # Local interface for the webhook HTTP server
+    webhook_port: int = 8080  # Local port for the webhook HTTP server
+    webhook_path: str = "/webhook/telegram"  # URL path for the webhook endpoint
+
 
 class FeishuConfig(Base):
     """Feishu/Lark channel configuration using WebSocket long connection."""

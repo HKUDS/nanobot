@@ -16,70 +16,56 @@ from nanobot.config.schema import TelegramConfig
 
 
 def _markdown_to_telegram_html(text: str) -> str:
-    """
-    Convert markdown to Telegram-safe HTML.
-    """
+    """Convert markdown to Telegram-safe HTML."""
     if not text:
         return ""
-    
+
     # 1. Extract and protect code blocks (preserve content from other processing)
     code_blocks: list[str] = []
     def save_code_block(m: re.Match) -> str:
         code_blocks.append(m.group(1))
         return f"\x00CB{len(code_blocks) - 1}\x00"
-    
     text = re.sub(r'```[\w]*\n?([\s\S]*?)```', save_code_block, text)
-    
+
     # 2. Extract and protect inline code
     inline_codes: list[str] = []
     def save_inline_code(m: re.Match) -> str:
         inline_codes.append(m.group(1))
         return f"\x00IC{len(inline_codes) - 1}\x00"
-    
     text = re.sub(r'`([^`]+)`', save_inline_code, text)
-    
-    # 3. Headers # Title -> just the title text
+
+    # 3. Headers → plain title text
     text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
-    
-    # 4. Blockquotes > text -> just the text (before HTML escaping)
+    # 4. Blockquotes → plain text
     text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
-    
     # 5. Escape HTML special characters
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    
-    # 6. Links [text](url) - must be before bold/italic to handle nested cases
+    # 6. Links [text](url)
     text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
-    
     # 7. Bold **text** or __text__
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
-    
     # 8. Italic _text_ (avoid matching inside words like some_var_name)
     text = re.sub(r'(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])', r'<i>\1</i>', text)
-    
     # 9. Strikethrough ~~text~~
     text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)
-    
-    # 10. Bullet lists - item -> • item
+    # 10. Bullet lists
     text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
-    
-    # 11. Restore inline code with HTML tags
+
+    # 11. Restore inline code
     for i, code in enumerate(inline_codes):
-        # Escape HTML in code content
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00IC{i}\x00", f"<code>{escaped}</code>")
-    
-    # 12. Restore code blocks with HTML tags
+    # 12. Restore code blocks
     for i, code in enumerate(code_blocks):
-        # Escape HTML in code content
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
-    
+
     return text
 
 
 def _split_message(content: str, max_len: int = 4000) -> list[str]:
-    """Split content into chunks within max_len, preferring line breaks."""
+    """Split content into chunks of at most *max_len* characters, breaking at newlines."""
     if len(content) <= max_len:
         return [content]
     chunks: list[str] = []
@@ -99,22 +85,40 @@ def _split_message(content: str, max_len: int = 4000) -> list[str]:
 
 
 class TelegramChannel(BaseChannel):
+    """Telegram channel supporting both long-polling and webhook receive modes.
+
+    **Polling** (default): no public URL required; suitable for local or
+    firewalled deployments.
+
+    **Webhook**: lower latency and no persistent polling connection; requires a
+    public HTTPS URL and the ``python-telegram-bot[webhooks]`` extra::
+
+        pip install "python-telegram-bot[webhooks]"
+
+    Configure via ``config.json``:
+
+    .. code-block:: json
+
+        "telegram": {
+            "enabled": true,
+            "token": "<BOT_TOKEN>",
+            "mode": "webhook",
+            "webhookUrl": "https://bot.example.com/webhook/telegram",
+            "webhookListen": "127.0.0.1",
+            "webhookPort": 8080,
+            "webhookPath": "/webhook/telegram"
+        }
     """
-    Telegram channel using long polling.
-    
-    Simple and reliable - no webhook/public IP needed.
-    """
-    
+
     name = "telegram"
-    
-    # Commands registered with Telegram's command menu
+
     BOT_COMMANDS = [
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("help", "Show available commands"),
     ]
-    
+
     def __init__(
         self,
         config: TelegramConfig,
@@ -125,80 +129,126 @@ class TelegramChannel(BaseChannel):
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
         self._app: Application | None = None
-        self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
-        self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
-    
+        self._chat_ids: dict[str, int] = {}
+        self._typing_tasks: dict[str, asyncio.Task] = {}
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
     async def start(self) -> None:
-        """Start the Telegram bot with long polling."""
+        """Start the Telegram bot using the configured receive mode."""
         if not self.config.token:
             logger.error("Telegram bot token not configured")
             return
-        
+
+        if self.config.mode == "webhook" and not self.config.webhook_url:
+            raise ValueError(
+                "Telegram webhook mode requires 'webhookUrl' to be set in config. "
+                "Example: \"https://bot.example.com/webhook/telegram\""
+            )
+
         self._running = True
-        
-        # Build the application with larger connection pool to avoid pool-timeout on long runs
-        req = HTTPXRequest(connection_pool_size=16, pool_timeout=5.0, connect_timeout=30.0, read_timeout=30.0)
-        builder = Application.builder().token(self.config.token).request(req).get_updates_request(req)
+
+        req = HTTPXRequest(
+            connection_pool_size=16,
+            pool_timeout=5.0,
+            connect_timeout=30.0,
+            read_timeout=30.0,
+        )
+        builder = Application.builder().token(self.config.token).request(req)
+        if self.config.mode == "polling":
+            builder = builder.get_updates_request(req)
         if self.config.proxy:
-            builder = builder.proxy(self.config.proxy).get_updates_proxy(self.config.proxy)
+            builder = builder.proxy(self.config.proxy)
+            if self.config.mode == "polling":
+                builder = builder.get_updates_proxy(self.config.proxy)
         self._app = builder.build()
         self._app.add_error_handler(self._on_error)
-        
-        # Add command handlers
+
+        # Register handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
-        
-        # Add message handler for text, photos, voice, documents
         self._app.add_handler(
             MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL) 
-                & ~filters.COMMAND, 
-                self._on_message
+                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL)
+                & ~filters.COMMAND,
+                self._on_message,
             )
         )
-        
-        logger.info("Starting Telegram bot (polling mode)...")
-        
-        # Initialize and start polling
+
         await self._app.initialize()
         await self._app.start()
-        
-        # Get bot info and register command menu
+
+        # Register bot command menu
         bot_info = await self._app.bot.get_me()
-        logger.info("Telegram bot @{} connected", bot_info.username)
-        
         try:
             await self._app.bot.set_my_commands(self.BOT_COMMANDS)
             logger.debug("Telegram bot commands registered")
         except Exception as e:
             logger.warning("Failed to register bot commands: {}", e)
-        
-        # Start polling (this runs until stopped)
-        await self._app.updater.start_polling(
-            allowed_updates=["message"],
-            drop_pending_updates=True  # Ignore old messages on startup
-        )
-        
+
+        if self.config.mode == "webhook":
+            await self._start_webhook(bot_info.username)
+        else:
+            await self._start_polling(bot_info.username)
+
         # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
-    
+
+    async def _start_polling(self, username: str) -> None:
+        """Start long-polling receive loop."""
+        logger.info("Telegram bot @{} connected (polling mode)", username)
+        await self._app.updater.start_polling(
+            allowed_updates=["message"],
+            drop_pending_updates=True,
+        )
+
+    async def _start_webhook(self, username: str) -> None:
+        """Start webhook HTTP server and register URL with Telegram."""
+        logger.info(
+            "Telegram bot @{} starting webhook mode — listening on {}:{}{} → {}",
+            username,
+            self.config.webhook_listen,
+            self.config.webhook_port,
+            self.config.webhook_path,
+            self.config.webhook_url,
+        )
+        try:
+            await self._app.updater.start_webhook(
+                listen=self.config.webhook_listen,
+                port=self.config.webhook_port,
+                url_path=self.config.webhook_path,
+                webhook_url=self.config.webhook_url,
+                drop_pending_updates=True,
+                allowed_updates=["message"],
+            )
+        except RuntimeError as exc:
+            if "webhooks" in str(exc).lower():
+                raise RuntimeError(
+                    "Telegram webhook mode requires the 'webhooks' extra: "
+                    "pip install \"python-telegram-bot[webhooks]\""
+                ) from exc
+            raise
+
     async def stop(self) -> None:
         """Stop the Telegram bot."""
         self._running = False
-        
-        # Cancel all typing indicators
         for chat_id in list(self._typing_tasks):
             self._stop_typing(chat_id)
-        
         if self._app:
-            logger.info("Stopping Telegram bot...")
+            logger.info("Stopping Telegram bot ({} mode)...", self.config.mode)
             await self._app.updater.stop()
             await self._app.stop()
             await self._app.shutdown()
             self._app = None
-    
+
+    # ------------------------------------------------------------------
+    # Outbound
+    # ------------------------------------------------------------------
+
     @staticmethod
     def _get_media_type(path: str) -> str:
         """Guess media type from file extension."""
@@ -231,7 +281,7 @@ class TelegramChannel(BaseChannel):
             if reply_to_message_id:
                 reply_params = ReplyParameters(
                     message_id=reply_to_message_id,
-                    allow_sending_without_reply=True
+                    allow_sending_without_reply=True,
                 )
 
         # Send media files
@@ -245,18 +295,14 @@ class TelegramChannel(BaseChannel):
                 }.get(media_type, self._app.bot.send_document)
                 param = "photo" if media_type == "photo" else media_type if media_type in ("voice", "audio") else "document"
                 with open(media_path, 'rb') as f:
-                    await sender(
-                        chat_id=chat_id, 
-                        **{param: f},
-                        reply_parameters=reply_params
-                    )
+                    await sender(chat_id=chat_id, **{param: f}, reply_parameters=reply_params)
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
                 logger.error("Failed to send media {}: {}", media_path, e)
                 await self._app.bot.send_message(
                     chat_id=chat_id,
                     text=f"[Failed to send: {filename}]",
-                    reply_parameters=reply_params
+                    reply_parameters=reply_params,
                 )
 
         # Send text content
@@ -265,27 +311,30 @@ class TelegramChannel(BaseChannel):
                 try:
                     html = _markdown_to_telegram_html(chunk)
                     await self._app.bot.send_message(
-                        chat_id=chat_id, 
-                        text=html, 
+                        chat_id=chat_id,
+                        text=html,
                         parse_mode="HTML",
-                        reply_parameters=reply_params
+                        reply_parameters=reply_params,
                     )
                 except Exception as e:
                     logger.warning("HTML parse failed, falling back to plain text: {}", e)
                     try:
                         await self._app.bot.send_message(
-                            chat_id=chat_id, 
+                            chat_id=chat_id,
                             text=chunk,
-                            reply_parameters=reply_params
+                            reply_parameters=reply_params,
                         )
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
-    
+
+    # ------------------------------------------------------------------
+    # Inbound handlers
+    # ------------------------------------------------------------------
+
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
         if not update.message or not update.effective_user:
             return
-
         user = update.effective_user
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
@@ -319,34 +368,31 @@ class TelegramChannel(BaseChannel):
             chat_id=str(update.message.chat_id),
             content=update.message.text,
         )
-    
+
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:
             return
-        
+
         message = update.message
         user = update.effective_user
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
-        
+
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
-        
-        # Build content from text and/or media
+
         content_parts = []
         media_paths = []
-        
-        # Text content
+
         if message.text:
             content_parts.append(message.text)
         if message.caption:
             content_parts.append(message.caption)
-        
-        # Handle media files
+
         media_file = None
         media_type = None
-        
+
         if message.photo:
             media_file = message.photo[-1]  # Largest photo
             media_type = "image"
@@ -359,25 +405,21 @@ class TelegramChannel(BaseChannel):
         elif message.document:
             media_file = message.document
             media_type = "file"
-        
-        # Download media if present
+
         if media_file and self._app:
             try:
                 file = await self._app.bot.get_file(media_file.file_id)
                 ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
-                
-                # Save to workspace/media/
+
                 from pathlib import Path
                 media_dir = Path.home() / ".nanobot" / "media"
                 media_dir.mkdir(parents=True, exist_ok=True)
-                
                 file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
                 await file.download_to_drive(str(file_path))
-                
                 media_paths.append(str(file_path))
-                
-                # Handle voice transcription
-                if media_type == "voice" or media_type == "audio":
+                logger.debug("Downloaded {} to {}", media_type, file_path)
+
+                if media_type in ("voice", "audio"):
                     from nanobot.providers.transcription import GroqTranscriptionProvider
                     transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
                     transcription = await transcriber.transcribe(file_path)
@@ -388,22 +430,15 @@ class TelegramChannel(BaseChannel):
                         content_parts.append(f"[{media_type}: {file_path}]")
                 else:
                     content_parts.append(f"[{media_type}: {file_path}]")
-                    
-                logger.debug("Downloaded {} to {}", media_type, file_path)
             except Exception as e:
                 logger.error("Failed to download media: {}", e)
                 content_parts.append(f"[{media_type}: download failed]")
-        
+
         content = "\n".join(content_parts) if content_parts else "[empty message]"
-        
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
-        
+
         str_chat_id = str(chat_id)
-        
-        # Start typing indicator before processing
         self._start_typing(str_chat_id)
-        
-        # Forward to the message bus
         await self._handle_message(
             sender_id=sender_id,
             chat_id=str_chat_id,
@@ -414,22 +449,25 @@ class TelegramChannel(BaseChannel):
                 "user_id": user.id,
                 "username": user.username,
                 "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
-            }
+                "is_group": message.chat.type != "private",
+            },
         )
-    
+
+    # ------------------------------------------------------------------
+    # Typing indicator
+    # ------------------------------------------------------------------
+
     def _start_typing(self, chat_id: str) -> None:
         """Start sending 'typing...' indicator for a chat."""
-        # Cancel any existing typing task for this chat
         self._stop_typing(chat_id)
         self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
-    
+
     def _stop_typing(self, chat_id: str) -> None:
         """Stop the typing indicator for a chat."""
         task = self._typing_tasks.pop(chat_id, None)
         if task and not task.done():
             task.cancel()
-    
+
     async def _typing_loop(self, chat_id: str) -> None:
         """Repeatedly send 'typing' action until cancelled."""
         try:
@@ -440,9 +478,9 @@ class TelegramChannel(BaseChannel):
             pass
         except Exception as e:
             logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
-    
+
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Log polling / handler errors instead of silently swallowing them."""
+        """Log polling / webhook handler errors instead of silently swallowing them."""
         logger.error("Telegram error: {}", context.error)
 
     def _get_extension(self, media_type: str, mime_type: str | None) -> str:
@@ -454,6 +492,5 @@ class TelegramChannel(BaseChannel):
             }
             if mime_type in ext_map:
                 return ext_map[mime_type]
-        
         type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
         return type_map.get(media_type, "")
