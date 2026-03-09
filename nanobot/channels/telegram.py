@@ -460,7 +460,10 @@ class TelegramChannel(BaseChannel):
             "is_group": message.chat.type != "private",
             "message_thread_id": getattr(message, "message_thread_id", None),
             "is_forum": bool(getattr(message.chat, "is_forum", False)),
-            "sent_at": message.date.isoformat() if message.date else None,
+            # Convert Telegram UTC message date to local machine timezone with millisecond precision
+            "sent_at": message.date.astimezone().isoformat(timespec="milliseconds")
+            if message.date
+            else None,
         }
 
     def _remember_thread_context(self, message) -> None:
