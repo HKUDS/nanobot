@@ -49,6 +49,7 @@ class NanobotDingTalkHandler(CallbackHandler):
 
     async def process(self, message: CallbackMessage):
         """Process incoming stream message."""
+        self.channel._touch_activity()
         try:
             # Parse using SDK's ChatbotMessage for robust handling
             chatbot_msg = ChatbotMessage.from_dict(message.data)
@@ -116,6 +117,11 @@ class DingTalkChannel(BaseChannel):
     _AUDIO_EXTS = {".amr", ".mp3", ".wav", ".ogg", ".m4a", ".aac"}
     _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
+    # If no WebSocket frame is received within this period, the connection is
+    # considered dead and will be forcibly closed so the SDK reconnects.
+    _WS_WATCHDOG_TIMEOUT: int = 180  # seconds (3 minutes)
+    _WS_WATCHDOG_INTERVAL: int = 30  # check every 30 seconds
+
     def __init__(self, config: DingTalkConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: DingTalkConfig = config
@@ -128,6 +134,36 @@ class DingTalkChannel(BaseChannel):
 
         # Hold references to background tasks to prevent GC
         self._background_tasks: set[asyncio.Task] = set()
+
+        # Watchdog: tracks the last time the SDK received any WebSocket frame.
+        self._last_ws_activity: float = 0.0
+
+    def _touch_activity(self) -> None:
+        """Mark that we just received a WebSocket frame from the SDK."""
+        self._last_ws_activity = time.time()
+
+    async def _ws_watchdog(self) -> None:
+        """Periodically check WebSocket liveness; force-close if stale."""
+        while self._running:
+            await asyncio.sleep(self._WS_WATCHDOG_INTERVAL)
+            if not self._running or not self._client:
+                break
+            elapsed = time.time() - self._last_ws_activity
+            if elapsed > self._WS_WATCHDOG_TIMEOUT:
+                ws = getattr(self._client, "websocket", None)
+                if ws is not None:
+                    logger.warning(
+                        "DingTalk watchdog: no activity for {:.0f}s (threshold {}s), "
+                        "force-closing WebSocket to trigger reconnect",
+                        elapsed,
+                        self._WS_WATCHDOG_TIMEOUT,
+                    )
+                    try:
+                        await ws.close()
+                    except Exception:
+                        pass
+                    # Reset so we don't fire again immediately during reconnect
+                    self._last_ws_activity = time.time()
 
     async def start(self) -> None:
         """Start the DingTalk bot with Stream Mode."""
@@ -156,17 +192,34 @@ class DingTalkChannel(BaseChannel):
             handler = NanobotDingTalkHandler(self)
             self._client.register_callback_handler(ChatbotMessage.TOPIC, handler)
 
+            # Monkey-patch SDK's route_message so every incoming WebSocket
+            # frame (including system pings) refreshes the watchdog timer.
+            _original_route = self._client.route_message
+
+            async def _patched_route(json_message: Any) -> Any:
+                self._touch_activity()
+                return await _original_route(json_message)
+
+            self._client.route_message = _patched_route
+
             logger.info("DingTalk bot started with Stream Mode")
+
+            # Start watchdog to detect stale WebSocket connections
+            self._last_ws_activity = time.time()
+            watchdog_task = asyncio.create_task(self._ws_watchdog())
 
             # Reconnect loop: restart stream if SDK exits or crashes
             while self._running:
                 try:
+                    self._last_ws_activity = time.time()
                     await self._client.start()
                 except Exception as e:
                     logger.warning("DingTalk stream error: {}", e)
                 if self._running:
                     logger.info("Reconnecting DingTalk stream in 5 seconds...")
                     await asyncio.sleep(5)
+
+            watchdog_task.cancel()
 
         except Exception as e:
             logger.exception("Failed to start DingTalk channel: {}", e)
