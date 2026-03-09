@@ -132,6 +132,7 @@ class TelegramChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
+        self._draft_messages: dict[str, int] = {}
     
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -216,6 +217,7 @@ class TelegramChannel(BaseChannel):
             await self._app.stop()
             await self._app.shutdown()
             self._app = None
+        self._draft_messages.clear()
     
     @staticmethod
     def _get_media_type(path: str) -> str:
@@ -228,6 +230,84 @@ class TelegramChannel(BaseChannel):
         if ext in ("mp3", "m4a", "wav", "aac"):
             return "audio"
         return "document"
+
+    async def _send_text_message(
+        self,
+        chat_id: int,
+        text: str,
+        *,
+        reply_params: ReplyParameters | None = None,
+        reply_markup: InlineKeyboardMarkup | None = None,
+    ) -> int | None:
+        if not self._app:
+            return None
+        try:
+            html = _markdown_to_telegram_html(text)
+            sent = await self._app.bot.send_message(
+                chat_id=chat_id,
+                text=html,
+                parse_mode="HTML",
+                reply_parameters=reply_params,
+                reply_markup=reply_markup,
+            )
+        except Exception as e:
+            logger.warning("HTML parse failed, falling back to plain text: {}", e)
+            try:
+                sent = await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    reply_parameters=reply_params,
+                    reply_markup=reply_markup,
+                )
+            except Exception as e2:
+                logger.error("Error sending Telegram message: {}", e2)
+                return None
+        return getattr(sent, "message_id", None)
+
+    async def _edit_text_message(
+        self,
+        chat_id: int,
+        message_id: int,
+        text: str,
+        *,
+        reply_markup: InlineKeyboardMarkup | None = None,
+    ) -> bool:
+        if not self._app:
+            return False
+        try:
+            html = _markdown_to_telegram_html(text)
+            await self._app.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=html,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+            return True
+        except Exception as e:
+            logger.warning("Telegram draft HTML edit failed, falling back to plain text: {}", e)
+            try:
+                await self._app.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=text,
+                    reply_markup=reply_markup,
+                )
+                return True
+            except Exception as e2:
+                logger.error("Error editing Telegram draft message: {}", e2)
+                return False
+
+    async def _clear_draft_message(self, chat_key: str, chat_id: int) -> None:
+        if not self._app:
+            return
+        message_id = self._draft_messages.pop(chat_key, None)
+        if message_id is None:
+            return
+        try:
+            await self._app.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except Exception as e:
+            logger.debug("Failed to delete Telegram draft message {}:{}: {}", chat_id, message_id, e)
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
@@ -242,6 +322,13 @@ class TelegramChannel(BaseChannel):
         except ValueError:
             logger.error("Invalid chat_id: {}", msg.chat_id)
             return
+        chat_key = msg.chat_id
+        is_progress = bool(msg.metadata.get("_progress"))
+        use_draft_stream = (
+            is_progress
+            and not msg.metadata.get("_tool_hint")
+            and msg.metadata.get("_progress_mode") == "replace"
+        )
 
         reply_params = None
         if self.config.reply_to_message:
@@ -251,7 +338,7 @@ class TelegramChannel(BaseChannel):
                     message_id=reply_to_message_id,
                     allow_sending_without_reply=True
                 )
-                
+
         # Handle inline keyboard markup
         reply_markup = None
         inline_keyboard_data = msg.metadata.get("inline_keyboard")
@@ -264,6 +351,36 @@ class TelegramChannel(BaseChannel):
                     button_row.append(InlineKeyboardButton(text=btn["text"], callback_data=btn["callback_data"]))
                 keyboard.append(button_row)
             reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if use_draft_stream and msg.content and len(msg.content) <= 4000:
+            draft_id = self._draft_messages.get(chat_key)
+            if draft_id is None:
+                sent_id = await self._send_text_message(
+                    chat_id,
+                    msg.content,
+                    reply_params=reply_params,
+                )
+                if sent_id is not None:
+                    self._draft_messages[chat_key] = sent_id
+                return
+            if await self._edit_text_message(chat_id, draft_id, msg.content):
+                return
+            await self._clear_draft_message(chat_key, chat_id)
+
+        if not is_progress and chat_key in self._draft_messages:
+            can_finalize_draft = (
+                not msg.media
+                and not inline_keyboard_data
+                and msg.content
+                and msg.content != "[empty message]"
+                and len(msg.content) <= 4000
+            )
+            if can_finalize_draft:
+                draft_id = self._draft_messages.pop(chat_key)
+                if await self._edit_text_message(chat_id, draft_id, msg.content, reply_markup=reply_markup):
+                    return
+                self._draft_messages[chat_key] = draft_id
+            await self._clear_draft_message(chat_key, chat_id)
 
         # Send media files
         for media_path in (msg.media or []):
@@ -293,26 +410,12 @@ class TelegramChannel(BaseChannel):
         # Send text content
         if msg.content and msg.content != "[empty message]":
             for chunk in _split_message(msg.content):
-                try:
-                    html = _markdown_to_telegram_html(chunk)
-                    await self._app.bot.send_message(
-                        chat_id=chat_id, 
-                        text=html, 
-                        parse_mode="HTML",
-                        reply_parameters=reply_params,
-                        reply_markup=reply_markup
-                    )
-                except Exception as e:
-                    logger.warning("HTML parse failed, falling back to plain text: {}", e)
-                    try:
-                        await self._app.bot.send_message(
-                            chat_id=chat_id, 
-                            text=chunk,
-                            reply_parameters=reply_params,
-                            reply_markup=reply_markup
-                        )
-                    except Exception as e2:
-                        logger.error("Error sending Telegram message: {}", e2)
+                await self._send_text_message(
+                    chat_id,
+                    chunk,
+                    reply_params=reply_params,
+                    reply_markup=reply_markup,
+                )
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
