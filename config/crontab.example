@@ -1,0 +1,65 @@
+# QuantBot Cron 定时任务配置
+# 使用 crontab -e 添加以下任务
+#
+# 路径配置
+# QUANTBOT_DIR: QuantBot 项目目录 (如 ~/QuantBot)
+# DATA_DIR: 数据存储目录 (项目内的 config/data/)
+
+# ============================================
+# 数据更新任务（不走 LLM，脚本直接执行）
+# ============================================
+
+# 每日 20:00 更新 A 股市场数据
+# 从 AkShare 拉取数据，写入项目目录的数据库
+0 20 * * 1-5 cd $QUANTBOT_DIR && python3 scripts/db_daily_update.py >> $QUANTBOT_DIR/logs/db_update.log 2>&1
+
+# ============================================
+# 量化分析任务（触发 LLM 任务）
+# ============================================
+
+# 每日 09:00 早盘前检查
+# 检查今日是否有重大宏观或政策新闻
+# 注意：需要配置 nanobot 的 cron 功能触发
+# 0 9 * * 1-5 nanobot cron run morning_check
+
+# 每日 16:15 收盘复盘
+# A 股收盘后生成市场简报
+# 0 16 * * 1-5 nanobot cron run post_market_review
+
+# 每日 21:00 更新模拟持仓
+# 更新虚拟持仓净值
+# 0 21 * * * nanobot cron run update_paper_trading
+
+# 每周五 18:00 周报
+# 生成本周策略绩效报告
+# 0 18 * * 5 nanobot cron run weekly_report
+
+# 每月初 09:00 月报
+# 月度健康检查
+# 0 9 1 * * nanobot cron run monthly_check
+
+# ============================================
+# 量化社区学习任务
+# ============================================
+
+# 每周一 20:00 量化社区学习
+# 从聚宽、QuantConnect 等学习新策略
+# 0 20 * * 1 nanobot cron run community_learn
+
+# ============================================
+# 注意事项
+# ============================================
+#
+# 1. 确保 Python 环境可用
+# 2. 首次运行前测试脚本
+# 3. 日志目录需要提前创建
+# 4. LLM 任务需要正确配置 nanobot cron
+#
+# 创建日志目录:
+# mkdir -p ~/.nanobot/logs
+
+# 查看当前 cron 任务:
+# crontab -l
+
+# 编辑 cron 任务:
+# crontab -e
