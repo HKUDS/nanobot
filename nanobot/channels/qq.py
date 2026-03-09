@@ -202,6 +202,7 @@ class QQChannel(BaseChannel):
                 is_group=is_group,
                 file_type=file_type,
                 file_data=base64_encoded_data,
+                file_name=path.name,
             )
 
             if not upload_result:
@@ -268,12 +269,14 @@ class QQChannel(BaseChannel):
 
     # https://github.com/tencent-connect/botpy/issues/198
     # https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/send-receive/rich-media.html
+    # file_name: https://github.com/sliverp/qqbot/blob/1a3708661c619564332355cbe76b9f00d514682d/src/api.ts#L449
     async def _post_base64file(
         self,
         chat_id: str,
         is_group: bool,
         file_type: int,
         file_data: str,
+        file_name: str | None = None,
         srv_send_msg: bool = False,
     ) -> "Media":
         """上传/发送 base64 编码的媒体文件.
@@ -283,6 +286,7 @@ class QQChannel(BaseChannel):
           is_group: 是否为群聊
           file_type: 媒体类型：1 图片png/jpg，2 视频mp4，3 语音silk，4 文件（暂不开放）
           file_data: base64 编码的媒体数据
+          file_name: 文件名
           srv_send_msg: 设置 true 会直接发送消息到目标端，且会占用主动消息频次
         """
         if is_group:
@@ -296,6 +300,7 @@ class QQChannel(BaseChannel):
             id_key: chat_id,
             "file_type": file_type,
             "file_data": file_data,
+            "file_name": file_name,
             "srv_send_msg": srv_send_msg,
         }
         route = Route("POST", endpoint, **{id_key: chat_id})
