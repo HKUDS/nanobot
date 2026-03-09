@@ -147,7 +147,24 @@ class CronTool(Tool):
         jobs = self._cron.list_jobs()
         if not jobs:
             return "No scheduled jobs."
-        lines = [f"- {j.name} (id: {j.id}, {j.schedule.kind})" for j in jobs]
+
+        def _details(j) -> str:
+            parts = [f"id: {j.id}", f"kind: {j.schedule.kind}"]
+            if j.schedule.kind == "cron":
+                if j.schedule.expr:
+                    parts.append(f"expr: {j.schedule.expr}")
+                if j.schedule.tz:
+                    parts.append(f"tz: {j.schedule.tz}")
+            elif j.schedule.kind == "every" and j.schedule.every_ms is not None:
+                parts.append(f"every_ms: {j.schedule.every_ms}")
+            elif j.schedule.kind == "at" and j.schedule.at_ms is not None:
+                parts.append(f"at_ms: {j.schedule.at_ms}")
+
+            if j.state.next_run_at_ms is not None:
+                parts.append(f"next_run_at_ms: {j.state.next_run_at_ms}")
+            return ", ".join(parts)
+
+        lines = [f"- {j.name} ({_details(j)})" for j in jobs]
         return "Scheduled jobs:\n" + "\n".join(lines)
 
     def _remove_job(self, job_id: str | None) -> str:
