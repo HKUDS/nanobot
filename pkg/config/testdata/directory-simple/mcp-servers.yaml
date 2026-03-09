@@ -1,0 +1,4 @@
+myserver:
+  url: https://example.com/mcp
+  headers:
+    Authorization: Bearer test-token

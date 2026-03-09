@@ -1,0 +1,11 @@
+agents:
+  main:
+    name: Hugging Face
+    instructions: |
+      ${servers.huggingface.instructions}
+    model: gpt-4.1
+    mcpServers: huggingface
+
+mcpServers:
+  huggingface:
+    url: 'https://huggingface.co/mcp?login&mix=mcp_ui'

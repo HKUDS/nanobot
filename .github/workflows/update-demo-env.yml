@@ -1,0 +1,31 @@
+name: Update Demo Env
+
+permissions:
+  id-token: write
+  contents: read
+  packages: write
+
+on:
+  schedule:
+    - cron: "0 02 * * *"
+  workflow_dispatch:
+
+jobs:
+  copy-tag:
+    if: github.event_name != 'schedule' || vars.DISABLE_DEMO_AUTO_UPDATE != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup crane
+        uses: imjasonh/setup-crane@v0.5
+
+      - name: Copy to demo tag
+        run: |
+          crane tag ghcr.io/${{ github.repository }}:main demo

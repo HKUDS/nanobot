@@ -1,0 +1,65 @@
+/* Obot Override Light Theme */
+:root:has(input.theme-controller[value=nanobotlight]:checked), [data-theme=nanobotlight] {
+    --color-base-100: hsl(0 0 100);
+    --color-base-200: hsl(0 0 95.5);
+    --color-base-300: hsl(0 0 92.5);
+    --color-base-content: hsl(0 0 0);
+    --color-primary: #4f7ef3;
+    --color-primary-content: hsl(0 0 100);
+    --color-secondary: hsl(0 0 82.5);
+    --color-secondary-content: hsl(0 0 0);
+    --color-accent: #95bcfb;
+    --color-accent-content: hsl(0 0 0);
+    --color-neutral: hsl(0 0 82.5);
+    --color-neutral-content: hsl(0 0 0);
+    --color-info: #4f7ef3;
+    --color-info-content: hsl(0 0 100);
+    --color-success: oklch(72.3% 0.219 149.579);
+    --color-success-content: hsl(0 0 0);
+    --color-warning: oklch(79.5% 0.184 86.047);
+    --color-warning-content: hsl(0 0 100);
+    --color-error: #ef4444;
+    --color-error-content: hsl(0 0 100);
+    --radius-selector: 1rem;
+    --radius-field: 0.25rem;
+    --radius-box: 0.5rem;
+    --size-selector: 0.25rem;
+    --size-field: 0.25rem;
+    --border: 1px;
+    --depth: 0;
+    --noise: 1;
+    --logo-url: /assets/obot-workflow-logo-blue-black-text.svg;
+}
+
+/* Obot Override Dark Theme */
+:root:has(input.theme-controller[value=nanobotdark]:checked), [data-theme=nanobotdark] {
+    --color-base-100: hsl(0 0 0);
+    --color-base-200: hsl(0 0 5.5);
+    --color-base-300: hsl(0 0 12.5);
+    --color-base-content: hsl(0 0 97.5);
+    --color-primary: #4f7ef3;
+    --color-primary-content: hsl(0 0 97.5);
+    --color-secondary: hsl(0 0 22.5);
+    --color-secondary-content: hsl(0 0 97.5);
+    --color-accent: #203188;
+    --color-accent-content: hsl(0 0 97.5);
+    --color-neutral: hsl(0 0 22.5);
+    --color-neutral-content: hsl(0 0 97.5);
+    --color-info: #4f7ef3;
+    --color-info-content: hsl(0 0 97.5);
+    --color-success: oklch(72.3% 0.219 149.579);
+    --color-success-content: hsl(0 0 97.5);
+    --color-warning: oklch(79.5% 0.184 86.047);
+    --color-warning-content: hsl(0 0 97.5);
+    --color-error: #ef4444;
+    --color-error-content: hsl(0 0 97.5);
+    --radius-selector: 1rem;
+    --radius-field: 0.25rem;
+    --radius-box: 0.5rem;
+    --size-selector: 0.25rem;
+    --size-field: 0.25rem;
+    --border: 1px;
+    --depth: 0;
+    --noise: 1;
+    --logo-url: /assets/obot-workflow-logo-blue-white-text.svg;
+}

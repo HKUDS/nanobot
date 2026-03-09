@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nanobot.dev/schemas/mcp.schema.json",
+  "title": "Nanobot MCP Configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mcpServers"],
+  "properties": {
+    "mcpServers": {
+      "description": "Map of MCP server name -> server configuration.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/mcpServerConfig" },
+      "default": {}
+    },
+    "mcpRegistries": {
+      "description": "Map of registry name -> registry configuration.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/mcpRegistryConfig" },
+      "default": {}
+    }
+  },
+  "$defs": {
+    "mcpServerConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "properties": {
+        "command": {
+          "description": "Executable used to start the MCP server.",
+          "type": "string",
+          "minLength": 1
+        },
+        "args": {
+          "description": "Arguments passed to the command.",
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "env": {
+          "description": "Environment variables for the MCP server process.",
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "default": {}
+        },
+        "cwd": {
+          "description": "Optional working directory for the MCP server process.",
+          "type": "string"
+        },
+        "allow_tools": {
+          "description": "Optional allowlist of tool names exposed by this server (toolName portion of server/toolName). If omitted, all server tools are available to be authorized by agents.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "timeout_ms": {
+          "description": "Startup/connection timeout.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 30000
+        }
+      }
+    },
+    "mcpRegistryConfig": {
+      "description": "A registry pointing at a standard MCP registry endpoint.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url"],
+      "properties": {
+        "url": {
+          "description": "Base URL of the MCP registry.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

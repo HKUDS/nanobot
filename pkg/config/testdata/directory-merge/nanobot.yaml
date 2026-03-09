@@ -1,0 +1,15 @@
+agents:
+  main:
+    name: YAML Main Override
+    model: claude-3-7-sonnet-latest
+    mcpServers:
+      - yamlserver
+  yamlonly:
+    name: YAML Only Agent
+    model: gpt-4
+    mcpServers:
+      - yamlserver
+
+mcpServers:
+  yamlserver:
+    url: https://example.com/yamlserver

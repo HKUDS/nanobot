@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nanobot.dev/schemas/task.step.frontmatter.schema.json",
+  "title": "Nanobot Task Step Front Matter",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "metadata": {
+      "type": "object",
+      "description": "Free-form metadata.",
+      "additionalProperties": true,
+      "default": {}
+    },
+
+    "agent": {
+      "description": "Agent ID to execute this step with.",
+      "type": "string",
+      "minLength": 1
+    },
+
+    "tools": {
+      "description": "Tools visible/available while executing this step. If omitted, defaults to [\"inherit\"].",
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string", "enum": ["inherit"] },
+          { "type": "string", "minLength": 1 }
+        ]
+      }
+    },
+
+    "tool_approvals": {
+      "description": "Tool approval policy while executing this step.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default"],
+      "properties": {
+        "default": { "type": "string", "enum": ["approve"], "default": "approve" },
+        "rules": { "type": "array", "items": { "$ref": "#/$defs/toolApprovalRule" }, "default": [] }
+      }
+    },
+
+    "skills": {
+      "description": "Skills visible/available while executing this step. If omitted, defaults to [\"inherit\"].",
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string", "enum": ["inherit"] },
+          { "type": "string", "minLength": 1 }
+        ]
+      }
+    },
+
+    "tasks": {
+      "description": "Tasks visible/available while executing this step (task IDs are directory paths under .nanobot/tasks).",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "default": ["inherit"]
+    },
+
+    "next": {
+      "description": "Relative path to the next step markdown file within the same task directory.",
+      "type": "string",
+      "minLength": 1
+    }
+  },
+
+  "$defs": {
+    "toolApprovalRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "allow"],
+      "properties": {
+        "tool": { "type": "string", "minLength": 1 },
+        "allow": { "type": "boolean" },
+        "when": { "type": "object", "additionalProperties": { "$ref": "#/$defs/matcher" } }
+      }
+    },
+    "taskApprovalRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task", "allow"],
+      "properties": {
+        "task": { "type": "string", "minLength": 1 },
+        "allow": { "type": "boolean" },
+        "when": { "type": "object", "additionalProperties": { "$ref": "#/$defs/matcher" } }
+      }
+    },
+
+    "matcher": {
+      "oneOf": [
+        { "$ref": "#/$defs/equalsMatcher" },
+        { "$ref": "#/$defs/inMatcher" },
+        { "$ref": "#/$defs/startsWithMatcher" },
+        { "$ref": "#/$defs/matchesMatcher" },
+        { "$ref": "#/$defs/containsMatcher" },
+        { "$ref": "#/$defs/containsAllMatcher" },
+        { "$ref": "#/$defs/anyOfMatcher" },
+        { "$ref": "#/$defs/allOfMatcher" }
+      ]
+    },
+    "equalsMatcher": { "type": "object", "additionalProperties": false, "required": ["equals"], "properties": { "equals": {} } },
+    "inMatcher": { "type": "object", "additionalProperties": false, "required": ["in"], "properties": { "in": { "type": "array", "items": {} } } },
+    "startsWithMatcher": { "type": "object", "additionalProperties": false, "required": ["startsWith"], "properties": { "startsWith": { "type": "string" } } },
+    "matchesMatcher": { "type": "object", "additionalProperties": false, "required": ["matches"], "properties": { "matches": { "type": "string" } } },
+    "containsMatcher": { "type": "object", "additionalProperties": false, "required": ["contains"], "properties": { "contains": {} } },
+    "containsAllMatcher": { "type": "object", "additionalProperties": false, "required": ["containsAll"], "properties": { "containsAll": { "type": "array", "items": {} } } },
+    "anyOfMatcher": { "type": "object", "additionalProperties": false, "required": ["anyOf"], "properties": { "anyOf": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/matcher" } } } },
+    "allOfMatcher": { "type": "object", "additionalProperties": false, "required": ["allOf"], "properties": { "allOf": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/matcher" } } } }
+  }
+}

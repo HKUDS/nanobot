@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nanobot.dev/schemas/task.frontmatter.schema.json",
+  "title": "Nanobot Task Front Matter (TASK.md only)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "metadata": {
+      "type": "object",
+      "description": "Free-form metadata.",
+      "additionalProperties": true,
+      "default": {}
+    },
+
+    "agent": {
+      "description": "Agent ID to execute this task with.",
+      "type": "string",
+      "minLength": 1
+    },
+
+    "tools": {
+      "description": "Tools visible/available while executing this task. If omitted, defaults to [\"inherit\"].",
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string", "enum": ["inherit"] },
+          { "type": "string", "minLength": 1 }
+        ]
+      }
+    },
+
+    "tool_approvals": {
+      "description": "Tool approval policy while executing this task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default"],
+      "properties": {
+        "default": { "type": "string", "enum": ["approve"], "default": "approve" },
+        "rules": { "type": "array", "items": { "$ref": "#/$defs/toolApprovalRule" }, "default": [] }
+      }
+    },
+
+    "tasks": {
+      "description": "Tasks visible/available while executing this task (task IDs are directory paths under .nanobot/tasks).",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "default": ["inherit"]
+    },
+
+    "task_approvals": {
+      "description": "Task approval policy while executing this task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default"],
+      "properties": {
+        "default": { "type": "string", "enum": ["approve"], "default": "approve" },
+        "rules": { "type": "array", "items": { "$ref": "#/$defs/taskApprovalRule" }, "default": [] }
+      }
+    },
+
+    "inputs": {
+      "description": "Task inputs (TASK.md only).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/taskInput" },
+      "default": []
+    },
+
+    "next": {
+      "description": "Relative path to the next step markdown file within the same task directory.",
+      "type": "string",
+      "minLength": 1
+    }
+  },
+
+  "$defs": {
+    "taskInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "description"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Input name."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Describe what the input means and expected format."
+        },
+        "default": {
+          "type": "string",
+          "description": "Optional default value (string)."
+        }
+      }
+    },
+
+    "toolApprovalRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "allow"],
+      "properties": {
+        "tool": { "type": "string", "minLength": 1 },
+        "allow": { "type": "boolean" },
+        "when": { "type": "object", "additionalProperties": { "$ref": "#/$defs/matcher" } }
+      }
+    },
+
+    "taskApprovalRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task", "allow"],
+      "properties": {
+        "task": { "type": "string", "minLength": 1 },
+        "allow": { "type": "boolean" },
+        "when": { "type": "object", "additionalProperties": { "$ref": "#/$defs/matcher" } }
+      }
+    },
+
+    "matcher": {
+      "oneOf": [
+        { "$ref": "#/$defs/equalsMatcher" },
+        { "$ref": "#/$defs/inMatcher" },
+        { "$ref": "#/$defs/startsWithMatcher" },
+        { "$ref": "#/$defs/matchesMatcher" },
+        { "$ref": "#/$defs/containsMatcher" },
+        { "$ref": "#/$defs/containsAllMatcher" },
+        { "$ref": "#/$defs/anyOfMatcher" },
+        { "$ref": "#/$defs/allOfMatcher" }
+      ]
+    },
+
+    "equalsMatcher": { "type": "object", "additionalProperties": false, "required": ["equals"], "properties": { "equals": {} } },
+    "inMatcher": { "type": "object", "additionalProperties": false, "required": ["in"], "properties": { "in": { "type": "array", "items": {} } } },
+    "startsWithMatcher": { "type": "object", "additionalProperties": false, "required": ["startsWith"], "properties": { "startsWith": { "type": "string" } } },
+    "matchesMatcher": { "type": "object", "additionalProperties": false, "required": ["matches"], "properties": { "matches": { "type": "string" } } },
+    "containsMatcher": { "type": "object", "additionalProperties": false, "required": ["contains"], "properties": { "contains": {} } },
+    "containsAllMatcher": { "type": "object", "additionalProperties": false, "required": ["containsAll"], "properties": { "containsAll": { "type": "array", "items": {} } } },
+    "anyOfMatcher": { "type": "object", "additionalProperties": false, "required": ["anyOf"], "properties": { "anyOf": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/matcher" } } } },
+    "allOfMatcher": { "type": "object", "additionalProperties": false, "required": ["allOf"], "properties": { "allOf": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/matcher" } } } }
+  }
+}

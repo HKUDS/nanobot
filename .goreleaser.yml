@@ -1,0 +1,108 @@
+version: 2
+before:
+  hooks:
+    - go generate ./...
+dist: releases
+snapshot:
+  version_template: "{{ .Summary }}"
+builds:
+  - id: default
+    env:
+      - CGO_ENABLED=0
+    binary: nanobot
+    goarch:
+      - amd64
+      - arm64
+    tags:
+      - netgo
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -X "github.com/nanobot-ai/nanobot/pkg/version.Tag=v{{ .Version }}"
+      - -X "github.com/nanobot-ai/nanobot/pkg/version.BaseImage=ghcr.io/nanobot-ai/nanobot:v{{ .Version }}"
+universal_binaries:
+  - id: mac
+    ids:
+      - default
+    replace: true
+archives:
+  - formats: ["tar.gz"]
+    ids:
+      - default
+      - mac
+    name_template: >-
+      {{ .ProjectName }}_ {{- .Os }}_ {{- if eq .Arch "amd64" }}x86_64 {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: ["zip"]
+checksum:
+  name_template: "{{ .ProjectName }}_v{{ .Version }}_checksums.txt"
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+release:
+  github:
+    owner: nanobot-ai
+    name: nanobot
+  prerelease: auto
+dockers:
+  - image_templates:
+      - "ghcr.io/nanobot-ai/nanobot:v{{ .Version }}-amd64"
+      - "ghcr.io/nanobot-ai/nanobot:latest-amd64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--target=release"
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--label=org.opencontainers.image.description=Nanobot CLI"
+    goarch: amd64
+  - image_templates:
+      - "ghcr.io/nanobot-ai/nanobot:v{{ .Version }}-arm64"
+      - "ghcr.io/nanobot-ai/nanobot:latest-arm64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--target=release"
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--label=org.opencontainers.image.description=Nanobot CLI"
+    goarch: arm64
+docker_manifests:
+  - name_template: "ghcr.io/nanobot-ai/nanobot:v{{ .Version }}"
+    image_templates:
+      - "ghcr.io/nanobot-ai/nanobot:v{{ .Version }}-amd64"
+      - "ghcr.io/nanobot-ai/nanobot:v{{ .Version }}-arm64"
+  - name_template: "ghcr.io/nanobot-ai/nanobot:latest"
+    image_templates:
+      - "ghcr.io/nanobot-ai/nanobot:latest-amd64"
+      - "ghcr.io/nanobot-ai/nanobot:latest-arm64"
+brews:
+  - name: nanobot
+    description: "Nanobot cli"
+    install: |
+      bin.install "nanobot"
+    homepage: "https://nanobot.ai"
+    skip_upload: false
+    directory: Formula
+    repository:
+      owner: nanobot-ai
+      name: homebrew-tap
+      token: "{{ .Env.GHCR_TOKEN }}"

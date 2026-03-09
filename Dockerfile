@@ -1,40 +1,82 @@
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+# syntax=docker/dockerfile:1
 
-# Install Node.js 20 for the WhatsApp bridge
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates gnupg git && \
-    mkdir -p /etc/apt/keyrings && \
-    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends nodejs && \
-    apt-get purge -y gnupg && \
-    apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/*
+# Build stage
+FROM golang:1.26-alpine AS builder
 
-WORKDIR /app
+# Install Node.js and pnpm for UI build
+RUN apk add --no-cache nodejs npm && npm install -g pnpm
 
-# Install Python dependencies first (cached layer)
-COPY pyproject.toml README.md LICENSE ./
-RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
-    uv pip install --system --no-cache . && \
-    rm -rf nanobot bridge
+WORKDIR /build
 
-# Copy the full source and install
-COPY nanobot/ nanobot/
-COPY bridge/ bridge/
-RUN uv pip install --system --no-cache .
+# Copy go mod files first for better caching
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Build the WhatsApp bridge
-WORKDIR /app/bridge
-RUN npm install && npm run build
-WORKDIR /app
+# Copy source code
+COPY . .
 
-# Create config directory
-RUN mkdir -p /root/.nanobot
+# Build UI and binary
+RUN CI=true CGO_ENABLED=0 go generate ./... && go build -o nanobot .
 
-# Gateway default port
-EXPOSE 18790
+# Final stage
+FROM cgr.dev/chainguard/wolfi-base:latest AS runtime
 
-ENTRYPOINT ["nanobot"]
-CMD ["status"]
+# Install bash, git, common utilities, uv, and poppler-utils (provides pdftoppm
+# and pdfinfo, used by the built-in read tool to render PDF pages as images)
+RUN apk update && apk add --no-cache \
+    bash \
+    git \
+    curl \
+    wget \
+    jq \
+    gzip \
+    xz \
+    coreutils \
+    findutils \
+    grep \
+    sed \
+    gawk \
+    ripgrep \
+    uv \
+    poppler-utils
+
+# Install mcp-cli
+ARG TARGETARCH
+RUN ARCH=$(if [ "${TARGETARCH}" = "amd64" ]; then echo "x64"; else echo "${TARGETARCH}"; fi) && \
+    wget "https://github.com/obot-platform/mcp-cli/releases/download/v0.3.1/mcp-cli-linux-${ARCH}" && \
+    mv mcp-cli-linux-${ARCH} /usr/bin/mcp-cli && \
+    chmod +x /usr/bin/mcp-cli
+
+# Create non-root user with home directory
+RUN adduser -D -h /home/nanobot -s /bin/bash nanobot
+
+# Create data and config directories with proper ownership
+RUN mkdir -p /data /home/nanobot/.nanobot && \
+    chown -R nanobot:nanobot /data /home/nanobot
+
+USER nanobot
+WORKDIR /home/nanobot
+
+# Set common env vars
+ENV HOME=/home/nanobot
+ENV NANOBOT_STATE=/data/nanobot.db
+ENV NANOBOT_RUN_LISTEN_ADDRESS=0.0.0.0:8080
+
+EXPOSE 8080
+
+# Define volume for persistent data
+VOLUME ["/data"]
+
+ENTRYPOINT ["/usr/local/bin/nanobot"]
+CMD ["run"]
+
+# Release image
+FROM runtime AS release
+
+COPY nanobot /usr/local/bin/nanobot
+
+# Dev image
+FROM runtime AS dev
+
+# Copy the binary from builder
+COPY --from=builder /build/nanobot /usr/local/bin/nanobot

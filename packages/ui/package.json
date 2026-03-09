@@ -1,0 +1,54 @@
+{
+	"name": "@nanobot-ai/ui",
+	"private": true,
+	"version": "0.0.1",
+	"type": "module",
+	"scripts": {
+		"dev": "pnpm i && vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"prepare": "svelte-kit sync || echo ''",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"check:fix": "npm run format",
+		"format": "prettier --write .",
+		"lint": "rm -rf dist && prettier --check . && eslint .",
+		"ci": "pnpm run check && npm run build"
+	},
+	"devDependencies": {
+		"@eslint/compat": "^1.4.1",
+		"@eslint/js": "^9.39.2",
+		"@sveltejs/adapter-static": "^3.0.10",
+		"@sveltejs/kit": "^2.49.2",
+		"@sveltejs/vite-plugin-svelte": "^6.2.1",
+		"@tailwindcss/typography": "^0.5.19",
+		"@tailwindcss/vite": "^4.1.18",
+		"@types/react": "^18.3.27",
+		"@types/react-dom": "^18.3.7",
+		"eslint": "^9.39.2",
+		"eslint-config-prettier": "^10.1.8",
+		"eslint-plugin-svelte": "^3.13.1",
+		"globals": "^16.5.0",
+		"prettier": "^3.7.4",
+		"prettier-plugin-svelte": "^3.4.1",
+		"prettier-plugin-tailwindcss": "^0.6.14",
+		"svelte": "^5.46.0",
+		"svelte-check": "^4.3.4",
+		"tailwindcss": "^4.1.18",
+		"typescript": "^5.9.3",
+		"typescript-eslint": "^8.50.0",
+		"vite": "^7.3.0"
+	},
+	"peerDependencies": {
+		"react": "^18",
+		"react-dom": "^18"
+	},
+	"dependencies": {
+		"@lucide/svelte": "^0.540.0",
+		"@mcp-ui/client": "^5.9.0",
+		"daisyui": "^5.1.10",
+		"highlight.js": "^11.11.1",
+		"marked": "^16.4.2",
+		"marked-highlight": "^2.2.3"
+	}
+}

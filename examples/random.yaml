@@ -1,0 +1,9 @@
+agents:
+  main:
+    name: Random Testing Tools
+    model: gpt-4.1
+    mcpServers: random
+
+mcpServers:
+  random:
+    url: https://mcp-aharvard.netlify.app/mcp

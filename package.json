@@ -1,0 +1,29 @@
+{
+	"name": "@nanobot-ai/nanobot",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"@tailwindcss/oxide",
+			"esbuild",
+			"node-pty"
+		]
+	},
+	"scripts": {
+		"dev": "cd ./packages/ui && pnpm run dev",
+		"check": "pnpm -r run check",
+		"check:fix": "pnpm -r run check:fix",
+		"ci": "pnpm -r run ci"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.3.7",
+		"@types/node": "^24.10.1",
+		"tsx": "^4.21.0",
+		"typescript": "^5.9.3"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "~1.24.0",
+		"zod": "^3"
+	}
+}

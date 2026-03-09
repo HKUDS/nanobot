@@ -1,0 +1,239 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nanobot.dev/schemas/agent.frontmatter.schema.json",
+  "title": "Nanobot Agent Front Matter",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "metadata": {
+      "type": "object",
+      "description": "Free-form metadata.",
+      "additionalProperties": true,
+      "default": {}
+    },
+
+    "model": { "type": "string" },
+    "allowed_models": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "temperature": { "type": "number" },
+    "max_tokens": { "type": "integer", "minimum": 1 },
+
+    "tools": {
+      "description": "Tools visible/available to the agent. If omitted, defaults to [\"inherit\"]. Built-ins are logical names (e.g. Read/Write). MCP tools are mcpServer/toolName.",
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string", "enum": ["inherit"] },
+          { "type": "string", "minLength": 1 }
+        ]
+      }
+    },
+
+    "tool_approvals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default"],
+      "properties": {
+        "default": {
+          "description": "Default authorization behavior. Currently only 'approve' is supported.",
+          "type": "string",
+          "enum": ["approve"],
+          "default": "approve"
+        },
+        "rules": {
+          "description": "Ordered allow rules; first matching rule wins.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/toolApprovalRule" },
+          "default": []
+        }
+      }
+    },
+
+    "skills": {
+      "description": "Skills visible/available to the agent. If omitted, defaults to [\"inherit\"]. Skill IDs are directory names.",
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string", "enum": ["inherit"] },
+          { "type": "string", "minLength": 1 }
+        ]
+      }
+    },
+
+    "tasks": {
+      "description": "Tasks visible/available to the agent (task IDs are directory paths under .nanobot/tasks).",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "default": ["inherit"]
+    },
+
+    "task_approvals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default"],
+      "properties": {
+        "default": {
+          "description": "Default task authorization behavior. Currently only 'approve' is supported.",
+          "type": "string",
+          "enum": ["approve"],
+          "default": "approve"
+        },
+        "rules": {
+          "description": "Ordered allow rules; first matching rule wins.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/taskApprovalRule" },
+          "default": []
+        }
+      }
+    }
+  },
+
+  "$defs": {
+    "toolApprovalRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "allow"],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Tool identifier (must match an entry in tools)."
+        },
+        "allow": { "type": "boolean" },
+        "when": {
+          "description": "Optional matchers keyed by tool argument name.",
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/matcher" }
+        }
+      }
+    },
+
+    "taskApprovalRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task", "allow"],
+      "properties": {
+        "task": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Task identifier (must match an entry in tasks)."
+        },
+        "allow": { "type": "boolean" },
+        "when": {
+          "description": "Optional matchers keyed by task input name.",
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/matcher" }
+        }
+      }
+    },
+
+    "matcher": {
+      "description": "A value matcher for a tool argument key.",
+      "oneOf": [
+        { "$ref": "#/$defs/equalsMatcher" },
+        { "$ref": "#/$defs/inMatcher" },
+        { "$ref": "#/$defs/startsWithMatcher" },
+        { "$ref": "#/$defs/matchesMatcher" },
+        { "$ref": "#/$defs/containsMatcher" },
+        { "$ref": "#/$defs/containsAllMatcher" },
+        { "$ref": "#/$defs/anyOfMatcher" },
+        { "$ref": "#/$defs/allOfMatcher" }
+      ]
+    },
+
+    "equalsMatcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["equals"],
+      "properties": {
+        "equals": {}
+      }
+    },
+
+    "inMatcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["in"],
+      "properties": {
+        "in": {
+          "type": "array",
+          "items": {}
+        }
+      }
+    },
+
+    "startsWithMatcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startsWith"],
+      "properties": {
+        "startsWith": { "type": "string" }
+      }
+    },
+
+    "matchesMatcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matches"],
+      "properties": {
+        "matches": {
+          "type": "string",
+          "description": "Regex string."
+        }
+      }
+    },
+
+    "containsMatcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contains"],
+      "properties": {
+        "contains": {}
+      }
+    },
+
+    "containsAllMatcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["containsAll"],
+      "properties": {
+        "containsAll": {
+          "type": "array",
+          "items": {}
+        }
+      }
+    },
+
+    "anyOfMatcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anyOf"],
+      "properties": {
+        "anyOf": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/matcher" }
+        }
+      }
+    },
+
+    "allOfMatcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allOf"],
+      "properties": {
+        "allOf": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/matcher" }
+        }
+      }
+    }
+  }
+}

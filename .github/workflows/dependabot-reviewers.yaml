@@ -1,0 +1,144 @@
+name: Request reviewers for Dependabot PRs (by directory)
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  request_reviewers:
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Choose reviewers based on changed paths
+        id: choose
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Paginate through PR files (up to 300 here; raise if needed).
+          files="$(curl -sS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}/files?per_page=100&page=1" | jq -r '.[].filename')"
+
+          files_page2="$(curl -sS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}/files?per_page=100&page=2" | jq -r '.[].filename // empty')"
+
+          files_page3="$(curl -sS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}/files?per_page=100&page=3" | jq -r '.[].filename // empty')"
+
+          all_files="$(printf "%s\n%s\n%s\n" "$files" "$files_page2" "$files_page3" | sed '/^$/d')"
+
+          echo "Changed files:"
+          echo "$all_files"
+
+          # Directory rule: if ANY changed file starts with ui/, use UI reviewers.
+          if echo "$all_files" | grep -qE '^ui/'; then
+            echo "route=ui" >> "$GITHUB_OUTPUT"
+          else
+            echo "route=default" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Request reviewers (ui/)
+        if: ${{ steps.choose.outputs.route == 'ui' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+
+          # --- UI reviewer config ---
+          # GitHub usernames (no @), comma-separated:
+          REVIEWERS: "ivyjeong13"
+          # Team slugs (no @org/), comma-separated:
+          TEAM_REVIEWERS: ""
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          reviewers_json=$(python - <<'PY'
+          import os, json
+          s=os.getenv("REVIEWERS","").strip()
+          arr=[x.strip() for x in s.split(",") if x.strip()]
+          print(json.dumps(arr))
+          PY
+          )
+
+          team_reviewers_json=$(python - <<'PY'
+          import os, json
+          s=os.getenv("TEAM_REVIEWERS","").strip()
+          arr=[x.strip() for x in s.split(",") if x.strip()]
+          print(json.dumps(arr))
+          PY
+          )
+
+          payload=$(python - <<PY
+          import json
+          print(json.dumps({
+            "reviewers": json.loads('''$reviewers_json'''),
+            "team_reviewers": json.loads('''$team_reviewers_json'''),
+          }))
+          PY
+          )
+
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}/requested_reviewers" \
+            -d "${payload}"
+
+      - name: Request reviewers (default)
+        if: ${{ steps.choose.outputs.route == 'default' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+
+          # --- Default reviewer config ---
+          REVIEWERS: "ibuildthecloud,njhale,thedadams,g-linville"
+          TEAM_REVIEWERS: ""
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          reviewers_json=$(python - <<'PY'
+          import os, json
+          s=os.getenv("REVIEWERS","").strip()
+          arr=[x.strip() for x in s.split(",") if x.strip()]
+          print(json.dumps(arr))
+          PY
+          )
+
+          team_reviewers_json=$(python - <<'PY'
+          import os, json
+          s=os.getenv("TEAM_REVIEWERS","").strip()
+          arr=[x.strip() for x in s.split(",") if x.strip()]
+          print(json.dumps(arr))
+          PY
+          )
+
+          payload=$(python - <<PY
+          import json
+          print(json.dumps({
+            "reviewers": json.loads('''$reviewers_json'''),
+            "team_reviewers": json.loads('''$team_reviewers_json'''),
+          }))
+          PY
+          )
+
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}/requested_reviewers" \
+            -d "${payload}"
