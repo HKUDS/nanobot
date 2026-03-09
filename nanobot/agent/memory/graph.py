@@ -124,7 +124,7 @@ class KnowledgeGraph:
 
     async def ensure_indexes(self) -> None:
         """Create uniqueness constraints and full-text indexes (idempotent)."""
-        if not self.enabled:
+        if not self.enabled or self._driver is None:
             return
         queries = [
             (
@@ -149,7 +149,7 @@ class KnowledgeGraph:
 
     async def upsert_entity(self, entity: Entity) -> None:
         """MERGE an entity node, updating properties and timestamps."""
-        if not self.enabled:
+        if not self.enabled or self._driver is None:
             return
         canonical = entity.canonical_name
         props: dict[str, Any] = {
@@ -175,7 +175,7 @@ class KnowledgeGraph:
 
     async def add_relationship(self, rel: Relationship) -> None:
         """MERGE a directed relationship edge between two entities."""
-        if not self.enabled:
+        if not self.enabled or self._driver is None:
             return
         src = rel.source_id.strip().lower().replace(" ", "_")
         tgt = rel.target_id.strip().lower().replace(" ", "_")
@@ -255,7 +255,7 @@ class KnowledgeGraph:
 
     async def get_entity(self, name: str) -> Entity | None:
         """Look up an entity by canonical name or alias."""
-        if not self.enabled:
+        if not self.enabled or self._driver is None:
             return None
         canonical = name.strip().lower().replace(" ", "_")
         cypher = (
@@ -282,7 +282,7 @@ class KnowledgeGraph:
         limit: int = 10,
     ) -> list[Entity]:
         """Fuzzy text search across entity names and aliases."""
-        if not self.enabled:
+        if not self.enabled or self._driver is None:
             return []
         # Use full-text index for fuzzy matching
         cypher = (
@@ -313,7 +313,7 @@ class KnowledgeGraph:
         relation_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """BFS traversal returning nodes + edges up to *depth* hops."""
-        if not self.enabled:
+        if not self.enabled or self._driver is None:
             return []
         canonical = entity_name.strip().lower().replace(" ", "_")
         depth = max(1, min(depth, 5))  # clamp to [1, 5]
@@ -335,7 +335,8 @@ class KnowledgeGraph:
         try:
             async with self._driver.session(database=self._database) as session:
                 result = await session.run(cypher, name=canonical)
-                return await result.data()
+                data: list[dict[str, Any]] = await result.data()
+                return data
         except Exception as exc:  # noqa: BLE001
             logger.warning("get_neighbors failed for %s: %s", entity_name, exc)
             return []
@@ -347,7 +348,7 @@ class KnowledgeGraph:
         max_depth: int = 3,
     ) -> list[list[dict[str, Any]]]:
         """Find shortest paths between two entities."""
-        if not self.enabled:
+        if not self.enabled or self._driver is None:
             return []
         src = source.strip().lower().replace(" ", "_")
         tgt = target.strip().lower().replace(" ", "_")

@@ -2,25 +2,41 @@
   "preferences": [
     "User prefers concise bullet-point responses.",
     "User prefers CLI-first workflows.",
-    "User prefers professional technical tone."
+    "User prefers professional technical tone.",
+    "User prefers Python type hints on all function signatures; no bare Exception catches.",
+    "User prefers async/await patterns over threading for I/O operations."
   ],
   "stable_facts": [
     "API authentication method is OAuth2.",
     "Deployment region is us-east-1.",
     "Primary runtime environment is nanobot workspace on Linux.",
-    "Memory backend is mem0 with local qdrant storage."
+    "Memory backend is mem0 with local qdrant storage.",
+    "Session storage uses PostgreSQL 15.",
+    "Caching layer uses Redis with 1GB maxmemory.",
+    "Infrastructure managed by Terraform; CI/CD via GitHub Actions.",
+    "Knowledge graph backed by Neo4j 5.x in Docker.",
+    "Production SLA target is 99.9% uptime with 5-minute incident response.",
+    "Config schemas use Pydantic v2; migration from v1 in progress."
   ],
   "active_projects": [
     "Memory relevance lift rollout is in progress.",
-    "Agent configuration remains separated from runtime state under ~/.nanobot."
+    "Agent configuration remains separated from runtime state under ~/.nanobot.",
+    "Knowledge graph integration with Neo4j entity ontology.",
+    "Cross-encoder reranker integration for improved retrieval precision."
   ],
   "relationships": [
     "Carlos collaborates with platform and infrastructure teams.",
-    "Decisions needing user input are escalated directly to Carlos."
+    "Decisions needing user input are escalated directly to Carlos.",
+    "Carlos leads the nanobot project and reports to the engineering director.",
+    "Alice is on the platform team and raises performance tickets.",
+    "Bob manages the infrastructure team and handles on-call rotations.",
+    "Carlos and Bob collaborated on the Redis incident post-mortem."
   ],
   "constraints": [
     "Commands must avoid destructive operations unless explicitly requested.",
-    "Use env > ~/.nanobot/config.json > code defaults for memory rollout config."
+    "Use env > ~/.nanobot/config.json > code defaults for memory rollout config.",
+    "All database schema migrations must be backward-compatible for zero-downtime deploys.",
+    "Must validate all user inputs before shell execution."
   ],
   "conflicts": [
     {

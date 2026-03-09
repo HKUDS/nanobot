@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -17,6 +18,9 @@ from nanobot.agent.memory.store import MemoryStore
 
 
 def run_retrieval_eval() -> None:
+    # Enable knowledge graph if Neo4j is reachable (can be overridden via env).
+    os.environ.setdefault("NANOBOT_GRAPH_ENABLED", "true")
+
     workspace = Path.home() / ".nanobot" / "workspace"
     store = MemoryStore(workspace)
 
@@ -42,6 +46,36 @@ def run_retrieval_eval() -> None:
         # Q10: Multi-hop (knowledge graph target)
         ("What caused the deployment failure and how was it resolved?",
          ["eu-west-1", "policy", "us-east-1"]),
+        # Q11: Redis incident timeline (multi-step episodic)
+        ("What happened during the Redis incident?",
+         ["redis", "eviction", "oom", "maxmemory"]),
+        # Q12: Cross-entity people + roles
+        ("Who are Alice and Bob and what do they do?",
+         ["alice", "platform", "bob", "infrastructure"]),
+        # Q13: Rejected alternatives (negation/absence)
+        ("What memory backend alternatives were considered and rejected?",
+         ["elasticsearch", "rejected"]),
+        # Q14: Tech stack (multi-entity graph)
+        ("What databases does the nanobot project use?",
+         ["postgresql", "redis", "qdrant", "neo4j"]),
+        # Q15: Deployment tooling
+        ("What tools are used for infrastructure and deployment?",
+         ["terraform", "github actions"]),
+        # Q16: Reflection from Redis incident
+        ("What did we learn from the caching incidents?",
+         ["resource limit", "eviction", "monitoring"]),
+        # Q17: SLA and production constraints
+        ("What are the production SLA requirements?",
+         ["99.9%", "uptime", "5-minute"]),
+        # Q18: Post-mortem collaboration (cross-entity graph)
+        ("Who worked together on the Redis post-mortem?",
+         ["carlos", "bob", "post-mortem"]),
+        # Q19: Coding preferences
+        ("What Python coding style does the user prefer?",
+         ["type hints", "exception"]),
+        # Q20: Knowledge graph architecture
+        ("How does the knowledge graph integration work?",
+         ["neo4j", "docker", "graph"]),
     ]
 
     print("=" * 80)
@@ -60,11 +94,12 @@ def run_retrieval_eval() -> None:
         # Run retrieval
         retrieved = store.retrieve(query, top_k=6)
 
-        # Build memory context
+        # Build memory context (budget must be large enough to include
+        # profile + BM25 events + entity graph section).
         context = store.get_memory_context(
             query=query,
             retrieval_k=6,
-            token_budget=900,
+            token_budget=2000,
         )
 
         # Check keyword recall (normalize hyphens ↔ spaces for fuzzy match)
