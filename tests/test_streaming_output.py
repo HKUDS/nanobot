@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -228,6 +229,7 @@ async def test_custom_provider_streams_reasoning_deltas_before_content() -> None
 @pytest.mark.asyncio
 async def test_telegram_reuses_draft_message_for_streaming_reply() -> None:
     channel = TelegramChannel(TelegramConfig(enabled=True, token="test"), MessageBus())
+    channel._draft_edit_interval = 0.01
     bot = SimpleNamespace(
         send_message=AsyncMock(return_value=SimpleNamespace(message_id=42)),
         edit_message_text=AsyncMock(return_value=True),
@@ -264,5 +266,54 @@ async def test_telegram_reuses_draft_message_for_streaming_reply() -> None:
     )
 
     assert bot.send_message.await_count == 1
-    assert bot.edit_message_text.await_count == 2
+    assert bot.edit_message_text.await_count == 1
     assert bot.delete_message.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_telegram_coalesces_streaming_edits() -> None:
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="test"), MessageBus())
+    channel._draft_edit_interval = 0.05
+    bot = SimpleNamespace(
+        send_message=AsyncMock(return_value=SimpleNamespace(message_id=42)),
+        edit_message_text=AsyncMock(return_value=True),
+        delete_message=AsyncMock(return_value=True),
+        send_photo=AsyncMock(),
+        send_voice=AsyncMock(),
+        send_audio=AsyncMock(),
+        send_document=AsyncMock(),
+    )
+    channel._app = SimpleNamespace(bot=bot)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Hel",
+            metadata={"_progress": True, "_progress_mode": "replace"},
+        )
+    )
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Hell",
+            metadata={"_progress": True, "_progress_mode": "replace"},
+        )
+    )
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Hello",
+            metadata={"_progress": True, "_progress_mode": "replace"},
+        )
+    )
+
+    assert bot.send_message.await_count == 1
+    assert bot.edit_message_text.await_count == 0
+
+    await asyncio.sleep(0.08)
+
+    assert bot.edit_message_text.await_count == 1
+    assert bot.edit_message_text.await_args_list[0].kwargs["text"] == "Hello"
