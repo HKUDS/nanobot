@@ -10,6 +10,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram import TelegramChannel
 from nanobot.config.schema import TelegramConfig
 from nanobot.providers.base import LLMResponse
+from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _consume_sse
 
 
@@ -105,6 +106,45 @@ async def test_agent_loop_emits_replace_progress_for_streamed_text() -> None:
 
     assert final_content == "Hello"
     assert progress_calls == [("Hel", True), ("Hello", True)]
+
+
+@pytest.mark.asyncio
+async def test_litellm_provider_streams_text_deltas() -> None:
+    provider = LiteLLMProvider(api_key="test", default_model="openai/gpt-4o-mini")
+    deltas: list[str] = []
+
+    async def _on_text_delta(delta: str) -> None:
+        deltas.append(delta)
+
+    async def _fake_acompletion(**kwargs):
+        if kwargs.get("stream"):
+            async def _gen():
+                yield SimpleNamespace(
+                    choices=[SimpleNamespace(delta=SimpleNamespace(content="Hel"))]
+                )
+                yield SimpleNamespace(
+                    choices=[SimpleNamespace(delta=SimpleNamespace(content="lo"))]
+                )
+            return _gen()
+        raise AssertionError("expected streaming path")
+
+    built_response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="Hello", tool_calls=None), finish_reason="stop")],
+        usage=None,
+    )
+
+    with (
+        patch("nanobot.providers.litellm_provider.acompletion", new=_fake_acompletion),
+        patch("nanobot.providers.litellm_provider.litellm.stream_chunk_builder", return_value=built_response),
+    ):
+        response = await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            on_text_delta=_on_text_delta,
+        )
+
+    assert deltas == ["Hel", "lo"]
+    assert response.content == "Hello"
+    assert response.streamed_output is True
 
 
 @pytest.mark.asyncio
