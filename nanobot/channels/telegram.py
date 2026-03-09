@@ -180,6 +180,10 @@ class TelegramChannel(BaseChannel):
         self._media_group_tasks: dict[str, asyncio.Task] = {}
         self._message_threads: dict[tuple[str, int], int] = {}
         self._draft_messages: dict[str, int] = {}
+        self._draft_last_text: dict[str, str] = {}
+        self._draft_pending_text: dict[str, str] = {}
+        self._draft_flush_tasks: dict[str, asyncio.Task] = {}
+        self._draft_edit_interval = 0.4
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -272,6 +276,9 @@ class TelegramChannel(BaseChannel):
             task.cancel()
         self._media_group_tasks.clear()
         self._media_group_buffers.clear()
+        for task in self._draft_flush_tasks.values():
+            task.cancel()
+        self._draft_flush_tasks.clear()
 
         if self._app:
             logger.info("Stopping Telegram bot...")
@@ -280,6 +287,9 @@ class TelegramChannel(BaseChannel):
             await self._app.shutdown()
             self._app = None
         self._draft_messages.clear()
+        self._draft_last_text.clear()
+        self._draft_pending_text.clear()
+
     @staticmethod
     def _get_media_type(path: str) -> str:
         """Guess media type from file extension."""
@@ -358,6 +368,11 @@ class TelegramChannel(BaseChannel):
     async def _clear_draft_message(self, chat_key: str, chat_id: int) -> None:
         if not self._app:
             return
+        task = self._draft_flush_tasks.pop(chat_key, None)
+        if task:
+            task.cancel()
+        self._draft_pending_text.pop(chat_key, None)
+        self._draft_last_text.pop(chat_key, None)
         message_id = self._draft_messages.pop(chat_key, None)
         if message_id is None:
             return
@@ -365,6 +380,44 @@ class TelegramChannel(BaseChannel):
             await self._app.bot.delete_message(chat_id=chat_id, message_id=message_id)
         except Exception as e:
             logger.debug("Failed to delete Telegram draft message {}:{}: {}", chat_id, message_id, e)
+
+    def _queue_draft_update(self, chat_key: str, chat_id: int, text: str) -> None:
+        self._draft_pending_text[chat_key] = text
+        task = self._draft_flush_tasks.get(chat_key)
+        if task and not task.done():
+            return
+        self._draft_flush_tasks[chat_key] = asyncio.create_task(self._flush_draft_update(chat_key, chat_id))
+
+    async def _flush_draft_update(
+        self,
+        chat_key: str,
+        chat_id: int,
+        *,
+        immediate: bool = False,
+    ) -> bool:
+        task = asyncio.current_task()
+        try:
+            if not immediate:
+                await asyncio.sleep(self._draft_edit_interval)
+
+            message_id = self._draft_messages.get(chat_key)
+            text = self._draft_pending_text.get(chat_key)
+            if message_id is None or not text:
+                return False
+            if text == self._draft_last_text.get(chat_key):
+                self._draft_pending_text.pop(chat_key, None)
+                return True
+            if await self._edit_text_message(chat_id, message_id, text):
+                self._draft_last_text[chat_key] = text
+                self._draft_pending_text.pop(chat_key, None)
+                return True
+            await self._clear_draft_message(chat_key, chat_id)
+            return False
+        except asyncio.CancelledError:
+            raise
+        finally:
+            if self._draft_flush_tasks.get(chat_key) is task:
+                self._draft_flush_tasks.pop(chat_key, None)
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
@@ -415,10 +468,10 @@ class TelegramChannel(BaseChannel):
                 )
                 if sent_id is not None:
                     self._draft_messages[chat_key] = sent_id
+                    self._draft_last_text[chat_key] = msg.content
                 return
-            if await self._edit_text_message(chat_id, draft_id, msg.content):
-                return
-            await self._clear_draft_message(chat_key, chat_id)
+            self._queue_draft_update(chat_key, chat_id, msg.content)
+            return
 
         if not is_progress and chat_key in self._draft_messages:
             can_finalize_draft = (
@@ -428,10 +481,17 @@ class TelegramChannel(BaseChannel):
                 and len(msg.content) <= 4000
             )
             if can_finalize_draft:
-                draft_id = self._draft_messages.pop(chat_key)
-                if await self._edit_text_message(chat_id, draft_id, msg.content):
+                self._draft_pending_text[chat_key] = msg.content
+                task = self._draft_flush_tasks.pop(chat_key, None)
+                if task:
+                    task.cancel()
+                if await self._flush_draft_update(chat_key, chat_id, immediate=True):
+                    self._draft_messages.pop(chat_key, None)
+                    self._draft_last_text.pop(chat_key, None)
+                    self._draft_pending_text.pop(chat_key, None)
                     return
-                self._draft_messages[chat_key] = draft_id
+                if chat_key in self._draft_messages:
+                    self._draft_last_text[chat_key] = msg.content
             await self._clear_draft_message(chat_key, chat_id)
 
         # Send media files
