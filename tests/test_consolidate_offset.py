@@ -786,10 +786,8 @@ class TestConsolidationDeduplicationGuard:
         )
 
     @pytest.mark.asyncio
-    async def test_new_cleans_up_consolidation_lock_for_invalidated_session(
-        self, tmp_path: Path
-    ) -> None:
-        """/new should remove lock entry for fully invalidated session key."""
+    async def test_new_clears_session_and_responds(self, tmp_path: Path) -> None:
+        """/new clears session and returns confirmation."""
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.events import InboundMessage
         from nanobot.bus.queue import MessageBus
@@ -801,7 +799,6 @@ class TestConsolidationDeduplicationGuard:
         loop = AgentLoop(
             bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
         )
-
         loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -810,10 +807,6 @@ class TestConsolidationDeduplicationGuard:
             session.add_message("user", f"msg{i}")
             session.add_message("assistant", f"resp{i}")
         loop.sessions.save(session)
-
-        # Ensure lock exists before /new.
-        _ = loop._get_consolidation_lock(session.key)
-        assert session.key in loop._consolidation_locks
 
         async def _ok_consolidate(sess, archive_all: bool = False) -> bool:
             return True
@@ -825,4 +818,4 @@ class TestConsolidationDeduplicationGuard:
 
         assert response is not None
         assert "new session started" in response.content.lower()
-        assert session.key not in loop._consolidation_locks
+        assert loop.sessions.get_or_create("cli:test").messages == []

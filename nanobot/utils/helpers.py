@@ -1,80 +1,101 @@
 """Utility functions for nanobot."""
 
-from pathlib import Path
+import re
 from datetime import datetime
+from pathlib import Path
+
+
+def detect_image_mime(data: bytes) -> str | None:
+    """Detect image MIME type from magic bytes, ignoring file extension."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 
 def ensure_dir(path: Path) -> Path:
-    """Ensure a directory exists, creating it if necessary."""
+    """Ensure directory exists, return it."""
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def get_data_path() -> Path:
-    """Get the nanobot data directory (~/.nanobot)."""
-    return ensure_dir(Path.home() / ".nanobot")
-
-
-def get_workspace_path(workspace: str | None = None) -> Path:
-    """
-    Get the workspace path.
-    
-    Args:
-        workspace: Optional workspace path. Defaults to ~/.nanobot/workspace.
-    
-    Returns:
-        Expanded and ensured workspace path.
-    """
-    if workspace:
-        path = Path(workspace).expanduser()
-    else:
-        path = Path.home() / ".nanobot" / "workspace"
-    return ensure_dir(path)
-
-
-def get_sessions_path() -> Path:
-    """Get the sessions storage directory."""
-    return ensure_dir(get_data_path() / "sessions")
-
-
-def get_skills_path(workspace: Path | None = None) -> Path:
-    """Get the skills directory within the workspace."""
-    ws = workspace or get_workspace_path()
-    return ensure_dir(ws / "skills")
-
-
 def timestamp() -> str:
-    """Get current timestamp in ISO format."""
+    """Current ISO timestamp."""
     return datetime.now().isoformat()
 
 
-def truncate_string(s: str, max_len: int = 100, suffix: str = "...") -> str:
-    """Truncate a string to max length, adding suffix if truncated."""
-    if len(s) <= max_len:
-        return s
-    return s[: max_len - len(suffix)] + suffix
-
+_UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
 
 def safe_filename(name: str) -> str:
-    """Convert a string to a safe filename."""
-    # Replace unsafe characters
-    unsafe = '<>:"/\\|?*'
-    for char in unsafe:
-        name = name.replace(char, "_")
-    return name.strip()
+    """Replace unsafe path characters with underscores."""
+    return _UNSAFE_CHARS.sub("_", name).strip()
 
 
-def parse_session_key(key: str) -> tuple[str, str]:
+def split_message(content: str, max_len: int = 2000) -> list[str]:
     """
-    Parse a session key into channel and chat_id.
-    
+    Split content into chunks within max_len, preferring line breaks.
+
     Args:
-        key: Session key in format "channel:chat_id"
-    
+        content: The text content to split.
+        max_len: Maximum length per chunk (default 2000 for Discord compatibility).
+
     Returns:
-        Tuple of (channel, chat_id)
+        List of message chunks, each within max_len.
     """
-    parts = key.split(":", 1)
-    if len(parts) != 2:
-        raise ValueError(f"Invalid session key: {key}")
-    return parts[0], parts[1]
+    if not content:
+        return []
+    if len(content) <= max_len:
+        return [content]
+    chunks: list[str] = []
+    while content:
+        if len(content) <= max_len:
+            chunks.append(content)
+            break
+        cut = content[:max_len]
+        # Try to break at newline first, then space, then hard break
+        pos = cut.rfind('\n')
+        if pos <= 0:
+            pos = cut.rfind(' ')
+        if pos <= 0:
+            pos = max_len
+        chunks.append(content[:pos])
+        content = content[pos:].lstrip()
+    return chunks
+
+
+def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
+    """Sync bundled templates to workspace. Only creates missing files."""
+    from importlib.resources import files as pkg_files
+    try:
+        tpl = pkg_files("nanobot") / "templates"
+    except Exception:
+        return []
+    if not tpl.is_dir():
+        return []
+
+    added: list[str] = []
+
+    def _write(src, dest: Path):
+        if dest.exists():
+            return
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(src.read_text(encoding="utf-8") if src else "", encoding="utf-8")
+        added.append(str(dest.relative_to(workspace)))
+
+    for item in tpl.iterdir():
+        if item.name.endswith(".md"):
+            _write(item, workspace / item.name)
+    _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
+    _write(None, workspace / "memory" / "HISTORY.md")
+    (workspace / "skills").mkdir(exist_ok=True)
+
+    if added and not silent:
+        from rich.console import Console
+        for name in added:
+            Console().print(f"  [dim]Created {name}[/dim]")
+    return added
