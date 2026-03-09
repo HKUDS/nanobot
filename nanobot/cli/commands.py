@@ -231,6 +231,7 @@ def _make_provider(config: Config):
             api_key=p.api_key if p else "no-key",
             api_base=config.get_api_base(model) or "http://localhost:8000/v1",
             default_model=model,
+            llm_arguments=p.llm_arguments if p else None,
         )
 
     # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
@@ -245,6 +246,7 @@ def _make_provider(config: Config):
             api_key=p.api_key,
             api_base=p.api_base,
             default_model=model,
+            llm_arguments=p.llm_arguments if p else None,
         )
 
     from nanobot.providers.litellm_provider import LiteLLMProvider
@@ -260,6 +262,7 @@ def _make_provider(config: Config):
         api_base=config.get_api_base(model),
         default_model=model,
         extra_headers=p.extra_headers if p else None,
+        llm_arguments=p.llm_arguments if p else None,
         provider_name=provider_name,
     )
 

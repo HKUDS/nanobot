@@ -39,9 +39,10 @@ class LiteLLMProvider(LLMProvider):
         api_base: str | None = None,
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
+        llm_arguments: dict[str, Any] | None = None,
         provider_name: str | None = None,
     ):
-        super().__init__(api_key, api_base)
+        super().__init__(api_key, api_base, llm_arguments)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
 
@@ -260,6 +261,14 @@ class LiteLLMProvider(LLMProvider):
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
+            
+        if self.llm_arguments:
+            # LiteLLM allows using extra_body to pass custom fields into the request body
+            # We also update kwargs as some fields might be native litellm arguments (e.g., stream)
+            filtered_args = {k: v for k, v in self.llm_arguments.items() if k not in kwargs}
+            kwargs.update(filtered_args)
+            if "extra_body" not in kwargs:
+                kwargs["extra_body"] = self.llm_arguments
         
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort

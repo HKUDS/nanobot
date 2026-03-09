@@ -13,8 +13,8 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 class CustomProvider(LLMProvider):
 
-    def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1", default_model: str = "default"):
-        super().__init__(api_key, api_base)
+    def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1", default_model: str = "default", llm_arguments: dict[str, Any] | None = None):
+        super().__init__(api_key, api_base, llm_arguments)
         self.default_model = default_model
         # Keep affinity stable for this provider instance to improve backend cache locality.
         self._client = AsyncOpenAI(
@@ -36,6 +36,12 @@ class CustomProvider(LLMProvider):
             kwargs["reasoning_effort"] = reasoning_effort
         if tools:
             kwargs.update(tools=tools, tool_choice="auto")
+            
+        if self.llm_arguments:
+            filtered_args = {k: v for k, v in self.llm_arguments.items() if k not in kwargs}
+            kwargs.update(filtered_args)
+            if "extra_body" not in kwargs:
+                kwargs["extra_body"] = self.llm_arguments
         try:
             return self._parse(await self._client.chat.completions.create(**kwargs))
         except Exception as e:

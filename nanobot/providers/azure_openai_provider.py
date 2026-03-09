@@ -31,8 +31,9 @@ class AzureOpenAIProvider(LLMProvider):
         api_key: str = "",
         api_base: str = "",
         default_model: str = "gpt-5.2-chat",
+        llm_arguments: dict[str, Any] | None = None,
     ):
-        super().__init__(api_key, api_base)
+        super().__init__(api_key, api_base, llm_arguments)
         self.default_model = default_model
         self.api_version = "2024-10-21"
         
@@ -107,6 +108,9 @@ class AzureOpenAIProvider(LLMProvider):
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+            
+        if self.llm_arguments:
+            payload.update(self.llm_arguments)
 
         return payload
 
