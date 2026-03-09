@@ -199,6 +199,27 @@ class QQConfig(Base):
     )  # Allowed user openids (empty = public access)
 
 
+class WeComConfig(Base):
+    """Enterprise WeChat (WeCom) Smart Robot channel configuration.
+
+    Uses WebSocket long connection for bidirectional communication.
+    Reference: @wecom/aibot-node-sdk
+    https://www.npmjs.com/package/@wecom/aibot-node-sdk
+
+    Configuration requires only 2 items:
+    - bot_id: WeCom bot ID from Smart Robot settings
+    - secret: WeCom bot secret for HMAC-SHA256 authentication
+    """
+
+    enabled: bool = False
+    bot_id: str = ""  # WeCom bot ID from Smart Robot settings
+    secret: str = ""  # WeCom bot secret for authentication
+    ws_url: str = "wss://openws.work.weixin.qq.com"  # WebSocket server URL
+    allow_from: list[str] = Field(
+        default_factory=list
+    )  # Allowed user IDs (empty = all users)
+
+
 
 
 class ChannelsConfig(Base):
@@ -215,6 +236,7 @@ class ChannelsConfig(Base):
     email: EmailConfig = Field(default_factory=EmailConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
+    wecom: WeComConfig = Field(default_factory=WeComConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
