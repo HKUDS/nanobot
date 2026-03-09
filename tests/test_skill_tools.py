@@ -257,7 +257,7 @@ class TestFindSkillToolsPy:
         path = loader._find_skill_tools_py("with-tools")
         assert path is not None
         assert path.name == "tools.py"
-        assert "skills/with-tools" in str(path)
+        assert "skills/with-tools" in path.as_posix()
 
     def test_finds_builtin_tools(self, tmp_path: Path) -> None:
         builtin = tmp_path / "_builtin"

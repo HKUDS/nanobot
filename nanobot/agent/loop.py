@@ -1366,7 +1366,7 @@ class AgentLoop:
             "event": event,
             "role": role,
             "confidence": confidence,
-            "latency_ms": round(latency_ms, 1),
+            "latency_ms": round(latency_ms, 3),
             "from_role": from_role,
             "depth": depth,
             "success": success,

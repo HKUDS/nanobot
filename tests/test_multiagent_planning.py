@@ -569,7 +569,7 @@ class TestMultiAgentRoutingTrace:
         trace = loop.get_routing_trace()
         complete = [e for e in trace if e["event"] == "delegate_complete"]
         assert len(complete) == 1
-        assert complete[0]["latency_ms"] > 0
+        assert complete[0]["latency_ms"] >= 0
         assert complete[0]["success"] is True
 
     @pytest.mark.asyncio

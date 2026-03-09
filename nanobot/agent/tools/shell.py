@@ -240,7 +240,7 @@ class ExecTool(Tool):
 
             cwd_path = Path(cwd).resolve()
 
-            win_paths = re.findall(r"[A-Za-z]:\\[^\\\"']+", cmd)
+            win_paths = re.findall(r"[A-Za-z]:[\\][^\s\"']+", cmd)
             # Only match absolute paths — avoid false positives on relative
             # paths like ".venv/bin/python" where "/bin/python" would be
             # incorrectly extracted by the old pattern.
