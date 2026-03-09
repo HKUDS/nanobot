@@ -753,8 +753,9 @@ class FeishuChannel(BaseChannel):
                     None, self._download_file_sync, message_id, file_key, msg_type
                 )
                 if not filename:
-                    ext = {"audio": ".opus", "media": ".mp4"}.get(msg_type, "")
-                    filename = f"{file_key[:16]}{ext}"
+                    filename = file_key[:16]
+                if msg_type == "audio" and not filename.endswith(".opus"):
+                    filename = f"{filename}.opus"
 
         if data and filename:
             file_path = media_dir / filename
