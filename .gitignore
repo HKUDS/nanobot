@@ -24,3 +24,5 @@ tests/__pycache__/
 artifacts/
 docs
 .github/prompts/
+node_modules/
+bridge/node_modules/
