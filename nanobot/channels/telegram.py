@@ -227,10 +227,10 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("stop", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
 
-        # Add message handler for text, photos, voice, documents
+        # Add message handler for text, photos, voice, documents, location
         self._app.add_handler(
             MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL)
+                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL | filters.LOCATION)
                 & ~filters.COMMAND,
                 self._on_message
             )
@@ -581,6 +581,12 @@ class TelegramChannel(BaseChannel):
             content_parts.append(message.text)
         if message.caption:
             content_parts.append(message.caption)
+
+        # Handle location
+        if message.location:
+            lat = message.location.latitude
+            lon = message.location.longitude
+            content_parts.append(f"[location: latitude={lat}, longitude={lon}]")
 
         # Handle media files
         media_file = None
