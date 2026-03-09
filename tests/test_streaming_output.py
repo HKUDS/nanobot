@@ -10,6 +10,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram import TelegramChannel
 from nanobot.config.schema import TelegramConfig
 from nanobot.providers.base import LLMResponse
+from nanobot.providers.custom_provider import CustomProvider
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _consume_sse
 
@@ -141,6 +142,43 @@ async def test_litellm_provider_streams_text_deltas() -> None:
             messages=[{"role": "user", "content": "hello"}],
             on_text_delta=_on_text_delta,
         )
+
+    assert deltas == ["Hel", "lo"]
+    assert response.content == "Hello"
+    assert response.streamed_output is True
+
+
+@pytest.mark.asyncio
+async def test_custom_provider_streams_text_deltas() -> None:
+    provider = CustomProvider(api_key="test", api_base="http://localhost:8000/v1", default_model="custom/test")
+    deltas: list[str] = []
+
+    async def _on_text_delta(delta: str) -> None:
+        deltas.append(delta)
+
+    async def _fake_stream_create(**kwargs):
+        assert kwargs["stream"] is True
+
+        async def _gen():
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content="Hel", tool_calls=None), finish_reason=None)]
+            )
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content="lo", tool_calls=None), finish_reason="stop")]
+            )
+
+        return _gen()
+
+    provider._client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=_fake_stream_create)
+        )
+    )
+
+    response = await provider.chat(
+        messages=[{"role": "user", "content": "hello"}],
+        on_text_delta=_on_text_delta,
+    )
 
     assert deltas == ["Hel", "lo"]
     assert response.content == "Hello"

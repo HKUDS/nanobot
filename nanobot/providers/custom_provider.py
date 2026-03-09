@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -20,7 +21,7 @@ class CustomProvider(LLMProvider):
 
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
                    model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
-                   reasoning_effort: str | None = None) -> LLMResponse:
+                   reasoning_effort: str | None = None, on_text_delta=None) -> LLMResponse:
         upstream_model = model or self.default_model
         if isinstance(upstream_model, str) and upstream_model.startswith("custom/"):
             upstream_model = upstream_model.split("/", 1)[1]
@@ -35,26 +36,39 @@ class CustomProvider(LLMProvider):
         if tools:
             kwargs.update(tools=tools, tool_choice="auto")
         try:
+            if on_text_delta:
+                return await self._stream_via_sdk(kwargs, on_text_delta)
             return self._parse(await self._client.chat.completions.create(**kwargs))
         except Exception as e:
-            fallback = await self._chat_via_http(kwargs)
+            fallback = await self._chat_via_http(kwargs, on_text_delta=on_text_delta)
             if fallback is not None:
                 return fallback
             return LLMResponse(content=f"Error: {e}", finish_reason="error")
 
-    async def _chat_via_http(self, kwargs: dict[str, Any]) -> LLMResponse | None:
+    async def _stream_via_sdk(self, kwargs: dict[str, Any], on_text_delta) -> LLMResponse:
+        stream = await self._client.chat.completions.create(stream=True, **kwargs)
+        return await self._consume_openai_stream(stream, on_text_delta=on_text_delta)
+
+    async def _chat_via_http(self, kwargs: dict[str, Any], on_text_delta=None) -> LLMResponse | None:
         """Fallback for OpenAI-compatible endpoints that reject the official SDK."""
         try:
             base = (self.api_base or "").rstrip("/")
             if not base:
                 return None
             url = f"{base}/chat/completions"
+            request_kwargs = dict(kwargs)
+            if on_text_delta:
+                request_kwargs["stream"] = True
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.api_key}",
             }
             async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(url, headers=headers, json=kwargs)
+                if on_text_delta:
+                    async with client.stream("POST", url, headers=headers, json=request_kwargs) as resp:
+                        resp.raise_for_status()
+                        return await self._consume_http_stream(resp, on_text_delta=on_text_delta)
+                resp = await client.post(url, headers=headers, json=request_kwargs)
                 resp.raise_for_status()
                 data = resp.json()
 
@@ -88,6 +102,131 @@ class CustomProvider(LLMProvider):
             )
         except Exception:
             return None
+
+    async def _consume_openai_stream(self, stream: Any, on_text_delta) -> LLMResponse:
+        content = ""
+        finish_reason = "stop"
+        streamed_output = False
+        tool_call_buffers: dict[int, dict[str, Any]] = {}
+
+        async for chunk in stream:
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            choice = choices[0]
+            delta = getattr(choice, "delta", None)
+            if delta is None:
+                continue
+
+            text_delta = getattr(delta, "content", None)
+            if text_delta:
+                content += text_delta
+                await on_text_delta(text_delta)
+                streamed_output = True
+
+            for tc in getattr(delta, "tool_calls", None) or []:
+                index = getattr(tc, "index", 0) or 0
+                buf = tool_call_buffers.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                if getattr(tc, "id", None):
+                    buf["id"] = tc.id
+                fn = getattr(tc, "function", None)
+                if fn is not None:
+                    if getattr(fn, "name", None):
+                        buf["name"] = fn.name
+                    if getattr(fn, "arguments", None):
+                        buf["arguments"] += fn.arguments
+
+            if getattr(choice, "finish_reason", None):
+                finish_reason = choice.finish_reason or "stop"
+
+        tool_calls: list[ToolCallRequest] = []
+        for buf in tool_call_buffers.values():
+            raw_arguments = buf["arguments"] or "{}"
+            try:
+                arguments = json_repair.loads(raw_arguments)
+            except Exception:
+                arguments = {"raw": raw_arguments}
+            tool_calls.append(
+                ToolCallRequest(
+                    id=buf["id"] or "",
+                    name=buf["name"] or "",
+                    arguments=arguments,
+                )
+            )
+
+        return LLMResponse(
+            content=content,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            streamed_output=streamed_output,
+        )
+
+    async def _consume_http_stream(self, response: httpx.Response, on_text_delta) -> LLMResponse:
+        content = ""
+        finish_reason = "stop"
+        streamed_output = False
+        tool_call_buffers: dict[int, dict[str, Any]] = {}
+        buffer: list[str] = []
+
+        async for line in response.aiter_lines():
+            if line == "":
+                if not buffer:
+                    continue
+                data_lines = [part[5:].strip() for part in buffer if part.startswith("data:")]
+                buffer = []
+                payload = "\n".join(data_lines).strip()
+                if not payload or payload == "[DONE]":
+                    continue
+                try:
+                    event = json.loads(payload)
+                except Exception:
+                    continue
+
+                choice = (event.get("choices") or [{}])[0]
+                delta = choice.get("delta") or {}
+                text_delta = delta.get("content")
+                if text_delta:
+                    content += text_delta
+                    await on_text_delta(text_delta)
+                    streamed_output = True
+
+                for tc in delta.get("tool_calls") or []:
+                    index = tc.get("index", 0) or 0
+                    buf = tool_call_buffers.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                    if tc.get("id"):
+                        buf["id"] = tc["id"]
+                    fn = tc.get("function") or {}
+                    if fn.get("name"):
+                        buf["name"] = fn["name"]
+                    if fn.get("arguments"):
+                        buf["arguments"] += fn["arguments"]
+
+                if choice.get("finish_reason"):
+                    finish_reason = choice["finish_reason"]
+                continue
+            buffer.append(line)
+
+        tool_calls: list[ToolCallRequest] = []
+        for buf in tool_call_buffers.values():
+            raw_arguments = buf["arguments"] or "{}"
+            try:
+                arguments = json_repair.loads(raw_arguments)
+            except Exception:
+                arguments = {"raw": raw_arguments}
+            tool_calls.append(
+                ToolCallRequest(
+                    id=buf["id"] or "",
+                    name=buf["name"] or "",
+                    arguments=arguments,
+                )
+            )
+
+        return LLMResponse(
+            content=content,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            streamed_output=streamed_output,
+        )
 
     def _parse(self, response: Any) -> LLMResponse:
         choice = response.choices[0]
