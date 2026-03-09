@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from nanobot.agent.memory import MemoryStore
 
 
@@ -581,3 +583,127 @@ def test_vector_health_marks_degraded_when_history_exists_but_no_vectors(tmp_pat
     metrics = store.get_metrics()
     assert metrics["vector_health_degraded_count"] >= 1
     assert metrics.get("vector_health_hard_degraded") is True
+
+
+# ---------------------------------------------------------------------------
+# Budget-aware section allocation tests
+# ---------------------------------------------------------------------------
+
+
+def test_allocate_section_budgets_proportional(tmp_path: Path) -> None:
+    """Sections receive budget proportional to their priority weight."""
+    sizes = {
+        "long_term": 500,
+        "profile": 400,
+        "semantic": 300,
+        "episodic": 0,
+        "reflection": 0,
+        "graph": 200,
+        "unresolved": 50,
+    }
+    alloc = MemoryStore._allocate_section_budgets(900, "fact_lookup", sizes)
+
+    # Every section with content should get *some* allocation.
+    assert alloc["long_term"] > 0
+    assert alloc["profile"] > 0
+    assert alloc["semantic"] > 0
+    assert alloc["graph"] > 0
+    # Empty sections get nothing.
+    assert alloc["episodic"] == 0
+    assert alloc["reflection"] == 0
+    # Total allocation should not exceed budget.
+    assert sum(alloc.values()) <= 900
+
+
+def test_allocate_section_budgets_caps_at_actual_size() -> None:
+    """A section smaller than its share should not get inflated."""
+    sizes = {
+        "long_term": 10,
+        "profile": 10,
+        "semantic": 10,
+        "episodic": 0,
+        "reflection": 0,
+        "graph": 10,
+        "unresolved": 10,
+    }
+    alloc = MemoryStore._allocate_section_budgets(2000, "fact_lookup", sizes)
+
+    # Each section is tiny — should be capped at its actual size.
+    for name, sz in sizes.items():
+        assert alloc[name] <= max(sz, 0)
+
+
+def test_allocate_section_budgets_redistributes_surplus() -> None:
+    """Surplus from small sections flows to sections that need more."""
+    sizes = {
+        "long_term": 10,    # tiny
+        "profile": 10,      # tiny
+        "semantic": 500,    # large
+        "episodic": 0,
+        "reflection": 0,
+        "graph": 500,       # large
+        "unresolved": 0,
+    }
+    alloc = MemoryStore._allocate_section_budgets(600, "fact_lookup", sizes)
+
+    # long_term and profile freed most of their share to semantic + graph.
+    assert alloc["long_term"] == 10
+    assert alloc["profile"] == 10
+    # semantic and graph should each get substantially more than their
+    # base proportional share (0.20 * 600 = 120).
+    assert alloc["semantic"] > 120
+    assert alloc["graph"] > 120
+
+
+def test_get_memory_context_graph_not_truncated_at_default_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Entity graph section should appear even at the default 900 token budget."""
+    monkeypatch.setenv("NANOBOT_GRAPH_ENABLED", "true")
+    store = MemoryStore(tmp_path)
+
+    # Simulate a large profile that previously consumed the whole budget.
+    large_profile = {
+        "preferences": [f"User prefers option {i}" for i in range(6)],
+        "stable_facts": [f"Fact number {i} about the system" for i in range(6)],
+        "active_projects": [],
+        "relationships": [],
+        "constraints": [f"Constraint {i}: must validate input" for i in range(4)],
+    }
+    store.write_profile(large_profile)
+
+    # Inject events that will be retrieved (semantic type).
+    events = [
+        {
+            "id": f"ev-{i}",
+            "timestamp": "2026-03-01T12:00:00+00:00",
+            "type": "fact",
+            "summary": f"Database uses PostgreSQL for storage (event {i}).",
+            "memory_type": "semantic",
+            "entities": ["postgresql", "nanobot"],
+            "triples": [
+                {"subject": "nanobot", "predicate": "USES", "object": "PostgreSQL"},
+            ],
+        }
+        for i in range(4)
+    ]
+    store.append_events(events)
+
+    # Mock retrieve to return the events we just stored.
+    store.retrieve = MagicMock(return_value=events)  # type: ignore[method-assign]
+
+    context = store.get_memory_context(
+        query="What databases does the project use?",
+        retrieval_k=6,
+        token_budget=900,
+    )
+
+    # Profile should still be present.
+    assert "## Profile Memory" in context
+    # Semantic memories should be present.
+    assert "## Relevant Semantic Memories" in context
+    # Graph section from local triples should NOT be truncated away.
+    assert "## Entity Graph" in context
+    assert "nanobot → USES → PostgreSQL" in context
+    # Total should stay within budget.
+    assert len(context) <= 900 * 4 + 200  # allow small heading overhead
