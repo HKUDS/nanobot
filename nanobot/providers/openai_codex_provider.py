@@ -15,14 +15,22 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_ORIGINATOR = "nanobot"
+DEFAULT_CODEX_TIMEOUT_S = 180.0
 
 
 class OpenAICodexProvider(LLMProvider):
     """Use Codex OAuth to call the Responses API."""
 
-    def __init__(self, default_model: str = "openai-codex/gpt-5.1-codex"):
+    def __init__(
+        self,
+        default_model: str = "openai-codex/gpt-5.1-codex",
+        timeout_s: float | None = None,
+        max_retries: int = 0,
+    ):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
+        self.timeout_s = timeout_s if timeout_s is not None else DEFAULT_CODEX_TIMEOUT_S
+        self.max_retries = max(0, int(max_retries))
 
     async def chat(
         self,
@@ -60,24 +68,51 @@ class OpenAICodexProvider(LLMProvider):
 
         url = DEFAULT_CODEX_URL
 
-        try:
+        total_attempts = self.max_retries + 1
+        for attempt in range(total_attempts):
             try:
-                content, tool_calls, finish_reason = await _request_codex(url, headers, body, verify=True)
+                try:
+                    content, tool_calls, finish_reason = await _request_codex(
+                        url,
+                        headers,
+                        body,
+                        verify=True,
+                        timeout_s=self.timeout_s,
+                    )
+                except Exception as e:
+                    if "CERTIFICATE_VERIFY_FAILED" not in str(e):
+                        raise
+                    logger.warning(
+                        "SSL certificate verification failed for Codex API; retrying with verify=False"
+                    )
+                    content, tool_calls, finish_reason = await _request_codex(
+                        url,
+                        headers,
+                        body,
+                        verify=False,
+                        timeout_s=self.timeout_s,
+                    )
+                return LLMResponse(
+                    content=content,
+                    tool_calls=tool_calls,
+                    finish_reason=finish_reason,
+                )
             except Exception as e:
-                if "CERTIFICATE_VERIFY_FAILED" not in str(e):
-                    raise
-                logger.warning("SSL certificate verification failed for Codex API; retrying with verify=False")
-                content, tool_calls, finish_reason = await _request_codex(url, headers, body, verify=False)
-            return LLMResponse(
-                content=content,
-                tool_calls=tool_calls,
-                finish_reason=finish_reason,
-            )
-        except Exception as e:
-            return LLMResponse(
-                content=f"Error calling Codex: {str(e)}",
-                finish_reason="error",
-            )
+                if attempt < self.max_retries and _is_retryable_error(e):
+                    delay_s = min(5, 1 + attempt)
+                    logger.warning(
+                        "Codex request failed (attempt {}/{}): {}. Retrying in {}s",
+                        attempt + 1,
+                        total_attempts,
+                        repr(e),
+                        delay_s,
+                    )
+                    await asyncio.sleep(delay_s)
+                    continue
+                return LLMResponse(
+                    content=f"Error calling Codex: {repr(e)}",
+                    finish_reason="error",
+                )
 
     def get_default_model(self) -> str:
         return self.default_model
@@ -106,13 +141,28 @@ async def _request_codex(
     headers: dict[str, str],
     body: dict[str, Any],
     verify: bool,
+    timeout_s: float,
 ) -> tuple[str, list[ToolCallRequest], str]:
-    async with httpx.AsyncClient(timeout=60.0, verify=verify) as client:
+    async with httpx.AsyncClient(timeout=_build_timeout(timeout_s), verify=verify) as client:
         async with client.stream("POST", url, headers=headers, json=body) as response:
             if response.status_code != 200:
                 text = await response.aread()
                 raise RuntimeError(_friendly_error(response.status_code, text.decode("utf-8", "ignore")))
             return await _consume_sse(response)
+
+
+def _build_timeout(timeout_s: float) -> httpx.Timeout:
+    read_s = max(1.0, float(timeout_s))
+    connect_s = min(10.0, read_s)
+    return httpx.Timeout(connect=connect_s, read=read_s, write=30.0, pool=10.0)
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+        return True
+    if isinstance(exc, RuntimeError):
+        return str(exc).startswith("HTTP 5")
+    return False
 
 
 def _convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:

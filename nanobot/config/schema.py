@@ -245,6 +245,8 @@ class ProviderConfig(Base):
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    timeout: float | None = None  # Optional request timeout override (seconds)
+    max_retries: int = 0  # Optional retry count for transient provider failures
 
 
 class ProvidersConfig(Base):
