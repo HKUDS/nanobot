@@ -272,3 +272,20 @@ def optimize_with_liquidity(expected_returns, cov_matrix,
 - 定期回顾和调整
 - 结合主观判断
 - 关注交易成本
+
+## 配套工具
+
+### 组合管理
+
+使用以下工具管理投资组合：
+
+1. **qlib_backtest** - 组合回测验证
+2. **paper_trading** - 模拟组合运行
+3. **quant_data** - 获取持仓相关数据
+
+### 优化脚本
+
+参考 `portfolio_optimization` skill 中的 Python 示例：
+- 均值-方差优化
+- 风险平价权重计算
+- 因子暴露控制

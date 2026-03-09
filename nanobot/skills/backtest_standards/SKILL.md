@@ -190,3 +190,53 @@ $$SoR = \frac{R_p - R_f}{\sigma_d}$$
 3. **非对称信息**：涨跌幅、停牌处理不当
 4. **流动性忽视**：大资金无法按回测价格成交
 5. **分红除权未复权**：价格数据未正确处理
+
+## 配套工具
+
+### Scripts
+
+本 skill 提供以下脚本，位于 `{baseDir}/scripts/`：
+
+#### generate_report.py
+生成标准格式的回测报告。
+
+```bash
+python {baseDir}/scripts/generate_report.py \
+  --results backtest_results.json \
+  --output report.md
+```
+
+#### analyze_results.py
+分析回测结果，检查过拟合信号。
+
+```bash
+python {baseDir}/scripts/analyze_results.py backtest_results.json
+```
+
+### References
+
+本 skill 提供以下参考配置：
+
+#### backtest_config.yaml
+回测配置模板，包含策略参数、成本假设、风控参数等。
+
+```yaml
+# 复制并修改此文件
+strategy:
+  name: "示例策略"
+backtest:
+  initial_capital: 1000000
+  commission_rate: 0.0003
+  stamp_duty: 0.001
+risk:
+  max_drawdown: 0.20
+  max_position: 0.10
+```
+
+### 数据更新脚本
+
+每日数据入库（参考 `scripts/db_daily_update.py`）：
+```bash
+# Cron: 0 20 * * 1-5
+python3 ~/.nanobot/scripts/db_daily_update.py
+```

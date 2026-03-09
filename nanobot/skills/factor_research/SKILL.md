@@ -261,3 +261,47 @@ def group_backtest(factor, returns, n_groups=5):
 2. **IC不稳定**：可能因子周期性强或失效
 3. **因子相关性高**：需要正交化
 4. **样本外IC下降**：可能过拟合
+
+## 配套工具
+
+### Scripts
+
+本 skill 提供以下脚本，位于 `{baseDir}/scripts/`：
+
+#### calculate_ic.py
+计算因子 IC 和 ICIR。
+
+```bash
+python {baseDir}/scripts/calculate_ic.py \
+  --factor factor.csv \
+  --returns returns.csv \
+  --output ic_report.json
+```
+
+#### group_backtest.py
+因子分组回测。
+
+```bash
+python {baseDir}/scripts/group_backtest.py \
+  --factor factor.csv \
+  --returns returns.csv \
+  --n-groups 5
+```
+
+### References
+
+因子入库标准参考：
+
+| 指标 | 入库阈值 |
+|------|----------|
+| IC均值 | >0.02 |
+| ICIR | >0.3 |
+| 覆盖率 | >80% |
+| 样本外IC | >0.01 |
+
+### 数据获取
+
+使用 `quant_data` Tool 获取实时市场数据：
+- 北向资金流向
+- 行业板块涨跌
+- 个股行情
