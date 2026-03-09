@@ -257,10 +257,20 @@ class LiteLLMProvider(LLMProvider):
         # Pass api_base for custom endpoints
         if self.api_base:
             kwargs["api_base"] = self.api_base
-
-        # Pass extra headers (e.g. APP-Code for AiHubMix)
-        if self.extra_headers:
-            kwargs["extra_headers"] = self.extra_headers
+        
+        # Use provided extra headers or start empty
+        headers = dict(self.extra_headers) if self.extra_headers else {}
+        
+        # WORKAROUND: The Zhipu `coding/paas/v4` endpoint explicitly blocks requests with 'OpenAI' or 'Python'
+        # in the User-Agent, returning a fake Rate Limit Error. Spoof it as curl.
+        if "coding/paas/v4" in (self.api_base or ""):
+            headers["User-Agent"] = "curl/8.7.1"
+            
+        if headers:
+            # For OpenAI client specifically, we need to inject into `extra_headers`
+            kwargs["extra_headers"] = headers
+            # Also globally set litellm headers override just in case the backend client rebuilds
+            litellm.headers = headers
         
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
@@ -271,6 +281,31 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tool_choice"] = "auto"
 
         try:
+            if on_text_delta:
+                stream_kwargs = dict(kwargs)
+                stream_kwargs["stream"] = True
+                response_stream = await acompletion(**stream_kwargs)
+                chunks: list[Any] = []
+                streamed_output = False
+
+                async for chunk in response_stream:
+                    chunks.append(chunk)
+                    try:
+                        delta = chunk.choices[0].delta
+                    except Exception:
+                        continue
+                    text_delta = getattr(delta, "content", None)
+                    if text_delta:
+                        await on_text_delta(text_delta)
+                        streamed_output = True
+
+                response = litellm.stream_chunk_builder(chunks=chunks, messages=kwargs["messages"])
+                if response is None:
+                    return LLMResponse(content="", streamed_output=streamed_output)
+                parsed = self._parse_response(response)
+                parsed.streamed_output = streamed_output
+                return parsed
+
             response = await acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
