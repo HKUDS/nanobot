@@ -186,6 +186,46 @@ async def test_custom_provider_streams_text_deltas() -> None:
 
 
 @pytest.mark.asyncio
+async def test_custom_provider_streams_reasoning_deltas_before_content() -> None:
+    provider = CustomProvider(api_key="test", api_base="http://localhost:8000/v1", default_model="glm-5")
+    deltas: list[str] = []
+
+    async def _on_text_delta(delta: str) -> None:
+        deltas.append(delta)
+
+    async def _fake_stream_create(**kwargs):
+        assert kwargs["stream"] is True
+
+        async def _gen():
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content=None, reasoning_content="Thinking "), finish_reason=None)]
+            )
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content=None, reasoning_content="through it"), finish_reason=None)]
+            )
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content="OK", reasoning_content=None), finish_reason="stop")]
+            )
+
+        return _gen()
+
+    provider._client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=_fake_stream_create)
+        )
+    )
+
+    response = await provider.chat(
+        messages=[{"role": "user", "content": "hello"}],
+        on_text_delta=_on_text_delta,
+    )
+
+    assert deltas == ["Thinking ", "through it", "OK"]
+    assert response.content == "OK"
+    assert response.streamed_output is True
+
+
+@pytest.mark.asyncio
 async def test_telegram_reuses_draft_message_for_streaming_reply() -> None:
     channel = TelegramChannel(TelegramConfig(enabled=True, token="test"), MessageBus())
     bot = SimpleNamespace(
