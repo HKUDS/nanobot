@@ -1,4 +1,6 @@
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -182,3 +184,88 @@ async def test_send_reply_infers_topic_from_message_id_cache() -> None:
 
     assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
     assert channel._app.bot.sent_messages[0]["reply_parameters"].message_id == 10
+
+
+@pytest.mark.asyncio
+async def test_telegram_media_uses_file_unique_id_for_storage(tmp_path: Path) -> None:
+    config = TelegramConfig(enabled=True, token="test", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+
+    download = AsyncMock()
+    channel._app = SimpleNamespace(
+        bot=SimpleNamespace(
+            get_file=AsyncMock(return_value=SimpleNamespace(download_to_drive=download))
+        )
+    )
+
+    photo = SimpleNamespace(
+        file_id="very-long-telegram-file-id-1234567890",
+        file_unique_id="stable-unique-id-42",
+        mime_type="image/jpeg",
+    )
+    user = SimpleNamespace(id=123, username="alice", first_name="Alice")
+    message = SimpleNamespace(
+        text=None,
+        caption=None,
+        photo=[photo],
+        voice=None,
+        audio=None,
+        document=None,
+        chat_id=456,
+        chat=SimpleNamespace(type="private"),
+        message_id=789,
+        media_group_id=None,
+    )
+    update = SimpleNamespace(message=message, effective_user=user)
+
+    with patch("pathlib.Path.home", return_value=tmp_path):
+        await channel._on_message(update, None)
+
+    expected_path = tmp_path / ".nanobot" / "media" / "stable-unique-id-42.jpg"
+    download.assert_awaited_once_with(str(expected_path))
+
+    inbound = await channel.bus.consume_inbound()
+    assert inbound.media == [str(expected_path)]
+    assert str(expected_path) in inbound.content
+
+
+@pytest.mark.asyncio
+async def test_telegram_media_falls_back_to_file_id_when_unique_id_missing(tmp_path: Path) -> None:
+    config = TelegramConfig(enabled=True, token="test", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+
+    download = AsyncMock()
+    channel._app = SimpleNamespace(
+        bot=SimpleNamespace(
+            get_file=AsyncMock(return_value=SimpleNamespace(download_to_drive=download))
+        )
+    )
+
+    document = SimpleNamespace(
+        file_id="full-file-id-abcdef1234567890",
+        mime_type="application/pdf",
+    )
+    user = SimpleNamespace(id=123, username=None, first_name="Alice")
+    message = SimpleNamespace(
+        text=None,
+        caption=None,
+        photo=None,
+        voice=None,
+        audio=None,
+        document=document,
+        chat_id=456,
+        chat=SimpleNamespace(type="private"),
+        message_id=790,
+        media_group_id=None,
+    )
+    update = SimpleNamespace(message=message, effective_user=user)
+
+    with patch("pathlib.Path.home", return_value=tmp_path):
+        await channel._on_message(update, None)
+
+    expected_path = tmp_path / ".nanobot" / "media" / "full-file-id-abcdef1234567890"
+    download.assert_awaited_once_with(str(expected_path))
+
+    inbound = await channel.bus.consume_inbound()
+    assert inbound.media == [str(expected_path)]
+    assert str(expected_path) in inbound.content
