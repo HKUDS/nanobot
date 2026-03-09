@@ -939,6 +939,21 @@ Run multiple nanobot instances simultaneously with separate configs and runtime 
 
 ### Quick Start
 
+**Initialize instances:**
+
+```bash
+# Create separate instance directories
+nanobot onboard --dir ~/.nanobot-telegram
+nanobot onboard --dir ~/.nanobot-discord
+nanobot onboard --dir ~/.nanobot-feishu
+```
+
+**Configure each instance:**
+
+Edit `~/.nanobot-telegram/config.json`, `~/.nanobot-discord/config.json`, etc. with different channel settings and workspaces.
+
+**Run instances:**
+
 ```bash
 # Instance A - Telegram bot
 nanobot gateway --config ~/.nanobot-telegram/config.json
@@ -1038,7 +1053,8 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 
 | Command | Description |
 |---------|-------------|
-| `nanobot onboard` | Initialize config & workspace |
+| `nanobot onboard` | Initialize config & workspace at `~/.nanobot/` |
+| `nanobot onboard --dir <path>` | Initialize config & workspace at custom directory |
 | `nanobot agent -m "..."` | Chat with the agent |
 | `nanobot agent -w <workspace>` | Chat against a specific workspace |
 | `nanobot agent -w <workspace> -c <config>` | Chat against a specific workspace/config |
