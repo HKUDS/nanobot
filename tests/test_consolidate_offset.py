@@ -526,6 +526,54 @@ class TestConsolidationDeduplicationGuard:
         )
 
     @pytest.mark.asyncio
+    async def test_auto_consolidation_persists_last_consolidated(self, tmp_path: Path) -> None:
+        """Background consolidation should persist last_consolidated after finishing."""
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.bus.events import InboundMessage
+        from nanobot.bus.queue import MessageBus
+        from nanobot.providers.base import LLMResponse
+
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        loop = AgentLoop(
+            bus=bus, provider=provider, workspace=tmp_path, model="test-model", memory_window=10
+        )
+
+        loop.provider.chat = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        session_key = "cli:test"
+        session = loop.sessions.get_or_create(session_key)
+        for i in range(15):
+            session.add_message("user", f"msg{i}")
+            session.add_message("assistant", f"resp{i}")
+        loop.sessions.save(session)
+
+        started = asyncio.Event()
+        release = asyncio.Event()
+        expected_last_consolidated = len(session.messages) - 3
+
+        async def _fake_consolidate(sess, archive_all: bool = False) -> bool:
+            started.set()
+            await release.wait()
+            sess.last_consolidated = expected_last_consolidated
+            return True
+
+        loop._consolidate_memory = _fake_consolidate  # type: ignore[method-assign]
+
+        msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="hello")
+        await loop._process_message(msg)
+        await started.wait()
+
+        release.set()
+        await asyncio.sleep(0.05)
+
+        loop.sessions.invalidate(session_key)
+        reloaded = loop.sessions.get_or_create(session_key)
+        assert reloaded.last_consolidated == expected_last_consolidated
+
+    @pytest.mark.asyncio
     async def test_new_command_guard_prevents_concurrent_consolidation(
         self, tmp_path: Path
     ) -> None:
