@@ -17,32 +17,37 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import A2AChannelConfig
 
 if TYPE_CHECKING:
-    from a2a.types import AgentCard as AgentCardType, Task as TaskType
+    from a2a.types import AgentCard as AgentCardType
+    from a2a.types import Task as TaskType
 
 try:
     from a2a.server.apps.jsonrpc.starlette_app import A2AStarletteApplication
-    from a2a.server.request_handlers.request_handler import RequestHandler
     from a2a.server.context import ServerCallContext
+    from a2a.server.request_handlers.request_handler import RequestHandler
     from a2a.server.tasks import InMemoryTaskStore
     from a2a.types import (
         AgentCard as AgentCardType,
+    )
+    from a2a.types import (
         AgentSkill,
-        Message,
-        MessageSendParams,
-        Part,
-        Task as TaskType,
-        TaskQueryParams,
-        TaskIdParams,
-        TaskStatus,
-        TaskState,
-        TaskPushNotificationConfig,
+        Artifact,
         DeleteTaskPushNotificationConfigParams,
         GetTaskPushNotificationConfigParams,
         ListTaskPushNotificationConfigParams,
-        Artifact,
-        TextPart,
-        TaskStatusUpdateEvent,
+        Message,
+        MessageSendParams,
+        Part,
         TaskArtifactUpdateEvent,
+        TaskIdParams,
+        TaskPushNotificationConfig,
+        TaskQueryParams,
+        TaskState,
+        TaskStatus,
+        TaskStatusUpdateEvent,
+        TextPart,
+    )
+    from a2a.types import (
+        Task as TaskType,
     )
 
     A2A_AVAILABLE = True
@@ -124,12 +129,17 @@ class A2ARequestHandler(RequestHandler):
 
         message = params.message
 
+        # Hoist headers to method scope so both identity resolution and the
+        # session-key fallback below can share the same dict without re-reading.
+        # The a2a-sdk DefaultCallContextBuilder stores HTTP headers in
+        # context.state['headers'] as a plain dict (not on context.request).
         headers: dict = (
             (getattr(context, "state", None) or {}).get("headers", {})
             if context is not None
             else {}
         )
 
+        # 1. Try trusted HTTP headers injected by an auth proxy.
         sender_id: str | None = (
             headers.get("x-user-id")
             or headers.get("x-forwarded-user")
@@ -138,17 +148,23 @@ class A2ARequestHandler(RequestHandler):
         if sender_id:
             logger.debug("A2A caller identity from HTTP header: {}", sender_id)
 
+        # 2. Fall back to client-supplied metadata (unverified).
         if not sender_id and message:
             metadata = getattr(message, "metadata", None) or {}
             sender_id = metadata.get("caller_id")
             if sender_id:
                 logger.debug("A2A caller identity from message.metadata: {}", sender_id)
 
+        # 3. Anonymous sentinel — no identity provided.
         if not sender_id:
             sender_id = "a2a-client"
 
         if not self._channel.is_allowed(sender_id):
-            logger.warning("A2A request from unauthorized sender: {}", sender_id)
+            logger.warning(
+                "A2A access denied for '{}' on channel a2a. "
+                "Add them to allowFrom list in config to grant access.",
+                sender_id,
+            )
             raise PermissionError(f"Sender '{sender_id}' not authorized")
 
         async with self._context_lock:
@@ -158,16 +174,13 @@ class A2ARequestHandler(RequestHandler):
                 # path: clients SHOULD echo the context_id from each Task response.
                 context_id = message.context_id
             else:
-                # No context_id: derive a stable fallback so the same caller
-                # always maps to the same session without requiring client changes.
-                # X-Real-IP (set by nginx/envoy) takes priority over the first hop
-                # of X-Forwarded-For (set by the OpenFaaS gateway or any proxy).
-                source_ip = (
-                    headers.get("x-real-ip")
-                    or (headers.get("x-forwarded-for", "").split(",")[0].strip())
-                    or ""
+                # No context_id: derive a stable fallback from the authenticated
+                # sender alone.  IP-based stickiness was dropped because K8s
+                # SNAT makes source IPs unstable across requests.
+                context_id = f"a2a:{sender_id}"
+                logger.info(
+                    "A2A stickiness: derived context_id={!r}", context_id
                 )
-                context_id = f"a2a:{sender_id}:{source_ip}" if source_ip else f"a2a:{sender_id}"
 
             content = self._extract_content(message)
             task_id = uuid.uuid4().hex[:ID_LENGTH]
@@ -248,7 +261,10 @@ class A2ARequestHandler(RequestHandler):
             return False
 
         now = time.time()
-        if now - self._last_progress_time.get(task_id, 0) < PROGRESS_MIN_INTERVAL_SECONDS:
+        if (
+            now - self._last_progress_time.get(task_id, 0)
+            < PROGRESS_MIN_INTERVAL_SECONDS
+        ):
             return False
         self._last_progress_time[task_id] = now
 
@@ -268,7 +284,11 @@ class A2ARequestHandler(RequestHandler):
                     max_tokens=256,
                     reasoning_effort=None,
                 )
-                summary = response.content[0].text.strip() if response.content else raw_text[:120]
+                summary = (
+                    response.content[0].text.strip()
+                    if response.content
+                    else raw_text[:120]
+                )
             except Exception as e:
                 logger.warning("Failed to summarize progress: {}", e)
                 summary = raw_text[:120]
@@ -418,9 +438,17 @@ class A2ARequestHandler(RequestHandler):
         for part in message.parts:
             # Part is a RootModel wrapping TextPart/DataPart/etc. Access via .root
             inner = part.root if hasattr(part, "root") else part
-            if hasattr(inner, "kind") and inner.kind == "text" and hasattr(inner, "text"):
+            if (
+                hasattr(inner, "kind")
+                and inner.kind == "text"
+                and hasattr(inner, "text")
+            ):
                 texts.append(inner.text)
-            elif hasattr(inner, "kind") and inner.kind == "data" and hasattr(inner, "data"):
+            elif (
+                hasattr(inner, "kind")
+                and inner.kind == "data"
+                and hasattr(inner, "data")
+            ):
                 texts.append(json.dumps(inner.data))
 
         return "\n".join(texts)
@@ -461,7 +489,7 @@ class A2ARequestHandler(RequestHandler):
             task.artifacts = [
                 Artifact(
                     artifact_id="0",
-                    parts=[Part(type="text", text=content)],
+                    parts=[Part(root=TextPart(kind="text", text=content))],
                 )
             ]
             await self._task_store.save(task)
@@ -501,8 +529,9 @@ class A2AChannel(BaseChannel):
 
     Bridges A2A Tasks to Nanobot's message bus.
 
-    Security note: By default, only the running_user is allowed to access the A2A endpoint.
-    For production, deploy behind an authenticating proxy and configure allow_from appropriately.
+    Security note: When allow_from is empty, all callers are accepted. Populate
+    allow_from in config to restrict access. For production use, deploy behind
+    an authenticating proxy.
     """
 
     name = "a2a"
@@ -517,12 +546,6 @@ class A2AChannel(BaseChannel):
     ):
         super().__init__(config, bus)
         self.config = config
-
-        # Get running user (default to current OS user)
-        import getpass
-
-        self._running_user = getattr(config, "running_user", "") or getpass.getuser()
-
         self._app: A2AStarletteApplication | None = None
         self._agent_card: AgentCardType | None = None
         self._handler: A2ARequestHandler | None = None
@@ -571,29 +594,6 @@ class A2AChannel(BaseChannel):
             agent_card=self._agent_card,
             http_handler=self._handler,
         )
-
-    def is_allowed(self, sender_id: str) -> bool:
-        """
-        Check if a sender is allowed to use this A2A endpoint.
-
-        Authorization logic:
-        - If allow_from is non-empty, check against that list
-        - If allow_from is empty, only allow the running_user
-
-        Args:
-            sender_id: The sender's identifier (from message.role.value).
-
-        Returns:
-            True if allowed, False otherwise.
-        """
-        allow_list = getattr(self.config, "allow_from", [])
-
-        # If allow_from is configured, use it
-        if allow_list:
-            return sender_id in allow_list
-
-        # Default: only allow running_user
-        return sender_id == self._running_user
 
     async def start(self) -> None:
         self._running = True
