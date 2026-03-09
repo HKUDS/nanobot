@@ -3,9 +3,12 @@
 import asyncio
 import os
 import signal
-from pathlib import Path
+import socket
+import subprocess
 import select
 import sys
+from pathlib import Path
+from urllib.parse import urlparse
 
 import typer
 from rich.console import Console
@@ -241,6 +244,47 @@ def _make_provider(config: Config):
     )
 
 
+def _bridge_socket_target(bridge_url: str) -> tuple[str, int] | None:
+    """Return the host/port when a bridge URL targets this machine."""
+    parsed = urlparse(bridge_url)
+    if parsed.scheme not in {"ws", "wss"}:
+        return None
+
+    host = parsed.hostname
+    if host not in {"localhost", "127.0.0.1", "::1"}:
+        return None
+
+    port = parsed.port or (443 if parsed.scheme == "wss" else 80)
+    if port <= 0:
+        return None
+    return host, port
+
+
+def _is_socket_open(host: str, port: int, timeout: float = 0.3) -> bool:
+    """Return True when a TCP socket accepts connections."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _get_local_whatsapp_bridge_launch_spec(config: Config) -> tuple[Path, dict[str, str]] | None:
+    """Return launch details for the bundled bridge when the bridge is local."""
+    if not config.channels.whatsapp.enabled:
+        return None
+
+    target = _bridge_socket_target(config.channels.whatsapp.bridge_url)
+    if target is None:
+        return None
+
+    _, port = target
+    env = {**os.environ, "BRIDGE_PORT": str(port)}
+    if config.channels.whatsapp.bridge_token:
+        env["BRIDGE_TOKEN"] = config.channels.whatsapp.bridge_token
+    return _get_bridge_dir(), env
+
+
 # ============================================================================
 # Gateway / Server
 # ============================================================================
@@ -381,6 +425,23 @@ def gateway(
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
     
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+
+    bridge_process: subprocess.Popen[str] | None = None
+    bridge_spec = _get_local_whatsapp_bridge_launch_spec(config)
+    if bridge_spec is not None:
+        bridge_target = _bridge_socket_target(config.channels.whatsapp.bridge_url)
+        if bridge_target is not None:
+            host, bridge_port = bridge_target
+            if _is_socket_open(host, bridge_port):
+                console.print(f"[green]✓[/green] WhatsApp bridge already running at {config.channels.whatsapp.bridge_url}")
+            else:
+                bridge_dir, bridge_env = bridge_spec
+                console.print(f"[green]✓[/green] Starting local WhatsApp bridge at {config.channels.whatsapp.bridge_url}")
+                bridge_process = subprocess.Popen(
+                    ["npm", "start"],
+                    cwd=bridge_dir,
+                    env=bridge_env,
+                )
     
     async def run():
         try:
@@ -399,7 +460,16 @@ def gateway(
             agent.stop()
             await channels.stop_all()
     
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    finally:
+        if bridge_process is not None and bridge_process.poll() is None:
+            bridge_process.terminate()
+            try:
+                bridge_process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                bridge_process.kill()
+                bridge_process.wait(timeout=5)
 
 
 

@@ -37,12 +37,16 @@ export class WhatsAppClient {
   private sock: any = null;
   private options: WhatsAppClientOptions;
   private reconnecting = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: WhatsAppClientOptions) {
     this.options = options;
   }
 
   async connect(): Promise<void> {
+    this.clearReconnectTimer();
+    this.disposeSocket();
+
     const logger = pino({ level: 'silent' });
     const { state, saveCreds } = await useMultiFileAuthState(this.options.authDir);
     const { version } = await fetchLatestBaileysVersion();
@@ -50,7 +54,7 @@ export class WhatsAppClient {
     console.log(`Using Baileys version: ${version.join('.')}`);
 
     // Create socket following OpenClaw's pattern
-    this.sock = makeWASocket({
+    const sock = makeWASocket({
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -62,16 +66,19 @@ export class WhatsAppClient {
       syncFullHistory: false,
       markOnlineOnConnect: false,
     });
+    this.sock = sock;
 
     // Handle WebSocket errors
-    if (this.sock.ws && typeof this.sock.ws.on === 'function') {
-      this.sock.ws.on('error', (err: Error) => {
+    if (sock.ws && typeof sock.ws.on === 'function') {
+      sock.ws.on('error', (err: Error) => {
         console.error('WebSocket error:', err.message);
       });
     }
 
     // Handle connection updates
-    this.sock.ev.on('connection.update', async (update: any) => {
+    sock.ev.on('connection.update', async (update: any) => {
+      if (this.sock !== sock) return;
+
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
@@ -87,27 +94,24 @@ export class WhatsAppClient {
 
         console.log(`Connection closed. Status: ${statusCode}, Will reconnect: ${shouldReconnect}`);
         this.options.onStatus('disconnected');
+        this.disposeSocket(sock);
 
-        if (shouldReconnect && !this.reconnecting) {
-          this.reconnecting = true;
-          console.log('Reconnecting in 5 seconds...');
-          setTimeout(() => {
-            this.reconnecting = false;
-            this.connect();
-          }, 5000);
+        if (shouldReconnect) {
+          this.scheduleReconnect();
         }
       } else if (connection === 'open') {
         console.log('✅ Connected to WhatsApp');
+        this.reconnecting = false;
         this.options.onStatus('connected');
       }
     });
 
     // Save credentials on update
-    this.sock.ev.on('creds.update', saveCreds);
+    sock.ev.on('creds.update', saveCreds);
 
     // Handle incoming messages
-    this.sock.ev.on('messages.upsert', async ({ messages, type }: { messages: any[]; type: string }) => {
-      if (type !== 'notify') return;
+    sock.ev.on('messages.upsert', async ({ messages, type }: { messages: any[]; type: string }) => {
+      if (this.sock !== sock || type !== 'notify') return;
 
       for (const msg of messages) {
         // Skip own messages
@@ -131,6 +135,47 @@ export class WhatsAppClient {
         });
       }
     });
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnecting) return;
+    this.reconnecting = true;
+    this.clearReconnectTimer();
+    console.log('Reconnecting in 5 seconds...');
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnecting = false;
+      void this.connect().catch((error) => {
+        console.error('Reconnect failed:', error);
+        this.scheduleReconnect();
+      });
+    }, 5000);
+  }
+
+  private disposeSocket(sock = this.sock): void {
+    if (!sock) return;
+
+    if (this.sock === sock) {
+      this.sock = null;
+    }
+
+    try {
+      sock.ev.removeAllListeners('connection.update');
+      sock.ev.removeAllListeners('creds.update');
+      sock.ev.removeAllListeners('messages.upsert');
+      if (sock.ws && typeof sock.ws.removeAllListeners === 'function') {
+        sock.ws.removeAllListeners();
+      }
+      sock.end(undefined);
+    } catch (error) {
+      console.error('Error disposing socket:', error);
+    }
   }
 
   private extractMessageContent(msg: any): string | null {
@@ -179,9 +224,8 @@ export class WhatsAppClient {
   }
 
   async disconnect(): Promise<void> {
-    if (this.sock) {
-      this.sock.end(undefined);
-      this.sock = null;
-    }
+    this.reconnecting = false;
+    this.clearReconnectTimer();
+    this.disposeSocket();
   }
 }

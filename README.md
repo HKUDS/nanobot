@@ -404,15 +404,13 @@ nanobot channels login
 }
 ```
 
-**3. Run** (two terminals)
+**3. Run**
 
 ```bash
-# Terminal 1
-nanobot channels login
-
-# Terminal 2
 nanobot gateway
 ```
+
+When `channels.whatsapp.bridgeUrl` points to `localhost` (default), `nanobot gateway` now auto-starts the bundled WhatsApp bridge for you. Run `nanobot channels login` only when you need to scan a fresh QR code or relink the device.
 
 </details>
 
