@@ -98,7 +98,41 @@ async def run_tool_loop(
             break
 
     if final_result is None:
-        final_result = "Task completed but no final response was generated."
+        # Iteration budget exhausted — ask the model for a final summary without tools
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "You have used all available tool iterations. "
+                    "Based on everything above, produce a concise final answer now."
+                ),
+            }
+        )
+        try:
+            summary_resp = await provider.chat(
+                messages=messages,
+                tools=None,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            final_result = summary_resp.content
+        except Exception:
+            pass
+
+    if not final_result:
+        # Last resort: collect recent tool results as the answer
+        tool_snippets = []
+        for m in reversed(messages):
+            if m.get("role") == "tool" and isinstance(m.get("content"), str):
+                tool_snippets.append(m["content"][:500])
+                if len(tool_snippets) >= 3:
+                    break
+        if tool_snippets:
+            tool_snippets.reverse()
+            final_result = "\n\n".join(tool_snippets)
+        else:
+            final_result = "Task completed but no final response was generated."
 
     return final_result, tools_used, messages
 

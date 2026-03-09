@@ -126,6 +126,10 @@ class DelegateParallelTool(Tool):
                                 "type": "string",
                                 "description": "Sub-task description.",
                             },
+                            "context": {
+                                "type": "string",
+                                "description": "Optional extra context or constraints.",
+                            },
                         },
                         "required": ["task"],
                     },
@@ -151,7 +155,8 @@ class DelegateParallelTool(Tool):
         async def _run_one(st: dict[str, str]) -> str:
             role = st.get("target_role", "")
             task = st.get("task", "")
-            return await self._dispatch(role, task, None)  # type: ignore[misc]
+            ctx = st.get("context") or None
+            return await self._dispatch(role, task, ctx)  # type: ignore[misc]
 
         results = await asyncio.gather(
             *[_run_one(st) for st in subtasks],

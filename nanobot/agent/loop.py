@@ -24,6 +24,7 @@ channel for progressive display on platforms that support message editing.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import re
 import time
@@ -72,6 +73,14 @@ if TYPE_CHECKING:
     from nanobot.agent.coordinator import Coordinator
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, RoutingConfig
     from nanobot.cron.service import CronService
+
+
+# Per-coroutine delegation ancestry — isolated across asyncio.gather branches.
+# Each parallel delegation branch inherits the parent's ancestry snapshot;
+# mutations in one branch never leak to siblings.
+_delegation_ancestry: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "_delegation_ancestry", default=()
+)
 
 
 def _user_friendly_error(exc: Exception) -> str:
@@ -211,10 +220,15 @@ class AgentLoop:
         self._delegation_stack: list[str] = []
         self._routing_trace: list[dict[str, Any]] = []
         self._scratchpad: Scratchpad | None = None
+        self._delegation_count: int = 0
+        self._max_delegations: int = 8
 
         # Routing metrics (lazy: only created when routing is enabled)
         self._routing_metrics: MetricsCollector | None = None
         self._trace_path = self.workspace / "memory" / "routing_trace.jsonl"
+
+        # Reference to the current loop's message list (for delegation context)
+        self._active_messages: list[dict[str, Any]] | None = None
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools, filtered by role config."""
@@ -512,7 +526,20 @@ class AgentLoop:
     _PLAN_PROMPT = (
         "Before taking action, briefly outline a numbered plan (3-7 steps) "
         "for how you will accomplish the user's request using available tools. "
-        "Keep each step to one sentence. Then begin executing step 1."
+        "Keep each step to one sentence. Then begin executing step 1.\n\n"
+        "DELEGATION: For tasks with multiple distinct work streams (e.g. code analysis "
+        "+ architecture review + report writing), use the `delegate_parallel` tool to "
+        "farm out sub-tasks to specialist agents (code, research, writing, pm) who work "
+        "concurrently. Then synthesise their results. Prefer delegation over doing "
+        "everything yourself when the request spans multiple domains.\n\n"
+        "TWO-PHASE RULE: Always separate data-gathering from synthesis.\n"
+        "  Phase 1 — Gather: use `delegate_parallel` for investigation tasks "
+        "(code analysis, research, architecture review). These agents write findings "
+        "to the scratchpad.\n"
+        "  Phase 2 — Synthesise: AFTER Phase 1 results return, compile/synthesise "
+        "yourself or delegate to a writing agent as a SEPARATE step.\n"
+        "  NEVER include synthesis/writing tasks in the same `delegate_parallel` call "
+        "as gathering tasks — the synthesis agent would run before data is available."
     )
 
     _PROGRESS_PROMPT = (
@@ -577,6 +604,47 @@ class AgentLoop:
         )
         return any(signal in text_lower for signal in multi_step_signals)
 
+    @staticmethod
+    def _has_parallel_structure(text: str) -> bool:
+        """Detect enumerated independent subtasks in the user message.
+
+        Looks for structural patterns (not domain-specific keywords) that
+        indicate the request lists multiple independent areas of work.
+        """
+        import re
+
+        text_lower = text.strip().lower()
+        # Pattern 1: explicit count words ("three areas", "four parts", etc.)
+        count_words = re.search(
+            r"\b(two|three|four|five|six|seven|eight|nine|ten|\d+)\s+"
+            r"(areas?|parts?|aspects?|sections?|components?|topics?|items?|tasks?"
+            r"|dimensions?|categories?|modules?|files?|layers?)",
+            text_lower,
+        )
+        if count_words:
+            return True
+        # Pattern 2: "X, Y, and Z" enumeration (3+ items separated by commas + 'and')
+        enum_pattern = re.search(
+            r"(?:[^,]+,\s*){2,}(?:and|&)\s+[^,.]+", text_lower
+        )
+        if enum_pattern:
+            return True
+        # Pattern 3: colon-introduced list with 3+ comma-separated items
+        colon_list = re.search(r":\s*[^,]+(?:,\s*[^,]+){2,}", text_lower)
+        if colon_list:
+            return True
+        # Pattern 4: numbered inline list ("1) X 2) Y 3) Z" or "(a) X (b) Y (c) Z")
+        numbered = re.findall(r"(?:^|\s)(?:\d+[.)\]]|[a-z][.)\]])\s", text_lower)
+        if len(numbered) >= 3:
+            return True
+        # Pattern 5: "across ... , ... , and ..." spanning pattern
+        across_pattern = re.search(
+            r"\bacross\b.+,.+(?:,|and)\s+", text_lower
+        )
+        if across_pattern:
+            return True
+        return False
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -587,6 +655,8 @@ class AgentLoop:
         Returns (final_content, tools_used, messages).
         """
         messages = initial_messages
+        self._active_messages = messages
+        self._delegation_count = 0
         iteration = 0
         final_content = None
         tools_used: list[str] = []
@@ -594,6 +664,7 @@ class AgentLoop:
         nudged_for_final = False
         consecutive_errors = 0
         has_plan = False
+        plan_enforced = False
 
         # Reserve ~20% of context window for the model's response
         context_budget = int(self.context_window_tokens * 0.80)
@@ -624,6 +695,22 @@ class AgentLoop:
                 )
                 has_plan = True
                 logger.debug("Planning prompt injected for: {}...", user_text[:60])
+                # Parallel structure nudge: when the request lists independent
+                # subtasks, explicitly instruct parallel delegation.
+                if self._has_parallel_structure(user_text):
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "The user's request lists multiple INDEPENDENT "
+                                "sub-tasks or areas. Use `delegate_parallel` (NOT "
+                                "sequential `delegate`) to fan them out concurrently. "
+                                "Sequential `delegate` is only appropriate when task B "
+                                "depends on task A's output."
+                            ),
+                        }
+                    )
+                    logger.debug("Parallel structure nudge injected")
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -635,6 +722,7 @@ class AgentLoop:
                 context_budget,
                 provider=self.provider,
                 model=summary_model,
+                tool_token_threshold=self.config.tool_result_context_tokens,
             )
 
             tools_def = self.tools.get_definitions()
@@ -697,6 +785,34 @@ class AgentLoop:
 
             # --- ACT: execute tool calls -----------------------------------
             if response.has_tool_calls:
+                # Plan enforcement: if planning was requested but model jumped
+                # straight to tools without producing a plan, nudge it once.
+                # Delegation calls (delegate/delegate_parallel) are exempt
+                # because delegation itself is a form of planning.
+                _delegation_names = {"delegate", "delegate_parallel"}
+                is_delegation = all(
+                    tc.name in _delegation_names for tc in response.tool_calls
+                )
+                if (
+                    has_plan
+                    and not plan_enforced
+                    and turn_tool_calls == 0
+                    and not response.content
+                    and not is_delegation
+                ):
+                    plan_enforced = True
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "You were asked to produce a plan before acting. "
+                                "Please outline your plan first, then proceed with tool calls."
+                            ),
+                        }
+                    )
+                    logger.debug("Plan enforcement: nudging model to produce plan first")
+                    continue
+
                 # Filter out malformed tool calls (empty name or empty arguments)
                 valid_calls = [
                     tc for tc in response.tool_calls
@@ -783,12 +899,85 @@ class AgentLoop:
                         any_failed = True
 
                 # --- REFLECT: after tool execution, evaluate progress ------
-                if any_failed:
+                # Check if delegation budget is exhausted
+                _del_names = {"delegate", "delegate_parallel"}
+                had_delegations = any(
+                    tc.name in _del_names for tc in response.tool_calls
+                )
+                if had_delegations and self._delegation_count >= self._max_delegations:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "Delegation budget exhausted. You have completed all "
+                                "delegated sub-tasks. Do NOT delegate any more work. "
+                                "Synthesize the results you have and produce your "
+                                "final answer NOW."
+                            ),
+                        }
+                    )
+                elif any_failed:
                     # Failure-aware: prompt alternative strategy
                     messages.append(
                         {
                             "role": "system",
                             "content": self._FAILURE_STRATEGY_PROMPT,
+                        }
+                    )
+                elif had_delegations:
+                    # After delegation, check if all planned work is done
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "Delegation(s) complete. Review the results above. "
+                                "If all planned delegations are done, produce your "
+                                "final answer synthesizing the results. Do NOT start "
+                                "another round of delegations unless the results are "
+                                "clearly insufficient (e.g. empty or errored)."
+                            ),
+                        }
+                    )
+                elif (
+                    has_plan
+                    and not had_delegations
+                    and turn_tool_calls >= 5
+                    and self._delegation_count == 0
+                    and self.tools.get("delegate_parallel")
+                ):
+                    # Delegation nudge: the parent is doing heavy solo work
+                    # despite having delegation tools available.
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                f"You have executed {turn_tool_calls} tool calls "
+                                "solo without delegating. STOP doing the work "
+                                "yourself. Use `delegate_parallel` NOW to distribute "
+                                "remaining work to specialist agents. This is "
+                                "required for multi-part tasks."
+                            ),
+                        }
+                    )
+                elif (
+                    had_delegations
+                    and not any(
+                        tc.name == "delegate_parallel"
+                        for tc in response.tool_calls
+                    )
+                    and self._has_parallel_structure(user_text)
+                ):
+                    # Sequential-to-parallel correction: agent used sequential
+                    # delegate but the user's request has parallel structure.
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "You used sequential `delegate` but the user's "
+                                "request lists independent sub-tasks. For the "
+                                "remaining work, switch to `delegate_parallel` "
+                                "to execute them concurrently."
+                            ),
                         }
                     )
                 elif has_plan and len(response.tool_calls) >= 1:
@@ -1005,32 +1194,7 @@ class AgentLoop:
         """
         self._running = True
         await self._connect_mcp()
-
-        # Lazy-initialise coordinator if routing is enabled
-        if self._routing_config and self._routing_config.enabled and self._coordinator is None:
-            from nanobot.agent.coordinator import Coordinator, build_default_registry
-
-            registry = build_default_registry(self._routing_config.default_role)
-            # Merge user-defined roles (override defaults with same name)
-            for role_cfg in self._routing_config.roles:
-                registry.register(role_cfg)
-            self._coordinator = Coordinator(
-                provider=self.provider,
-                registry=registry,
-                classifier_model=self._routing_config.classifier_model,
-                default_role=self._routing_config.default_role,
-            )
-            self._wire_delegate_tools()
-            # Routing metrics collector
-            self._routing_metrics = MetricsCollector(
-                self.workspace / "memory" / "routing_metrics.json",
-                flush_interval_s=30.0,
-            )
-            self._routing_metrics.start()
-            logger.info(
-                "Multi-agent routing enabled with {} roles",
-                len(registry),
-            )
+        self._ensure_coordinator()
 
         logger.info("Agent loop started")
 
@@ -1142,6 +1306,35 @@ class AgentLoop:
     # Delegation dispatch
     # ------------------------------------------------------------------
 
+    def _ensure_coordinator(self) -> None:
+        """Lazy-initialise the multi-agent coordinator if routing is enabled."""
+        if not self._routing_config or not self._routing_config.enabled:
+            return
+        if self._coordinator is not None:
+            return
+
+        from nanobot.agent.coordinator import Coordinator, build_default_registry
+
+        registry = build_default_registry(self._routing_config.default_role)
+        for role_cfg in self._routing_config.roles:
+            registry.merge_register(role_cfg)
+        self._coordinator = Coordinator(
+            provider=self.provider,
+            registry=registry,
+            classifier_model=self._routing_config.classifier_model,
+            default_role=self._routing_config.default_role,
+        )
+        self._wire_delegate_tools()
+        self._routing_metrics = MetricsCollector(
+            self.workspace / "memory" / "routing_metrics.json",
+            flush_interval_s=30.0,
+        )
+        self._routing_metrics.start()
+        logger.info(
+            "Multi-agent routing enabled with {} roles",
+            len(registry),
+        )
+
     def _wire_delegate_tools(self) -> None:
         """Set the dispatch callback on all registered delegate tools."""
         for name in ("delegate", "delegate_parallel"):
@@ -1160,11 +1353,12 @@ class AgentLoop:
         depth: int = 0,
         success: bool = True,
         message_excerpt: str = "",
+        tools_used: list[str] | None = None,
     ) -> None:
         """Append an entry to the in-memory routing trace and record metrics."""
         import json as _json
 
-        entry = {
+        entry: dict[str, Any] = {
             "event": event,
             "role": role,
             "confidence": confidence,
@@ -1175,6 +1369,9 @@ class AgentLoop:
             "message": message_excerpt[:80],
             "timestamp": datetime.now().isoformat(),
         }
+        if tools_used is not None:
+            entry["tools_used"] = tools_used
+            entry["tools_used_count"] = len(tools_used)
         self._routing_trace.append(entry)
 
         # Persist to JSONL trace file
@@ -1207,6 +1404,36 @@ class AgentLoop:
         """Return a copy of the routing trace."""
         return list(self._routing_trace)
 
+    def _gather_recent_tool_results(
+        self, max_results: int = 15, max_chars: int = 8000
+    ) -> str:
+        """Extract recent tool results from the active message list for delegation context."""
+        if not self._active_messages:
+            return ""
+
+        tool_results: list[str] = []
+        total_chars = 0
+        # Walk backwards to get the most recent results first
+        for m in reversed(self._active_messages):
+            if m.get("role") != "tool":
+                continue
+            name = m.get("name", "unknown")
+            content = m.get("content", "")
+            if not isinstance(content, str) or not content.strip():
+                continue
+            entry = f"**{name}**: {content}"
+            if total_chars + len(entry) > max_chars:
+                break
+            tool_results.append(entry)
+            total_chars += len(entry)
+            if len(tool_results) >= max_results:
+                break
+
+        if not tool_results:
+            return ""
+        tool_results.reverse()  # restore chronological order
+        return "\n\n".join(tool_results)
+
     async def _dispatch_delegation(
         self,
         target_role: str,
@@ -1229,21 +1456,26 @@ class AgentLoop:
         if role is None:
             role = await self._coordinator.route(task)
 
-        # Cycle guard
-        if role.name in self._delegation_stack:
-            chain = " → ".join(self._delegation_stack + [role.name])
+        # Cycle guard using per-coroutine ContextVar ancestry.
+        # Each asyncio.gather branch inherits the parent's ancestry snapshot;
+        # parallel siblings never see each other's mutations, so fanning out
+        # the same role in parallel is safe while re-entrant chains (A→B→A)
+        # are correctly blocked.
+        ancestry = _delegation_ancestry.get()
+        depth = len(ancestry)
+        if role.name in ancestry:
+            chain = " → ".join((*ancestry, role.name))
             self._record_route_trace(
                 "delegate_cycle_blocked",
                 role=role.name,
-                from_role=self._delegation_stack[-1] if self._delegation_stack else "",
-                depth=len(self._delegation_stack),
+                from_role=ancestry[-1] if ancestry else "",
+                depth=depth,
                 success=False,
                 message_excerpt=task,
             )
             raise _CycleError(f"Delegation cycle detected: {chain}")
 
-        from_role = self._delegation_stack[-1] if self._delegation_stack else self.role_name
-        depth = len(self._delegation_stack)
+        from_role = ancestry[-1] if ancestry else self.role_name
         self._record_route_trace(
             "delegate",
             role=role.name,
@@ -1253,9 +1485,10 @@ class AgentLoop:
         )
 
         t0 = time.monotonic()
-        self._delegation_stack.append(role.name)
+        self._delegation_count += 1
+        token = _delegation_ancestry.set((*ancestry, role.name))
         try:
-            result = await self._execute_delegated_agent(role, task, context)
+            result, used_tools = await self._execute_delegated_agent(role, task, context)
             latency_ms = (time.monotonic() - t0) * 1000
             self._record_route_trace(
                 "delegate_complete",
@@ -1264,6 +1497,7 @@ class AgentLoop:
                 depth=depth,
                 success=True,
                 message_excerpt=task,
+                tools_used=used_tools,
             )
             return result
         except Exception:
@@ -1278,15 +1512,334 @@ class AgentLoop:
             )
             raise
         finally:
-            self._delegation_stack.pop()
+            _delegation_ancestry.reset(token)
+
+    # ------------------------------------------------------------------
+    # Delegation contract construction
+    # ------------------------------------------------------------------
+
+    # Task type taxonomy: each type defines tool routing, evidence
+    # expectations, completion criteria, and anti-hallucination rules.
+    _TASK_TYPES: dict[str, dict[str, Any]] = {
+        "local_code_analysis": {
+            "prefer": ["read_file", "list_dir", "exec"],
+            "avoid_first": ["web_search", "web_fetch"],
+            "evidence": "file paths + code excerpts with line numbers",
+            "completion": (
+                "Stop when you have inspected the relevant files and can answer "
+                "the question with evidence. Do not exhaustively scan every file "
+                "unless the task explicitly asks for it."
+            ),
+            "anti_hallucination": (
+                "Do not infer architecture from naming alone. "
+                "Distinguish inspected evidence vs assumption. "
+                "Say 'not found' when absent. Cite inspected file paths."
+            ),
+        },
+        "repo_architecture": {
+            "prefer": ["read_file", "list_dir", "exec"],
+            "avoid_first": ["web_search"],
+            "evidence": "file paths, module relationships, code excerpts",
+            "completion": (
+                "Stop when you have mapped the relevant module structure "
+                "and key interfaces. Focus on structure, not every detail."
+            ),
+            "anti_hallucination": (
+                "Only describe architecture you have verified by reading files. "
+                "Do not infer from file names alone. Cite every claim."
+            ),
+        },
+        "web_research": {
+            "prefer": ["web_search", "web_fetch"],
+            "avoid_first": ["exec", "write_file"],
+            "evidence": "URLs, quoted excerpts, publication dates",
+            "completion": (
+                "Stop after finding 3-5 high-quality sources that answer "
+                "the question. Cross-reference when possible."
+            ),
+            "anti_hallucination": (
+                "Cite URLs for every claim. Distinguish search results from "
+                "your own analysis. Say 'no results found' when searches fail."
+            ),
+        },
+        "report_writing": {
+            "prefer": ["write_file", "read_file"],
+            "avoid_first": ["exec", "web_search"],
+            "evidence": "references to source findings from other agents",
+            "completion": (
+                "Stop after producing the requested document. "
+                "Base all content on prior agent findings."
+            ),
+            "anti_hallucination": (
+                "Use ONLY data from prior agent findings (scratchpad). "
+                "Do not invent statistics, metrics, or file paths. "
+                "If data is missing, note it as a gap."
+            ),
+        },
+        "bug_investigation": {
+            "prefer": ["read_file", "exec", "list_dir"],
+            "avoid_first": ["web_search", "write_file"],
+            "evidence": "error messages, stack traces, file paths + line numbers",
+            "completion": (
+                "Stop when you have identified the root cause with evidence, "
+                "or when you have exhausted reasonable investigation paths."
+            ),
+            "anti_hallucination": (
+                "Report only errors and behavior you have observed via tools. "
+                "Do not guess root causes without evidence."
+            ),
+        },
+        "general": {
+            "prefer": [],
+            "avoid_first": [],
+            "evidence": "tool output excerpts",
+            "completion": "Stop when the task objective is met.",
+            "anti_hallucination": (
+                "Ground all claims in tool output. Say 'unknown' when unsure."
+            ),
+        },
+    }
+
+    @staticmethod
+    def _classify_task_type(role: str, task: str) -> str:
+        """Classify a delegation task into a task type from the taxonomy."""
+        task_lower = task.lower()
+
+        # Role-based fast paths
+        if role == "writing":
+            return "report_writing"
+
+        code_signals = (
+            "code", "module", "file", "function", "class", "test",
+            "import", "line", "bug", "error", "refactor", "implement",
+            "source", "python", ".py", "coverage", "lint", "scan",
+        )
+        bug_signals = ("bug", "error", "crash", "fail", "exception", "broken", "fix")
+        web_signals = (
+            "latest", "current", "news", "trend", "benchmark",
+            "compare with", "industry", "best practice", "state of the art",
+        )
+        arch_signals = (
+            "architecture", "subsystem", "design", "structure", "pattern",
+            "how does", "relationship", "dependency",
+        )
+        project_signals = (
+            "our", "this project", "nanobot", "workspace", "codebase",
+        )
+
+        # Bug investigation (check before general code)
+        if role == "code" and any(s in task_lower for s in bug_signals):
+            return "bug_investigation"
+
+        # Architecture analysis
+        if any(s in task_lower for s in arch_signals):
+            return "repo_architecture"
+
+        # Local code analysis
+        if any(s in task_lower for s in code_signals) or role == "code":
+            return "local_code_analysis"
+
+        # Web research (only if no project-specific signals)
+        if any(s in task_lower for s in web_signals):
+            if not any(s in task_lower for s in project_signals):
+                return "web_research"
+            return "repo_architecture"  # project-specific → inspect locally
+
+        # Research role defaults to repo if project-specific, web otherwise
+        if role == "research":
+            if any(s in task_lower for s in project_signals):
+                return "repo_architecture"
+            return "web_research"
+
+        return "general"
+
+    def _extract_plan_text(self) -> str:
+        """Pull the plan from _active_messages if planning was triggered."""
+        if not self._active_messages:
+            return ""
+        found_plan_prompt = False
+        for m in self._active_messages:
+            if found_plan_prompt and m.get("role") == "assistant":
+                content = m.get("content", "")
+                if isinstance(content, str) and content.strip():
+                    return content.strip()
+                return ""
+            if (
+                m.get("role") == "system"
+                and isinstance(m.get("content"), str)
+                and "outline a numbered plan" in m["content"]
+            ):
+                found_plan_prompt = True
+        return ""
+
+    def _extract_user_request(self) -> str:
+        """Pull the original user message from _active_messages."""
+        if not self._active_messages:
+            return ""
+        for m in self._active_messages:
+            if m.get("role") == "user":
+                content = m.get("content", "")
+                if isinstance(content, str):
+                    return content.strip()
+        return ""
+
+    def _build_execution_context(self, task_type: str) -> str:
+        """Assemble project knowledge with tier-based stratification.
+
+        Tier A (always): workspace root + directory layout.
+        Tier C (conditional): key file excerpts — only for investigative types.
+        """
+        parts: list[str] = [f"Workspace: {self.workspace}"]
+
+        # Directory tree (top-level, max 50 entries) — Tier A
+        try:
+            entries = sorted(self.workspace.iterdir())
+            tree_lines = []
+            for entry in entries[:50]:
+                suffix = "/" if entry.is_dir() else ""
+                tree_lines.append(f"  {entry.name}{suffix}")
+            if tree_lines:
+                parts.append("Directory layout:\n" + "\n".join(tree_lines))
+        except OSError:
+            pass
+
+        # Tier C: key file excerpts — only for investigative task types
+        if task_type in ("local_code_analysis", "repo_architecture", "bug_investigation"):
+            for name in ("AGENTS.md", "README.md", "SOUL.md"):
+                path = self.workspace / name
+                try:
+                    if path.is_file():
+                        text = path.read_text(encoding="utf-8", errors="replace")[:1500]
+                        if text.strip():
+                            parts.append(f"--- {name} (excerpt) ---\n{text.strip()}")
+                except OSError:
+                    pass
+
+        return "\n\n".join(parts)
+
+    def _build_parallel_work_summary(self, role: str) -> str:
+        """Build a brief summary of what other agents are doing (non_goals)."""
+        if not self._scratchpad:
+            return ""
+        entries = self._scratchpad.list_entries()
+        if not entries:
+            return ""
+        lines: list[str] = []
+        for e in entries:
+            if e.get("role") == role:
+                continue  # skip own prior entries
+            lines.append(
+                f"- [{e.get('role', '?')}] {e.get('label', '')[:60]}"
+            )
+        return "\n".join(lines) if lines else ""
+
+    def _build_delegation_contract(
+        self,
+        role: str,
+        task: str,
+        context: str | None,
+        task_type: str,
+    ) -> tuple[str, str]:
+        """Build a typed delegation contract.
+
+        Returns ``(user_content, output_schema_instruction)`` where
+        output_schema_instruction is injected into the system prompt.
+        """
+        tt = self._TASK_TYPES.get(task_type, self._TASK_TYPES["general"])
+        sections: list[str] = []
+
+        # --- Tier A: always present ---
+        # Mission
+        user_request = self._extract_user_request()
+        if user_request:
+            sections.append(f"## Original User Request\n{user_request}")
+
+        sections.append(f"## Your Mission\n{task}")
+        if context:
+            sections.append(f"### Additional Context\n{context}")
+
+        # Project root — always prominently placed so agents know where to look
+        sections.append(f"## Project Root\n`{self.workspace}`")
+
+        # Scope & non-goals
+        non_goals: list[str] = []
+        avoid = tt.get("avoid_first", [])
+        if avoid:
+            non_goals.append(f"Do not start with: {', '.join(avoid)}")
+        parallel = self._build_parallel_work_summary(role)
+        if parallel:
+            sections.append(
+                f"## Other Agents' Work (do not duplicate)\n{parallel}"
+            )
+            non_goals.append("Do not duplicate work already done by other agents.")
+        if non_goals:
+            sections.append("## Non-Goals\n" + "\n".join(f"- {g}" for g in non_goals))
+
+        # Tool guidance
+        prefer = tt.get("prefer", [])
+        tool_lines: list[str] = []
+        if prefer:
+            tool_lines.append(f"Preferred tools: {', '.join(prefer)}")
+        if avoid:
+            tool_lines.append(
+                f"Avoid using first (use only if preferred tools insufficient): "
+                f"{', '.join(avoid)}"
+            )
+        if tool_lines:
+            sections.append("## Tool Guidance\n" + "\n".join(tool_lines))
+
+        # Completion criteria
+        completion = tt.get("completion", "")
+        if completion:
+            sections.append(f"## Completion Criteria\n{completion}")
+
+        # Anti-hallucination constraints
+        anti_h = tt.get("anti_hallucination", "")
+        if anti_h:
+            sections.append(f"## Evidence Rules\n{anti_h}")
+
+        # --- Tier B: when available ---
+        plan_text = self._extract_plan_text()
+        if plan_text:
+            sections.append(f"## Overall Plan (for context)\n{plan_text}")
+
+        # Project context (Tier A workspace + Tier C conditional files)
+        execution_ctx = self._build_execution_context(task_type)
+        if execution_ctx:
+            sections.append(f"## Project Context\n{execution_ctx}")
+
+        # Tier B: parent findings (relevant prior results)
+        parent_findings = self._gather_recent_tool_results()
+        if parent_findings:
+            sections.append(f"## Prior Results\n{parent_findings}")
+
+        # Build the output schema instruction (goes in system prompt)
+        evidence_type = tt.get("evidence", "tool output excerpts")
+        output_schema = (
+            "\n\nYour response MUST use this structure:\n"
+            "## Findings\n<your key findings>\n\n"
+            "## Evidence\n<supporting evidence: " + evidence_type + ">\n\n"
+            "## Open Questions\n<anything unresolved or needing further investigation>\n\n"
+            "## Confidence\n<high/medium/low with brief justification>\n\n"
+            "## Files Inspected\n<list of files/sources you actually examined>"
+        )
+
+        return "\n\n".join(sections), output_schema
 
     async def _execute_delegated_agent(
         self,
         role: AgentRoleConfig,
         task: str,
         context: str | None,
-    ) -> str:
-        """Set up and run a delegated agent for a single sub-task."""
+    ) -> tuple[str, list[str]]:
+        """Set up and run a delegated agent for a single sub-task.
+
+        Returns ``(summary, tools_used)``.
+        """
+
+        # Classify task type for contract construction
+        task_type = self._classify_task_type(role.name, task)
+        logger.debug("Delegation task type: {} (role={})", task_type, role.name)
 
         # Build isolated tool set (same tools as subagent, plus delegate for chaining)
         tools = ToolRegistry()
@@ -1318,27 +1871,49 @@ class AgentLoop:
                 if tname not in allowed:
                     tools.unregister(tname)
 
-        # Build messages
+        # Build delegation contract
+        user_content, output_schema = self._build_delegation_contract(
+            role=role.name,
+            task=task,
+            context=context,
+            task_type=task_type,
+        )
+
+        # For synthesizing roles, inject scratchpad as primary input (Tier B)
+        if role.name in ("pm", "writing", "general") and self._scratchpad:
+            scratchpad_content = self._scratchpad.read()
+            if scratchpad_content and scratchpad_content != "Scratchpad is empty.":
+                user_content += (
+                    f"\n\n## Prior Agent Findings (Scratchpad)\n{scratchpad_content}"
+                )
+
+        # Build system prompt with contract-driven structure
+        avail_tools = ", ".join(tools.tool_names)
         system_prompt = (
             f"You are the **{role.name}** specialist agent.\n\n"
             f"{role.system_prompt or ''}\n\n"
-            f"Complete the following task and return a clear, concise result."
+            f"You MUST use your available tools to complete this task. "
+            f"Do NOT fabricate information — always verify with tools first."
         )
-        user_content = task
-        if context:
-            user_content = f"{task}\n\nAdditional context:\n{context}"
+        if avail_tools:
+            system_prompt += f"\nAvailable tools: {avail_tools}"
+        system_prompt += output_schema
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ]
 
-        # Bound iterations: min of remaining parent budget or 10
-        max_iter = min(self.max_iterations, 10)
+        # Bound iterations: investigative tasks get 12, synthesis tasks get 8
+        if task_type in ("report_writing", "general"):
+            iter_cap = 8
+        else:
+            iter_cap = 12
+        max_iter = min(self.max_iterations, iter_cap)
         model = role.model or self.model
         temperature = role.temperature if role.temperature is not None else self.temperature
 
-        result, tools_used, _ = await run_tool_loop(
+        result, tools_used, messages = await run_tool_loop(
             provider=self.provider,
             tools=tools,
             messages=messages,
@@ -1348,18 +1923,52 @@ class AgentLoop:
             max_iterations=max_iter,
         )
 
+        # Retry if agent didn't use any tools on an investigation-type task
+        if not tools_used and task_type not in ("report_writing",) and max_iter > 2:
+            logger.warning(
+                "Delegated {} agent used no tools — retrying with tool-use reminder",
+                role.name,
+            )
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "You have not used any tools yet. You MUST use the available "
+                        "tools to gather real data before producing your answer. "
+                        "Start by using list_dir or read_file to inspect the workspace."
+                    ),
+                }
+            )
+            retry_result, retry_tools, _ = await run_tool_loop(
+                provider=self.provider,
+                tools=tools,
+                messages=messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=self.max_tokens,
+                max_iterations=min(max_iter, 6),
+            )
+            if retry_tools:
+                result = retry_result
+                tools_used = tools_used + retry_tools
+
         summary = result or "No result produced."
 
-        # Write to scratchpad if available
+        # Strip model artifacts: some models prefix the final response with "final"
+        if summary.lower().startswith("final\n"):
+            summary = summary[6:].lstrip()
+        elif summary.lower().startswith("final:"):
+            summary = summary[6:].lstrip()
+
+        # Write to scratchpad if available (but return clean summary to caller)
         if self._scratchpad:
-            entry_id = await self._scratchpad.write(
+            await self._scratchpad.write(
                 role=role.name,
                 label=task[:80],
                 content=summary,
             )
-            return f"[scratchpad:{entry_id}] {summary}"
 
-        return summary
+        return summary, tools_used
 
     # ------------------------------------------------------------------
     # Per-turn role switching (multi-agent routing)
@@ -1794,18 +2403,17 @@ class AgentLoop:
             metadata=msg.metadata or {},
         )
 
-    _TOOL_RESULT_MAX_CHARS = 500
-
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
 
+        max_chars = self.config.tool_result_max_chars
         for m in messages[skip:]:
             entry = {k: v for k, v in m.items() if k != "reasoning_content"}
             if entry.get("role") == "tool" and isinstance(entry.get("content"), str):
                 content = entry["content"]
-                if len(content) > self._TOOL_RESULT_MAX_CHARS:
-                    entry["content"] = content[: self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+                if len(content) > max_chars:
+                    entry["content"] = content[:max_chars] + "\n... (truncated)"
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now()
@@ -1859,6 +2467,7 @@ class AgentLoop:
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
+        self._ensure_coordinator()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(
             msg, session_key=session_key, on_progress=on_progress

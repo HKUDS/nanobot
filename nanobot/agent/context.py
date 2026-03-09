@@ -84,6 +84,7 @@ def compress_context(
     max_tokens: int,
     *,
     preserve_recent: int = 6,
+    tool_token_threshold: int = 200,
 ) -> list[dict[str, Any]]:
     """Drop or truncate old tool results to fit within *max_tokens*.
 
@@ -161,6 +162,7 @@ async def summarize_and_compress(
     *,
     preserve_recent: int = 6,
     summary_max_tokens: int = 400,
+    tool_token_threshold: int = 200,
 ) -> list[dict[str, Any]]:
     """Like :func:`compress_context` but uses an LLM call for Phase 3.
 
@@ -188,8 +190,8 @@ async def summarize_and_compress(
     for i, m in enumerate(middle):
         if m.get("role") == "tool":
             content = m.get("content", "")
-            if isinstance(content, str) and estimate_tokens(content) > 200:
-                middle[i] = {**m, "content": content[:200] + f"\n{truncation_note}"}
+            if isinstance(content, str) and estimate_tokens(content) > tool_token_threshold:
+                middle[i] = {**m, "content": content[:tool_token_threshold] + f"\n{truncation_note}"}
 
     trial = system + middle + tail
     if estimate_messages_tokens(trial) <= max_tokens:

@@ -219,13 +219,17 @@ class TestRoute:
 class TestParseResponse:
     def test_json_object(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence = coordinator._parse_response('{"role": "code"}')
+        role, confidence, needs_orch, relevant = coordinator._parse_response(
+            '{"role": "code"}'
+        )
         assert role == "code"
         assert confidence == 1.0
+        assert needs_orch is False
+        assert relevant == []
 
     def test_json_with_confidence_field(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence = coordinator._parse_response(
+        role, confidence, _, _ = coordinator._parse_response(
             '{"role": "code", "confidence": 0.75}'
         )
         assert role == "code"
@@ -233,27 +237,125 @@ class TestParseResponse:
 
     def test_json_uppercase_normalised(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, _ = coordinator._parse_response('{"role": "CODE"}')
+        role, _, _, _ = coordinator._parse_response('{"role": "CODE"}')
         assert role == "code"
 
     def test_plain_text_fallback(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence = coordinator._parse_response("Use the research agent")
+        role, confidence, needs_orch, relevant = coordinator._parse_response(
+            "Use the research agent"
+        )
         assert role == "research"
         assert confidence == 0.5
+        assert needs_orch is False
+        assert relevant == []
 
     def test_no_match_returns_default(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence = coordinator._parse_response("something random")
+        role, confidence, needs_orch, relevant = coordinator._parse_response(
+            "something random"
+        )
         assert role == "general"
         assert confidence == 0.0
+        assert needs_orch is False
+        assert relevant == []
 
     def test_confidence_clamped(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        _, conf = coordinator._parse_response('{"role": "code", "confidence": 1.5}')
+        _, conf, _, _ = coordinator._parse_response(
+            '{"role": "code", "confidence": 1.5}'
+        )
         assert conf == 1.0
-        _, conf2 = coordinator._parse_response('{"role": "code", "confidence": -0.5}')
+        _, conf2, _, _ = coordinator._parse_response(
+            '{"role": "code", "confidence": -0.5}'
+        )
         assert conf2 == 0.0
+
+    def test_needs_orchestration_parsed(self) -> None:
+        coordinator = Coordinator(FakeProvider(""), _make_registry())
+        role, confidence, needs_orch, relevant = coordinator._parse_response(
+            '{"role": "code", "confidence": 0.9, '
+            '"needs_orchestration": true, "relevant_roles": ["code", "writing"]}'
+        )
+        assert role == "code"
+        assert confidence == 0.9
+        assert needs_orch is True
+        assert relevant == ["code", "writing"]
+
+    def test_needs_orchestration_false_when_absent(self) -> None:
+        coordinator = Coordinator(FakeProvider(""), _make_registry())
+        _, _, needs_orch, relevant = coordinator._parse_response(
+            '{"role": "code", "confidence": 0.8}'
+        )
+        assert needs_orch is False
+        assert relevant == []
+
+    def test_malformed_relevant_roles_ignored(self) -> None:
+        coordinator = Coordinator(FakeProvider(""), _make_registry())
+        _, _, _, relevant = coordinator._parse_response(
+            '{"role": "code", "relevant_roles": "not-a-list"}'
+        )
+        assert relevant == []
+
+
+class TestOrchestrationOverride:
+    """Coordinator.classify() overrides to 'pm' based on LLM orchestration signal."""
+
+    async def test_classify_overrides_to_pm_when_needs_orchestration(self) -> None:
+        """When classifier says needs_orchestration=true, override to 'pm'."""
+        provider = FakeProvider(
+            '{"role": "code", "confidence": 0.9, '
+            '"needs_orchestration": true, "relevant_roles": ["code", "writing"]}'
+        )
+        registry = build_default_registry("general")
+        coordinator = Coordinator(provider, registry, default_role="general")
+        role, _conf = await coordinator.classify(
+            "Analyze code quality, investigate the subsystem architecture, "
+            "and produce a comprehensive report"
+        )
+        assert role == "pm"
+
+    async def test_classify_overrides_when_multiple_relevant_roles(self) -> None:
+        """Even without needs_orchestration, 2+ relevant_roles triggers pm."""
+        provider = FakeProvider(
+            '{"role": "code", "confidence": 0.9, '
+            '"needs_orchestration": false, "relevant_roles": ["code", "research"]}'
+        )
+        registry = build_default_registry("general")
+        coordinator = Coordinator(provider, registry, default_role="general")
+        role, _conf = await coordinator.classify("Do multiple things")
+        assert role == "pm"
+
+    async def test_classify_no_override_when_already_pm(self) -> None:
+        """When classifier already returns 'pm', no override needed."""
+        provider = FakeProvider(
+            '{"role": "pm", "confidence": 0.9, "needs_orchestration": true}'
+        )
+        registry = build_default_registry("general")
+        coordinator = Coordinator(provider, registry, default_role="general")
+        role, _conf = await coordinator.classify(
+            "Create a project report covering code and architecture"
+        )
+        assert role == "pm"
+
+    async def test_classify_no_override_for_single_role(self) -> None:
+        """Single-role, no orchestration needed → stays with classified role."""
+        provider = FakeProvider(
+            '{"role": "code", "confidence": 0.9, '
+            '"needs_orchestration": false, "relevant_roles": ["code"]}'
+        )
+        registry = build_default_registry("general")
+        coordinator = Coordinator(provider, registry, default_role="general")
+        role, _conf = await coordinator.classify("Fix the bug in loop.py")
+        assert role == "code"
+
+    async def test_classify_backward_compat_old_format(self) -> None:
+        """Old-format classifiers (no orchestration fields) don't trigger override."""
+        provider = FakeProvider('{"role": "code", "confidence": 0.9}')
+        registry = build_default_registry("general")
+        coordinator = Coordinator(provider, registry, default_role="general")
+        role, _conf = await coordinator.classify("Fix the bug in loop.py")
+        assert role == "code"
 
 
 # ---------------------------------------------------------------------------

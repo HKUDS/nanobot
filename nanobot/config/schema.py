@@ -220,6 +220,10 @@ class AgentDefaults(Base):
     memory_rollout_gate_max_avg_memory_context_tokens: float = 1400.0
     memory_rollout_gate_max_history_fallback_ratio: float = 0.05
 
+    # Tool-result truncation
+    tool_result_max_chars: int = 2000
+    tool_result_context_tokens: int = 500
+
 
 class AgentConfig(Base):
     """Unified agent runtime configuration.
@@ -260,6 +264,10 @@ class AgentConfig(Base):
     memory_rollout_gate_min_precision_at_k: float = 0.25
     memory_rollout_gate_max_avg_memory_context_tokens: float = 1400.0
     memory_rollout_gate_max_history_fallback_ratio: float = 0.05
+
+    # Tool-result truncation
+    tool_result_max_chars: int = 2000
+    tool_result_context_tokens: int = 500
 
     # Planning & verification (Step 1 & 2)
     planning_enabled: bool = True
@@ -308,6 +316,8 @@ class AgentConfig(Base):
             "memory_rollout_gate_min_precision_at_k": defaults.memory_rollout_gate_min_precision_at_k,
             "memory_rollout_gate_max_avg_memory_context_tokens": defaults.memory_rollout_gate_max_avg_memory_context_tokens,
             "memory_rollout_gate_max_history_fallback_ratio": defaults.memory_rollout_gate_max_history_fallback_ratio,
+            "tool_result_max_chars": defaults.tool_result_max_chars,
+            "tool_result_context_tokens": defaults.tool_result_context_tokens,
         }
         data.update(overrides)
         return cls(**data)  # type: ignore[arg-type]

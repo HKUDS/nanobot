@@ -199,8 +199,8 @@ class TestDelegateParallelTool:
 
 class TestDelegationDispatch:
     async def test_cycle_detection(self, tmp_path: Path) -> None:
-        """Delegating to a role already in the stack raises _CycleError."""
-        from nanobot.agent.loop import AgentLoop
+        """Delegating to a role already in the ancestry raises _CycleError."""
+        from nanobot.agent.loop import AgentLoop, _delegation_ancestry
         from nanobot.bus.queue import MessageBus
 
         provider = FakeProvider(['{"role": "code"}', "result"])
@@ -214,15 +214,17 @@ class TestDelegationDispatch:
         )
         loop._wire_delegate_tools()
 
-        # Simulate being inside a "code" delegation already
-        loop._delegation_stack = ["code"]
-
-        with pytest.raises(_CycleError, match="cycle"):
-            await loop._dispatch_delegation("code", "do more code", None)
+        # Simulate being inside a "code" delegation via ContextVar
+        token = _delegation_ancestry.set(("code",))
+        try:
+            with pytest.raises(_CycleError, match="cycle"):
+                await loop._dispatch_delegation("code", "do more code", None)
+        finally:
+            _delegation_ancestry.reset(token)
 
     async def test_deep_chain_allowed(self, tmp_path: Path) -> None:
         """A → B → C is allowed (no cycle)."""
-        from nanobot.agent.loop import AgentLoop
+        from nanobot.agent.loop import AgentLoop, _delegation_ancestry
         from nanobot.bus.queue import MessageBus
 
         # Provider returns responses for: classify → research, then agent response
@@ -236,14 +238,16 @@ class TestDelegationDispatch:
         )
         loop._wire_delegate_tools()
 
-        # Currently inside "code" role
-        loop._delegation_stack = ["code"]
-
-        # Delegating to "research" should work (no cycle)
-        result = await loop._dispatch_delegation("research", "find info", None)
-        assert result  # Got a result
-        assert len(loop._delegation_stack) == 1  # Stack restored
-        assert loop._delegation_stack[0] == "code"
+        # Currently inside "code" role via ContextVar
+        token = _delegation_ancestry.set(("code",))
+        try:
+            # Delegating to "research" should work (no cycle)
+            result = await loop._dispatch_delegation("research", "find info", None)
+            assert result  # Got a result
+            # Ancestry restored after delegation completes
+            assert _delegation_ancestry.get() == ("code",)
+        finally:
+            _delegation_ancestry.reset(token)
 
     async def test_direct_role_bypasses_classifier(self, tmp_path: Path) -> None:
         """When target_role is specified and exists, classifier is not called."""
@@ -270,8 +274,9 @@ class TestDelegationDispatch:
 
         call_count = 0
         result = await loop._dispatch_delegation("code", "write code", None)
-        # Only 1 call (the agent execution), not 2 (classifier + execution)
-        assert call_count == 1
+        # Direct role: no classifier call.  Expect 2 calls: 1 for the agent
+        # execution + 1 for the tool-use retry (since no tools were used).
+        assert call_count == 2
         assert result
 
     async def test_routing_trace_recorded(self, tmp_path: Path) -> None:
@@ -297,3 +302,24 @@ class TestDelegationDispatch:
         assert trace[0]["role"] == "code"
         assert trace[1]["event"] == "delegate_complete"
         assert trace[1]["success"] is True
+
+    async def test_parallel_same_role_at_depth_zero(self, tmp_path: Path) -> None:
+        """At depth 0 (empty ancestry), delegating to the same role twice is allowed."""
+        from nanobot.agent.loop import AgentLoop, _delegation_ancestry
+        from nanobot.bus.queue import MessageBus
+
+        provider = FakeProvider(["result"])
+        bus = MessageBus()
+        loop = AgentLoop(bus, provider, _make_agent_config(tmp_path))
+
+        registry = build_default_registry("general")
+        loop._coordinator = Coordinator(
+            provider=provider, registry=registry, default_role="general"
+        )
+        loop._wire_delegate_tools()
+
+        # Ancestry is empty (depth 0) — same-role delegation should succeed
+        assert _delegation_ancestry.get() == ()
+        result = await loop._dispatch_delegation("code", "task A", None)
+        assert result
+        assert _delegation_ancestry.get() == ()  # Restored after completion

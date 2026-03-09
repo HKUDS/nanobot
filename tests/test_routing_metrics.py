@@ -261,12 +261,17 @@ class TestDispatchRecordsMetrics:
 
     async def test_cycle_block_records_metric(self, tmp_path: Path) -> None:
         """Cycle detection records routing_cycles_blocked."""
+        from nanobot.agent.loop import _delegation_ancestry
+
         loop = _make_loop(tmp_path)
         assert loop._routing_metrics is not None
 
-        loop._delegation_stack = ["code"]
-        with pytest.raises(_CycleError):
-            await loop._dispatch_delegation("code", "cause cycle", None)
+        token = _delegation_ancestry.set(("code",))
+        try:
+            with pytest.raises(_CycleError):
+                await loop._dispatch_delegation("code", "cause cycle", None)
+        finally:
+            _delegation_ancestry.reset(token)
 
         assert loop._routing_metrics.get(ROUTING_CYCLES_BLOCKED) == 1
 

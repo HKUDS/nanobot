@@ -32,6 +32,25 @@ class AgentRegistry:
             logger.debug("Overriding existing agent role: {}", role.name)
         self._roles[role.name] = role
 
+    def merge_register(self, role: AgentRoleConfig) -> None:
+        """Register a role, merging explicitly-set fields into any existing entry.
+
+        If *role.name* already exists, only fields the caller explicitly set
+        (tracked via Pydantic's ``model_fields_set``) overwrite the existing
+        values — unset fields keep the previous defaults.
+
+        If the role is new, it is registered as-is.
+        """
+        existing = self._roles.get(role.name)
+        if existing is None:
+            self._roles[role.name] = role
+            return
+        overrides = {f: getattr(role, f) for f in role.model_fields_set if f != "name"}
+        if overrides:
+            merged = existing.model_copy(update=overrides)
+            self._roles[role.name] = merged
+            logger.debug("Merged config into role '{}': {}", role.name, list(overrides))
+
     def get(self, name: str) -> AgentRoleConfig | None:
         """Look up a role by name. Returns None if not found."""
         return self._roles.get(name)
