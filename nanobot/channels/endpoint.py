@@ -2,7 +2,7 @@ import uuid
 import time
 import threading
 import concurrent.futures
-from typing import Any
+from typing import Any, List, Dict, Optional
 
 from flask import Flask, request, jsonify
 from werkzeug.serving import make_server
@@ -24,8 +24,11 @@ class EndpointConfig(Base):
 
 class EndpointChannel(BaseChannel):
     """
-    HTTP endpoint channel implementing an OpenAI-compatible /v1/responses interface.
+    HTTP endpoint channel implementing an OpenAI /v1/responses interface.
     Simplified implementation using Flask's async support and thread-safe futures.
+
+    This channel translates Responses API style POST requests into bus messages
+    and waits for the corresponding outbound response to fulfill the HTTP request.
     """
 
     name: str = "endpoint"
@@ -57,23 +60,59 @@ class EndpointChannel(BaseChannel):
         @self.app.route("/v1/responses", methods=["POST"])
         async def create_response():
             """
-            OpenAI-like chat completion endpoint.
+            OpenAI Responses API endpoint.
+
+            Request Schema:
+            {
+                "model": "...",
+                "input": [
+                    {"type": "message", "role": "user", "content": [{"type": "text", "text": "..."}]}
+                ],
+                "instructions": "System instructions",
+                "previous_response_id": "resp_...",
+                "store": true,
+                "metadata": {...}
+            }
             """
             data = request.get_json()
-            if not data or "messages" not in data:
-                return jsonify({"error": "Invalid request"}), 400
+            if not data:
+                return jsonify({"error": "Missing request body"}), 400
 
-            user_messages = [m for m in data["messages"] if m.get("role") == "user"]
-            if not user_messages:
-                return jsonify({"error": "No user message found"}), 400
+            # Input is an array of items in Responses API
+            input_items = data.get("input", [])
+            instructions = data.get("instructions", "")
 
-            content = user_messages[-1].get("content", "")
+            content = ""
+            if isinstance(input_items, list):
+                # Extract text from the last user message item
+                for item in reversed(input_items):
+                    if item.get("type") == "message" and item.get("role") == "user":
+                        item_content = item.get("content")
+                        if isinstance(item_content, list):
+                            content = " ".join([c.get("text", "") for c in item_content if c.get("type") == "text"])
+                        elif isinstance(item_content, str):
+                            content = item_content
+                        break
+            elif isinstance(input_items, str):
+                # Handle simplified input string if provided
+                content = input_items
+
+            # Fallback to legacy 'messages' if 'input' is empty
+            if not content and "messages" in data:
+                for m in reversed(data["messages"]):
+                    if m.get("role") == "user":
+                        content = m.get("content", "")
+                        break
+
+            if not content:
+                return jsonify({"error": "Invalid request: 'input' or 'messages' with user content is required"}), 400
+
             sender_id = data.get("user", "default_user")
+            chat_id = data.get("previous_response_id", f"resp_{uuid.uuid4().hex}")
 
             if not self.is_allowed(sender_id):
                 return jsonify({"error": "Access denied"}), 403
 
-            chat_id = str(uuid.uuid4())
             future = concurrent.futures.Future()
             self._pending_responses[chat_id] = future
 
@@ -82,7 +121,13 @@ class EndpointChannel(BaseChannel):
                 await self._handle_message(
                     sender_id=sender_id,
                     chat_id=chat_id,
-                    content=content
+                    content=content,
+                    metadata={
+                        "http_request": True,
+                        "instructions": instructions,
+                        "store": data.get("store", True),
+                        "model": data.get("model")
+                    }
                 )
 
                 # Wait for the response message (blocking the request thread is safe
@@ -93,18 +138,30 @@ class EndpointChannel(BaseChannel):
                 except concurrent.futures.TimeoutError:
                     return jsonify({"error": "Response timeout"}), 504
 
+                # Construct Response object matching OpenAI spec
                 return jsonify({
-                    "id": f"chatcmpl-{chat_id}",
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "choices": [{
-                        "index": 0,
-                        "message": {
+                    "id": chat_id,
+                    "object": "response",
+                    "created_at": int(time.time()),
+                    "model": data.get("model", "agent-v1"),
+                    "status": "completed",
+                    "output": [
+                        {
+                            "id": f"msg_{uuid.uuid4().hex}",
+                            "type": "message",
+                            "status": "completed",
                             "role": "assistant",
-                            "content": outbound_msg.content
-                        },
-                        "finish_reason": "stop"
-                    }]
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": outbound_msg.content
+                                }
+                            ]
+                        }
+                    ],
+                    "usage": {
+                        "total_tokens": -1
+                    }
                 })
 
             finally:
@@ -137,3 +194,5 @@ class EndpointChannel(BaseChannel):
         if future and not future.done():
             future.set_result(msg)
             logger.debug(f"Resolved response for {msg.chat_id}")
+        else:
+            logger.warning(f"Received outbound message for unknown or expired chat_id: {msg.chat_id}")

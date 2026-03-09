@@ -12,7 +12,7 @@ HTML_PAGE = """<!doctype html>
   <meta charset="utf-8" />
   <meta name="color-scheme" content="light dark">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>endpoint direct test</title>
+  <title>endpoint webchat test</title>
   <style>
     :root { --panel: #7f81861e; --line: #8f90a054; --accent: #6f5ff07f; --accent-dim: #4f46a07f; --danger: #9f12397f; }
     * { box-sizing: border-box; }
@@ -36,7 +36,7 @@ HTML_PAGE = """<!doctype html>
 <body>
   <main class="shell">
     <section class="panel chats">
-      <h2>Direct Endpoint Test</h2>
+      <h2>Endpoint webchat Test</h2>
       <ul id="chat-list"></ul>
       <form id="new-chat-form"><input id="chat-title" placeholder="Session Name" required /><button type="submit">Start</button></form>
     </section>
@@ -51,7 +51,7 @@ HTML_PAGE = """<!doctype html>
 
   <script>
     let activeId = null;
-    const endpointUrl = "/v1/responses"; // Direct URL
+    const endpointUrl = "/v1/responses";
 
     const addMsg = (role, content) => {
       const el = document.createElement('div');
@@ -68,7 +68,6 @@ HTML_PAGE = """<!doctype html>
       li.className = 'active';
       document.getElementById('chat-list').appendChild(li);
       document.getElementById('messages').innerHTML = '';
-      addMsg('system', 'Connected directly to ' + endpointUrl);
     };
 
     document.getElementById('send-form').onsubmit = async (e) => {
@@ -83,11 +82,20 @@ HTML_PAGE = """<!doctype html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             messages: [{role: 'user', content}],
-            user: "direct-test-user"
+            user: "test-user"
           })
         });
         const data = await r.json();
-        addMsg('assistant', data.choices[0].message.content);
+        let reply = '';
+        if (data.output && Array.isArray(data.output)) {
+          const msgItem = data.output.find(item => item.type === 'message');
+          if (msgItem && msgItem.content && Array.isArray(msgItem.content)) {
+            // Find the first text part in the content array
+            const textPart = msgItem.content.find(c => c.type === 'text');
+            if (textPart) reply = textPart.text;
+          }
+        }
+        addMsg('assistant', reply || 'Error: No output text');
       } catch (err) {
         addMsg('system', 'Connection failed: ' + err.message);
       }
