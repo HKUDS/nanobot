@@ -1,6 +1,7 @@
 """Shell execution tool."""
 
 import asyncio
+import locale
 import os
 import re
 import sys
@@ -72,6 +73,8 @@ class ExecTool(Tool):
             return guard_error
         
         env = os.environ.copy()
+        if sys.platform == "win32":
+            env["PYTHONIOENCODING"] = "utf-8"
         if self.path_append:
             env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
 
@@ -156,12 +159,12 @@ class ExecTool(Tool):
             fd_out, stdout_path = tempfile.mkstemp(prefix="nb_out_")
             fd_err, stderr_path = tempfile.mkstemp(prefix="nb_err_")
 
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=fd_out,
-                stderr=fd_err,
-                cwd=cwd,
-                env=env,
+            process = await asyncio.create_subprocess_exec(
+                "powershell", "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass",
+                "-Command", command,
+                stdout=fd_out, stderr=fd_err,
+                cwd=cwd, env=env,
             )
             # Close our copies so only the child holds the handles.
             os.close(fd_out)
@@ -179,8 +182,8 @@ class ExecTool(Tool):
                     pass
                 raise
 
-            stdout = Path(stdout_path).read_bytes().decode("utf-8", errors="replace")
-            stderr = Path(stderr_path).read_bytes().decode("utf-8", errors="replace")
+            stdout = self._decode_output(Path(stdout_path).read_bytes())
+            stderr = self._decode_output(Path(stderr_path).read_bytes())
             return stdout, stderr, process.returncode
         finally:
             for fd in (fd_out, fd_err):
@@ -195,6 +198,14 @@ class ExecTool(Tool):
                         os.unlink(p)
                     except OSError:
                         pass
+
+    @staticmethod
+    def _decode_output(data: bytes) -> str:
+        """Decode bytes trying UTF-8 first, falling back to locale encoding."""
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return data.decode(locale.getpreferredencoding(False), errors="replace")
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
