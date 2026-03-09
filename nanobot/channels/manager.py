@@ -138,6 +138,18 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("QQ channel not available: {}", e)
 
+        # WeCom channel
+        if self.config.channels.wecom.enabled:
+            try:
+                from nanobot.channels.wecom import WeComChannel
+                self.channels["wecom"] = WeComChannel(
+                    self.config.channels.wecom,
+                    self.bus,
+                )
+                logger.info("WeCom channel enabled")
+            except ImportError as e:
+                logger.warning("WeCom channel not available: {}", e)
+
         # Matrix channel
         if self.config.channels.matrix.enabled:
             try:
