@@ -44,6 +44,10 @@ dependencies = [
     "json-repair>=0.57.0,<1.0.0",
     "chardet>=3.0.2,<6.0.0",
     "openai>=2.8.0",
+    # 量化数据
+    "akshare>=1.14.0",
+    "pandas>=2.0.0",
+    "ta>=0.10.0",
 ]
 
 [project.optional-dependencies]

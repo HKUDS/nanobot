@@ -22,6 +22,14 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.agent.tools.quant_data import QuantDataTool
+from nanobot.agent.tools.quant_tech import QuantTechTool
+from nanobot.agent.tools.quant_ipo import QuantIpoTool
+from nanobot.agent.tools.quant_etf import QuantEtfTool
+from nanobot.agent.tools.quant_fund import QuantFundTool
+from nanobot.agent.tools.quant_financial import QuantFinancialTool
+from nanobot.agent.tools.quant_futures import QuantFuturesTool
+from nanobot.agent.tools.quant_export import QuantExportTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -129,6 +137,16 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+        # 注册量化数据工具
+        self.tools.register(QuantDataTool())
+        self.tools.register(QuantTechTool())
+        self.tools.register(QuantIpoTool())
+        self.tools.register(QuantEtfTool())
+        self.tools.register(QuantFundTool())
+        self.tools.register(QuantFinancialTool())
+        self.tools.register(QuantFuturesTool())
+        self.tools.register(QuantExportTool())
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""

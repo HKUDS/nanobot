@@ -1,4 +1,5 @@
 """AkShare 量化数据获取 Tool"""
+import asyncio
 import akshare as ak
 from typing import Optional
 from datetime import datetime, timedelta
@@ -14,8 +15,13 @@ class QuantDataTool(Tool):
 
     name = "quant_data"
     description = (
-        "获取 A 股市场数据，包括个股行情、北向资金、融资融券、行业板块等。"
-        "用于实时数据查询，回测数据建议使用本地数据库。"
+        "获取 A 股市场数据，包括大盘综述、个股行情、北向资金、融资融券、行业板块等。"
+        "获取数据后，必须主动为用户提供更多有价值的信息，包括但不限于："
+        "1) 板块轮动分析（哪些板块领涨/领跌）"
+        "2) 资金流向解读（主力资金、北向资金动向）"
+        "3) 市场情绪判断（涨停/跌停数量、涨跌比）"
+        "4) 如果数据不足以回答用户问题，应使用 web_search 工具搜索相关信息补充"
+        "5) 可参考大V观点、机构研报、美股/港股行情进行对比分析"
     )
 
     parameters = {
@@ -24,6 +30,7 @@ class QuantDataTool(Tool):
             "data_type": {
                 "type": "string",
                 "enum": [
+                    "market_overview",    # 大盘综述（主要指数+涨跌统计）
                     "stock_realtime",      # 个股实时行情
                     "index_realtime",      # 指数实时行情
                     "north_fund",          # 北向资金流向
@@ -51,7 +58,9 @@ class QuantDataTool(Tool):
     ) -> str:
         """执行数据获取"""
         try:
-            if data_type == "stock_realtime":
+            if data_type == "market_overview":
+                return await self._market_overview()
+            elif data_type == "stock_realtime":
                 return await self._stock_realtime(symbol)
             elif data_type == "index_realtime":
                 return await self._index_realtime(symbol)
@@ -69,6 +78,81 @@ class QuantDataTool(Tool):
                 return f"Error: 未知数据类型 {data_type}"
         except Exception as e:
             return f"Error: 获取数据失败 - {str(e)}"
+
+    async def _market_overview(self) -> str:
+        """大盘综述 - 获取主要指数行情和涨跌统计"""
+        import pandas as pd
+
+        try:
+            # 设置超时
+            async def get_index_data():
+                return await asyncio.wait_for(
+                    asyncio.to_thread(ak.stock_zh_index_spot_em),
+                    timeout=30.0
+                )
+
+            async def get_stock_stats():
+                return await asyncio.wait_for(
+                    asyncio.to_thread(ak.stock_zh_a_spot_em),
+                    timeout=30.0
+                )
+
+            # 获取指数数据
+            try:
+                df_index = await get_index_data()
+            except asyncio.TimeoutError:
+                return "Error: 获取指数数据超时，请稍后重试"
+
+            # 主要指数代码映射
+            major_indices = {
+                '000001': '上证指数',
+                '399001': '深证成指',
+                '399006': '创业板指',
+                '000300': '沪深300',
+                '000905': '中证500',
+                '000016': '上证50',
+                '000852': '中证1000',
+            }
+
+            results = []
+            results.append("=" * 50)
+            results.append("📈 A股主要指数行情")
+            results.append("=" * 50)
+
+            for code, name in major_indices.items():
+                row = df_index[df_index['代码'] == code]
+                if not row.empty:
+                    price = row.iloc[0].get('最新价')
+                    change = row.iloc[0].get('涨跌幅')
+                    if pd.notna(price) and pd.notna(change):
+                        results.append(f"{name}: {price:.2f} ({change:+.2f}%)")
+
+            # 获取涨跌统计
+            try:
+                df_stocks = await get_stock_stats()
+                up = (df_stocks['涨跌幅'] > 0).sum()
+                down = (df_stocks['涨跌幅'] < 0).sum()
+                flat = (df_stocks['涨跌幅'] == 0).sum()
+                total = len(df_stocks)
+
+                results.append("")
+                results.append("=" * 50)
+                results.append("📊 涨跌统计 (全部A股)")
+                results.append("=" * 50)
+                results.append(f"上涨: {up} ({up/total*100:.1f}%)")
+                results.append(f"下跌: {down} ({down/total*100:.1f}%)")
+                results.append(f"平盘: {flat} ({flat/total*100:.1f}%)")
+                results.append(f"总计: {total}")
+            except asyncio.TimeoutError:
+                results.append("")
+                results.append("注: 涨跌统计获取超时")
+
+            return "\n".join(results)
+
+        except asyncio.TimeoutError:
+            return "Error: 数据源响应超时，请稍后重试"
+        except Exception as e:
+            return f"Error: 获取大盘数据失败 - {str(e)}"
 
     async def _stock_realtime(self, symbol: str) -> str:
         """个股实时行情"""
