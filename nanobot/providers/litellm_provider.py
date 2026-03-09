@@ -332,18 +332,6 @@ class LiteLLMProvider(LLMProvider):
             if isinstance(args, str):
                 args = json_repair.loads(args)
 
-            # Some models (e.g. Dashscope/Qwen) occasionally wrap arguments
-            # in a list.  Unwrap single-element lists so downstream code and
-            # the provider API always see a plain dict.
-            if isinstance(args, list):
-                if len(args) == 1 and isinstance(args[0], dict):
-                    args = args[0]
-                else:
-                    args = {"raw": args}
-
-            if not isinstance(args, dict):
-                args = {"raw": args}
-
             tool_calls.append(ToolCallRequest(
                 id=_short_tool_id(),
                 name=tc.function.name,

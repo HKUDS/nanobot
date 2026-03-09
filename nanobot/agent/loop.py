@@ -548,38 +548,6 @@ class AgentLoop:
             metadata=msg.metadata or {},
         )
 
-    @staticmethod
-    def _normalize_tool_call_args(entry: dict) -> None:
-        """Ensure tool_calls[].function.arguments is a valid JSON object string.
-
-        Uses json_repair for parsing because models (especially Dashscope/Qwen)
-        can produce severely malformed JSON that stdlib json.loads rejects.
-        """
-        import json_repair
-
-        tcs = entry.get("tool_calls")
-        if not isinstance(tcs, list):
-            return
-        for tc in tcs:
-            if not isinstance(tc, dict):
-                continue
-            fn = tc.get("function")
-            if not isinstance(fn, dict):
-                continue
-            args = fn.get("arguments")
-            if isinstance(args, str):
-                try:
-                    parsed = json_repair.loads(args)
-                except Exception:
-                    continue
-                if isinstance(parsed, list):
-                    parsed = parsed[0] if len(parsed) == 1 and isinstance(parsed[0], dict) else {"raw": parsed}
-                if not isinstance(parsed, dict):
-                    parsed = {"raw": parsed}
-                fn["arguments"] = json.dumps(parsed, ensure_ascii=False)
-            elif isinstance(args, dict):
-                fn["arguments"] = json.dumps(args, ensure_ascii=False)
-
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
@@ -588,8 +556,6 @@ class AgentLoop:
             role, content = entry.get("role"), entry.get("content")
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
-            if role == "assistant":
-                self._normalize_tool_call_args(entry)
             if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
                 entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
             elif role == "user":

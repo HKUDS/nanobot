@@ -41,21 +41,12 @@ class CustomProvider(LLMProvider):
         except Exception as e:
             return LLMResponse(content=f"Error: {e}", finish_reason="error")
 
-    @staticmethod
-    def _normalize_args(raw: Any) -> dict[str, Any]:
-        args = json_repair.loads(raw) if isinstance(raw, str) else raw
-        if isinstance(args, list):
-            args = args[0] if len(args) == 1 and isinstance(args[0], dict) else {"raw": args}
-        if not isinstance(args, dict):
-            args = {"raw": args}
-        return args
-
     def _parse(self, response: Any) -> LLMResponse:
         choice = response.choices[0]
         msg = choice.message
         tool_calls = [
             ToolCallRequest(id=tc.id, name=tc.function.name,
-                            arguments=self._normalize_args(tc.function.arguments))
+                            arguments=json_repair.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments)
             for tc in (msg.tool_calls or [])
         ]
         u = response.usage
