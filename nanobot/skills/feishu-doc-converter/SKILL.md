@@ -72,10 +72,10 @@ md = url_to_md("https://uniquecapital.feishu.cn/wiki/xxx")
 ```
 
 - 飞书配置：环境变量 `NANOBOT_CHANNELS__FEISHU__APP_ID` / `NANOBOT_CHANNELS__FEISHU__APP_SECRET`
-- 微信抓取：复用 `wechat-article-fetcher`
+- 微信抓取：复用 `content-extractor/wechat_fetcher`
 
 ## 与旧技能的关系
 
 | 旧技能 | 功能迁移 |
 |--------|---------|
-| wechat-article-fetcher | 整合为 url_to_md 的子功能 |
+| wechat-article-fetcher | 整合入 content-extractor 和 url_to_md |

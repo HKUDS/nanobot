@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 # 添加技能目录到路径
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'feishu-doc-creator-with-permission' / 'scripts'))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / 'feishu-shared' / 'feishu-doc-creator-with-permission' / 'scripts'))
 
 from doc_creator_with_permission import load_config, get_access_token
 import requests

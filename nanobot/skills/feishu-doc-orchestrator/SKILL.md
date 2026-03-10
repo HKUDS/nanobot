@@ -41,12 +41,14 @@ FEISHU_API_DOMAIN=https://open.feishu.cn  # 默认值
 ## 技能架构
 
 ```
-feishu-doc-orchestrator/        # 主技能
-├── feishu-md-parser/               # Markdown解析
+feishu-doc-orchestrator/             # 主技能
+└── feishu-doc-orchestrator/         # 编排脚本
+feishu-shared/                       # 共享子技能（与 wiki-orchestrator 共用）
+├── feishu-md-parser/                # Markdown解析
 ├── feishu-doc-creator-with-permission/  # 创建+权限
-├── feishu-block-adder/             # 批量添加
-├── feishu-doc-verifier/            # 文档验证
-└── feishu-logger/                  # 日志记录
+├── feishu-block-adder/              # 批量添加
+├── feishu-doc-verifier/             # 文档验证
+└── feishu-logger/                   # 日志记录
 ```
 
 ## 测试脚本

@@ -14,13 +14,14 @@ from datetime import datetime
 
 
 # 子技能脚本路径
-SCRIPT_DIR = Path(__file__).parent.parent.parent
+ORCH_DIR = Path(__file__).parent.parent.parent  # feishu-wiki-orchestrator/
+SHARED_DIR = ORCH_DIR.parent / "feishu-shared"  # nanobot/skills/feishu-shared/
 SUB_SKILLS = {
-    "parser": SCRIPT_DIR / "feishu-md-parser" / "scripts" / "md_parser.py",
-    "creator_with_permission": SCRIPT_DIR / "feishu-doc-creator-with-permission" / "scripts" / "doc_creator_with_permission.py",
-    "block_adder": SCRIPT_DIR / "feishu-block-adder" / "scripts" / "block_adder.py",
-    "verifier": SCRIPT_DIR / "feishu-doc-verifier" / "scripts" / "doc_verifier.py",
-    "logger": SCRIPT_DIR / "feishu-logger" / "scripts" / "logger.py"
+    "parser": SHARED_DIR / "feishu-md-parser" / "scripts" / "md_parser.py",
+    "creator_with_permission": SHARED_DIR / "feishu-doc-creator-with-permission" / "scripts" / "doc_creator_with_permission.py",
+    "block_adder": SHARED_DIR / "feishu-block-adder" / "scripts" / "block_adder.py",
+    "verifier": SHARED_DIR / "feishu-doc-verifier" / "scripts" / "doc_verifier.py",
+    "logger": SHARED_DIR / "feishu-logger" / "scripts" / "logger.py"
 }
 
 

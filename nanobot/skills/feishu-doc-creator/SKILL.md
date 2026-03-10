@@ -24,15 +24,13 @@ from skills.feishu_doc_creator import create_drive_doc, create_wiki_doc
 # 创建云盘文档
 result = create_drive_doc(
     title="文档标题",
-    content="# 正文\n\n内容...",
-    folder_token="DYPXf8ZktlOCIXdmGq3cfjevn2F"  # 可选
+    content="# 正文\n\n内容..."
 )
 
 # 创建知识库文档
 result = create_wiki_doc(
     title="文档标题",
-    content="# 正文\n\n内容...",
-    parent_node_token="LmZ6wKwTViA4bSkVSYfcJGFcnRf"  # 可选
+    content="# 正文\n\n内容..."
 )
 ```
 
@@ -51,8 +49,6 @@ python3 skills/feishu-doc-creator/scripts/create_doc.py wiki "标题" input.md
 所有配置通过环境变量读取：
 
 - `NANOBOT_CHANNELS__FEISHU__APP_ID` / `NANOBOT_CHANNELS__FEISHU__APP_SECRET`（必需）
-- `FEISHU_DRIVE_FOLDER_TOKEN`（默认云盘文件夹，默认 `DYPXf8ZktlOCIXdmGq3cfjevn2F`）
-- `FEISHU_PARENT_DAILY_REPORT`（默认知识库父节点，默认 `LmZ6wKwTViA4bSkVSYfcJGFcnRf`）
 - `FEISHU_AUTO_COLLABORATOR_ID`（自动添加权限的用户，可选）
 
 ## 与旧技能的区别

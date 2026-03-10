@@ -19,8 +19,6 @@ def load_config():
         'FEISHU_APP_SECRET': os.environ.get('NANOBOT_CHANNELS__FEISHU__APP_SECRET', ''),
         'FEISHU_API_DOMAIN': os.environ.get('FEISHU_API_DOMAIN', 'https://open.feishu.cn'),
         'FEISHU_WIKI_SPACE_ID': os.environ.get('FEISHU_WIKI_SPACE_ID', '7313882962775556100'),
-        'FEISHU_PARENT_DAILY_REPORT': os.environ.get('FEISHU_PARENT_DAILY_REPORT', 'LmZ6wKwTViA4bSkVSYfcJGFcnRf'),
-        'FEISHU_DRIVE_FOLDER_TOKEN': os.environ.get('FEISHU_DRIVE_FOLDER_TOKEN', 'DYPXf8ZktlOCIXdmGq3cfjevn2F'),
         'FEISHU_AUTO_COLLABORATOR_ID': os.environ.get('FEISHU_AUTO_COLLABORATOR_ID', ''),
     }
     if not config['FEISHU_APP_ID'] or not config['FEISHU_APP_SECRET']:
@@ -82,20 +80,17 @@ def create_drive_doc(
     config = load_config()
     token = get_access_token(config)
     
-    # 使用默认文件夹
-    if not folder_token:
-        folder_token = config.get('FEISHU_DRIVE_FOLDER_TOKEN', 'DYPXf8ZktlOCIXdmGq3cfjevn2F')
-    
-    # 创建文档
+    # 创建文档（不指定 folder_token 则创建到根目录，避免权限问题）
     url = f"{config['FEISHU_API_DOMAIN']}/open-apis/docx/v1/documents"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
     }
-    payload = {
-        "title": title,
-        "folder_token": folder_token
-    }
+    payload = {"title": title}
+    
+    # 仅在明确指定 folder_token 时使用
+    if folder_token:
+        payload["folder_token"] = folder_token
     
     response = requests.post(url, json=payload, headers=headers)
     result = response.json()
@@ -136,10 +131,6 @@ def create_wiki_doc(
     """
     config = load_config()
     token = get_access_token(config)
-    
-    # 使用默认父节点
-    if not parent_node_token:
-        parent_node_token = config.get('FEISHU_PARENT_DAILY_REPORT', 'LmZ6wKwTViA4bSkVSYfcJGFcnRf')
     
     space_id = config.get('FEISHU_WIKI_SPACE_ID', '7313882962775556100')
     
@@ -182,52 +173,67 @@ def create_wiki_doc(
 def _write_content(token: str, config: Dict, document_id: str, content: str):
     """
     写入文档内容
-    使用 feishu_doc.write 工具
+    
+    修复说明：
+    - 飞书 API 不支持直接创建 heading 块，改用 block_type: 2 (text) + 加粗样式
+    - 跳过 divider 块（block_type: 10），用空行替代
+    - 所有文本块统一使用 block_type: 2
     """
-    # 简单实现：直接调用 feishu_doc API
-    url = f"{config['FEISHU_API_DOMAIN']}/open-apis/docx/v1/documents/{document_id}/content"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
     }
     
-    # 将 Markdown 转为纯文本块
-    # 这里简化处理，实际应该使用 feishu-doc-orchestrator 的 parser
-    # 但为了独立性，先实现基础版本
-    
-    # 分段处理
+    # 解析 Markdown 为飞书块
     blocks = []
     lines = content.split('\n')
     current_text = []
     
     for line in lines:
+        # 处理标题：用加粗文本替代
         if line.startswith('#'):
-            # 先提交之前的文本
             if current_text:
                 text_content = '\n'.join(current_text).strip()
-                if text_content:
+                if text_content and not text_content.startswith('|'):
                     blocks.append({
                         "block_type": 2,
                         "text": {
-                            "elements": [{"text_run": {"content": text_content}}],
-                            "style": {}
+                            "elements": [{"text_run": {"content": text_content}}]
                         }
                     })
                 current_text = []
             
-            # 处理标题
-            level = len(line) - len(line.lstrip('#'))
+            # 标题用加粗
             heading_text = line.lstrip('#').strip()
             if heading_text:
                 blocks.append({
-                    "block_type": 2 + min(level, 9),  # heading1-9
-                    f"heading{min(level, 9)}": {
-                        "elements": [{"text_run": {"content": heading_text}}],
-                        "style": {}
+                    "block_type": 2,
+                    "text": {
+                        "elements": [{
+                            "text_run": {
+                                "content": heading_text,
+                                "text_element_style": {"bold": True}
+                            }
+                        }]
                     }
                 })
+        # 处理分隔线：跳过
+        elif line.startswith('---'):
+            if current_text:
+                text_content = '\n'.join(current_text).strip()
+                if text_content and not text_content.startswith('|'):
+                    blocks.append({
+                        "block_type": 2,
+                        "text": {
+                            "elements": [{"text_run": {"content": text_content}}]
+                        }
+                    })
+                current_text = []
+            # 跳过 divider，不添加块
+        # 其他内容累积
         else:
-            current_text.append(line)
+            if line.strip() and not line.startswith('|'):  # 跳过表格行
+                current_text.append(line)
     
     # 提交剩余的文本
     if current_text:
@@ -236,22 +242,39 @@ def _write_content(token: str, config: Dict, document_id: str, content: str):
             blocks.append({
                 "block_type": 2,
                 "text": {
-                    "elements": [{"text_run": {"content": text_content}}],
-                    "style": {}
+                    "elements": [{"text_run": {"content": text_content}}]
                 }
             })
     
     # 批量添加块
     if blocks:
+        add_url = f"{config['FEISHU_API_DOMAIN']}/open-apis/docx/v1/documents/{document_id}/blocks/{document_id}/children"
         batch_size = 50
+        success_count = 0
+        
         for i in range(0, len(blocks), batch_size):
             batch = blocks[i:i+batch_size]
-            add_url = f"{config['FEISHU_API_DOMAIN']}/open-apis/docx/v1/documents/{document_id}/blocks/{document_id}/children"
             payload = {
                 "children": batch,
                 "index": -1
             }
-            requests.post(add_url, json=payload, headers=headers)
+            response = requests.post(add_url, json=payload, headers=headers)
+            result = response.json()
+            
+            if result.get("code") == 0:
+                success_count += len(batch)
+            else:
+                # 单块重试
+                for block in batch:
+                    payload = {"children": [block], "index": -1}
+                    response = requests.post(add_url, json=payload, headers=headers)
+                    result = response.json()
+                    if result.get("code") == 0:
+                        success_count += 1
+        
+        return {"success": True, "blocks_written": success_count, "total": len(blocks)}
+    
+    return {"success": True, "blocks_written": 0, "total": 0}
 
 
 # 便捷函数

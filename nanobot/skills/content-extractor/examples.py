@@ -125,7 +125,7 @@ def main():
     print("\n提示：")
     print("  • 实际提取需要安装: pip install playwright requests")
     print("  • 初始化浏览器: playwright install chromium")
-    print("  • 微信公众号提取需要: wechat-article-fetcher skill")
+    print("  • 微信公众号提取需要: wechat_fetcher.py (已内置)")
 
 if __name__ == "__main__":
     main()

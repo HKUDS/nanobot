@@ -385,9 +385,11 @@ class ContentExtractor:
     def _extract_wechat(self, url: str, **options) -> ExtractResult:
         """提取微信公众号文章"""
         try:
-            # 复用现有的wechat-article-fetcher
             import sys
-            sys.path.insert(0, '/Users/delta/.hiperone/workspace/skills/wechat-article-fetcher')
+            from pathlib import Path
+            _local_dir = str(Path(__file__).parent)
+            if _local_dir not in sys.path:
+                sys.path.insert(0, _local_dir)
             from wechat_fetcher import WechatArticleFetcher
             
             fetcher = WechatArticleFetcher()
@@ -404,7 +406,7 @@ class ContentExtractor:
             )
             
         except ImportError:
-            raise ExtractError("wechat-article-fetcher未找到")
+            raise ExtractError("wechat_fetcher 模块未找到")
         except Exception as e:
             raise ExtractError(f"微信公众号提取失败: {str(e)}")
     

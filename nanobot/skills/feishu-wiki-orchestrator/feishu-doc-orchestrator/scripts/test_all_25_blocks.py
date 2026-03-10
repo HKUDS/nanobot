@@ -10,8 +10,9 @@ import time
 from pathlib import Path
 
 # 添加当前技能目录到路径
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'feishu-doc-creator-with-permission' / 'scripts'))
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'feishu-block-adder' / 'scripts'))
+_SHARED_DIR = Path(__file__).parent.parent.parent.parent / 'feishu-shared'
+sys.path.insert(0, str(_SHARED_DIR / 'feishu-doc-creator-with-permission' / 'scripts'))
+sys.path.insert(0, str(_SHARED_DIR / 'feishu-block-adder' / 'scripts'))
 
 from doc_creator_with_permission import load_config, get_access_token, create_document, add_permission_member, transfer_owner
 from block_adder import add_children_to_block

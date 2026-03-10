@@ -360,16 +360,16 @@ def _feishu_doc_to_md_by_browser(url: str) -> str:
 
 def _wechat_to_md(url: str) -> str:
     """微信公众号文章转 Markdown"""
-    # 复用 wechat-article-fetcher
     try:
         import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'wechat-article-fetcher'))
+        _ce_dir = str(Path(__file__).parent.parent / 'content-extractor')
+        if _ce_dir not in sys.path:
+            sys.path.insert(0, _ce_dir)
         from wechat_fetcher import WechatArticleFetcher
         
         fetcher = WechatArticleFetcher()
         article = fetcher.fetch(url)
         
-        # 组装 Markdown
         md = f"# {article.get('title', '')}\n\n"
         md += f"**作者**: {article.get('author', '未知')}\n\n"
         if article.get('publish_time'):
@@ -380,8 +380,8 @@ def _wechat_to_md(url: str) -> str:
         return md
     except ImportError:
         raise ImportError(
-            "wechat-article-fetcher 未安装。\n"
-            "请确保 skills/wechat-article-fetcher/ 存在。"
+            "wechat_fetcher 未找到。\n"
+            "请确保 skills/content-extractor/wechat_fetcher.py 存在。"
         )
 
 
