@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.memory import MemoryStore
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 
 def _make_session(message_count: int = 30, memory_window: int = 50):
@@ -43,6 +43,22 @@ def _make_tool_response(history_entry, memory_update):
     )
 
 
+class ScriptedProvider(LLMProvider):
+    def __init__(self, responses: list[LLMResponse]):
+        super().__init__()
+        self._responses = list(responses)
+        self.calls = 0
+
+    async def chat(self, *args, **kwargs) -> LLMResponse:
+        self.calls += 1
+        if self._responses:
+            return self._responses.pop(0)
+        return LLMResponse(content="", tool_calls=[])
+
+    def get_default_model(self) -> str:
+        return "test-model"
+
+
 class TestMemoryConsolidationTypeHandling:
     """Test that consolidation handles various argument types correctly."""
 
@@ -57,6 +73,7 @@ class TestMemoryConsolidationTypeHandling:
                 memory_update="# Memory\nUser likes testing.",
             )
         )
+        provider.chat_with_retry = provider.chat
         session = _make_session(message_count=60)
 
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
@@ -77,6 +94,7 @@ class TestMemoryConsolidationTypeHandling:
                 memory_update={"facts": ["User likes testing"], "topics": ["testing"]},
             )
         )
+        provider.chat_with_retry = provider.chat
         session = _make_session(message_count=60)
 
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
@@ -112,6 +130,7 @@ class TestMemoryConsolidationTypeHandling:
             ],
         )
         provider.chat = AsyncMock(return_value=response)
+        provider.chat_with_retry = provider.chat
         session = _make_session(message_count=60)
 
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
@@ -127,6 +146,7 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat = AsyncMock(
             return_value=LLMResponse(content="I summarized the conversation.", tool_calls=[])
         )
+        provider.chat_with_retry = provider.chat
         session = _make_session(message_count=60)
 
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
@@ -139,6 +159,7 @@ class TestMemoryConsolidationTypeHandling:
         """Consolidation should be a no-op when messages < keep_count."""
         store = MemoryStore(tmp_path)
         provider = AsyncMock()
+        provider.chat_with_retry = provider.chat
         session = _make_session(message_count=10)
 
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
@@ -167,6 +188,7 @@ class TestMemoryConsolidationTypeHandling:
             ],
         )
         provider.chat = AsyncMock(return_value=response)
+        provider.chat_with_retry = provider.chat
         session = _make_session(message_count=60)
 
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
@@ -192,6 +214,7 @@ class TestMemoryConsolidationTypeHandling:
             ],
         )
         provider.chat = AsyncMock(return_value=response)
+        provider.chat_with_retry = provider.chat
         session = _make_session(message_count=60)
 
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
@@ -215,8 +238,33 @@ class TestMemoryConsolidationTypeHandling:
             ],
         )
         provider.chat = AsyncMock(return_value=response)
+        provider.chat_with_retry = provider.chat
         session = _make_session(message_count=60)
 
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
 
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_retries_transient_error_then_succeeds(self, tmp_path: Path, monkeypatch) -> None:
+        store = MemoryStore(tmp_path)
+        provider = ScriptedProvider([
+            LLMResponse(content="503 server error", finish_reason="error"),
+            _make_tool_response(
+                history_entry="[2026-01-01] User discussed testing.",
+                memory_update="# Memory\nUser likes testing.",
+            ),
+        ])
+        session = _make_session(message_count=60)
+        delays: list[int] = []
+
+        async def _fake_sleep(delay: int) -> None:
+            delays.append(delay)
+
+        monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+        result = await store.consolidate(session, provider, "test-model", memory_window=50)
+
+        assert result is True
+        assert provider.calls == 2
+        assert delays == [1]
