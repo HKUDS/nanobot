@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -40,6 +41,37 @@ _SAVE_MEMORY_TOOL = [
         },
     }
 ]
+
+
+_SECRET_PATTERNS = [
+    re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bghp_[A-Za-z0-9]{8,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{8,}\b"),
+    re.compile(r"\bgho_[A-Za-z0-9]{8,}\b"),
+    re.compile(r"\bghu_[A-Za-z0-9]{8,}\b"),
+    re.compile(r"\bghs_[A-Za-z0-9]{8,}\b"),
+    re.compile(r"\bghr_[A-Za-z0-9]{8,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bASIA[0-9A-Z]{16}\b"),
+    re.compile(r"(?i)\b(Bearer)\s+[A-Za-z0-9._~+\-/=]{8,}"),
+    re.compile(r"(?i)\b(access_token|refresh_token|id_token|api[_-]?key|token|secret|password)\b(\s*[:=]\s*|\s+)([^\s,;]+)"),
+    re.compile(r"(?i)([?&](?:access_token|refresh_token|api[_-]?key|token|secret|password)=)([^&\s]+)"),
+]
+
+
+def redact_secrets(text: str) -> str:
+    """Redact obvious secret-like values before persisting memory."""
+    redacted = text
+    for pattern in _SECRET_PATTERNS:
+        if pattern.pattern.startswith("(?i)\\b(Bearer)"):
+            redacted = pattern.sub(r"\1 [REDACTED]", redacted)
+        elif "([?&]" in pattern.pattern:
+            redacted = pattern.sub(r"\1[REDACTED]", redacted)
+        elif "(\\s*[:=]\\s*|\\s+)" in pattern.pattern:
+            redacted = pattern.sub(r"\1\2[REDACTED]", redacted)
+        else:
+            redacted = pattern.sub("[REDACTED]", redacted)
+    return redacted
 
 
 class MemoryStore:
@@ -139,28 +171,19 @@ class MemoryStore:
                 logger.warning("Memory consolidation: unexpected arguments type {}", type(args).__name__)
                 return False
 
-            if "history_entry" not in args or "memory_update" not in args:
-                logger.warning("Memory consolidation: save_memory payload missing required fields")
-                return False
-
-            entry = args["history_entry"]
-            update = args["memory_update"]
-
-            if entry is None or update is None:
-                logger.warning("Memory consolidation: save_memory payload contains null required fields")
-                return False
+            entry = args.get("history_entry", "")
+            update = args.get("memory_update", current_memory)
 
             if not isinstance(entry, str):
                 entry = json.dumps(entry, ensure_ascii=False)
             if not isinstance(update, str):
                 update = json.dumps(update, ensure_ascii=False)
 
-            entry = entry.strip()
-            if not entry:
-                logger.warning("Memory consolidation: history_entry is empty after normalization")
-                return False
+            entry = redact_secrets(entry).strip()
+            update = redact_secrets(update)
 
-            self.append_history(entry)
+            if entry:
+                self.append_history(entry)
             if update != current_memory:
                 self.write_long_term(update)
 
