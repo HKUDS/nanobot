@@ -79,6 +79,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         litellm_prefix="",
         is_direct=True,
     ),
+
+    # === Azure OpenAI (direct API calls with API version 2024-10-21) =====
+    ProviderSpec(
+        name="azure_openai",
+        keywords=("azure", "azure-openai"),
+        env_key="",
+        display_name="Azure OpenAI",
+        litellm_prefix="",
+        is_direct=True,
+    ),
     # === Gateways (detected by api_key / api_base, not model name) =========
     # Gateways can route any model, so they win in fallback.
     # OpenRouter: global gateway, keys start with "sk-or-"
