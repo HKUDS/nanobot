@@ -401,7 +401,8 @@ class AgentLoop:
             async def _consolidate_and_unlock():
                 try:
                     async with lock:
-                        await self._consolidate_memory(session)
+                        if await self._consolidate_memory(session):
+                            self.sessions.save(session)
                 finally:
                     self._consolidating.discard(session.key)
                     _task = asyncio.current_task()
