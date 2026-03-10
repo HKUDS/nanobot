@@ -14,7 +14,7 @@ from nanobot.providers.registry import find_by_model
 runner = CliRunner()
 
 
-class _StopGateway(RuntimeError):
+class _StopGatewayError(RuntimeError):
     pass
 
 
@@ -23,7 +23,7 @@ def mock_paths():
     """Mock config/workspace paths for test isolation."""
     with patch("nanobot.config.loader.get_config_path") as mock_cp, \
          patch("nanobot.config.loader.save_config") as mock_sc, \
-         patch("nanobot.config.loader.load_config") as mock_lc, \
+         patch("nanobot.config.loader.load_config"), \
          patch("nanobot.cli.commands.get_workspace_path") as mock_ws:
 
         base_dir = Path("./test_onboard_data")
@@ -287,12 +287,12 @@ def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Pa
     )
     monkeypatch.setattr(
         "nanobot.cli.commands._make_provider",
-        lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
+        lambda _config: (_ for _ in ()).throw(_StopGatewayError("stop")),
     )
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
-    assert isinstance(result.exception, _StopGateway)
+    assert isinstance(result.exception, _StopGatewayError)
     assert seen["config_path"] == config_file.resolve()
     assert seen["workspace"] == Path(config.agents.defaults.workspace)
 
@@ -315,7 +315,7 @@ def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) 
     )
     monkeypatch.setattr(
         "nanobot.cli.commands._make_provider",
-        lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
+        lambda _config: (_ for _ in ()).throw(_StopGatewayError("stop")),
     )
 
     result = runner.invoke(
@@ -323,7 +323,7 @@ def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) 
         ["gateway", "--config", str(config_file), "--workspace", str(override)],
     )
 
-    assert isinstance(result.exception, _StopGateway)
+    assert isinstance(result.exception, _StopGatewayError)
     assert seen["workspace"] == override
     assert config.workspace_path == override
 
@@ -348,11 +348,150 @@ def test_gateway_uses_config_directory_for_cron_store(monkeypatch, tmp_path: Pat
     class _StopCron:
         def __init__(self, store_path: Path) -> None:
             seen["cron_store"] = store_path
-            raise _StopGateway("stop")
+            raise _StopGatewayError("stop")
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _StopCron)
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
-    assert isinstance(result.exception, _StopGateway)
+    assert isinstance(result.exception, _StopGatewayError)
     assert seen["cron_store"] == config_file.parent / "cron" / "jobs.json"
+
+
+
+def test_status_help_shows_workspace_and_config_options():
+    result = runner.invoke(app, ["status", "--help"])
+
+    assert result.exit_code == 0
+    assert "--workspace" in result.stdout
+    assert "-w" in result.stdout
+    assert "--config" in result.stdout
+    assert "-c" in result.stdout
+
+
+def test_status_uses_explicit_config_path(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    seen: dict[str, Path] = {}
+    display_path = tmp_path / "active-config.json"
+
+    monkeypatch.setattr(
+        "nanobot.config.loader.set_config_path",
+        lambda path: seen.__setitem__("config_path", path),
+    )
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: display_path)
+
+    result = runner.invoke(app, ["status", "--config", str(config_file)])
+    normalized = result.stdout.replace("\n", "")
+
+    assert result.exit_code == 0
+    assert seen["config_path"] == config_file.resolve()
+    assert "Using config:" not in result.stdout
+    assert "Config:" in result.stdout
+    assert str(display_path) in normalized
+
+
+def test_status_workspace_option_overrides_config(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    override = tmp_path / "override-workspace"
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+
+    result = runner.invoke(
+        app,
+        ["status", "--config", str(config_file), "--workspace", str(override)],
+    )
+    normalized = result.stdout.replace("\n", "")
+
+    assert result.exit_code == 0
+    assert config.workspace_path == override
+    assert "Workspace:" in result.stdout
+    assert str(override) in normalized
+
+
+def test_channels_status_help_shows_config_option():
+    result = runner.invoke(app, ["channels", "status", "--help"])
+
+    assert result.exit_code == 0
+    assert "--config" in result.stdout
+    assert "-c" in result.stdout
+    assert "--workspace" not in result.stdout
+    assert "-w" not in result.stdout
+
+
+def test_channels_status_uses_explicit_config_path(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    seen: dict[str, object] = {}
+
+    def fake_load_runtime_config(config_arg=None, workspace_arg=None, *, announce=True):
+        seen["config"] = config_arg
+        seen["workspace"] = workspace_arg
+        seen["announce"] = announce
+        return config
+
+    monkeypatch.setattr("nanobot.cli.commands._load_runtime_config", fake_load_runtime_config)
+
+    result = runner.invoke(app, ["channels", "status", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    assert seen == {
+        "config": str(config_file),
+        "workspace": None,
+        "announce": False,
+    }
+
+
+def test_channels_login_help_shows_config_option():
+    result = runner.invoke(app, ["channels", "login", "--help"])
+
+    assert result.exit_code == 0
+    assert "--config" in result.stdout
+    assert "-c" in result.stdout
+
+
+def test_channels_login_uses_config_specific_auth_dir(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.config import loader
+
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    seen: dict[str, object] = {}
+    original_set_config_path = loader.set_config_path
+
+    def fake_set_config_path(path: Path) -> None:
+        seen["config_path"] = path
+        original_set_config_path(path)
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", fake_set_config_path)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands._get_bridge_dir", lambda: tmp_path / "bridge")
+
+    def fake_run(cmd, cwd=None, check=None, env=None):
+        seen["cwd"] = cwd
+        seen["env"] = env
+        return None
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = runner.invoke(app, ["channels", "login", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    assert seen["config_path"] == config_file.resolve()
+    assert seen["env"]["AUTH_DIR"] == str(config_file.parent / "whatsapp-auth")

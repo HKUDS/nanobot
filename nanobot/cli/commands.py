@@ -213,8 +213,8 @@ def onboard():
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
-    from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
+    from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
@@ -240,7 +240,7 @@ def _make_provider(config: Config):
             console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
             console.print("Use the model field to specify the deployment name.")
             raise typer.Exit(1)
-        
+
         return AzureOpenAIProvider(
             api_key=p.api_key,
             api_base=p.api_base,
@@ -264,7 +264,12 @@ def _make_provider(config: Config):
     )
 
 
-def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
+def _load_runtime_config(
+    config: str | None = None,
+    workspace: str | None = None,
+    *,
+    announce: bool = True,
+) -> Config:
     """Load config and optionally override the active workspace."""
     from nanobot.config.loader import load_config, set_config_path
 
@@ -275,7 +280,8 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
             console.print(f"[red]Error: Config file not found: {config_path}[/red]")
             raise typer.Exit(1)
         set_config_path(config_path)
-        console.print(f"[dim]Using config: {config_path}[/dim]")
+        if announce:
+            console.print(f"[dim]Using config: {config_path}[/dim]")
 
     loaded = load_config(config_path)
     if workspace:
@@ -667,11 +673,11 @@ app.add_typer(channels_app, name="channels")
 
 
 @channels_app.command("status")
-def channels_status():
+def channels_status(
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
     """Show channel status."""
-    from nanobot.config.loader import load_config
-
-    config = load_config()
+    config = _load_runtime_config(config_path, announce=False)
 
     table = Table(title="Channel Status")
     table.add_column("Channel", style="cyan")
@@ -820,22 +826,23 @@ def _get_bridge_dir() -> Path:
 
 
 @channels_app.command("login")
-def channels_login():
+def channels_login(
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
     """Link device via QR code."""
     import subprocess
 
-    from nanobot.config.loader import load_config
     from nanobot.config.paths import get_runtime_subdir
 
-    config = load_config()
+    runtime_config = _load_runtime_config(config_path, announce=False)
     bridge_dir = _get_bridge_dir()
 
     console.print(f"{__logo__} Starting bridge...")
     console.print("Scan the QR code to connect.\n")
 
     env = {**os.environ}
-    if config.channels.whatsapp.bridge_token:
-        env["BRIDGE_TOKEN"] = config.channels.whatsapp.bridge_token
+    if runtime_config.channels.whatsapp.bridge_token:
+        env["BRIDGE_TOKEN"] = runtime_config.channels.whatsapp.bridge_token
     env["AUTH_DIR"] = str(get_runtime_subdir("whatsapp-auth"))
 
     try:
@@ -852,13 +859,16 @@ def channels_login():
 
 
 @app.command()
-def status():
+def status(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
     """Show nanobot status."""
-    from nanobot.config.loader import get_config_path, load_config
+    from nanobot.config.loader import get_config_path
 
+    runtime_config = _load_runtime_config(config, workspace, announce=False)
     config_path = get_config_path()
-    config = load_config()
-    workspace = config.workspace_path
+    workspace = runtime_config.workspace_path
 
     console.print(f"{__logo__} nanobot Status\n")
 
@@ -868,11 +878,11 @@ def status():
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS
 
-        console.print(f"Model: {config.agents.defaults.model}")
+        console.print(f"Model: {runtime_config.agents.defaults.model}")
 
         # Check API keys from registry
         for spec in PROVIDERS:
-            p = getattr(config.providers, spec.name, None)
+            p = getattr(runtime_config.providers, spec.name, None)
             if p is None:
                 continue
             if spec.is_oauth:
