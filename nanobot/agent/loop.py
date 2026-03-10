@@ -58,6 +58,38 @@ from nanobot.agent.tools.google import (
     GoogleContactsDeleteTool,
     GoogleContactsSearchTool,
 )
+from nanobot.agent.tools.x import (
+    XPostTweetTool,
+    XDeleteTweetTool,
+    XGetTweetTool,
+    XSearchTweetsTool,
+    XGetUserTweetsTool,
+    XGetUserMentionsTool,
+    XLikeTweetTool,
+    XUnlikeTweetTool,
+    XGetLikedTweetsTool,
+    XRetweetTool,
+    XUndoRetweetTool,
+    XGetMeTool,
+    XGetUserByIdTool,
+    XGetUserByUsernameTool,
+    XFollowUserTool,
+    XUnfollowUserTool,
+    XGetFollowersTool,
+    XGetFollowingTool,
+    XGetBookmarksTool,
+    XBookmarkTweetTool,
+    XRemoveBookmarkTool,
+    XCreateListTool,
+    XDeleteListTool,
+    XGetListTool,
+    XGetOwnedListsTool,
+    XAddListMemberTool,
+    XRemoveListMemberTool,
+    XSendDmTool,
+    XGetDmEventsTool,
+    XGetDmConversationTool,
+)
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
@@ -209,6 +241,44 @@ class AgentLoop:
             self.tools.register(GoogleContactsUpdateTool())
             self.tools.register(GoogleContactsDeleteTool())
             self.tools.register(GoogleContactsSearchTool())
+            # X — Tweets
+            self.tools.register(XPostTweetTool())
+            self.tools.register(XDeleteTweetTool())
+            self.tools.register(XGetTweetTool())
+            self.tools.register(XSearchTweetsTool())
+            self.tools.register(XGetUserTweetsTool())
+            self.tools.register(XGetUserMentionsTool())
+            # X — Likes
+            self.tools.register(XLikeTweetTool())
+            self.tools.register(XUnlikeTweetTool())
+            self.tools.register(XGetLikedTweetsTool())
+            # X — Retweets
+            self.tools.register(XRetweetTool())
+            self.tools.register(XUndoRetweetTool())
+            # X — Users
+            self.tools.register(XGetMeTool())
+            self.tools.register(XGetUserByIdTool())
+            self.tools.register(XGetUserByUsernameTool())
+            # X — Follows
+            self.tools.register(XFollowUserTool())
+            self.tools.register(XUnfollowUserTool())
+            self.tools.register(XGetFollowersTool())
+            self.tools.register(XGetFollowingTool())
+            # X — Bookmarks
+            self.tools.register(XGetBookmarksTool())
+            self.tools.register(XBookmarkTweetTool())
+            self.tools.register(XRemoveBookmarkTool())
+            # X — Lists
+            self.tools.register(XCreateListTool())
+            self.tools.register(XDeleteListTool())
+            self.tools.register(XGetListTool())
+            self.tools.register(XGetOwnedListsTool())
+            self.tools.register(XAddListMemberTool())
+            self.tools.register(XRemoveListMemberTool())
+            # X — DMs
+            self.tools.register(XSendDmTool())
+            self.tools.register(XGetDmEventsTool())
+            self.tools.register(XGetDmConversationTool())
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
