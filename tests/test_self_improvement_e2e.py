@@ -45,6 +45,14 @@ from nanobot.hooks.self_improvement import (
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.utils.helpers import sync_workspace_templates
 
+_RATE_LIMIT_MARKER = "RateLimitError"
+
+
+def _skip_if_rate_limited(response: str | None) -> None:
+    """Skip test instead of failing when LLM provider hits rate limit."""
+    if response and _RATE_LIMIT_MARKER in response:
+        pytest.skip(f"LLM rate limited: {response[:120]}")
+
 
 # ---------------------------------------------------------------------------
 # Config discovery
@@ -158,13 +166,15 @@ def _has_new_content(workspace: Path, filename: str, original: str) -> bool:
 
 
 async def _run_agent(agent: AgentLoop, prompt: str) -> str:
-    """Run agent with a prompt and return the response."""
-    return await agent.process_direct(
+    """Run agent with a prompt and return the response. Skips on rate limit."""
+    response = await agent.process_direct(
         content=prompt,
         session_key="e2e:test",
         channel="cli",
         chat_id="e2e",
     )
+    _skip_if_rate_limited(response)
+    return response
 
 
 # ===========================================================================
@@ -600,7 +610,7 @@ class TestPromotionE2E:
 
     async def test_promote_to_agents_md(self, agent: AgentLoop, workspace: Path) -> None:
         """Ask agent to promote a workflow learning to AGENTS.md."""
-        original_agents = (workspace / "AGENTS.md").read_text() if (workspace / "AGENTS.md").exists() else ""
+        original_agents = (workspace / "AGENTS.md").read_text(encoding="utf-8") if (workspace / "AGENTS.md").exists() else ""
 
         prompt = (
             "I've noticed a recurring pattern: when running database migrations, "
@@ -612,7 +622,7 @@ class TestPromotionE2E:
         )
         response = await _run_agent(agent, prompt)
 
-        agents_content = (workspace / "AGENTS.md").read_text() if (workspace / "AGENTS.md").exists() else ""
+        agents_content = (workspace / "AGENTS.md").read_text(encoding="utf-8") if (workspace / "AGENTS.md").exists() else ""
         assert len(agents_content) > len(original_agents), (
             f"AGENTS.md was not updated.\nOriginal:\n{original_agents}\n"
             f"Current:\n{agents_content}\nResponse:\n{response}"
@@ -815,6 +825,7 @@ class TestProviderE2E:
             max_tokens=50,
             temperature=0.0,
         )
+        _skip_if_rate_limited(response.content)
         assert response.content is not None
         assert "PONG" in response.content.upper()
 
@@ -843,6 +854,7 @@ class TestProviderE2E:
             max_tokens=200,
             temperature=0.0,
         )
+        _skip_if_rate_limited(response.content)
         assert response.has_tool_calls or response.content is not None
 
     async def test_agent_process_direct_basic(self, agent: AgentLoop) -> None:
