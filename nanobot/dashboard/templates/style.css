@@ -691,6 +691,102 @@ main { flex: 1; padding: 20px 24px; max-width: 1400px; width: 100%; margin: 0 au
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* -- Clickable Memory File Rows -------------------------------------------- */
+
+.mem-file-row {
+  cursor: pointer;
+  transition: background .12s;
+}
+
+.mem-file-row:hover { background: var(--surface2); }
+
+.mem-file-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(108,142,245,.3);
+  text-underline-offset: 2px;
+}
+
+.mem-file-row:hover .mem-file-link {
+  text-decoration-color: var(--accent);
+}
+
+/* -- File Viewer Modal ----------------------------------------------------- */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.6);
+  backdrop-filter: blur(4px);
+  z-index: 200;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-overlay.open { display: flex; }
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: 90vw;
+  max-width: 800px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,.5);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.modal-header span:first-child {
+  font-family: var(--mono);
+  color: var(--accent);
+}
+
+.modal-header span:nth-child(2) {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.modal-close {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-sm);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 3px 10px;
+  transition: border-color .15s, color .15s;
+}
+.modal-close:hover { border-color: var(--accent); color: var(--accent); }
+
+.modal-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  background: var(--bg);
+}
+
 /* -- Responsive ------------------------------------------------------------ */
 
 @media (max-width: 900px) {

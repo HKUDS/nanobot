@@ -85,6 +85,18 @@
     <div id="drawer-messages"></div>
   </div>
 
+  <!-- File Viewer Modal -->
+  <div id="file-modal" class="modal-overlay" onclick="closeFileModal(event)">
+    <div class="modal">
+      <div class="modal-header">
+        <span id="file-modal-title"></span>
+        <span id="file-modal-size"></span>
+        <button class="modal-close" onclick="closeFileModal()">Close</button>
+      </div>
+      <pre id="file-modal-content" class="modal-content"></pre>
+    </div>
+  </div>
+
 </div>
 <script src="/static/app.js"></script>
 </body>

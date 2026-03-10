@@ -340,16 +340,54 @@ function renderSystemMemory(mem) {
     el.innerHTML = '<div class="empty">Memory not available</div>';
     return;
   }
-  el.innerHTML = '<div class="status-grid">' +
-    '<div class="status-row">' +
-      '<span class="status-label">MEMORY.md</span>' +
-      '<span class="status-value">' + fmtBytes(mem.memory_size_bytes || 0) + '</span>' +
-    '</div>' +
-    '<div class="status-row">' +
-      '<span class="status-label">HISTORY.md</span>' +
-      '<span class="status-value">' + (mem.history_lines || 0) + ' lines</span>' +
-    '</div>' +
-  '</div>';
+  var files = mem.files || [];
+  if (files.length === 0) {
+    el.innerHTML = '<div class="empty">No memory files</div>';
+    return;
+  }
+  el.innerHTML = '<div class="status-grid">' + files.map(function(f) {
+    return '<div class="status-row mem-file-row" data-filename="' + esc(f.name) + '" onclick="openFileModal(this)">' +
+      '<span class="status-label mem-file-link">' + esc(f.name) + '</span>' +
+      '<span class="status-value">' + fmtBytes(f.size_bytes || 0) + '</span>' +
+    '</div>';
+  }).join('') + '</div>';
+}
+
+// -- File Viewer Modal --------------------------------------------------------
+
+async function openFileModal(rowEl) {
+  var filename = rowEl.dataset.filename;
+  if (!filename) return;
+
+  var overlay = document.getElementById('file-modal');
+  var titleEl = document.getElementById('file-modal-title');
+  var sizeEl = document.getElementById('file-modal-size');
+  var contentEl = document.getElementById('file-modal-content');
+
+  titleEl.textContent = filename;
+  sizeEl.textContent = '';
+  contentEl.textContent = 'Loading\u2026';
+  overlay.classList.add('open');
+
+  try {
+    var res = await fetch('/api/memory/' + encodeURIComponent(filename));
+    if (!res.ok) {
+      var err = await res.json().catch(function() { return {}; });
+      contentEl.textContent = err.error || 'Failed to load file (HTTP ' + res.status + ')';
+      return;
+    }
+    var data = await res.json();
+    sizeEl.textContent = fmtBytes(data.size_bytes || 0);
+    contentEl.textContent = data.content || '(empty file)';
+  } catch (e) {
+    contentEl.textContent = 'Error: ' + e.message;
+  }
+}
+
+function closeFileModal(event) {
+  // If called from overlay click, only close if clicking the overlay itself
+  if (event && event.target && !event.target.classList.contains('modal-overlay')) return;
+  document.getElementById('file-modal').classList.remove('open');
 }
 
 // -- Session Inspector Drawer -------------------------------------------------

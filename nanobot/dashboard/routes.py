@@ -137,11 +137,51 @@ def get_dashboard_app(state_getter: Callable[[], dict[str, Any] | None]) -> Star
             }
         )
 
+    async def api_memory_file(request: Request) -> JSONResponse:
+        """Return the contents of a memory file (MEMORY.md, HISTORY.md, etc.)."""
+        state = state_getter()
+        if state is None:
+            return JSONResponse({"error": "not initialized"}, status_code=503)
+
+        filename = request.path_params["filename"]
+
+        # Only allow known safe filenames — no path traversal
+        allowed = {"MEMORY.md", "HISTORY.md", "HEARTBEAT.md"}
+        if filename not in allowed:
+            return JSONResponse({"error": "file not allowed"}, status_code=403)
+
+        agent = state.get("agent")
+        workspace = getattr(agent, "workspace", None) if agent else None
+        if workspace is None:
+            return JSONResponse({"error": "workspace not available"}, status_code=500)
+
+        if filename == "HEARTBEAT.md":
+            filepath = workspace / filename
+        else:
+            filepath = workspace / "memory" / filename
+
+        if not filepath.exists():
+            return JSONResponse({"error": "file not found"}, status_code=404)
+
+        try:
+            content = filepath.read_text(encoding="utf-8")
+            # Cap at 100KB to prevent huge payloads
+            if len(content) > 102400:
+                content = content[:102400] + "\n\n... [truncated at 100KB]"
+            return JSONResponse({
+                "filename": filename,
+                "content": content,
+                "size_bytes": filepath.stat().st_size,
+            })
+        except OSError:
+            return JSONResponse({"error": "read error"}, status_code=500)
+
     routes = [
         Route("/health", health),
         Route("/", dashboard_html),
         Route("/api/dashboard", api_dashboard),
         Route("/api/session/{key:path}", api_session_detail),
+        Route("/api/memory/{filename}", api_memory_file),
         Mount("/static", StaticFiles(directory=str(_TEMPLATES_DIR)), name="static"),
     ]
 
@@ -415,30 +455,26 @@ def _build_memory(state: dict[str, Any]) -> dict[str, Any]:
     agent = state.get("agent")
     workspace = getattr(agent, "workspace", None) if agent else None
     if workspace is None:
-        return {"available": False}
+        return {"available": False, "files": []}
 
-    memory_dir = workspace / "memory"
-    memory_file = memory_dir / "MEMORY.md"
-    history_file = memory_dir / "HISTORY.md"
-
-    memory_size = 0
-    history_lines = 0
-
-    if memory_file.exists():
-        try:
-            memory_size = memory_file.stat().st_size
-        except OSError:
-            pass
-
-    if history_file.exists():
-        try:
-            with open(history_file, encoding="utf-8") as f:
-                history_lines = sum(1 for _ in f)
-        except OSError:
-            pass
+    files = []
+    for name, path in [
+        ("MEMORY.md", workspace / "memory" / "MEMORY.md"),
+        ("HISTORY.md", workspace / "memory" / "HISTORY.md"),
+        ("HEARTBEAT.md", workspace / "HEARTBEAT.md"),
+    ]:
+        if path.exists():
+            try:
+                stat = path.stat()
+                files.append({
+                    "name": name,
+                    "size_bytes": stat.st_size,
+                    "modified": stat.st_mtime,
+                })
+            except OSError:
+                pass
 
     return {
         "available": True,
-        "memory_size_bytes": memory_size,
-        "history_lines": history_lines,
+        "files": files,
     }
