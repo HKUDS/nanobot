@@ -173,13 +173,14 @@ async def test_decide_prompt_requires_due_now(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_decide_prompt_includes_last_run_awareness(tmp_path) -> None:
-    """Phase 1 prompt must tell the LLM to skip tasks whose Last-run matches today."""
+async def test_decide_prompt_includes_last_run_awareness_when_enabled(tmp_path) -> None:
+    """Phase 1 prompt includes Last-run instruction when last_run_tracking=True."""
     provider = DummyProvider([LLMResponse(content="", tool_calls=[])])
     service = HeartbeatService(
         workspace=tmp_path,
         provider=provider,
         model="openai/gpt-4o-mini",
+        last_run_tracking=True,
     )
 
     await service._decide("some heartbeat content")
@@ -188,9 +189,27 @@ async def test_decide_prompt_includes_last_run_awareness(tmp_path) -> None:
         m["content"] for m in provider.last_messages if m["role"] == "user"
     )
     assert "last-run" in user_content.lower()
-    # Today's date must appear so the LLM can compare it against the Last-run field
     today = datetime.now().strftime("%Y-%m-%d")
     assert today in user_content
+
+
+@pytest.mark.asyncio
+async def test_decide_prompt_omits_last_run_when_disabled(tmp_path) -> None:
+    """Phase 1 prompt must NOT mention Last-run when last_run_tracking=False (default)."""
+    provider = DummyProvider([LLMResponse(content="", tool_calls=[])])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        last_run_tracking=False,
+    )
+
+    await service._decide("some heartbeat content")
+
+    user_content = next(
+        m["content"] for m in provider.last_messages if m["role"] == "user"
+    )
+    assert "last-run" not in user_content.lower()
 
 
 @pytest.mark.asyncio
@@ -281,6 +300,7 @@ Added: 2026-03-09
         provider=provider,
         model="openai/gpt-4o-mini",
         on_execute=_on_execute,
+        last_run_tracking=True,
     )
 
     result = await service.trigger_now()
@@ -340,6 +360,7 @@ Added: 2026-03-10
         provider=provider,
         model="openai/gpt-4o-mini",
         on_execute=_on_execute,
+        last_run_tracking=True,
     )
 
     result = await service.trigger_now()

@@ -60,6 +60,7 @@ class HeartbeatService:
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
+        last_run_tracking: bool = False,
     ):
         self.workspace = workspace
         self.provider = provider
@@ -68,6 +69,7 @@ class HeartbeatService:
         self.on_notify = on_notify
         self.interval_s = interval_s
         self.enabled = enabled
+        self.last_run_tracking = last_run_tracking
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -89,7 +91,13 @@ class HeartbeatService:
         Returns (action, tasks) where action is 'skip' or 'run'.
         """
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-        today_str = datetime.now().strftime("%Y-%m-%d")
+        last_run_instruction = ""
+        if self.last_run_tracking:
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            last_run_instruction = (
+                f"Evaluate each task independently: if a task has a 'Last-run' field dated {today_str}, "
+                "that specific task already ran today — skip it. Other tasks are unaffected. "
+            )
         response = await self.provider.chat_with_retry(
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
@@ -98,8 +106,7 @@ class HeartbeatService:
                     "Review the following HEARTBEAT.md and decide whether there are tasks DUE NOW "
                     "(scheduled date/time has already passed or is within the next 5 minutes). "
                     "Tasks scheduled for a future date are NOT due — choose 'skip' for those. "
-                    f"Evaluate each task independently: if a task has a 'Last-run' field dated {today_str}, "
-                    "that specific task already ran today — skip it. Other tasks are unaffected.\n\n"
+                    f"{last_run_instruction}\n\n"
                     f"{content}"
                 )},
             ],

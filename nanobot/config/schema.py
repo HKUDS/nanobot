@@ -278,6 +278,7 @@ class HeartbeatConfig(Base):
     interval_s: int = 30 * 60  # 30 minutes
     shared_session: bool = False  # Use target channel's session key instead of isolated "heartbeat"
     send_reasoning: bool = False  # Auto-deliver full agent response; when False only explicit message tool calls reach the user
+    last_run_tracking: bool = False  # When True, Phase 1 skips tasks whose Last-run field matches today (requires agent to write Last-run after executing each task)
 
 
 class GatewayConfig(Base):
