@@ -245,6 +245,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     subagent_max_iterations: int = 15
     memory_window: int = 100
+    memory_model: str | None = None  # Model for memory consolidation (defaults to main model)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
 
 
