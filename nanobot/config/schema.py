@@ -240,12 +240,24 @@ class AgentsConfig(Base):
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
 
 
+class EndpointConfig(Base):
+    """Single endpoint override within a provider (for rotation pools)."""
+
+    api_key: str = ""
+    api_base: str | None = None
+    model: str | None = None  # Override default model for this endpoint
+    extra_headers: dict[str, str] | None = None
+    priority: int = 0  # Lower = higher priority
+    cooldown_seconds: float = 60.0
+
+
 class ProviderConfig(Base):
     """LLM provider configuration."""
 
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    endpoints: list[EndpointConfig] = Field(default_factory=list)  # Multiple endpoints for rotation
 
 
 class ProvidersConfig(Base):
