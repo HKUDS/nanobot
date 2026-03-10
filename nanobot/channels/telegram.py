@@ -179,6 +179,8 @@ class TelegramChannel(BaseChannel):
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
         self._message_threads: dict[tuple[str, int], int] = {}
+        self._bot_user_id: int | None = None
+        self._bot_username: str | None = None
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -242,6 +244,8 @@ class TelegramChannel(BaseChannel):
 
         # Get bot info and register command menu
         bot_info = await self._app.bot.get_me()
+        self._bot_user_id = getattr(bot_info, "id", None)
+        self._bot_username = getattr(bot_info, "username", None)
         logger.info("Telegram bot @{} connected", bot_info.username)
 
         try:
@@ -462,6 +466,70 @@ class TelegramChannel(BaseChannel):
             "is_forum": bool(getattr(message.chat, "is_forum", False)),
         }
 
+    async def _ensure_bot_identity(self) -> tuple[int | None, str | None]:
+        """Load bot identity once and reuse it for mention/reply checks."""
+        if self._bot_user_id is not None or self._bot_username is not None:
+            return self._bot_user_id, self._bot_username
+        if not self._app:
+            return None, None
+        bot_info = await self._app.bot.get_me()
+        self._bot_user_id = getattr(bot_info, "id", None)
+        self._bot_username = getattr(bot_info, "username", None)
+        return self._bot_user_id, self._bot_username
+
+    @staticmethod
+    def _has_mention_entity(
+        text: str,
+        entities,
+        bot_username: str,
+        bot_id: int | None,
+    ) -> bool:
+        """Check Telegram mention entities against the bot username."""
+        handle = f"@{bot_username}".lower()
+        for entity in entities or []:
+            entity_type = getattr(entity, "type", None)
+            if entity_type == "text_mention":
+                user = getattr(entity, "user", None)
+                if user is not None and bot_id is not None and getattr(user, "id", None) == bot_id:
+                    return True
+                continue
+            if entity_type != "mention":
+                continue
+            offset = getattr(entity, "offset", None)
+            length = getattr(entity, "length", None)
+            if offset is None or length is None:
+                continue
+            if text[offset : offset + length].lower() == handle:
+                return True
+        return handle in text.lower()
+
+    async def _is_group_message_for_bot(self, message) -> bool:
+        """Allow group messages when policy is open, @mentioned, or replying to the bot."""
+        if message.chat.type == "private" or self.config.group_policy == "open":
+            return True
+
+        bot_id, bot_username = await self._ensure_bot_identity()
+        if bot_username:
+            text = message.text or ""
+            caption = message.caption or ""
+            if self._has_mention_entity(
+                text,
+                getattr(message, "entities", None),
+                bot_username,
+                bot_id,
+            ):
+                return True
+            if self._has_mention_entity(
+                caption,
+                getattr(message, "caption_entities", None),
+                bot_username,
+                bot_id,
+            ):
+                return True
+
+        reply_user = getattr(getattr(message, "reply_to_message", None), "from_user", None)
+        return bool(bot_id and reply_user and reply_user.id == bot_id)
+
     def _remember_thread_context(self, message) -> None:
         """Cache topic thread id by chat/message id for follow-up replies."""
         message_thread_id = getattr(message, "message_thread_id", None)
@@ -500,6 +568,9 @@ class TelegramChannel(BaseChannel):
 
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
+
+        if not await self._is_group_message_for_bot(message):
+            return
 
         # Build content from text and/or media
         content_parts = []
