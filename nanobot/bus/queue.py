@@ -16,6 +16,7 @@ class MessageBus:
     def __init__(self):
         self.inbound: asyncio.Queue[InboundMessage] = asyncio.Queue()
         self.outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue()
+        self._pending_background: int = 0  # Counter for pending background tasks
 
     async def publish_inbound(self, msg: InboundMessage) -> None:
         """Publish a message from a channel to the agent."""
@@ -42,3 +43,17 @@ class MessageBus:
     def outbound_size(self) -> int:
         """Number of pending outbound messages."""
         return self.outbound.qsize()
+
+    def increment_background(self) -> None:
+        """Increment pending background task counter."""
+        self._pending_background += 1
+
+    def decrement_background(self) -> None:
+        """Decrement pending background task counter."""
+        if self._pending_background > 0:
+            self._pending_background -= 1
+
+    @property
+    def has_pending_background(self) -> bool:
+        """Check if there are pending background tasks."""
+        return self._pending_background > 0

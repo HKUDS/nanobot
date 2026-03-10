@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 import httpx
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, ToolResult
 
 # Shared constants
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
@@ -68,7 +68,7 @@ class WebSearchTool(Tool):
         """Resolve API key at call time so env/config changes are picked up."""
         return self._init_api_key or os.environ.get("BRAVE_API_KEY", "")
 
-    async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
+    async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str | ToolResult:
         if not self.api_key:
             return (
                 "Error: Brave Search API key not configured. Set it in "
@@ -92,18 +92,91 @@ class WebSearchTool(Tool):
             if not results:
                 return f"No results for: {query}"
 
-            lines = [f"Results for: {query}\n"]
+            # Format content for LLM (plain text)
+            content_lines = [f"Results for: {query}\n"]
             for i, item in enumerate(results, 1):
-                lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
+                content_lines.append(f"{i}. {item.get('title', '')}\n   {item.get('url', '')}")
                 if desc := item.get("description"):
-                    lines.append(f"   {desc}")
-            return "\n".join(lines)
+                    content_lines.append(f"   {desc}")
+            content = "\n".join(content_lines)
+
+            # Format display for CLI (with more structure)
+            display = self._format_search_results(query, results)
+
+            return ToolResult(
+                content=content,
+                display=display,
+                display_type="list_result",
+            )
         except httpx.ProxyError as e:
             logger.error("WebSearch proxy error: {}", e)
             return f"Proxy error: {e}"
         except Exception as e:
             logger.error("WebSearch error: {}", e)
             return f"Error: {e}"
+
+    def _format_search_results(self, query: str, results: list[dict]) -> str:
+        """
+        Format search results for CLI display with background color.
+
+        Args:
+            query: Search query string.
+            results: List of search result dictionaries.
+
+        Returns:
+            Formatted search results with dark gray background and dim text.
+        """
+        # ANSI color codes - dark gray background with dim foreground
+        BG_COLOR = "\x1b[48;2;26;26;26m"   # #1a1a1a
+        DIM_FG = "\x1b[38;2;150;150;150m"   # 暗灰色
+        BOLD = "\x1b[1m"
+        RESET = "\x1b[0m"
+
+        # Get terminal width for full-line background
+        try:
+            terminal_width = os.get_terminal_size().columns
+        except OSError:
+            terminal_width = 100
+
+        lines = []
+
+        # Header
+        header = f"Search results for: {query}"
+        lines.append(f"{BOLD}{BG_COLOR}{DIM_FG}{header}{' ' * (terminal_width - len(header))}{RESET}")
+        count = f"Found {len(results)} result{'s' if len(results) != 1 else ''}"
+        lines.append(f"{BG_COLOR}{DIM_FG}{count}{' ' * (terminal_width - len(count))}{RESET}")
+        # Empty line with background
+        lines.append(f"{BG_COLOR}{' ' * terminal_width}{RESET}")
+
+        # Results
+        for i, item in enumerate(results, 1):
+            title = item.get('title', 'No title')
+            url = item.get('url', '')
+            desc = item.get('description', '')
+
+            # Title
+            title_line = f"{i}. {title}"
+            padded = title_line.ljust(terminal_width)
+            lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+
+            # URL
+            url_line = f"   {url}"
+            padded = url_line.ljust(terminal_width)
+            lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+
+            # Description
+            if desc:
+                # Truncate long descriptions
+                if len(desc) > 200:
+                    desc = desc[:197] + "..."
+                desc_line = f"   {desc}"
+                padded = desc_line.ljust(terminal_width)
+                lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+
+            # Empty line between results
+            lines.append(f"{BG_COLOR}{' ' * terminal_width}{RESET}")
+
+        return "\n".join(lines) + "\n"
 
 
 class WebFetchTool(Tool):
@@ -125,13 +198,14 @@ class WebFetchTool(Tool):
         self.max_chars = max_chars
         self.proxy = proxy
 
-    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
+    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str | ToolResult:
         from readability import Document
 
         max_chars = maxChars or self.max_chars
         is_valid, error_msg = _validate_url(url)
         if not is_valid:
-            return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
+            error_json = json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
+            return error_json
 
         try:
             logger.debug("WebFetch: {}", "proxy enabled" if self.proxy else "direct connection")
@@ -148,25 +222,118 @@ class WebFetchTool(Tool):
 
             if "application/json" in ctype:
                 text, extractor = json.dumps(r.json(), indent=2, ensure_ascii=False), "json"
+                title = "JSON data"
             elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
                 doc = Document(r.text)
                 content = self._to_markdown(doc.summary()) if extractMode == "markdown" else _strip_tags(doc.summary())
                 text = f"# {doc.title()}\n\n{content}" if doc.title() else content
                 extractor = "readability"
+                title = doc.title() or "Untitled"
             else:
                 text, extractor = r.text, "raw"
+                title = url.split("/")[-1]
 
             truncated = len(text) > max_chars
             if truncated: text = text[:max_chars]
 
-            return json.dumps({"url": url, "finalUrl": str(r.url), "status": r.status_code,
-                              "extractor": extractor, "truncated": truncated, "length": len(text), "text": text}, ensure_ascii=False)
+            # Content for LLM (JSON format)
+            content = json.dumps({
+                "url": url,
+                "finalUrl": str(r.url),
+                "status": r.status_code,
+                "extractor": extractor,
+                "truncated": truncated,
+                "length": len(text),
+                "text": text
+            }, ensure_ascii=False)
+
+            # Display for CLI (formatted summary)
+            display = self._format_fetch_display(url, str(r.url), r.status_code, title, len(text), truncated, extractor)
+
+            return ToolResult(
+                content=content,
+                display=display,
+                display_type="list_result",
+            )
         except httpx.ProxyError as e:
             logger.error("WebFetch proxy error for {}: {}", url, e)
             return json.dumps({"error": f"Proxy error: {e}", "url": url}, ensure_ascii=False)
         except Exception as e:
             logger.error("WebFetch error for {}: {}", url, e)
             return json.dumps({"error": str(e), "url": url}, ensure_ascii=False)
+
+    def _format_fetch_display(self, original_url: str, final_url: str, status: int, title: str,
+                              length: int, truncated: bool, extractor: str) -> str:
+        """
+        Format web fetch result for CLI display.
+
+        Args:
+            original_url: The requested URL.
+            final_url: The final URL after redirects.
+            status: HTTP status code.
+            title: Page title.
+            length: Content length in characters.
+            truncated: Whether content was truncated.
+            extractor: Extractor type (readability/json/raw).
+
+        Returns:
+            Formatted fetch summary for display.
+        """
+        # ANSI color codes - dark gray background with dim foreground
+        BG_COLOR = "\x1b[48;2;26;26;26m"   # #1a1a1a
+        DIM_FG = "\x1b[38;2;150;150;150m"   # 暗灰色
+        BOLD = "\x1b[1m"
+        RESET = "\x1b[0m"
+
+        # Get terminal width for full-line background
+        try:
+            terminal_width = os.get_terminal_size().columns
+        except OSError:
+            terminal_width = 100
+
+        lines = []
+
+        # Fetched URL
+        url_line = f"Fetched: {original_url}"
+        padded = url_line.ljust(terminal_width)
+        lines.append(f"{BOLD}{BG_COLOR}{DIM_FG}{padded}{RESET}")
+
+        # Redirected URL
+        if final_url != original_url:
+            redirect_line = f"Redirected to: {final_url}"
+            padded = redirect_line.ljust(terminal_width)
+            lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+
+        # Status
+        status_line = f"Status: {status}"
+        padded = status_line.ljust(terminal_width)
+        lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+
+        # Title
+        title_line = f"Title: {title}"
+        padded = title_line.ljust(terminal_width)
+        lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+
+        # Extractor
+        extractor_line = f"Extractor: {extractor}"
+        padded = extractor_line.ljust(terminal_width)
+        lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+
+        # Length
+        length_line = f"Length: {length:,} chars"
+        padded = length_line.ljust(terminal_width)
+        lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+
+        # Truncated warning
+        if truncated:
+            trunc_line = f"⚠️  Content truncated (max {self.max_chars:,} chars)"
+            padded = trunc_line.ljust(terminal_width)
+            lines.append(f"{BG_COLOR}{DIM_FG}{padded}{RESET}")
+
+        # Empty line
+        lines.append(f"{BG_COLOR}{' ' * terminal_width}{RESET}")
+
+        return "\n".join(lines) + "\n"
 
     def _to_markdown(self, html: str) -> str:
         """Convert HTML to markdown."""
