@@ -165,3 +165,82 @@ class TestSubagentCancellation:
         provider.get_default_model.return_value = "test-model"
         mgr = SubagentManager(provider=provider, workspace=MagicMock(), bus=bus)
         assert await mgr.cancel_by_session("nonexistent") == 0
+
+
+class TestSubagentSpawnDedupe:
+    @pytest.mark.asyncio
+    async def test_spawn_dedupes_same_task_within_session(self):
+        from nanobot.agent.subagent import SubagentManager
+        from nanobot.bus.queue import MessageBus
+
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        mgr = SubagentManager(provider=provider, workspace=MagicMock(), bus=bus)
+
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def fake_run(_task_id: str, _task: str, _label: str, _origin: dict[str, str]) -> None:
+            started.set()
+            await release.wait()
+
+        with patch.object(mgr, "_run_subagent", side_effect=fake_run) as run_mock:
+            first = await mgr.spawn(
+                task="fetch news",
+                label="news_fetch",
+                origin_channel="telegram",
+                origin_chat_id="123",
+                session_key="telegram:123",
+            )
+            await started.wait()
+            second = await mgr.spawn(
+                task="fetch news",
+                label="news_fetch",
+                origin_channel="telegram",
+                origin_chat_id="123",
+                session_key="telegram:123",
+            )
+
+            assert "started" in first
+            assert "already running" in second
+            assert run_mock.call_count == 1
+            assert mgr.get_running_count() == 1
+
+            release.set()
+            await asyncio.sleep(0)
+
+    @pytest.mark.asyncio
+    async def test_spawn_allows_same_task_in_different_sessions(self):
+        from nanobot.agent.subagent import SubagentManager
+        from nanobot.bus.queue import MessageBus
+
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        mgr = SubagentManager(provider=provider, workspace=MagicMock(), bus=bus)
+
+        release = asyncio.Event()
+
+        async def fake_run(_task_id: str, _task: str, _label: str, _origin: dict[str, str]) -> None:
+            await release.wait()
+
+        with patch.object(mgr, "_run_subagent", side_effect=fake_run) as run_mock:
+            await mgr.spawn(
+                task="fetch news",
+                label="news_fetch",
+                origin_channel="telegram",
+                origin_chat_id="111",
+                session_key="telegram:111",
+            )
+            await mgr.spawn(
+                task="fetch news",
+                label="news_fetch",
+                origin_channel="telegram",
+                origin_chat_id="222",
+                session_key="telegram:222",
+            )
+
+            assert run_mock.call_count == 2
+            release.set()
+            await asyncio.sleep(0)

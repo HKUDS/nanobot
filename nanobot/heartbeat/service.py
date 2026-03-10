@@ -137,6 +137,25 @@ class HeartbeatService:
             except Exception as e:
                 logger.error("Heartbeat error: {}", e)
 
+    def _build_execution_input(self, tasks: str, content: str) -> str:
+        """Build phase-2 input while preserving full HEARTBEAT.md details."""
+        tasks = (tasks or "").strip()
+        content = (content or "").strip()
+
+        if not tasks:
+            return content
+
+        if not content:
+            return tasks
+
+        return (
+            f"{tasks}\n\n"
+            "Reference details from HEARTBEAT.md below when executing:\n"
+            "---\n"
+            f"{content}\n"
+            "---"
+        )
+
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
         content = self._read_heartbeat_file()
@@ -155,7 +174,8 @@ class HeartbeatService:
 
             logger.info("Heartbeat: tasks found, executing...")
             if self.on_execute:
-                response = await self.on_execute(tasks)
+                execution_input = self._build_execution_input(tasks, content)
+                response = await self.on_execute(execution_input)
                 if response and self.on_notify:
                     logger.info("Heartbeat: completed, delivering response")
                     await self.on_notify(response)
@@ -170,4 +190,5 @@ class HeartbeatService:
         action, tasks = await self._decide(content)
         if action != "run" or not self.on_execute:
             return None
-        return await self.on_execute(tasks)
+        execution_input = self._build_execution_input(tasks, content)
+        return await self.on_execute(execution_input)

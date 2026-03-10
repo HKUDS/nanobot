@@ -84,7 +84,26 @@ async def test_trigger_now_executes_when_decision_is_run(tmp_path) -> None:
 
     result = await service.trigger_now()
     assert result == "done"
-    assert called_with == ["check open tasks"]
+    assert len(called_with) == 1
+    assert "check open tasks" in called_with[0]
+    assert "- [ ] do thing" in called_with[0]
+
+
+def test_build_execution_input_preserves_full_heartbeat_details(tmp_path) -> None:
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+    )
+
+    payload = service._build_execution_input(
+        "short summary",
+        "line1\nline2\nline3",
+    )
+
+    assert "short summary" in payload
+    assert "line1" in payload and "line2" in payload and "line3" in payload
 
 
 @pytest.mark.asyncio

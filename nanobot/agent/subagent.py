@@ -49,6 +49,21 @@ class SubagentManager:
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self._active_spawn_keys: dict[tuple[str, str, str], str] = {}
+
+    @staticmethod
+    def _normalize_spawn_key_text(value: str | None) -> str:
+        if value is None:
+            return ""
+        return " ".join(value.strip().split())
+
+    def _build_spawn_key(self, session_key: str | None, task: str, label: str | None) -> tuple[str, str, str]:
+        scope = session_key or ""
+        return (
+            scope,
+            self._normalize_spawn_key_text(task),
+            self._normalize_spawn_key_text(label),
+        )
 
     async def spawn(
         self,
@@ -62,16 +77,34 @@ class SubagentManager:
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin = {"channel": origin_channel, "chat_id": origin_chat_id}
+        spawn_key = self._build_spawn_key(session_key, task, label)
+
+        if existing_task_id := self._active_spawn_keys.get(spawn_key):
+            existing = self._running_tasks.get(existing_task_id)
+            if existing is not None and not existing.done():
+                logger.info(
+                    "Deduped subagent spawn [{}]: {}",
+                    existing_task_id,
+                    display_label,
+                )
+                return (
+                    f"Subagent [{display_label}] is already running "
+                    f"(id: {existing_task_id}); not spawning a duplicate."
+                )
+            self._active_spawn_keys.pop(spawn_key, None)
 
         bg_task = asyncio.create_task(
             self._run_subagent(task_id, task, display_label, origin)
         )
         self._running_tasks[task_id] = bg_task
+        self._active_spawn_keys[spawn_key] = task_id
         if session_key:
             self._session_tasks.setdefault(session_key, set()).add(task_id)
 
         def _cleanup(_: asyncio.Task) -> None:
             self._running_tasks.pop(task_id, None)
+            if self._active_spawn_keys.get(spawn_key) == task_id:
+                self._active_spawn_keys.pop(spawn_key, None)
             if session_key and (ids := self._session_tasks.get(session_key)):
                 ids.discard(task_id)
                 if not ids:
