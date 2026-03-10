@@ -24,7 +24,7 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(self, skill_names: list[str] | None = None, *, current_message: str = "") -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
@@ -32,7 +32,7 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
 
-        memory = self.memory.get_memory_context()
+        memory = self.memory.get_memory_context(query=current_message)
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
@@ -83,6 +83,7 @@ You are nanobot, a helpful AI assistant.
 Your workspace is at: {workspace_path}
 - Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
 - History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
+- Learned skills: {workspace_path}/memory/SKILLS.jsonl (auto-extracted reusable workflow patterns)
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
 {platform_policy}
@@ -139,7 +140,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, current_message=current_message)},
             *history,
             {"role": "user", "content": merged},
         ]
