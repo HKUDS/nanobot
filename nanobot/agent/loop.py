@@ -31,6 +31,14 @@ if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig
     from nanobot.cron.service import CronService
 
+# Token budgets for Anthropic extended thinking mode.
+# Used when reasoning_effort is set and the model supports thinking dicts.
+THINKING_BUDGETS: dict[str, int] = {
+    "low": 2_048,
+    "medium": 8_192,
+    "high": 32_768,
+}
+
 
 class AgentLoop:
     """
@@ -188,6 +196,23 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
 
+        # Dual thinking mode: Anthropic models use a thinking dict with token
+        # budgets; other models use the simpler reasoning_effort string.
+        thinking: dict | None = None
+        effective_reasoning = self.reasoning_effort
+        effective_temperature = self.temperature
+        effective_max_tokens = self.max_tokens
+
+        if self.reasoning_effort and self.reasoning_effort in THINKING_BUDGETS:
+            model_lower = self.model.lower()
+            if "claude" in model_lower or "anthropic" in model_lower:
+                budget = THINKING_BUDGETS[self.reasoning_effort]
+                thinking = {"type": "enabled", "budget_tokens": budget}
+                effective_max_tokens = self.max_tokens + budget
+                # Anthropic requires temperature=1 when thinking is enabled
+                effective_temperature = 1
+                effective_reasoning = None  # Don't pass both
+
         while iteration < self.max_iterations:
             iteration += 1
 
@@ -195,9 +220,10 @@ class AgentLoop:
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                reasoning_effort=self.reasoning_effort,
+                temperature=effective_temperature,
+                max_tokens=effective_max_tokens,
+                reasoning_effort=effective_reasoning,
+                thinking=thinking,
             )
 
             if response.has_tool_calls:
