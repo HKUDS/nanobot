@@ -30,7 +30,19 @@ Architecture
 from .extractor import MemoryExtractor
 from .graph import KnowledgeGraph
 from .mem0_adapter import _Mem0Adapter, _Mem0RuntimeInfo
-from .ontology import Entity, EntityType, Relationship, RelationType, Triple, classify_entity_type
+from .ontology import (
+    AGENT_NATIVE_TYPES,
+    AGENT_RELATION_TYPES,
+    RELATION_RULES,
+    Entity,
+    EntityType,
+    Relationship,
+    RelationType,
+    Triple,
+    TripleValidation,
+    classify_entity_type,
+    validate_triple_types,
+)
 from .persistence import MemoryPersistence
 from .reranker import CrossEncoderReranker
 from .store import MemoryStore
@@ -48,5 +60,10 @@ __all__ = [
     "RelationType",
     "Relationship",
     "Triple",
+    "TripleValidation",
     "classify_entity_type",
+    "validate_triple_types",
+    "RELATION_RULES",
+    "AGENT_NATIVE_TYPES",
+    "AGENT_RELATION_TYPES",
 ]

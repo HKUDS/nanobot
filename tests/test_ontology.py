@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 from nanobot.agent.memory.ontology import (
+    AGENT_NATIVE_TYPES,
+    AGENT_RELATION_TYPES,
+    RELATION_RULES,
     Entity,
     EntityType,
     Relationship,
     RelationType,
     Triple,
+    TripleValidation,
     TypeScore,
     classify_entity_type,
     classify_entity_type_scored,
     refine_type_from_predicate,
     resolve_alias,
+    validate_triple_types,
 )
 
 
@@ -27,6 +32,27 @@ class TestEntityType:
         # Top-level types return themselves
         assert EntityType.parent_type(EntityType.PERSON) == EntityType.PERSON
         assert EntityType.parent_type(EntityType.UNKNOWN) == EntityType.UNKNOWN
+
+    def test_agent_native_parent_types(self) -> None:
+        # USER is a subtype of PERSON
+        assert EntityType.parent_type(EntityType.USER) == EntityType.PERSON
+        # Autonomous agent-native types return themselves
+        assert EntityType.parent_type(EntityType.AGENT) == EntityType.AGENT
+        assert EntityType.parent_type(EntityType.TASK) == EntityType.TASK
+        assert EntityType.parent_type(EntityType.ACTION) == EntityType.ACTION
+        assert EntityType.parent_type(EntityType.SESSION) == EntityType.SESSION
+
+    def test_agent_native_types_exist(self) -> None:
+        for name in ("AGENT", "USER", "TASK", "ACTION", "OBSERVATION",
+                     "MEMORY", "SESSION", "MESSAGE", "DOCUMENT", "TOOL", "MODEL"):
+            assert hasattr(EntityType, name)
+            assert EntityType(name.lower()) is getattr(EntityType, name)
+
+    def test_agent_native_types_constant(self) -> None:
+        assert EntityType.AGENT in AGENT_NATIVE_TYPES
+        assert EntityType.TOOL in AGENT_NATIVE_TYPES
+        assert EntityType.MODEL in AGENT_NATIVE_TYPES
+        assert EntityType.PERSON not in AGENT_NATIVE_TYPES
 
     def test_all_values_are_strings(self) -> None:
         for member in EntityType:
@@ -47,6 +73,22 @@ class TestRelationType:
         for member in RelationType:
             assert member.value == member.value.upper()
 
+    def test_agent_operational_relations_exist(self) -> None:
+        for name in ("PERFORMS", "EXECUTES", "CALLS", "PRODUCES",
+                     "OBSERVES", "STORES", "RECALLS", "REFERENCES",
+                     "DERIVED_FROM", "SAME_AS", "PART_OF"):
+            assert hasattr(RelationType, name)
+
+    def test_agent_relation_types_constant(self) -> None:
+        assert RelationType.PERFORMS in AGENT_RELATION_TYPES
+        assert RelationType.RECALLS in AGENT_RELATION_TYPES
+        assert RelationType.WORKS_ON not in AGENT_RELATION_TYPES
+
+    def test_from_str_agent_predicates(self) -> None:
+        assert RelationType.from_str("PERFORMS") == RelationType.PERFORMS
+        assert RelationType.from_str("derived from") == RelationType.DERIVED_FROM
+        assert RelationType.from_str("PART_OF") == RelationType.PART_OF
+
 
 class TestEntity:
     def test_canonical_name(self) -> None:
@@ -64,6 +106,33 @@ class TestEntity:
         assert e.properties == {}
         assert e.first_seen == ""
         assert e.last_seen == ""
+
+    def test_secondary_types(self) -> None:
+        e = Entity(
+            name="Neo4j",
+            entity_type=EntityType.DATABASE,
+            secondary_types=[EntityType.SYSTEM, EntityType.TECHNOLOGY],
+        )
+        assert e.all_types == [EntityType.DATABASE, EntityType.SYSTEM, EntityType.TECHNOLOGY]
+
+    def test_all_types_deduplicates(self) -> None:
+        e = Entity(
+            name="x",
+            entity_type=EntityType.TECHNOLOGY,
+            secondary_types=[EntityType.TECHNOLOGY, EntityType.SYSTEM],
+        )
+        assert e.all_types == [EntityType.TECHNOLOGY, EntityType.SYSTEM]
+
+    def test_external_grounding(self) -> None:
+        e = Entity(
+            name="Python",
+            entity_type=EntityType.TECHNOLOGY,
+            properties={
+                "wikidata_id": "Q28865",
+                "external_uri": "https://www.wikidata.org/entity/Q28865",
+            },
+        )
+        assert e.properties["wikidata_id"] == "Q28865"
 
 
 class TestRelationship:
@@ -270,3 +339,109 @@ class TestRefineTypeFromPredicate:
         assert refine_type_from_predicate(
             EntityType.UNKNOWN, RelationType.RELATED_TO, is_subject=True,
         ) == EntityType.UNKNOWN
+
+    def test_agent_predicate_hints(self) -> None:
+        # PERFORMS subject → AGENT
+        assert refine_type_from_predicate(
+            EntityType.UNKNOWN, RelationType.PERFORMS, is_subject=True,
+        ) == EntityType.AGENT
+        # STORES object → MEMORY
+        assert refine_type_from_predicate(
+            EntityType.UNKNOWN, RelationType.STORES, is_subject=False,
+        ) == EntityType.MEMORY
+
+
+class TestValidateTripleTypes:
+    """Tests for relation domain/range constraint validation."""
+
+    def test_valid_works_on(self) -> None:
+        result = validate_triple_types(
+            RelationType.WORKS_ON, EntityType.PERSON, EntityType.PROJECT,
+        )
+        assert result.valid is True
+
+    def test_invalid_works_on_subject(self) -> None:
+        # DATABASE cannot be subject of WORKS_ON
+        result = validate_triple_types(
+            RelationType.WORKS_ON, EntityType.DATABASE, EntityType.PROJECT,
+        )
+        assert result.valid is False
+        assert "subject" in result.reason
+
+    def test_invalid_works_on_object(self) -> None:
+        # PERSON cannot be object of WORKS_ON
+        result = validate_triple_types(
+            RelationType.WORKS_ON, EntityType.PERSON, EntityType.PERSON,
+        )
+        assert result.valid is False
+        assert "object" in result.reason
+
+    def test_unconstrained_predicate(self) -> None:
+        # RELATED_TO has no constraints — always valid
+        result = validate_triple_types(
+            RelationType.RELATED_TO, EntityType.DATABASE, EntityType.PERSON,
+        )
+        assert result.valid is True
+
+    def test_agent_relation_valid(self) -> None:
+        result = validate_triple_types(
+            RelationType.PERFORMS, EntityType.AGENT, EntityType.TASK,
+        )
+        assert result.valid is True
+
+    def test_agent_relation_invalid(self) -> None:
+        result = validate_triple_types(
+            RelationType.PERFORMS, EntityType.DATABASE, EntityType.TASK,
+        )
+        assert result.valid is False
+
+    def test_same_as_always_valid(self) -> None:
+        # SAME_AS is symmetric and unconstrained by entity type
+        result = validate_triple_types(
+            RelationType.SAME_AS, EntityType.DATABASE, EntityType.TECHNOLOGY,
+        )
+        assert result.valid is True
+
+    def test_validation_result_fields(self) -> None:
+        result = validate_triple_types(
+            RelationType.USES, EntityType.AGENT, EntityType.TOOL,
+        )
+        assert isinstance(result, TripleValidation)
+        assert result.predicate == RelationType.USES
+        assert result.subject_type == EntityType.AGENT
+        assert result.object_type == EntityType.TOOL
+
+    def test_unknown_type_passes_when_in_allowed_set(self) -> None:
+        # UNKNOWN is explicitly allowed in some subject/object sets
+        result = validate_triple_types(
+            RelationType.WORKS_ON, EntityType.PERSON, EntityType.UNKNOWN,
+        )
+        assert result.valid is True
+
+    def test_relation_rules_completeness(self) -> None:
+        # Every rule should have both subject and object keys
+        for rel, rule in RELATION_RULES.items():
+            assert "subject" in rule, f"{rel} missing 'subject'"
+            assert "object" in rule, f"{rel} missing 'object'"
+
+
+class TestClassifyAgentNativeKeywords:
+    """Tests for agent-native keyword classification."""
+
+    def test_agent_keyword(self) -> None:
+        assert classify_entity_type("nanobot agent") == EntityType.AGENT
+
+    def test_tool_keyword(self) -> None:
+        assert classify_entity_type("search tool") == EntityType.TOOL
+
+    def test_model_keyword(self) -> None:
+        assert classify_entity_type("gpt-4o-mini") == EntityType.MODEL
+
+    def test_document_keyword(self) -> None:
+        assert classify_entity_type("deployment runbook") == EntityType.DOCUMENT
+
+    def test_task_keyword(self) -> None:
+        assert classify_entity_type("bug fix task") == EntityType.TASK
+
+    def test_session_keyword(self) -> None:
+        assert classify_entity_type("chat session") == EntityType.SESSION

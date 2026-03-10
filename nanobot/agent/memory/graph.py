@@ -29,6 +29,7 @@ from .ontology import (
     Triple,
     classify_entity_type,
     refine_type_from_predicate,
+    validate_triple_types,
 )
 
 try:
@@ -230,6 +231,17 @@ class KnowledgeGraph:
                 obj_type, triple.predicate, is_subject=False,
             )
 
+            # Validate domain/range constraints — demote confidence on violation
+            validation = validate_triple_types(triple.predicate, sub_type, obj_type)
+            confidence = triple.confidence
+            if not validation.valid:
+                logger.debug(
+                    "Triple constraint violation (%s): %s",
+                    triple.predicate.value,
+                    validation.reason,
+                )
+                confidence *= 0.5  # demote but still insert
+
             sub_entity = Entity(
                 name=triple.subject,
                 entity_type=sub_type,
@@ -247,7 +259,7 @@ class KnowledgeGraph:
                 source_id=triple.subject,
                 target_id=triple.object,
                 relation_type=triple.predicate,
-                confidence=triple.confidence,
+                confidence=confidence,
                 source_event_id=event_id,
                 timestamp=timestamp,
             )

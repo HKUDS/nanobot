@@ -3857,7 +3857,7 @@ class MemoryStore:
         raw_reflection = [self._memory_item_line(item) for item in reflection_items]
 
         raw_graph: list[str] = []
-        if self.graph.enabled and query:
+        if query:
             raw_graph = self._build_graph_context_lines(
                 query, retrieved, max_tokens=budget,
             )
