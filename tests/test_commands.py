@@ -1,3 +1,5 @@
+import asyncio
+import json
 import shutil
 from pathlib import Path
 from unittest.mock import patch
@@ -5,7 +7,11 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from nanobot.cli.commands import app
+from nanobot.cli.commands import (
+    _gateway_probe_host,
+    _start_gateway_health_server,
+    app,
+)
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
@@ -19,7 +25,7 @@ def mock_paths():
     """Mock config/workspace paths for test isolation."""
     with patch("nanobot.config.loader.get_config_path") as mock_cp, \
          patch("nanobot.config.loader.save_config") as mock_sc, \
-         patch("nanobot.config.loader.load_config") as mock_lc, \
+         patch("nanobot.config.loader.load_config"), \
          patch("nanobot.utils.helpers.get_workspace_path") as mock_ws:
 
         base_dir = Path("./test_onboard_data")
@@ -53,6 +59,8 @@ def test_onboard_fresh_install(mock_paths):
     assert config_file.exists()
     assert (workspace_dir / "AGENTS.md").exists()
     assert (workspace_dir / "memory" / "MEMORY.md").exists()
+    assert (workspace_dir / "memory" / "PINNED.md").exists()
+    assert (workspace_dir / "WORKFLOW.md").exists()
 
 
 def test_onboard_existing_config_refresh(mock_paths):
@@ -128,3 +136,71 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_gateway_probe_host_maps_unspecified_addresses_to_loopback():
+    assert _gateway_probe_host("0.0.0.0") == "127.0.0.1"
+    assert _gateway_probe_host("::") == "127.0.0.1"
+    assert _gateway_probe_host("[::]") == "::1"
+    assert _gateway_probe_host("127.0.0.1") == "127.0.0.1"
+
+
+def test_gateway_health_server_exposes_online_status():
+    async def scenario() -> None:
+        server = await _start_gateway_health_server(
+            "127.0.0.1",
+            0,
+            lambda: {
+                "status": "online",
+                "port": 18790,
+                "channels": ["telegram"],
+            },
+        )
+        try:
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.write(b"GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            await writer.drain()
+            raw = await reader.read()
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            server.close()
+            await server.wait_closed()
+
+        headers, body = raw.split(b"\r\n\r\n", 1)
+        assert b"200 OK" in headers
+        payload = json.loads(body.decode("utf-8"))
+        assert payload["status"] == "online"
+        assert payload["channels"] == ["telegram"]
+        assert payload["port"] == 18790
+
+    asyncio.run(scenario())
+
+
+def test_gateway_health_server_returns_404_for_unknown_path():
+    async def scenario() -> None:
+        server = await _start_gateway_health_server(
+            "127.0.0.1",
+            0,
+            lambda: {"status": "online"},
+        )
+        try:
+            port = server.sockets[0].getsockname()[1]
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.write(b"GET /missing HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            await writer.drain()
+            raw = await reader.read()
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            server.close()
+            await server.wait_closed()
+
+        headers, body = raw.split(b"\r\n\r\n", 1)
+        assert b"404 Not Found" in headers
+        payload = json.loads(body.decode("utf-8"))
+        assert payload["status"] == "not_found"
+        assert payload["path"] == "/missing"
+
+    asyncio.run(scenario())

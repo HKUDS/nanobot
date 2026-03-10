@@ -1,12 +1,15 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import json
 import os
 import signal
 import socket
 import subprocess
 import select
 import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -269,6 +272,80 @@ def _is_socket_open(host: str, port: int, timeout: float = 0.3) -> bool:
         return False
 
 
+def _gateway_probe_host(host: str) -> str:
+    """Return a loopback-safe host for local health checks."""
+    if host in {"0.0.0.0", "::"}:
+        return "127.0.0.1"
+    if host == "[::]":
+        return "::1"
+    return host
+
+
+def _make_http_json_response(
+    payload: dict[str, object],
+    *,
+    status: str = "200 OK",
+) -> bytes:
+    """Build a minimal HTTP JSON response."""
+    body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
+    headers = [
+        f"HTTP/1.1 {status}",
+        "Content-Type: application/json; charset=utf-8",
+        f"Content-Length: {len(body)}",
+        "Connection: close",
+        "",
+        "",
+    ]
+    return "\r\n".join(headers).encode("ascii") + body
+
+
+async def _handle_gateway_health_request(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    payload_factory: Callable[[], dict[str, object]],
+) -> None:
+    """Serve a tiny HTTP health endpoint for external liveness probes."""
+    path = "/"
+    try:
+        data = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=2.0)
+    except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, asyncio.TimeoutError):
+        data = b""
+
+    if data:
+        request_line = data.splitlines()[0].decode("ascii", errors="ignore")
+        parts = request_line.split()
+        if len(parts) >= 2:
+            path = parts[1]
+
+    if path in {"/", "/health", "/status"}:
+        response = _make_http_json_response(payload_factory())
+    else:
+        response = _make_http_json_response(
+            {"status": "not_found", "path": path},
+            status="404 Not Found",
+        )
+
+    writer.write(response)
+    try:
+        await writer.drain()
+    finally:
+        writer.close()
+        await writer.wait_closed()
+
+
+async def _start_gateway_health_server(
+    host: str,
+    port: int,
+    payload_factory: Callable[[], dict[str, object]],
+) -> asyncio.AbstractServer:
+    """Start the gateway health endpoint."""
+    return await asyncio.start_server(
+        lambda reader, writer: _handle_gateway_health_request(reader, writer, payload_factory),
+        host=host,
+        port=port,
+    )
+
+
 def _get_local_whatsapp_bridge_launch_spec(config: Config) -> tuple[Path, dict[str, str]] | None:
     """Return launch details for the bundled bridge when the bridge is local."""
     if not config.channels.whatsapp.enabled:
@@ -292,7 +369,7 @@ def _get_local_whatsapp_bridge_launch_spec(config: Config) -> tuple[Path, dict[s
 
 @app.command()
 def gateway(
-    port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the nanobot gateway."""
@@ -309,10 +386,13 @@ def gateway(
         import logging
         logging.basicConfig(level=logging.DEBUG)
     
-    console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    
     config = load_config()
     sync_workspace_templates(config.workspace_path)
+    listen_host = config.gateway.host
+    listen_port = port if port is not None else config.gateway.port
+
+    console.print(f"{__logo__} Starting nanobot gateway on {listen_host}:{listen_port}...")
+
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
@@ -442,8 +522,34 @@ def gateway(
                     cwd=bridge_dir,
                     env=bridge_env,
                 )
+
+    started_at = time.time()
+    active_port = listen_port
+
+    def _gateway_health_payload() -> dict[str, object]:
+        return {
+            "status": "online",
+            "host": listen_host,
+            "port": active_port,
+            "channels": list(channels.enabled_channels),
+            "heartbeat": {
+                "enabled": hb_cfg.enabled,
+                "intervalS": hb_cfg.interval_s,
+            },
+            "uptimeSeconds": max(0, int(time.time() - started_at)),
+        }
     
     async def run():
+        nonlocal active_port
+        health_server = await _start_gateway_health_server(
+            listen_host,
+            listen_port,
+            _gateway_health_payload,
+        )
+        socket_info = next(iter(health_server.sockets or []), None)
+        if socket_info is not None:
+            active_port = int(socket_info.getsockname()[1])
+            console.print(f"[green]✓[/green] Health endpoint: http://{_gateway_probe_host(listen_host)}:{active_port}/health")
         try:
             await cron.start()
             await heartbeat.start()
@@ -454,6 +560,8 @@ def gateway(
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
+            health_server.close()
+            await health_server.wait_closed()
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
@@ -1124,6 +1232,12 @@ def status():
 
     console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
     console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
+    gateway_host = _gateway_probe_host(config.gateway.host)
+    gateway_online = _is_socket_open(gateway_host, config.gateway.port)
+    console.print(
+        f"Gateway: {gateway_host}:{config.gateway.port} "
+        f"{'[green]online[/green]' if gateway_online else '[red]offline[/red]'}"
+    )
 
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS
