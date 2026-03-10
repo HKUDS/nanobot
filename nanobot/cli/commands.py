@@ -213,8 +213,8 @@ def onboard():
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
-    from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
+    from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
@@ -240,7 +240,7 @@ def _make_provider(config: Config):
             console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
             console.print("Use the model field to specify the deployment name.")
             raise typer.Exit(1)
-        
+
         return AzureOpenAIProvider(
             api_key=p.api_key,
             api_base=p.api_base,
@@ -365,6 +365,7 @@ def gateway(
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
+                emit_progress=False,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
