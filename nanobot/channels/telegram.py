@@ -164,6 +164,10 @@ class TelegramChannel(BaseChannel):
         BotCommand("new", "Start a new conversation"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("help", "Show available commands"),
+        BotCommand("models", "List available/current models"),
+        BotCommand("set_model", "Switch model"),
+        BotCommand("agents", "List available/current agents"),
+        BotCommand("set_agent", "Switch agent"),
     ]
 
     def __init__(
@@ -233,6 +237,10 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
         self._app.add_handler(CommandHandler("stop", self._forward_command))
+        self._app.add_handler(CommandHandler("models", self._forward_command))
+        self._app.add_handler(CommandHandler("set_model", self._forward_command))
+        self._app.add_handler(CommandHandler("agents", self._forward_command))
+        self._app.add_handler(CommandHandler("set_agent", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
 
         # Add message handler for text, photos, voice, documents
@@ -459,7 +467,11 @@ class TelegramChannel(BaseChannel):
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
-            "/help — Show available commands"
+            "/help — Show available commands\n"
+            "/models — List available/current models\n"
+            "/set_model <model_id> — Switch model\n"
+            "/agents — List available/current agents\n"
+            "/set_agent <agent_id> — Switch agent"
         )
 
     @staticmethod
