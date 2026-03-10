@@ -4,6 +4,7 @@ import hashlib
 import os
 import secrets
 import string
+from collections.abc import AsyncIterator
 from typing import Any
 
 import json_repair
@@ -369,3 +370,86 @@ class LiteLLMProvider(LLMProvider):
     def get_default_model(self) -> str:
         """Get the default model."""
         return self.default_model
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+    ) -> AsyncIterator[LLMResponse]:
+        """Stream a chat completion request via LiteLLM."""
+        original_model = model or self.default_model
+        model = self._resolve_model(original_model)
+        extra_msg_keys = self._extra_msg_keys(original_model, model)
+
+        if self._supports_cache_control(original_model):
+            messages, tools = self._apply_cache_control(messages, tools)
+
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": self._sanitize_messages(self._sanitize_empty_content(messages), extra_keys=extra_msg_keys),
+            "max_tokens": max(1, max_tokens),
+            "temperature": temperature,
+            "stream": True,
+        }
+        self._apply_model_overrides(model, kwargs)
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        if self.extra_headers:
+            kwargs["extra_headers"] = self.extra_headers
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
+            kwargs["drop_params"] = True
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+
+        try:
+            response = await acompletion(**kwargs)
+            accumulated_content = ""
+            accumulated_tool_calls: list[dict] = []
+            finish_reason = "stop"
+
+            async for chunk in response:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if not delta:
+                    continue
+                if chunk.choices[0].finish_reason:
+                    finish_reason = chunk.choices[0].finish_reason
+                if delta.content:
+                    accumulated_content += delta.content
+                    yield LLMResponse(content=delta.content, finish_reason="")
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        idx = tc.index if hasattr(tc, "index") else 0
+                        while len(accumulated_tool_calls) <= idx:
+                            accumulated_tool_calls.append({"id": "", "name": "", "arguments": ""})
+                        if tc.id:
+                            accumulated_tool_calls[idx]["id"] = tc.id
+                        if tc.function:
+                            if tc.function.name:
+                                accumulated_tool_calls[idx]["name"] = tc.function.name
+                            if tc.function.arguments:
+                                accumulated_tool_calls[idx]["arguments"] += tc.function.arguments
+
+            # Final response with tool calls
+            tool_calls = [
+                ToolCallRequest(
+                    id=_short_tool_id(),
+                    name=tc["name"],
+                    arguments=json_repair.loads(tc["arguments"]) if tc["arguments"] else {},
+                )
+                for tc in accumulated_tool_calls if tc["name"]
+            ]
+            yield LLMResponse(
+                content=accumulated_content or None,
+                tool_calls=tool_calls,
+                finish_reason=finish_reason,
+            )
+        except Exception as e:
+            yield LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
