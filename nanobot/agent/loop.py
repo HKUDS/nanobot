@@ -45,6 +45,7 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 500
+    _MAX_LLM_ERROR_RETRIES = 2
 
     def __init__(
         self,
@@ -177,19 +178,54 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    @staticmethod
+    def _is_retryable_llm_error(content: str | None) -> bool:
+        """Detect transient upstream/model gateway errors worth retrying."""
+        if not content:
+            return False
+        text = content.lower()
+        retryable_markers = (
+            "error code: 502",
+            "error code: 503",
+            "bad gateway",
+            "service unavailable",
+            "timeout",
+            "timed out",
+            "connection reset",
+            "temporarily unavailable",
+        )
+        return any(marker in text for marker in retryable_markers)
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        stream_text_progress: bool = False,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        llm_error_retries = 0
+        streamed_text = ""
+        last_stream_preview = ""
+
+        async def _on_text_delta(delta: str) -> None:
+            nonlocal streamed_text, last_stream_preview
+            if not on_progress or not stream_text_progress or not delta:
+                return
+            streamed_text += delta
+            clean = self._strip_think(streamed_text)
+            if not clean or clean == last_stream_preview:
+                return
+            last_stream_preview = clean
+            await on_progress(clean, replace=True)
 
         while iteration < self.max_iterations:
             iteration += 1
+            streamed_text = ""
+            last_stream_preview = ""
 
             response = await self.provider.chat(
                 messages=messages,
@@ -198,13 +234,14 @@ class AgentLoop:
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
+                on_text_delta=_on_text_delta if stream_text_progress else None,
             )
 
             if response.has_tool_calls:
                 if on_progress:
-                    thought = self._strip_think(response.content)
-                    if thought:
-                        await on_progress(thought)
+                    clean = self._strip_think(response.content)
+                    if clean and not response.streamed_output:
+                        await on_progress(clean)
                     await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
                 tool_call_dicts = [
@@ -238,7 +275,24 @@ class AgentLoop:
                 # poison the context and cause permanent 400 loops (#1303).
                 if response.finish_reason == "error":
                     logger.error("LLM returned error: {}", (clean or "")[:200])
-                    final_content = clean or "Sorry, I encountered an error calling the AI model."
+                    if (
+                        llm_error_retries < self._MAX_LLM_ERROR_RETRIES
+                        and self._is_retryable_llm_error(clean)
+                    ):
+                        llm_error_retries += 1
+                        delay = 0.8 * (2 ** (llm_error_retries - 1))
+                        logger.warning(
+                            "Retrying transient LLM failure {}/{} in {:.1f}s",
+                            llm_error_retries,
+                            self._MAX_LLM_ERROR_RETRIES,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    final_content = (
+                        "Upstream model is temporarily unavailable (502/timeout). "
+                        "Please retry in 10-30 seconds."
+                    )
                     break
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
@@ -424,16 +478,25 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id,
         )
 
-        async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
+        async def _bus_progress(
+            content: str,
+            *,
+            tool_hint: bool = False,
+            replace: bool = False,
+        ) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             meta["_tool_hint"] = tool_hint
+            if replace:
+                meta["_progress_mode"] = "replace"
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages,
+            on_progress=on_progress or _bus_progress,
+            stream_text_progress=(msg.channel == "telegram"),
         )
 
         if final_content is None:
@@ -500,7 +563,7 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()

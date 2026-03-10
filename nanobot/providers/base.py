@@ -2,7 +2,10 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Awaitable, Callable
+
+
+TextDeltaHandler = Callable[[str], Awaitable[None]]
 
 
 @dataclass
@@ -22,6 +25,7 @@ class LLMResponse:
     usage: dict[str, int] = field(default_factory=dict)
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1 etc.
     thinking_blocks: list[dict] | None = None  # Anthropic extended thinking
+    streamed_output: bool = False
     
     @property
     def has_tool_calls(self) -> bool:
@@ -110,6 +114,7 @@ class LLMProvider(ABC):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        on_text_delta: TextDeltaHandler | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request.
