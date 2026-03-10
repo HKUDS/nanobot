@@ -118,6 +118,8 @@ class MemoryStore:
                 ],
                 tools=_SAVE_MEMORY_TOOL,
                 model=model,
+                max_tokens=16384,
+                tool_choice={"type": "function", "function": {"name": "save_memory"}},
             )
 
             if not response.has_tool_calls:
