@@ -1,8 +1,11 @@
 """Shell execution tool."""
 
 import asyncio
+import locale
 import os
 import re
+import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -70,57 +73,139 @@ class ExecTool(Tool):
             return guard_error
         
         env = os.environ.copy()
+        if sys.platform == "win32":
+            env["PYTHONIOENCODING"] = "utf-8"
         if self.path_append:
             env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
 
         try:
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=env,
-            )
-            
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=self.timeout
+            # On Windows, redirect to temp files instead of pipes.
+            # Pipes hang when child processes (e.g. a spawned browser)
+            # inherit the pipe handles and keep them open after the main
+            # process exits.
+            if sys.platform == "win32":
+                stdout, stderr, returncode = await self._run_with_tempfiles(
+                    command, cwd, env
                 )
+            else:
+                stdout, stderr, returncode = await self._run_with_pipes(
+                    command, cwd, env
+                )
+        except asyncio.TimeoutError:
+            return f"Error: Command timed out after {self.timeout} seconds"
+        except Exception as e:
+            return f"Error executing command: {str(e)}"
+
+        output_parts = []
+
+        if stdout:
+            output_parts.append(stdout)
+
+        if stderr and stderr.strip():
+            output_parts.append(f"STDERR:\n{stderr}")
+
+        if returncode != 0:
+            output_parts.append(f"\nExit code: {returncode}")
+
+        result = "\n".join(output_parts) if output_parts else "(no output)"
+
+        # Truncate very long output
+        max_len = 10000
+        if len(result) > max_len:
+            result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
+
+        return result
+
+    async def _run_with_pipes(
+        self, command: str, cwd: str, env: dict[str, str]
+    ) -> tuple[str, str, int | None]:
+        """Run command using pipes for stdout/stderr (default on POSIX)."""
+        process = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
+            env=env,
+        )
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                process.communicate(), timeout=self.timeout
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                pass
+            raise
+        stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+        stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+        return stdout, stderr, process.returncode
+
+    async def _run_with_tempfiles(
+        self, command: str, cwd: str, env: dict[str, str]
+    ) -> tuple[str, str, int | None]:
+        """Run command using temp files for stdout/stderr (Windows).
+
+        On Windows, child processes inherit pipe handles.  If a long-lived
+        grandchild (e.g. `agent-browser`) keeps the handles open,
+        `process.communicate()` never returns.  Writing to temp files
+        sidesteps the issue because we only `process.wait()` (which only
+        waits for the direct child to exit) and then read the files.
+        """
+        fd_out = fd_err = None
+        stdout_path = stderr_path = None
+        try:
+            fd_out, stdout_path = tempfile.mkstemp(prefix="nb_out_")
+            fd_err, stderr_path = tempfile.mkstemp(prefix="nb_err_")
+
+            process = await asyncio.create_subprocess_exec(
+                "powershell", "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass",
+                "-Command", command,
+                stdout=fd_out, stderr=fd_err,
+                cwd=cwd, env=env,
+            )
+            # Close our copies so only the child holds the handles.
+            os.close(fd_out)
+            fd_out = None
+            os.close(fd_err)
+            fd_err = None
+
+            try:
+                await asyncio.wait_for(process.wait(), timeout=self.timeout)
             except asyncio.TimeoutError:
                 process.kill()
-                # Wait for the process to fully terminate so pipes are
-                # drained and file descriptors are released.
                 try:
                     await asyncio.wait_for(process.wait(), timeout=5.0)
                 except asyncio.TimeoutError:
                     pass
-                return f"Error: Command timed out after {self.timeout} seconds"
-            
-            output_parts = []
-            
-            if stdout:
-                output_parts.append(stdout.decode("utf-8", errors="replace"))
-            
-            if stderr:
-                stderr_text = stderr.decode("utf-8", errors="replace")
-                if stderr_text.strip():
-                    output_parts.append(f"STDERR:\n{stderr_text}")
-            
-            if process.returncode != 0:
-                output_parts.append(f"\nExit code: {process.returncode}")
-            
-            result = "\n".join(output_parts) if output_parts else "(no output)"
-            
-            # Truncate very long output
-            max_len = 10000
-            if len(result) > max_len:
-                result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
-            
-            return result
-            
-        except Exception as e:
-            return f"Error executing command: {str(e)}"
+                raise
+
+            stdout = self._decode_output(Path(stdout_path).read_bytes())
+            stderr = self._decode_output(Path(stderr_path).read_bytes())
+            return stdout, stderr, process.returncode
+        finally:
+            for fd in (fd_out, fd_err):
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+            for p in (stdout_path, stderr_path):
+                if p is not None:
+                    try:
+                        os.unlink(p)
+                    except OSError:
+                        pass
+
+    @staticmethod
+    def _decode_output(data: bytes) -> str:
+        """Decode bytes trying UTF-8 first, falling back to locale encoding."""
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return data.decode(locale.getpreferredencoding(False), errors="replace")
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
