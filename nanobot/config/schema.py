@@ -224,6 +224,9 @@ class AgentDefaults(Base):
     tool_result_max_chars: int = 2000
     tool_result_context_tokens: int = 500
 
+    # Vision / multimodal
+    vision_model: str = "gpt-4o-mini"
+
     # Knowledge graph
     graph_enabled: bool = False
     graph_neo4j_uri: str = "bolt://localhost:7687"
@@ -296,6 +299,9 @@ class AgentConfig(Base):
     graph_neo4j_auth: str = "neo4j/nanobot_graph"
     graph_neo4j_database: str = "neo4j"
 
+    # Vision / multimodal
+    vision_model: str = "gpt-4o-mini"
+
     # Tools
     restrict_to_workspace: bool = False
 
@@ -334,6 +340,7 @@ class AgentConfig(Base):
             "graph_neo4j_uri": defaults.graph_neo4j_uri,
             "graph_neo4j_auth": defaults.graph_neo4j_auth,
             "graph_neo4j_database": defaults.graph_neo4j_database,
+            "vision_model": defaults.vision_model,
         }
         data.update(overrides)
         return cls(**data)  # type: ignore[arg-type]
@@ -416,6 +423,7 @@ class HeartbeatConfig(Base):
 
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
+    model: str | None = None  # Override agent default model for heartbeat
 
 
 class GatewayConfig(Base):
