@@ -23,10 +23,13 @@ class ContextBuilder:
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
-
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    
+    def build_system_prompt(self, skill_names: list[str] | None = None, enable_event_handling: bool = False) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
+
+        if enable_event_handling:
+            parts.append(self._get_event_handling_directive())
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
@@ -97,6 +100,25 @@ Your workspace is at: {workspace_path}
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
 
     @staticmethod
+    def _get_event_handling_directive() -> str:
+        """Get the event handling directive for system prompt."""
+        return """## Follow-up Questions
+
+Sometimes users may send additional messages before you finish responding. These will be appended to their previous message with a "[Follow-up]:" marker.
+
+When you see a user message containing "[Follow-up]:":
+1. Understand that the user sent multiple messages in quick succession
+2. Address ALL parts of their message - both the original question and the follow-up
+3. Treat it as a natural multi-part question, not separate conversations
+
+Example:
+- User's message appears as: "What's your name?\n\n[Follow-up]: What time is it?"
+- You should answer: "I'm nanobot, an AI assistant. It's currently [time]. How can I help you today?"
+
+This ensures users feel heard even when they send multiple messages quickly.
+"""
+
+    @staticmethod
     def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
@@ -126,6 +148,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        enable_event_handling: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id)
@@ -139,7 +162,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, enable_event_handling=enable_event_handling)},
             *history,
             {"role": "user", "content": merged},
         ]
