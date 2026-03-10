@@ -789,6 +789,7 @@ class TelegramChannel(BaseChannel):
 
         if not await self._is_group_message_for_bot(message):
             return
+        await self._add_reaction(str(chat_id), message.message_id, self.config.react_emoji)
 
         # Build content from text and/or media
         content_parts = []
@@ -839,7 +840,6 @@ class TelegramChannel(BaseChannel):
                     "session_key": session_key,
                 }
                 self._start_typing(str_chat_id)
-                await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
             buf = self._media_group_buffers[key]
             if content and content != "[empty message]":
                 buf["contents"].append(content)
@@ -850,7 +850,6 @@ class TelegramChannel(BaseChannel):
 
         # Start typing indicator before processing
         self._start_typing(str_chat_id)
-        await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
 
         # Forward to the message bus
         await self._handle_message(

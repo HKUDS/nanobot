@@ -41,6 +41,7 @@ class _FakeBot:
     def __init__(self) -> None:
         self.sent_messages: list[dict] = []
         self.sent_media: list[dict] = []
+        self.reaction_calls: list[dict] = []
         self.get_me_calls = 0
 
     async def get_me(self):
@@ -68,6 +69,9 @@ class _FakeBot:
 
     async def send_chat_action(self, **kwargs) -> None:
         pass
+
+    async def set_message_reaction(self, **kwargs) -> None:
+        self.reaction_calls.append(kwargs)
 
     async def get_file(self, file_id: str):
         """Return a fake file that 'downloads' to a path (for reply-to-media tests)."""
@@ -551,6 +555,7 @@ async def test_group_policy_mention_ignores_unmentioned_group_message() -> None:
 
     assert handled == []
     assert channel._app.bot.get_me_calls == 1
+    assert channel._app.bot.reaction_calls == []
 
 
 @pytest.mark.asyncio
@@ -575,6 +580,8 @@ async def test_group_policy_mention_accepts_text_mention_and_caches_bot_identity
 
     assert len(handled) == 2
     assert channel._app.bot.get_me_calls == 1
+    assert len(channel._app.bot.reaction_calls) == 2
+    assert [call["message_id"] for call in channel._app.bot.reaction_calls] == [1, 1]
 
 
 @pytest.mark.asyncio
