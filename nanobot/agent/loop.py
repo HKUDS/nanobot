@@ -8,7 +8,7 @@ import re
 import weakref
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from loguru import logger
 
@@ -108,8 +108,8 @@ class AgentLoop:
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+        self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
-        self._processing_lock = asyncio.Lock()
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -291,27 +291,57 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
 
+    def _resolve_session_key(self, msg: InboundMessage, session_key: str | None = None) -> str:
+        """Resolve the canonical session key for both chat and system messages."""
+        if session_key:
+            return session_key
+        if msg.channel == "system":
+            if ":" in msg.chat_id:
+                channel, chat_id = msg.chat_id.split(":", 1)
+                return f"{channel}:{chat_id}"
+            return f"cli:{msg.chat_id}"
+        return msg.session_key
+
+    def _get_session_lock(self, session_key: str) -> asyncio.Lock:
+        """Return the lock guarding a single conversation session."""
+        lock = self._session_locks.get(session_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[session_key] = lock
+        return lock
+
+    async def _process_with_session_lock(
+        self,
+        msg: InboundMessage,
+        session_key: str | None = None,
+        on_progress: Callable[[str], Awaitable[None]] | None = None,
+    ) -> OutboundMessage | None:
+        """Serialize processing within one session while allowing other sessions to run."""
+        key = self._resolve_session_key(msg, session_key=session_key)
+        async with self._get_session_lock(key):
+            return await self._process_message(msg, session_key=key, on_progress=on_progress)
+
     async def _dispatch(self, msg: InboundMessage) -> None:
-        """Process a message under the global lock."""
-        async with self._processing_lock:
-            try:
-                response = await self._process_message(msg)
-                if response is not None:
-                    await self.bus.publish_outbound(response)
-                elif msg.channel == "cli":
-                    await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel, chat_id=msg.chat_id,
-                        content="", metadata=msg.metadata or {},
-                    ))
-            except asyncio.CancelledError:
-                logger.info("Task cancelled for session {}", msg.session_key)
-                raise
-            except Exception:
-                logger.exception("Error processing message for session {}", msg.session_key)
+        """Process a message under a per-session lock."""
+        key = self._resolve_session_key(msg)
+        try:
+            response = await self._process_with_session_lock(msg, session_key=key)
+            if response is not None:
+                await self.bus.publish_outbound(response)
+            elif msg.channel == "cli":
                 await self.bus.publish_outbound(OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
-                    content="Sorry, I encountered an error.",
+                    content="", metadata=msg.metadata or {},
                 ))
+        except asyncio.CancelledError:
+            logger.info("Task cancelled for session {}", key)
+            raise
+        except Exception:
+            logger.exception("Error processing message for session {}", key)
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content="Sorry, I encountered an error.",
+            ))
 
     async def close_mcp(self) -> None:
         """Close MCP connections."""
@@ -356,7 +386,7 @@ class AgentLoop:
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
-        key = session_key or msg.session_key
+        key = self._resolve_session_key(msg, session_key=session_key)
         session = self.sessions.get_or_create(key)
 
         # Slash commands
@@ -505,5 +535,9 @@ class AgentLoop:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        response = await self._process_with_session_lock(
+            msg,
+            session_key=session_key,
+            on_progress=on_progress,
+        )
         return response.content if response else ""
