@@ -118,6 +118,7 @@ class MemoryStore:
                 ],
                 tools=_SAVE_MEMORY_TOOL,
                 model=model,
+                temperature=0.0,
             )
 
             if not response.has_tool_calls:
