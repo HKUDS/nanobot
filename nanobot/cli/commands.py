@@ -292,7 +292,7 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
 
 
 def run_gateway_foreground_loop(
-    port: int = 18790,
+    port: int | None = None,
     verbose: bool = False,
     workspace: str | None = None,
     config_path: str | None = None,
@@ -317,6 +317,7 @@ def run_gateway_foreground_loop(
         logging.basicConfig(level=logging.DEBUG)
 
     config = _load_runtime_config(config_path, workspace)
+    port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     sync_workspace_templates(config.workspace_path)
@@ -555,10 +556,23 @@ def _build_gateway_runtime_facade(
     return facade, resolved_policy
 
 
+def _resolve_gateway_effective_port(
+    *,
+    port: int | None,
+    workspace: str | None,
+    config_path: str | None,
+) -> int:
+    """Resolve the actual gateway port with CLI-over-config precedence."""
+    if port is not None:
+        return port
+    loaded = _load_runtime_config(config_path, workspace)
+    return loaded.gateway.port
+
+
 def _validate_gateway_group_options_for_subcommand(
     *,
     ctx: typer.Context,
-    port: int,
+    port: int | None,
     verbose: bool,
     workspace: str | None,
     config: str | None,
@@ -605,7 +619,7 @@ def _validate_gateway_group_options_for_subcommand(
 @gateway_app.callback(invoke_without_command=True)
 def gateway(
     ctx: typer.Context,
-    port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
@@ -643,6 +657,12 @@ def gateway(
 
     from nanobot.gateway_runtime.models import GatewayStartOptions
 
+    effective_port = _resolve_gateway_effective_port(
+        port=port,
+        workspace=workspace,
+        config_path=config,
+    )
+
     # Flow: parse explicit CLI mode -> resolve policy -> build facade -> start.
     cli_mode = _resolve_gateway_cli_mode(foreground=foreground, background=background)
     facade, policy = _build_gateway_runtime_facade(
@@ -660,7 +680,7 @@ def gateway(
     try:
         result = facade.start(
             GatewayStartOptions(
-                port=port,
+                port=effective_port,
                 verbose=verbose,
                 workspace=workspace,
                 config_path=config,
