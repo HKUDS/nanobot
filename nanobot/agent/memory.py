@@ -114,17 +114,23 @@ class MemoryStore:
 {chr(10).join(lines)}"""
 
         try:
-            response = await provider.chat(
-                messages=[
+            chat_kwargs = {
+                "messages": [
                     {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
                     {"role": "user", "content": prompt},
                 ],
-                tools=_SAVE_MEMORY_TOOL,
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                reasoning_effort=reasoning_effort,
-            )
+                "tools": _SAVE_MEMORY_TOOL,
+                "model": model,
+            }
+
+            if temperature is not None:
+                chat_kwargs["temperature"] = temperature
+            if max_tokens is not None:
+                chat_kwargs["max_tokens"] = max_tokens
+            if reasoning_effort is not None:
+                chat_kwargs["reasoning_effort"] = reasoning_effort
+
+            response = await provider.chat(**chat_kwargs)
 
             if not response.has_tool_calls:
                 logger.warning("Memory consolidation: LLM did not call save_memory, skipping")
