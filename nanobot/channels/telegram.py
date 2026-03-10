@@ -558,12 +558,12 @@ class TelegramChannel(BaseChannel):
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
 
-        # Best-effort early acknowledgment before normal processing/reply.
-        await self._try_react_to_message(message)
-
-        # In silent group mode, receive everything but only process when explicitly addressed.
+        # In silent group mode, receive everything but only process/reaction when explicitly addressed.
         if self._is_group_chat(message) and not self._should_respond_in_group(message):
             return
+
+        # Best-effort early acknowledgment before normal processing/reply.
+        await self._try_react_to_message(message)
 
         # Build content from text and/or media
         content_parts = []
