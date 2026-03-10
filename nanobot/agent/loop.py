@@ -181,12 +181,19 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+
+        # Build merged env once: inherit process env + overlay per-request vars.
+        # This avoids mutating os.environ (unsafe for concurrent requests).
+        merged_env: dict[str, str] | None = None
+        if extra_env:
+            merged_env = {**os.environ, **extra_env}
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -228,7 +235,9 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    result = await self.tools.execute(
+                        tool_call.name, tool_call.arguments, env=extra_env
+                    )
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -332,6 +341,8 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        extra_system_prompt: str | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -422,6 +433,7 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            extra_system_prompt=extra_system_prompt,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -434,6 +446,7 @@ class AgentLoop:
 
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
+            extra_env=extra_env,
         )
 
         if final_content is None:
@@ -501,9 +514,18 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        extra_system_prompt: str | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> str:
-        """Process a message directly (for CLI or cron usage)."""
+        """Process a message directly (for CLI, cron, or HTTP API usage)."""
         await self._connect_mcp()
+        if extra_env:
+            env_keys = ", ".join(extra_env.keys())
+            logger.debug(f"process_direct: extra_env keys: {env_keys}")
+
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        response = await self._process_message(
+            msg, session_key=session_key, on_progress=on_progress,
+            extra_system_prompt=extra_system_prompt, extra_env=extra_env,
+        )
         return response.content if response else ""
