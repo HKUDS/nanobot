@@ -27,15 +27,20 @@ class _FakeUpdater:
 class _FakeBot:
     def __init__(self) -> None:
         self.sent_messages: list[dict] = []
+        self.get_me_calls = 0
 
     async def get_me(self):
-        return SimpleNamespace(username="nanobot_test")
+        self.get_me_calls += 1
+        return SimpleNamespace(id=999, username="nanobot_test")
 
     async def set_my_commands(self, commands) -> None:
         self.commands = commands
 
     async def send_message(self, **kwargs) -> None:
         self.sent_messages.append(kwargs)
+
+    async def send_chat_action(self, **kwargs) -> None:
+        pass
 
 
 class _FakeApp:
@@ -87,6 +92,35 @@ class _FakeBuilder:
         return self.app
 
 
+def _make_telegram_update(
+    *,
+    chat_type: str = "group",
+    text: str | None = None,
+    caption: str | None = None,
+    entities=None,
+    caption_entities=None,
+    reply_to_message=None,
+):
+    user = SimpleNamespace(id=12345, username="alice", first_name="Alice")
+    message = SimpleNamespace(
+        chat=SimpleNamespace(type=chat_type, is_forum=False),
+        chat_id=-100123,
+        text=text,
+        caption=caption,
+        entities=entities or [],
+        caption_entities=caption_entities or [],
+        reply_to_message=reply_to_message,
+        photo=None,
+        voice=None,
+        audio=None,
+        document=None,
+        media_group_id=None,
+        message_thread_id=None,
+        message_id=1,
+    )
+    return SimpleNamespace(message=message, effective_user=user)
+
+
 @pytest.mark.asyncio
 async def test_start_uses_request_proxy_without_builder_proxy(monkeypatch) -> None:
     config = TelegramConfig(
@@ -129,6 +163,10 @@ def test_get_extension_falls_back_to_original_filename() -> None:
 
     assert channel._get_extension("file", None, "report.pdf") == ".pdf"
     assert channel._get_extension("file", None, "archive.tar.gz") == ".tar.gz"
+
+
+def test_telegram_group_policy_defaults_to_mention() -> None:
+    assert TelegramConfig().group_policy == "mention"
 
 
 def test_is_allowed_accepts_legacy_telegram_id_username_formats() -> None:
@@ -182,3 +220,119 @@ async def test_send_reply_infers_topic_from_message_id_cache() -> None:
 
     assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
     assert channel._app.bot.sent_messages[0]["reply_parameters"].message_id == 10
+
+
+@pytest.mark.asyncio
+async def test_group_policy_mention_ignores_unmentioned_group_message() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="mention"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    await channel._on_message(_make_telegram_update(text="hello everyone"), None)
+
+    assert handled == []
+    assert channel._app.bot.get_me_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_group_policy_mention_accepts_text_mention_and_caches_bot_identity() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="mention"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    mention = SimpleNamespace(type="mention", offset=0, length=13)
+    await channel._on_message(_make_telegram_update(text="@nanobot_test hi", entities=[mention]), None)
+    await channel._on_message(_make_telegram_update(text="@nanobot_test again", entities=[mention]), None)
+
+    assert len(handled) == 2
+    assert channel._app.bot.get_me_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_group_policy_mention_accepts_caption_mention() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="mention"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    mention = SimpleNamespace(type="mention", offset=0, length=13)
+    await channel._on_message(
+        _make_telegram_update(caption="@nanobot_test photo", caption_entities=[mention]),
+        None,
+    )
+
+    assert len(handled) == 1
+    assert handled[0]["content"] == "@nanobot_test photo"
+
+
+@pytest.mark.asyncio
+async def test_group_policy_mention_accepts_reply_to_bot() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="mention"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    reply = SimpleNamespace(from_user=SimpleNamespace(id=999))
+    await channel._on_message(_make_telegram_update(text="reply", reply_to_message=reply), None)
+
+    assert len(handled) == 1
+
+
+@pytest.mark.asyncio
+async def test_group_policy_open_accepts_plain_group_message() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    await channel._on_message(_make_telegram_update(text="hello group"), None)
+
+    assert len(handled) == 1
+    assert channel._app.bot.get_me_calls == 0
