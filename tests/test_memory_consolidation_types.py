@@ -97,7 +97,6 @@ class TestMemoryConsolidationTypeHandling:
         store = MemoryStore(tmp_path)
         provider = AsyncMock()
 
-        # Simulate arguments being a JSON string (not yet parsed)
         response = LLMResponse(
             content=None,
             tool_calls=[
@@ -152,7 +151,6 @@ class TestMemoryConsolidationTypeHandling:
         store = MemoryStore(tmp_path)
         provider = AsyncMock()
 
-        # Simulate arguments being a list containing a dict
         response = LLMResponse(
             content=None,
             tool_calls=[
@@ -220,3 +218,68 @@ class TestMemoryConsolidationTypeHandling:
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
 
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_redacts_secrets_before_persisting_history_and_memory(self, tmp_path: Path) -> None:
+        """Secrets should be redacted before being written to durable memory files."""
+        store = MemoryStore(tmp_path)
+        provider = AsyncMock()
+        provider.chat = AsyncMock(
+            return_value=_make_tool_response(
+                history_entry=(
+                    "[2026-01-01] User shared api_key=sk-abcdefghi12345678 "
+                    "and Authorization: Bearer tok_verysecret12345."
+                ),
+                memory_update=(
+                    "# Memory\n"
+                    "API credential api_key=sk-abcdefghi12345678\n"
+                    "GitHub token ghp_abcdefgh12345678\n"
+                    "URL https://example.com/cb?access_token=abc123456789\n"
+                    "AWS key AKIA1234567890ABCDEF\n"
+                ),
+            )
+        )
+        session = _make_session(message_count=60)
+
+        result = await store.consolidate(session, provider, "test-model", memory_window=50)
+
+        assert result is True
+
+        history_content = store.history_file.read_text()
+        memory_content = store.memory_file.read_text()
+
+        for raw_secret in [
+            "sk-abcdefghi12345678",
+            "tok_verysecret12345",
+            "ghp_abcdefgh12345678",
+            "abc123456789",
+            "AKIA1234567890ABCDEF",
+        ]:
+            assert raw_secret not in history_content
+            assert raw_secret not in memory_content
+
+        assert "api_key=[REDACTED]" in history_content
+        assert "Bearer [REDACTED]" in history_content
+        assert "api_key=[REDACTED]" in memory_content
+        assert "ghp_[REDACTED]" not in memory_content
+        assert "[REDACTED]" in memory_content
+        assert "access_token=[REDACTED]" in memory_content
+
+    @pytest.mark.asyncio
+    async def test_non_secret_text_remains_unchanged(self, tmp_path: Path) -> None:
+        """Ordinary memory content should not be modified by redaction."""
+        store = MemoryStore(tmp_path)
+        provider = AsyncMock()
+        provider.chat = AsyncMock(
+            return_value=_make_tool_response(
+                history_entry="[2026-01-01] User prefers concise responses and uses pytest.",
+                memory_update="# Memory\n- Preference: concise responses\n- Tooling: pytest\n",
+            )
+        )
+        session = _make_session(message_count=60)
+
+        result = await store.consolidate(session, provider, "test-model", memory_window=50)
+
+        assert result is True
+        assert store.history_file.read_text() == "[2026-01-01] User prefers concise responses and uses pytest.\n\n"
+        assert store.memory_file.read_text() == "# Memory\n- Preference: concise responses\n- Tooling: pytest\n"
