@@ -290,7 +290,7 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
 
 @app.command()
 def gateway(
-    port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
@@ -309,13 +309,14 @@ def gateway(
         import logging
         logging.basicConfig(level=logging.DEBUG)
 
-    config = _load_runtime_config(config, workspace)
+    loaded_config = _load_runtime_config(config, workspace)
+    actual_port = port if port is not None else loaded_config.gateway.port
 
-    console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    sync_workspace_templates(config.workspace_path)
+    console.print(f"{__logo__} Starting nanobot gateway on port {actual_port}...")
+    sync_workspace_templates(loaded_config.workspace_path)
     bus = MessageBus()
-    provider = _make_provider(config)
-    session_manager = SessionManager(config.workspace_path)
+    provider = _make_provider(loaded_config)
+    session_manager = SessionManager(loaded_config.workspace_path)
 
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_cron_dir() / "jobs.json"
@@ -325,21 +326,21 @@ def gateway(
     agent = AgentLoop(
         bus=bus,
         provider=provider,
-        workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        temperature=config.agents.defaults.temperature,
-        max_tokens=config.agents.defaults.max_tokens,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
-        reasoning_effort=config.agents.defaults.reasoning_effort,
-        brave_api_key=config.tools.web.search.api_key or None,
-        web_proxy=config.tools.web.proxy or None,
-        exec_config=config.tools.exec,
+        workspace=loaded_config.workspace_path,
+        model=loaded_config.agents.defaults.model,
+        temperature=loaded_config.agents.defaults.temperature,
+        max_tokens=loaded_config.agents.defaults.max_tokens,
+        max_iterations=loaded_config.agents.defaults.max_tool_iterations,
+        memory_window=loaded_config.agents.defaults.memory_window,
+        reasoning_effort=loaded_config.agents.defaults.reasoning_effort,
+        brave_api_key=loaded_config.tools.web.search.api_key or None,
+        web_proxy=loaded_config.tools.web.proxy or None,
+        exec_config=loaded_config.tools.exec,
         cron_service=cron,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
+        restrict_to_workspace=loaded_config.tools.restrict_to_workspace,
         session_manager=session_manager,
-        mcp_servers=config.tools.mcp_servers,
-        channels_config=config.channels,
+        mcp_servers=loaded_config.tools.mcp_servers,
+        channels_config=loaded_config.channels,
     )
 
     # Set cron callback (needs agent)
@@ -384,7 +385,7 @@ def gateway(
     cron.on_job = on_cron_job
 
     # Create channel manager
-    channels = ChannelManager(config, bus)
+    channels = ChannelManager(loaded_config, bus)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -426,9 +427,9 @@ def gateway(
             return  # No external channel available to deliver to
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
 
-    hb_cfg = config.gateway.heartbeat
+    hb_cfg = loaded_config.gateway.heartbeat
     heartbeat = HeartbeatService(
-        workspace=config.workspace_path,
+        workspace=loaded_config.workspace_path,
         provider=provider,
         model=agent.model,
         on_execute=on_heartbeat_execute,
