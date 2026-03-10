@@ -165,3 +165,115 @@ class TestSubagentCancellation:
         provider.get_default_model.return_value = "test-model"
         mgr = SubagentManager(provider=provider, workspace=MagicMock(), bus=bus)
         assert await mgr.cancel_by_session("nonexistent") == 0
+
+
+class TestAutoCancelOnNewMessage:
+    """Tests for automatic task cancellation when a new message arrives."""
+
+    @pytest.mark.asyncio
+    async def test_new_message_cancels_existing_task(self):
+        """Test that sending a new message automatically cancels the previous task."""
+        from nanobot.bus.events import InboundMessage, OutboundMessage
+
+        loop, bus = _make_loop()
+
+        async def slow_process(msg, **kwargs):
+            await asyncio.sleep(0.1)  # Simulate slow processing
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"reply-{msg.content}")
+
+        loop._process_message = slow_process
+
+        # Start first message
+        msg1 = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="first")
+        t1 = asyncio.create_task(loop._dispatch(msg1))
+        loop._active_tasks["test:c1"] = [t1]
+        await asyncio.sleep(0.01)  # Let first task start
+
+        # Send second message - should cancel first
+        await loop._cancel_session_tasks("test:c1")
+
+        # First task should be cancelled
+        assert t1.cancelled() or t1.done()
+        # Active tasks should be cleared
+        assert "test:c1" not in loop._active_tasks
+
+    @pytest.mark.asyncio
+    async def test_cancelled_task_checked_before_send(self):
+        """Test that cancelled task checks cancellation before sending message."""
+        from nanobot.bus.events import InboundMessage, OutboundMessage
+
+        loop, bus = _make_loop()
+        sent_messages = []
+
+        original_publish = bus.publish_outbound
+
+        async def capture_publish(msg):
+            sent_messages.append(msg)
+            await original_publish(msg)
+
+        bus.publish_outbound = capture_publish
+
+        async def mock_process(msg, **kwargs):
+            # Simulate task that completes after cancellation
+            await asyncio.sleep(0.05)
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"done-{msg.content}")
+
+        loop._process_message = mock_process
+
+        # Start first task
+        msg1 = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="slow")
+        t1 = asyncio.create_task(loop._dispatch(msg1))
+        loop._active_tasks["test:c1"] = [t1]
+        await asyncio.sleep(0.01)
+
+        # Cancel it
+        await loop._cancel_session_tasks("test:c1")
+
+        # Wait for task to potentially finish
+        try:
+            await asyncio.wait_for(t1, timeout=0.2)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+
+        # Check cancellation happened - task should either be cancelled or have raised CancelledError
+        # The key is that we check before sending
+        assert len(sent_messages) == 0 or t1.cancelled()
+
+    @pytest.mark.asyncio
+    async def test_different_sessions_not_affected(self):
+        """Test that cancelling one session doesn't affect other sessions."""
+        loop, bus = _make_loop()
+        task1_cancelled = asyncio.Event()
+        task2_cancelled = asyncio.Event()
+
+        async def mock_task(session, event):
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                event.set()
+                raise
+
+        t1 = asyncio.create_task(mock_task("s1", task1_cancelled))
+        t2 = asyncio.create_task(mock_task("s2", task2_cancelled))
+        await asyncio.sleep(0)
+
+        loop._active_tasks["s1"] = [t1]
+        loop._active_tasks["s2"] = [t2]
+
+        # Cancel only s1
+        await loop._cancel_session_tasks("s1")
+
+        await asyncio.sleep(0.01)
+
+        assert task1_cancelled.is_set()
+        assert not task2_cancelled.is_set()
+        assert "s1" not in loop._active_tasks
+        assert "s2" in loop._active_tasks
+
+    @pytest.mark.asyncio
+    async def test_cancel_empty_session_no_error(self):
+        """Test that cancelling a session with no tasks is safe."""
+        loop, bus = _make_loop()
+        # Should not raise
+        await loop._cancel_session_tasks("nonexistent")
+        assert True

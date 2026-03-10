@@ -271,9 +271,28 @@ class AgentLoop:
             if msg.content.strip().lower() == "/stop":
                 await self._handle_stop(msg)
             else:
+                # Auto-cancel any existing task for this session before processing new message
+                if msg.session_key in self._active_tasks:
+                    await self._cancel_session_tasks(msg.session_key)
+                
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
                 task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
+
+    async def _cancel_session_tasks(self, session_key: str) -> None:
+        """Cancel all active tasks and subagents for the session (silently, no message)."""
+        tasks = self._active_tasks.pop(session_key, [])
+        cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
+        for t in tasks:
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
+        sub_cancelled = await self.subagents.cancel_by_session(session_key)
+        total = cancelled + sub_cancelled
+        if total:
+            logger.info("Auto-cancelled {} task(s) for session {}", total, session_key)
+
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
@@ -296,6 +315,9 @@ class AgentLoop:
         async with self._processing_lock:
             try:
                 response = await self._process_message(msg)
+                # Check if cancellation was requested before sending response
+                if asyncio.current_task().uncancel() > 0:
+                    raise asyncio.CancelledError()
                 if response is not None:
                     await self.bus.publish_outbound(response)
                 elif msg.channel == "cli":
