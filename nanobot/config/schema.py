@@ -200,6 +200,72 @@ class QQConfig(Base):
     )  # Allowed user openids (empty = public access)
 
 
+class MQTTTopicConfig(Base):
+    """Configuration for a single MQTT topic subscription."""
+
+    topic: str = "nanobot/+/inbox"  # Topic pattern (supports + and # wildcards)
+    qos: int = 1  # QoS level: 0 (at most once), 1 (at least once), 2 (exactly once)
+
+
+class MQTTWillConfig(Base):
+    """Last Will and Testament (LWT) configuration for MQTT."""
+
+    enabled: bool = True
+    topic: str = "nanobot/status"  # Topic for will message
+    payload: str = "offline"  # Message published on unexpected disconnect
+    qos: int = 1
+    retain: bool = True
+
+
+class MQTTConfig(Base):
+    """MQTT channel configuration using aiomqtt."""
+
+    enabled: bool = False
+
+    # Connection settings
+    host: str = "localhost"  # MQTT broker hostname
+    port: int = 1883  # MQTT broker port (8883 for TLS)
+    client_id: str = ""  # Optional client ID (auto-generated if empty)
+
+    # Authentication
+    username: str = ""  # MQTT username (optional)
+    password: str = ""  # MQTT password (optional)
+
+    # TLS/SSL settings
+    use_tls: bool = False  # Enable TLS/SSL (default True for port 8883)
+    tls_insecure: bool = False  # Skip certificate verification (dev only)
+
+    # Session settings
+    clean_session: bool = True  # Start with a clean session
+    keepalive: int = 60  # Keepalive interval in seconds
+
+    # Topic configuration
+    subscribe_topics: list[MQTTTopicConfig] = Field(
+        default_factory=lambda: [MQTTTopicConfig()]
+    )
+    publish_topic_template: str = "nanobot/{chat_id}/outbox"
+    publish_qos: int = 1
+    retain_outbound: bool = False
+
+    # Last Will Testament (LWT)
+    will: MQTTWillConfig = Field(default_factory=MQTTWillConfig)
+
+    # Birth message (published on connect)
+    birth_enabled: bool = True
+    birth_topic: str = "nanobot/status"
+    birth_payload: str = "online"
+    birth_qos: int = 1
+    birth_retain: bool = True
+
+    # Message format
+    payload_format: Literal["json", "text"] = "json"
+
+    # Reconnection settings
+    reconnect_min_delay: float = 1.0
+    reconnect_max_delay: float = 60.0
+
+    # Access control
+    allow_from: list[str] = Field(default_factory=list)
 
 
 class ChannelsConfig(Base):
@@ -217,6 +283,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    mqtt: MQTTConfig = Field(default_factory=MQTTConfig)
 
 
 class AgentDefaults(Base):

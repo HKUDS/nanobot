@@ -44,6 +44,7 @@ dependencies = [
     "json-repair>=0.57.0,<1.0.0",
     "chardet>=3.0.2,<6.0.0",
     "openai>=2.8.0",
+    "aiomqtt>=2.3.0,<3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -105,3 +106,10 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.15.5",
+]
