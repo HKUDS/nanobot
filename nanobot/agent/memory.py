@@ -74,6 +74,7 @@ class MemoryStore:
         *,
         archive_all: bool = False,
         memory_window: int = 50,
+        temperature: float = 0.0,
     ) -> bool:
         """Consolidate old messages into MEMORY.md + HISTORY.md via LLM tool call.
 
@@ -118,7 +119,7 @@ class MemoryStore:
                 ],
                 tools=_SAVE_MEMORY_TOOL,
                 model=model,
-                temperature=0.0,
+                temperature=temperature,
             )
 
             if not response.has_tool_calls:
