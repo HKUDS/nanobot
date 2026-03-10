@@ -232,6 +232,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    enable_steering: bool = False  # Dual-layer architecture: interruption checking + context hooks
 
 
 class AgentsConfig(Base):
