@@ -32,6 +32,14 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
 
+        pinned = self.memory.get_pinned_context()
+        if pinned:
+            parts.append(f"# Pinned Context\n\n{pinned}")
+
+        workflow = self._load_workflow()
+        if workflow:
+            parts.append(f"# Current Workflow\n\n{workflow}")
+
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
@@ -82,7 +90,9 @@ You are nanobot, a helpful AI assistant.
 ## Workspace
 Your workspace is at: {workspace_path}
 - Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
+- Pinned context: {workspace_path}/memory/PINNED.md (always-injected task-critical rules)
 - History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
+- Workflow tracker: {workspace_path}/WORKFLOW.md (current long-task status and next action)
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
 {platform_policy}
@@ -117,6 +127,13 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 parts.append(f"## {filename}\n\n{content}")
 
         return "\n\n".join(parts) if parts else ""
+
+    def _load_workflow(self) -> str:
+        """Load the current workflow tracker if present."""
+        workflow_file = self.workspace / "WORKFLOW.md"
+        if workflow_file.exists():
+            return workflow_file.read_text(encoding="utf-8").strip()
+        return ""
 
     def build_messages(
         self,

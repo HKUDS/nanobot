@@ -49,11 +49,19 @@ class MemoryStore:
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
+        self.pinned_file = self.memory_dir / "PINNED.md"
+
+    @staticmethod
+    def _read_file(path: Path) -> str:
+        if path.exists():
+            return path.read_text(encoding="utf-8")
+        return ""
 
     def read_long_term(self) -> str:
-        if self.memory_file.exists():
-            return self.memory_file.read_text(encoding="utf-8")
-        return ""
+        return self._read_file(self.memory_file)
+
+    def read_pinned(self) -> str:
+        return self._read_file(self.pinned_file)
 
     def write_long_term(self, content: str) -> None:
         self.memory_file.write_text(content, encoding="utf-8")
@@ -65,6 +73,9 @@ class MemoryStore:
     def get_memory_context(self) -> str:
         long_term = self.read_long_term()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
+
+    def get_pinned_context(self) -> str:
+        return self.read_pinned().strip()
 
     async def consolidate(
         self,

@@ -32,6 +32,9 @@ class Session:
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
 
+    _RECENT_TOOL_RESULT_COUNT = 2
+    _OLDER_TOOL_RESULT_MAX_CHARS = 180
+
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
         msg = {
@@ -54,14 +57,42 @@ class Session:
                 sliced = sliced[i:]
                 break
 
+        tool_indices = [i for i, m in enumerate(sliced) if m.get("role") == "tool"]
+        detailed_tool_start = (
+            tool_indices[-self._RECENT_TOOL_RESULT_COUNT]
+            if len(tool_indices) > self._RECENT_TOOL_RESULT_COUNT
+            else len(sliced)
+        )
+
         out: list[dict[str, Any]] = []
-        for m in sliced:
+        for idx, m in enumerate(sliced):
             entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
             for k in ("tool_calls", "tool_call_id", "name"):
                 if k in m:
                     entry[k] = m[k]
+            if entry["role"] == "tool":
+                entry["content"] = self._prune_tool_content(
+                    content=entry.get("content", ""),
+                    tool_name=entry.get("name"),
+                    keep_detail=idx >= detailed_tool_start,
+                )
             out.append(entry)
         return out
+
+    @classmethod
+    def _prune_tool_content(cls, content: Any, tool_name: str | None, keep_detail: bool) -> Any:
+        """Reduce stale tool output while preserving recent detailed results."""
+        if keep_detail or not isinstance(content, str):
+            return content
+
+        compact = " ".join(content.split())
+        if len(compact) > cls._OLDER_TOOL_RESULT_MAX_CHARS:
+            compact = compact[:cls._OLDER_TOOL_RESULT_MAX_CHARS].rstrip() + "..."
+
+        label = tool_name or "tool"
+        if compact:
+            return f"[older tool result pruned: {label}] {compact}"
+        return f"[older tool result pruned: {label}]"
 
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
