@@ -930,7 +930,69 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 |--------|---------|-------------|
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
-| `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
+| `tools.exec.requireApproval` | `true` | When `true`, the agent pauses and asks for confirmation before running package-install commands. Set `false` to disable. |
+| `tools.exec.approvalPatterns` | *(see below)* | List of regex patterns for commands that trigger approval. Override to add or remove patterns. |
+| `tools.exec.approvalTimeout` | `300` | Seconds before a pending approval expires automatically (default 5 minutes). |
+| `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
+
+### Human-in-the-Loop Command Approval
+
+By default, nanobot intercepts potentially environment-altering commands (package installs, etc.) and asks you before executing them. This prevents the agent from silently modifying your environment.
+
+**How it works:**
+
+1. The agent decides to run a matched command (e.g. `pip install yt-dlp`).
+2. Instead of executing it, nanobot sends you an approval request:
+
+   ```
+   ⚠️ Approval required (#1)
+   Command: `pip install yt-dlp`
+
+   Reply /approve 1 to execute or /deny 1 to reject.
+   ```
+
+3. You reply `/approve 1` to allow or `/deny 1` to cancel.
+4. The agent resumes and continues processing.
+
+The `#id` in the message lets you handle multiple pending approvals in the same session without mixing them up. The approval request shows the exact normalized command that will be executed — what you see is what runs.
+
+**Default patterns that trigger approval** (all package managers):
+```
+pip / pip3 / uv pip / uv add / poetry add / conda / mamba install
+npm / npx / yarn / pnpm / bun install/add
+apt / apt-get / yum / dnf / pacman / brew install
+cargo install  ·  gem install  ·  go install
+```
+
+**Disable approval entirely:**
+```json
+{
+  "tools": {
+    "exec": {
+      "requireApproval": false
+    }
+  }
+}
+```
+
+**Customize which commands require approval:**
+```json
+{
+  "tools": {
+    "exec": {
+      "requireApproval": true,
+      "approvalPatterns": [
+        "\\b(pip|pip3|uv pip)\\s+install\\b",
+        "\\b(npm|yarn)\\s+(install|add)\\b"
+      ],
+      "approvalTimeout": 600
+    }
+  }
+}
+```
+
+> [!NOTE]
+> Approval works the same way across all channels — CLI, Telegram, Discord, Slack, and any other channel. Reply `/approve <id>` or `/deny <id>` as a plain text message. Pending approvals that are not answered within `approvalTimeout` seconds are automatically cancelled.
 
 
 ## 🧩 Multiple Instances

@@ -12,6 +12,9 @@ from nanobot.agent.tools.base import Tool
 class ExecTool(Tool):
     """Tool to execute shell commands."""
 
+    # Sentinel prefix returned by _guard_command when approval is needed
+    APPROVAL_REQUIRED_PREFIX = "APPROVAL_REQUIRED:"
+
     def __init__(
         self,
         timeout: int = 60,
@@ -20,6 +23,8 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
+        require_approval: bool = False,
+        approval_patterns: list[str] | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -37,6 +42,8 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+        self.require_approval = require_approval
+        self.approval_patterns = approval_patterns or []
 
     @property
     def name(self) -> str:
@@ -134,6 +141,12 @@ class ExecTool(Tool):
         if self.allow_patterns:
             if not any(re.search(p, lower) for p in self.allow_patterns):
                 return "Error: Command blocked by safety guard (not in allowlist)"
+
+        # Check if the command requires user approval
+        if self.require_approval and self.approval_patterns:
+            for pattern in self.approval_patterns:
+                if re.search(pattern, lower):
+                    return f"{self.APPROVAL_REQUIRED_PREFIX}{cmd}"
 
         if self.restrict_to_workspace:
             if "..\\" in cmd or "../" in cmd:

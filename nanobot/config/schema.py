@@ -307,6 +307,16 @@ class ExecToolConfig(Base):
 
     timeout: int = 60
     path_append: str = ""
+    require_approval: bool = True  # Require user approval before running install commands
+    approval_patterns: list[str] = Field(default_factory=lambda: [
+        r"\b(pip|pip3|uv pip|uv add|poetry add|conda|mamba)\s+install\b",
+        r"\b(npm|npx|yarn|pnpm|bun)\s+(install|add|i)\b",
+        r"\b(apt|apt-get|yum|dnf|pacman|brew)\s+install\b",
+        r"\bcargo\s+install\b",
+        r"\bgem\s+install\b",
+        r"\bgo\s+install\b",
+    ])  # Regex patterns for commands that require approval
+    approval_timeout: int = 300  # Seconds before a pending approval expires
 
 
 class MCPServerConfig(Base):

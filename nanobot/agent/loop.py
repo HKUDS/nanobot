@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 import weakref
 from contextlib import AsyncExitStack
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -30,6 +32,24 @@ from nanobot.session.manager import Session, SessionManager
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig
     from nanobot.cron.service import CronService
+
+
+@dataclass
+class PendingApproval:
+    """A command awaiting user approval."""
+
+    approval_id: int
+    session_key: str
+    channel: str
+    chat_id: str
+    command: str
+    tool_call_id: str
+    tool_name: str
+    created_at: float = field(default_factory=time.time)
+    messages_snapshot: list[dict] = field(default_factory=list)
+    on_progress: Any = None  # Callable or None
+    tools_used: list[str] = field(default_factory=list)
+    iteration: int = 0
 
 
 class AgentLoop:
@@ -110,6 +130,9 @@ class AgentLoop:
         self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
+        self._pending_approvals: dict[str, dict[int, PendingApproval]] = {}  # session_key -> {id: pending}
+        self._approval_counter = 0
+        self._approval_timeout = getattr(self.exec_config, "approval_timeout", 300)
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -122,6 +145,8 @@ class AgentLoop:
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
             path_append=self.exec_config.path_append,
+            require_approval=getattr(self.exec_config, "require_approval", False),
+            approval_patterns=getattr(self.exec_config, "approval_patterns", []),
         ))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
@@ -181,6 +206,9 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        session_key: str | None = None,
+        channel: str | None = None,
+        chat_id: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
@@ -229,6 +257,41 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+
+                    # Check if the command requires user approval
+                    if isinstance(result, str) and result.startswith(ExecTool.APPROVAL_REQUIRED_PREFIX):
+                        pending_cmd = result[len(ExecTool.APPROVAL_REQUIRED_PREFIX):]
+                        if session_key and channel and chat_id:
+                            self._approval_counter += 1
+                            aid = self._approval_counter
+                            session_pending = self._pending_approvals.setdefault(session_key, {})
+                            session_pending[aid] = PendingApproval(
+                                approval_id=aid,
+                                session_key=session_key,
+                                channel=channel,
+                                chat_id=chat_id,
+                                command=pending_cmd,
+                                tool_call_id=tool_call.id,
+                                tool_name=tool_call.name,
+                                messages_snapshot=list(messages),
+                                on_progress=on_progress,
+                                tools_used=list(tools_used),
+                                iteration=iteration,
+                            )
+                            logger.info("Approval required for command: {} (id={})", pending_cmd, aid)
+                            await self.bus.publish_outbound(OutboundMessage(
+                                channel=channel, chat_id=chat_id,
+                                content=(
+                                    f"⚠️ **Approval required** (#{aid})\n"
+                                    f"Command: `{pending_cmd}`\n\n"
+                                    f"Reply `/approve {aid}` to execute or `/deny {aid}` to reject."
+                                ),
+                            ))
+                            # Return a sentinel so the caller knows the loop is suspended
+                            return "__APPROVAL_PENDING__", tools_used, messages
+                        # Fallback: no session context, just block
+                        result = f"Error: Command requires user approval but no interactive session is available: {pending_cmd}"
+
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -347,7 +410,11 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(
+                messages, session_key=key, channel=channel, chat_id=chat_id,
+            )
+            if final_content == "__APPROVAL_PENDING__":
+                return None
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -391,7 +458,14 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/approve <id> — Approve a pending command\n/deny <id> — Reject a pending command\n/help — Show available commands")
+
+        # Handle /approve <id> and /deny <id> for pending approval
+        raw_cmd = msg.content.strip()
+        if raw_cmd.lower().startswith("/approve"):
+            return await self._handle_approval(msg, approved=True, raw=raw_cmd)
+        if raw_cmd.lower().startswith("/deny"):
+            return await self._handle_approval(msg, approved=False, raw=raw_cmd)
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
@@ -434,7 +508,12 @@ class AgentLoop:
 
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
+            session_key=key, channel=msg.channel, chat_id=msg.chat_id,
         )
+
+        if final_content == "__APPROVAL_PENDING__":
+            # Agent loop is suspended waiting for user approval; don't save yet
+            return None
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
@@ -450,6 +529,128 @@ class AgentLoop:
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},
+        )
+
+    async def _handle_approval(self, msg: InboundMessage, *, approved: bool, raw: str = "") -> OutboundMessage:
+        """Handle /approve [id] or /deny [id] for a pending command."""
+        key = msg.session_key
+        session_pending = self._pending_approvals.get(key, {})
+
+        if not session_pending:
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content="No pending command to approve.",
+            )
+
+        # Parse optional ID from command, e.g. "/approve 3"
+        parts = raw.split()
+        target_id: int | None = None
+        if len(parts) >= 2:
+            try:
+                target_id = int(parts[1])
+            except ValueError:
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content=f"Invalid approval ID '{parts[1]}'. Use `/approve <id>` or `/deny <id>`.",
+                )
+
+        if target_id is not None:
+            pending = session_pending.pop(target_id, None)
+            if pending is None:
+                ids = ", ".join(f"#{i}" for i in session_pending)
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content=f"No pending command with ID #{target_id}. Pending: {ids or 'none'}.",
+                )
+        else:
+            # No ID given: only accept if there is exactly one pending
+            if len(session_pending) > 1:
+                ids = ", ".join(f"#{i}: `{p.command}`" for i, p in sorted(session_pending.items()))
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content=f"Multiple pending commands — please specify an ID:\n{ids}",
+                )
+            target_id, pending = next(iter(session_pending.items()))
+            session_pending.pop(target_id)
+
+        if not session_pending:
+            self._pending_approvals.pop(key, None)
+
+        # Check expiration
+        if time.time() - pending.created_at > self._approval_timeout:
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content=f"⏰ Approval #{pending.approval_id} expired. Ask the agent to try again.",
+            )
+
+        if not approved:
+            # Feed a denial result back into the messages so the LLM knows
+            messages = pending.messages_snapshot
+            messages = self.context.add_tool_result(
+                messages, pending.tool_call_id, pending.tool_name,
+                f"Error: User denied execution of command: {pending.command}",
+            )
+            session = self.sessions.get_or_create(key)
+            self._set_tool_context(pending.channel, pending.chat_id)
+
+            final_content, _, all_msgs = await self._run_agent_loop(
+                messages,
+                on_progress=pending.on_progress,
+                session_key=key,
+                channel=pending.channel,
+                chat_id=pending.chat_id,
+            )
+            if final_content == "__APPROVAL_PENDING__":
+                return None
+
+            if final_content is None:
+                final_content = "Command was denied."
+            self._save_turn(session, all_msgs, len(pending.messages_snapshot))
+            self.sessions.save(session)
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id, content=final_content,
+            )
+
+        # Approved: execute the original command directly
+        exec_tool = self.tools.get("exec")
+        if not exec_tool or not isinstance(exec_tool, ExecTool):
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content="Error: exec tool not available.",
+            )
+
+        # Temporarily disable approval to avoid re-triggering
+        exec_tool.require_approval = False
+        try:
+            result = await exec_tool.execute(command=pending.command)
+        finally:
+            exec_tool.require_approval = getattr(self.exec_config, "require_approval", True)
+
+        messages = pending.messages_snapshot
+        messages = self.context.add_tool_result(
+            messages, pending.tool_call_id, pending.tool_name, result,
+        )
+
+        session = self.sessions.get_or_create(key)
+        self._set_tool_context(pending.channel, pending.chat_id)
+
+        # Resume the agent loop so it can continue processing
+        final_content, _, all_msgs = await self._run_agent_loop(
+            messages,
+            on_progress=pending.on_progress,
+            session_key=key,
+            channel=pending.channel,
+            chat_id=pending.chat_id,
+        )
+        if final_content == "__APPROVAL_PENDING__":
+            return None
+
+        if final_content is None:
+            final_content = "Command executed and processing complete."
+        self._save_turn(session, all_msgs, len(pending.messages_snapshot))
+        self.sessions.save(session)
+        return OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id, content=final_content,
         )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
