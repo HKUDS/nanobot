@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -110,48 +111,58 @@ class MemoryStore:
 ## Conversation to Process
 {chr(10).join(lines)}"""
 
-        try:
-            response = await provider.chat(
-                messages=[
-                    {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
-                    {"role": "user", "content": prompt},
-                ],
-                tools=_SAVE_MEMORY_TOOL,
-                model=model,
-            )
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await provider.chat(
+                    messages=[
+                        {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    tools=_SAVE_MEMORY_TOOL,
+                    model=model,
+                )
 
-            if not response.has_tool_calls:
-                logger.warning("Memory consolidation: LLM did not call save_memory, skipping")
-                return False
-
-            args = response.tool_calls[0].arguments
-            # Some providers return arguments as a JSON string instead of dict
-            if isinstance(args, str):
-                args = json.loads(args)
-            # Some providers return arguments as a list (handle edge case)
-            if isinstance(args, list):
-                if args and isinstance(args[0], dict):
-                    args = args[0]
-                else:
-                    logger.warning("Memory consolidation: unexpected arguments as empty or non-dict list")
+                if not response.has_tool_calls:
+                    logger.warning("Memory consolidation: LLM did not call save_memory (attempt {}/{})", attempt, max_attempts)
+                    if attempt < max_attempts:
+                        await asyncio.sleep(2 ** (attempt - 1))
+                        continue
                     return False
-            if not isinstance(args, dict):
-                logger.warning("Memory consolidation: unexpected arguments type {}", type(args).__name__)
-                return False
 
-            if entry := args.get("history_entry"):
-                if not isinstance(entry, str):
-                    entry = json.dumps(entry, ensure_ascii=False)
-                self.append_history(entry)
-            if update := args.get("memory_update"):
-                if not isinstance(update, str):
-                    update = json.dumps(update, ensure_ascii=False)
-                if update != current_memory:
-                    self.write_long_term(update)
+                args = response.tool_calls[0].arguments
+                # Some providers return arguments as a JSON string instead of dict
+                if isinstance(args, str):
+                    args = json.loads(args)
+                # Some providers return arguments as a list (handle edge case)
+                if isinstance(args, list):
+                    if args and isinstance(args[0], dict):
+                        args = args[0]
+                    else:
+                        logger.warning("Memory consolidation: unexpected arguments as empty or non-dict list")
+                        return False
+                if not isinstance(args, dict):
+                    logger.warning("Memory consolidation: unexpected arguments type {}", type(args).__name__)
+                    return False
 
-            session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
-            logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)
-            return True
-        except Exception:
-            logger.exception("Memory consolidation failed")
-            return False
+                if entry := args.get("history_entry"):
+                    if not isinstance(entry, str):
+                        entry = str(entry)
+                    self.append_history(entry)
+                if update := args.get("memory_update"):
+                    if not isinstance(update, str):
+                        update = str(update)
+                    if update != current_memory:
+                        self.write_long_term(update)
+
+                session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
+                logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)
+                return True
+
+            except Exception:
+                logger.warning("Memory consolidation failed (attempt {}/{})", attempt, max_attempts, exc_info=True)
+                if attempt < max_attempts:
+                    await asyncio.sleep(2 ** (attempt - 1))
+
+        logger.warning("Memory consolidation: all {} attempts failed", max_attempts)
+        return False
