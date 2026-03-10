@@ -134,7 +134,7 @@ class MemoryStore:
 {chr(10).join(lines)}"""
 
         try:
-            response = await provider.chat(
+            response = await provider.chat_with_retry(
                 messages=[
                     {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
                     {"role": "user", "content": prompt},
