@@ -152,7 +152,8 @@ class ImageTool(Tool):
         valid_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
         if path.suffix.lower() not in valid_extensions:
             raise ValueError(
-                f"Unsupported image format: {path.suffix}. " f"Supported formats: {', '.join(valid_extensions)}"
+                f"Unsupported image format: {path.suffix}. "
+                f"Supported formats: {', '.join(valid_extensions)}"
             )
 
         # Read and encode image
@@ -272,7 +273,7 @@ class ImageTool(Tool):
             {"role": "user", "content": content},
         ]
         try:
-            response = await self.provider.chat(messages=messages, mode="multimodal")
+            response = await self.provider.chat_with_retry(messages=messages, mode="multimodal")
             if response.content:
                 return response.content
             return "Error: No response content from vision model."
@@ -419,7 +420,9 @@ class ImageTool(Tool):
             choices = output.get("choices", [])
 
             if not choices:
-                return f"Error: No image generated. Response: {json.dumps(result, ensure_ascii=False)}"
+                return (
+                    f"Error: No image generated. Response: {json.dumps(result, ensure_ascii=False)}"
+                )
 
             # Get image URLs
             image_urls = []
@@ -480,7 +483,9 @@ class ImageTool(Tool):
                 error_msg = error_detail
             return f"Error: HTTP {e.response.status_code} - {error_msg}"
         except httpx.TimeoutException:
-            return "Error: Request timed out. The generation may take 10-30 seconds, please try again."
+            return (
+                "Error: Request timed out. The generation may take 10-30 seconds, please try again."
+            )
         except httpx.RequestError as e:
             return f"Error: Network request failed - {str(e)}"
         except Exception as e:

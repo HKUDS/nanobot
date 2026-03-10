@@ -47,7 +47,7 @@ class ProvidersManager:
             provider_name=provider_name,
         )
 
-    async def chat(
+    async def chat_with_retry(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
@@ -91,8 +91,12 @@ class ProvidersManager:
                 }
             )
             # Get decider's response - it should return only a mode name
-            decider_response = await decider.chat(
-                messages=decider_messages, tools=None, model=decider.get_default_model(), max_tokens=50, temperature=0.1
+            decider_response = await decider.chat_with_retry(
+                messages=decider_messages,
+                tools=None,
+                model=decider.get_default_model(),
+                max_tokens=50,
+                temperature=0.1,
             )
             # Extract mode from decider response (should be just one word)
             selected_mode = decider_response.content.strip() if decider_response.content else "main"
@@ -114,7 +118,7 @@ class ProvidersManager:
             raise ValueError(f"Unknown mode: {mode} and no fallback available")
 
         # Make the chat request
-        return await provider.chat(
+        return await provider.chat_with_retry(
             messages=messages,
             tools=tools,
             model=model or provider.get_default_model(),
@@ -175,7 +179,9 @@ class ProvidersManager:
 
         summary_parts = []
         for mode_name, m_info in self._modes.items():
-            summary_parts.append(f"Mode '{mode_name}'({self.get_model(mode_name)}) : {m_info['describe']}")
+            summary_parts.append(
+                f"Mode '{mode_name}'({self.get_model(mode_name)}) : {m_info['describe']}"
+            )
         return "\n".join(summary_parts)
 
     def get_provider(self, mode: str):
@@ -213,4 +219,7 @@ class ProvidersManager:
     def list_models(self) -> list[str]:
         """List all available models."""
 
-        return [{"name": k, "model": self.get_model(k), "describe": v["describe"]} for k, v in self._modes.items()]
+        return [
+            {"name": k, "model": self.get_model(k), "describe": v["describe"]}
+            for k, v in self._modes.items()
+        ]
