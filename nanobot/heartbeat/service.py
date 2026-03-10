@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
@@ -87,10 +89,15 @@ class HeartbeatService:
 
         Returns (action, tasks) where action is 'skip' or 'run'.
         """
+        # Include current time so LLM can evaluate time-based tasks
+        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        tz = time.strftime("%Z") or "UTC"
+
         response = await self.provider.chat(
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
                 {"role": "user", "content": (
+                    f"Current Time: {now} ({tz})\n\n"
                     "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
                     f"{content}"
                 )},
