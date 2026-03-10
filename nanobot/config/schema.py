@@ -68,6 +68,7 @@ class DiscordConfig(Base):
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
     group_policy: Literal["mention", "open"] = "mention"
+    reply_to_message: bool = False  # If true, bot replies quote the original message
 
 
 class MatrixConfig(Base):
@@ -198,8 +199,6 @@ class QQConfig(Base):
     allow_from: list[str] = Field(
         default_factory=list
     )  # Allowed user openids (empty = public access)
-
-
 
 
 class ChannelsConfig(Base):
