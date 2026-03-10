@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
@@ -87,11 +88,18 @@ class HeartbeatService:
 
         Returns (action, tasks) where action is 'skip' or 'run'.
         """
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        today_str = datetime.now().strftime("%Y-%m-%d")
         response = await self.provider.chat_with_retry(
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
                 {"role": "user", "content": (
-                    "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
+                    f"Current date/time: {now_str}\n\n"
+                    "Review the following HEARTBEAT.md and decide whether there are tasks DUE NOW "
+                    "(scheduled date/time has already passed or is within the next 5 minutes). "
+                    "Tasks scheduled for a future date are NOT due — choose 'skip' for those. "
+                    f"Evaluate each task independently: if a task has a 'Last-run' field dated {today_str}, "
+                    "that specific task already ran today — skip it. Other tasks are unaffected.\n\n"
                     f"{content}"
                 )},
             ],
