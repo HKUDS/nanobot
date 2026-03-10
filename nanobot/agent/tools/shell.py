@@ -123,10 +123,11 @@ class ExecTool(Tool):
             return f"Error executing command: {str(e)}"
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
-        """Best-effort safety guard for potentially destructive commands."""
+        """Enhanced safety guard for potentially destructive commands and injections."""
         cmd = command.strip()
         lower = cmd.lower()
 
+        # Basic pattern matching (existing)
         for pattern in self.deny_patterns:
             if re.search(pattern, lower):
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
@@ -135,6 +136,12 @@ class ExecTool(Tool):
             if not any(re.search(p, lower) for p in self.allow_patterns):
                 return "Error: Command blocked by safety guard (not in allowlist)"
 
+        # Enhanced injection detection
+        injection_error = self._detect_command_injection(cmd)
+        if injection_error:
+            return injection_error
+
+        # Path traversal protection
         if self.restrict_to_workspace:
             if "..\\" in cmd or "../" in cmd:
                 return "Error: Command blocked by safety guard (path traversal detected)"
@@ -149,6 +156,44 @@ class ExecTool(Tool):
                 if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
                     return "Error: Command blocked by safety guard (path outside working dir)"
 
+        return None
+
+    def _detect_command_injection(self, command: str) -> str | None:
+        """Detect potential command injection patterns."""
+        # Check for command chaining with suspicious context
+        chain_patterns = [
+            r'[;&|`]\s*rm\s+',           # ; rm, & rm, | rm, ` rm
+            r'[;&|`]\s*del\s+',          # ; del, & del, | del
+            r'[;&|`]\s*format\b',        # ; format, & format
+            r'[;&|`]\s*shutdown\b',      # ; shutdown
+            r'\$\([^)]*rm\s+[^)]*\)',    # $(rm ...)
+            r'`[^`]*rm\s+[^`]*`',        # `rm ...`
+        ]
+        
+        for pattern in chain_patterns:
+            if re.search(pattern, command, re.IGNORECASE):
+                return "Error: Command blocked by safety guard (potential command injection detected)"
+        
+        # Check for suspicious variable expansion
+        if re.search(r'\$\{[^}]*[;&|][^}]*\}', command):
+            return "Error: Command blocked by safety guard (suspicious variable expansion)"
+        
+        # Check for base64/hex encoded commands (simple detection)
+        if re.search(r'base64|xxd.*-r|echo.*[a-fA-F0-9]{20,}.*\|\s*sh', command):
+            return "Error: Command blocked by safety guard (potential encoded command)"
+        
+        # Check for network operations in suspicious context
+        network_suspicious = [
+            r'curl\s+.*\s*\|\s*sh',      # curl ... | sh
+            r'wget\s+.*\s*\|\s*sh',      # wget ... | sh
+            r'\|\s*bash\s*$',            # | bash
+            r'\|\s*sh\s*$',              # | sh
+        ]
+        
+        for pattern in network_suspicious:
+            if re.search(pattern, command, re.IGNORECASE):
+                return "Error: Command blocked by safety guard (suspicious network/pipe operation)"
+        
         return None
 
     @staticmethod
