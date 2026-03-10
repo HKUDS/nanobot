@@ -28,6 +28,7 @@ from .ontology import (
     Relationship,
     Triple,
     classify_entity_type,
+    refine_type_from_predicate,
 )
 
 try:
@@ -222,6 +223,12 @@ class KnowledgeGraph:
         for triple in triples:
             sub_type = classify_entity_type(triple.subject)
             obj_type = classify_entity_type(triple.object)
+            sub_type = refine_type_from_predicate(
+                sub_type, triple.predicate, is_subject=True,
+            )
+            obj_type = refine_type_from_predicate(
+                obj_type, triple.predicate, is_subject=False,
+            )
 
             sub_entity = Entity(
                 name=triple.subject,

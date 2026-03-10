@@ -3426,7 +3426,10 @@ class MemoryStore:
         if not rel_triples:
             return []
 
-        # Deduplicate and format as compact lines, respecting token budget
+        # Deduplicate and format as compact lines, respecting token budget.
+        # Annotate entities with ontology types to help the LLM disambiguate.
+        from .ontology import classify_entity_type
+
         seen: set[tuple[str, str, str]] = set()
         graph_lines: list[str] = []
         total_chars = 0
@@ -3437,7 +3440,11 @@ class MemoryStore:
             if key in seen:
                 continue
             seen.add(key)
-            line = f"- {subj} → {pred} → {obj}"
+            s_type = classify_entity_type(subj).value
+            o_type = classify_entity_type(obj).value
+            s_label = f"{subj} [{s_type}]" if s_type != "unknown" else subj
+            o_label = f"{obj} [{o_type}]" if o_type != "unknown" else obj
+            line = f"- {s_label} → {pred} → {o_label}"
             if total_chars + len(line) > max_chars:
                 break
             graph_lines.append(line)
@@ -3805,12 +3812,16 @@ class MemoryStore:
         long_term = self.read_long_term()
 
         profile = self.read_profile()
-        retrieved = self.retrieve(
-            query or "",
-            top_k=retrieval_k,
-            recency_half_life_days=recency_half_life_days,
-            embedding_provider=embedding_provider,
-        )
+        try:
+            retrieved = self.retrieve(
+                query or "",
+                top_k=retrieval_k,
+                recency_half_life_days=recency_half_life_days,
+                embedding_provider=embedding_provider,
+            )
+        except Exception:
+            logger.warning("Memory retrieval failed; continuing with local data only")
+            retrieved = []
 
         budget = max(token_budget, 200)
 

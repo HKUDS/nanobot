@@ -8,7 +8,11 @@ from nanobot.agent.memory.ontology import (
     Relationship,
     RelationType,
     Triple,
+    TypeScore,
     classify_entity_type,
+    classify_entity_type_scored,
+    refine_type_from_predicate,
+    resolve_alias,
 )
 
 
@@ -160,3 +164,109 @@ class TestClassifyEntityType:
 
     def test_case_insensitive(self) -> None:
         assert classify_entity_type("REDIS") == EntityType.DATABASE
+
+
+class TestClassifyEntityTypeScored:
+    """Tests for the multi-signal scored classifier."""
+
+    def test_returns_list(self) -> None:
+        result = classify_entity_type_scored("Redis")
+        assert isinstance(result, list)
+        assert all(isinstance(s, TypeScore) for s in result)
+
+    def test_high_confidence_for_regex(self) -> None:
+        scores = classify_entity_type_scored("us-east-1")
+        assert scores[0].entity_type == EntityType.REGION
+        assert scores[0].confidence >= 0.9
+        assert scores[0].signal == "regex"
+
+    def test_keyword_confidence(self) -> None:
+        scores = classify_entity_type_scored("PostgreSQL")
+        assert scores[0].entity_type == EntityType.DATABASE
+        assert scores[0].signal == "keyword"
+
+    def test_person_via_capitalization(self) -> None:
+        # Unknown proper noun should be classified as person via capitalisation
+        scores = classify_entity_type_scored("Diana")
+        assert scores[0].entity_type == EntityType.PERSON
+        assert scores[0].signal == "capitalized"
+        assert scores[0].confidence < 0.6  # low confidence — it's a heuristic
+
+    def test_person_via_role(self) -> None:
+        scores = classify_entity_type_scored("lead engineer")
+        assert scores[0].entity_type == EntityType.PERSON
+        assert scores[0].signal == "role"
+
+    def test_system_keyword_beats_capitalization(self) -> None:
+        # "Docker" is capitalized but should match technology, not person
+        scores = classify_entity_type_scored("Docker")
+        assert scores[0].entity_type == EntityType.TECHNOLOGY
+
+    def test_suffix_pattern(self) -> None:
+        scores = classify_entity_type_scored("billing team")
+        assert scores[0].entity_type == EntityType.ORGANIZATION
+        assert scores[0].signal == "suffix"
+
+    def test_phrase_keyword(self) -> None:
+        scores = classify_entity_type_scored("github actions pipeline")
+        assert scores[0].entity_type == EntityType.TECHNOLOGY
+
+    def test_empty_returns_unknown(self) -> None:
+        scores = classify_entity_type_scored("")
+        assert scores[0].entity_type == EntityType.UNKNOWN
+
+    def test_multiple_candidates(self) -> None:
+        # "Redis server" → DATABASE (keyword "redis") + SERVICE (suffix " server")
+        scores = classify_entity_type_scored("Redis server")
+        types = {s.entity_type for s in scores}
+        assert EntityType.DATABASE in types
+        assert EntityType.SERVICE in types
+        # DATABASE should rank higher
+        assert scores[0].entity_type == EntityType.DATABASE
+
+
+class TestResolveAlias:
+    def test_known_alias(self) -> None:
+        assert resolve_alias("pg") == "postgresql"
+        assert resolve_alias("k8s") == "kubernetes"
+        assert resolve_alias("prod") == "production"
+
+    def test_unknown_passthrough(self) -> None:
+        assert resolve_alias("foobar") == "foobar"
+
+    def test_case_insensitive(self) -> None:
+        assert resolve_alias("PG") == "postgresql"
+        assert resolve_alias("K8S") == "kubernetes"
+
+    def test_strips_whitespace(self) -> None:
+        assert resolve_alias("  pg  ") == "postgresql"
+
+    def test_alias_enables_classification(self) -> None:
+        # "pg" alone wouldn't match DATABASE, but alias resolves to "postgresql"
+        assert classify_entity_type("pg") == EntityType.DATABASE
+        assert classify_entity_type("k8s") == EntityType.TECHNOLOGY
+
+
+class TestRefineTypeFromPredicate:
+    def test_refines_unknown_subject(self) -> None:
+        # WORKS_ON subject → PERSON
+        assert refine_type_from_predicate(
+            EntityType.UNKNOWN, RelationType.WORKS_ON, is_subject=True,
+        ) == EntityType.PERSON
+
+    def test_refines_unknown_object(self) -> None:
+        # LOCATED_IN object → LOCATION
+        assert refine_type_from_predicate(
+            EntityType.UNKNOWN, RelationType.LOCATED_IN, is_subject=False,
+        ) == EntityType.LOCATION
+
+    def test_preserves_known_type(self) -> None:
+        # Already classified — should not overwrite
+        assert refine_type_from_predicate(
+            EntityType.DATABASE, RelationType.WORKS_ON, is_subject=True,
+        ) == EntityType.DATABASE
+
+    def test_no_hint_stays_unknown(self) -> None:
+        assert refine_type_from_predicate(
+            EntityType.UNKNOWN, RelationType.RELATED_TO, is_subject=True,
+        ) == EntityType.UNKNOWN
