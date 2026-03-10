@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -49,6 +49,15 @@ class MemoryStore:
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
+        self._index: Any | None = None
+
+    @property
+    def index(self) -> Any:
+        """Lazy-init the FTS5 search index."""
+        if self._index is None:
+            from nanobot.agent.tools.memory_search import MemoryIndex
+            self._index = MemoryIndex(self.memory_dir)
+        return self._index
 
     def read_long_term(self) -> str:
         if self.memory_file.exists():
@@ -61,6 +70,11 @@ class MemoryStore:
     def append_history(self, entry: str) -> None:
         with open(self.history_file, "a", encoding="utf-8") as f:
             f.write(entry.rstrip() + "\n\n")
+        # Sync to FTS5 index
+        try:
+            self.index.index_entry(entry)
+        except Exception:
+            logger.warning("Failed to index history entry, search may be stale")
 
     def get_memory_context(self) -> str:
         long_term = self.read_long_term()
