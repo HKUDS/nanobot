@@ -1,9 +1,27 @@
 """Message tool for sending messages to users."""
 
+import os
+import tempfile
 from typing import Any, Awaitable, Callable
+from urllib.parse import urlparse
+
+import httpx
+from loguru import logger
 
 from nanobot.agent.tools.base import Tool
 from nanobot.bus.events import OutboundMessage
+
+# Fallback extensions from Content-Type when URL path has none
+_MIME_TO_EXT: dict[str, str] = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "audio/mpeg": ".mp3",
+    "audio/ogg": ".ogg",
+    "video/mp4": ".mp4",
+    "application/pdf": ".pdf",
+}
 
 
 class MessageTool(Tool):
@@ -70,6 +88,49 @@ class MessageTool(Tool):
             "required": ["content"]
         }
 
+    @staticmethod
+    def _is_url(path: str) -> bool:
+        return path.startswith("http://") or path.startswith("https://")
+
+    @staticmethod
+    async def _download_to_temp(url: str) -> str | None:
+        """Download a URL to a temporary file and return its path."""
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=60) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+
+            # Determine file extension
+            parsed = urlparse(url)
+            _, ext = os.path.splitext(parsed.path)
+            if not ext or len(ext) > 6:
+                ct = resp.headers.get("content-type", "").split(";")[0].strip()
+                ext = _MIME_TO_EXT.get(ct, ".bin")
+
+            fd, tmp_path = tempfile.mkstemp(suffix=ext)
+            try:
+                os.write(fd, resp.content)
+            finally:
+                os.close(fd)
+            return tmp_path
+        except Exception as e:
+            logger.warning("Failed to download media URL {}: {}", url, e)
+            return None
+
+    async def _resolve_media(self, media: list[str]) -> list[str]:
+        """Download any URLs in media list to temp files, pass local paths through."""
+        resolved: list[str] = []
+        for item in media:
+            if self._is_url(item):
+                path = await self._download_to_temp(item)
+                if path:
+                    resolved.append(path)
+                else:
+                    logger.warning("Skipping undownloadable media: {}", item)
+            else:
+                resolved.append(item)
+        return resolved
+
     async def execute(
         self,
         content: str,
@@ -89,11 +150,13 @@ class MessageTool(Tool):
         if not self._send_callback:
             return "Error: Message sending not configured"
 
+        resolved_media = await self._resolve_media(media) if media else []
+
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
             content=content,
-            media=media or [],
+            media=resolved_media,
             metadata={
                 "message_id": message_id,
             }
@@ -103,7 +166,7 @@ class MessageTool(Tool):
             await self._send_callback(msg)
             if channel == self._default_channel and chat_id == self._default_chat_id:
                 self._sent_in_turn = True
-            media_info = f" with {len(media)} attachments" if media else ""
+            media_info = f" with {len(resolved_media)} attachments" if resolved_media else ""
             return f"Message sent to {channel}:{chat_id}{media_info}"
         except Exception as e:
             return f"Error sending message: {str(e)}"
