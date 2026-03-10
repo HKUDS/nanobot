@@ -5,11 +5,24 @@ import os
 import secrets
 import string
 from typing import Any
+from loguru import logger
 
 import json_repair
 import litellm
 from litellm import acompletion
 from loguru import logger
+
+# Enable Langfuse tracing when LANGFUSE_BASE_URL is set.
+# Requires: pip install langfuse
+# Env vars: LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY
+_langfuse_enabled = False
+if os.environ.get("LANGFUSE_BASE_URL"):
+    if "langfuse" not in litellm.success_callback:
+        litellm.success_callback.append("langfuse")
+    if "langfuse" not in litellm.failure_callback:
+        litellm.failure_callback.append("langfuse")
+    _langfuse_enabled = True
+    logger.info("Langfuse enabled")
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway

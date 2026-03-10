@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from typing import Any
 
 import json_repair
-from openai import AsyncOpenAI
+
+if os.environ.get("LANGFUSE_BASE_URL"):
+    from langfuse.openai import AsyncOpenAI  # type: ignore[import-untyped]
+else:
+    from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
