@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any, Callable
 
@@ -63,7 +64,13 @@ def get_dashboard_app(state_getter: Callable[[], dict[str, Any] | None]) -> Star
         if session_mgr is None:
             return JSONResponse({"error": "no session manager"}, status_code=500)
 
-        session = session_mgr.get_or_create(key)
+        # Read-only: only return data for sessions that exist
+        session = session_mgr._cache.get(key)
+        if session is None:
+            session = session_mgr._load(key)
+        if session is None:
+            return JSONResponse({"error": "session not found"}, status_code=404)
+
         messages = []
         for m in session.messages:
             entry: dict[str, Any] = {
@@ -71,11 +78,9 @@ def get_dashboard_app(state_getter: Callable[[], dict[str, Any] | None]) -> Star
                 "timestamp": m.get("timestamp"),
             }
             content = m.get("content")
-            # Truncate very large tool results / images
             if isinstance(content, str):
-                entry["content"] = content[:2000] + ("…" if len(content) > 2000 else "")
+                entry["content"] = content[:2000] + ("\u2026" if len(content) > 2000 else "")
             elif isinstance(content, list):
-                # Multi-modal content — extract text parts
                 parts = []
                 for block in content:
                     if isinstance(block, dict):
@@ -89,7 +94,6 @@ def get_dashboard_app(state_getter: Callable[[], dict[str, Any] | None]) -> Star
             else:
                 entry["content"] = ""
 
-            # Tool call info
             if tool_calls := m.get("tool_calls"):
                 calls = []
                 for tc in tool_calls:
@@ -109,6 +113,15 @@ def get_dashboard_app(state_getter: Callable[[], dict[str, Any] | None]) -> Star
 
             messages.append(entry)
 
+        # Compute per-session stats
+        tool_counts: Counter[str] = Counter()
+        for m in session.messages:
+            if tc_list := m.get("tool_calls"):
+                for tc in tc_list:
+                    fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                    name = fn.get("name", "?")
+                    tool_counts[name] += 1
+
         return JSONResponse(
             {
                 "key": session.key,
@@ -116,6 +129,11 @@ def get_dashboard_app(state_getter: Callable[[], dict[str, Any] | None]) -> Star
                 "updated_at": session.updated_at.isoformat(),
                 "message_count": len(session.messages),
                 "messages": messages,
+                "stats": {
+                    "tool_usage": dict(tool_counts.most_common(20)),
+                    "consolidated": session.last_consolidated,
+                    "unconsolidated": len(session.messages) - session.last_consolidated,
+                },
             }
         )
 
@@ -138,11 +156,12 @@ def get_dashboard_app(state_getter: Callable[[], dict[str, Any] | None]) -> Star
 def _build_dashboard_data(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "identity": _build_identity(state),
-        "sessions": _build_sessions(state),
+        "activity": _build_activity(state),
         "tools": _build_tools(state),
         "channels": _build_channels(state),
         "cron": _build_cron(state),
         "system": _build_system(state),
+        "memory": _build_memory(state),
     }
 
 
@@ -155,46 +174,92 @@ def _build_identity(state: dict[str, Any]) -> dict[str, Any]:
     name = getattr(config, "name", "nanobot") if config else "nanobot"
     model = getattr(agent, "model", "unknown") if agent else "unknown"
 
-    # Is the agent currently processing anything?
     active_tasks: dict = getattr(agent, "_active_tasks", {}) if agent else {}
-    busy = any(tasks for tasks in active_tasks.values() if any(not t.done() for t in tasks))
-    status = "processing" if busy else "idle"
+    active_count = sum(
+        1 for tasks in active_tasks.values() for t in tasks if not t.done()
+    )
+    status = "processing" if active_count > 0 else "idle"
 
     return {
         "name": name,
         "model": model,
         "uptime_seconds": uptime,
         "status": status,
+        "active_count": active_count,
     }
 
 
-def _build_sessions(state: dict[str, Any]) -> list[dict[str, Any]]:
+def _build_activity(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build a rich activity feed from sessions.
+
+    Each entry contains: session key, active status, user prompt preview,
+    tool usage summary, message counts by role, and timestamps.
+    """
     session_mgr = state.get("sessions")
     agent = state.get("agent")
     if session_mgr is None:
         return []
 
     active_tasks: dict = getattr(agent, "_active_tasks", {}) if agent else {}
-    active_keys = {key for key, tasks in active_tasks.items() if any(not t.done() for t in tasks)}
+    active_keys = {
+        key for key, tasks in active_tasks.items() if any(not t.done() for t in tasks)
+    }
 
-    sessions = []
+    entries = []
+
     for info in session_mgr.list_sessions():
         key = info.get("key", "")
 
-        # Peek at the last few messages to get a preview and count
+        # Try to get session from cache (read-only, no side effects)
         session = session_mgr._cache.get(key)
         msg_count = 0
-        last_preview = ""
+        user_prompt = ""
+        last_response = ""
+        tools_used: Counter[str] = Counter()
+        role_counts: dict[str, int] = {"user": 0, "assistant": 0, "tool": 0}
+        channel = ""
+        error = False
+
         if session:
             msg_count = len(session.messages)
+
+            # Extract channel from session key
+            if ":" in key:
+                channel = key.split(":")[0]
+
+            # Find the last user message (the prompt that triggered this)
             for m in reversed(session.messages):
+                role = m.get("role", "")
                 content = m.get("content")
-                if isinstance(content, str) and content.strip():
-                    last_preview = content[:120] + ("…" if len(content) > 120 else "")
+                if role == "user" and isinstance(content, str) and content.strip():
+                    user_prompt = content[:200] + ("\u2026" if len(content) > 200 else "")
                     break
+
+            # Find the last assistant response
+            for m in reversed(session.messages):
+                role = m.get("role", "")
+                content = m.get("content")
+                if role == "assistant" and isinstance(content, str) and content.strip():
+                    last_response = content[:200] + ("\u2026" if len(content) > 200 else "")
+                    break
+
+            # Count tools and roles
+            for m in session.messages:
+                role = m.get("role", "")
+                if role in role_counts:
+                    role_counts[role] += 1
+                if tc_list := m.get("tool_calls"):
+                    for tc in tc_list:
+                        fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                        tools_used[fn.get("name", "?")] += 1
+
+                # Check for errors
+                content = m.get("content")
+                if role == "assistant" and isinstance(content, str):
+                    if "maximum number of tool call iterations" in content:
+                        error = True
         else:
-            # Session not in memory cache — estimate message count from the
-            # file path stored in the listing (line count minus the metadata line).
+            # Not in cache — get basic info from file metadata
             file_path = info.get("path")
             if file_path:
                 try:
@@ -202,19 +267,30 @@ def _build_sessions(state: dict[str, Any]) -> list[dict[str, Any]]:
                         msg_count = max(0, sum(1 for _ in _f) - 1)
                 except OSError:
                     pass
+            if ":" in key:
+                channel = key.split(":")[0]
 
-        sessions.append(
+        # Compute iteration estimate: each assistant turn with tool_calls = 1 iteration
+        iterations = role_counts.get("assistant", 0)
+
+        entries.append(
             {
                 "key": key,
+                "channel": channel,
+                "active": key in active_keys,
                 "created_at": info.get("created_at"),
                 "updated_at": info.get("updated_at"),
                 "message_count": msg_count,
-                "active": key in active_keys,
-                "last_preview": last_preview,
+                "user_prompt": user_prompt,
+                "last_response": last_response,
+                "iterations": iterations,
+                "tools_used": dict(tools_used.most_common(10)),
+                "role_counts": role_counts,
+                "error": error,
             }
         )
 
-    return sessions
+    return entries
 
 
 def _build_tools(state: dict[str, Any]) -> dict[str, Any]:
@@ -228,20 +304,26 @@ def _build_tools(state: dict[str, Any]) -> dict[str, Any]:
     builtin = [n for n in tool_names if not n.startswith("mcp_")]
     mcp_tool_names = [n for n in tool_names if n.startswith("mcp_")]
 
-    # Group MCP tools by server name (prefix: mcp_{server}_{tool})
-    mcp_servers_cfg: dict = getattr(agent, "_mcp_servers", {})
-    mcp_connected: bool = getattr(agent, "_mcp_connected", False)
+    mcp_manager = getattr(agent, "_mcp_manager", None)
+    mcp_servers_cfg: dict = {}
+    mcp_server_status: dict[str, str] = {}
+
+    if mcp_manager:
+        mcp_servers_cfg = getattr(mcp_manager, "_servers", {})
+        mcp_server_status = getattr(mcp_manager, "_status", {})
 
     mcp: list[dict[str, Any]] = []
     for server_name, cfg in mcp_servers_cfg.items():
         prefix = f"mcp_{server_name}_"
-        server_tools = [n[len(prefix) :] for n in mcp_tool_names if n.startswith(prefix)]
+        server_tools = [n[len(prefix):] for n in mcp_tool_names if n.startswith(prefix)]
         transport = "stdio" if getattr(cfg, "command", "") else "http"
         endpoint = getattr(cfg, "command", "") or getattr(cfg, "url", "")
+        status = mcp_server_status.get(server_name, "not connected")
         mcp.append(
             {
                 "server": server_name,
-                "connected": mcp_connected,
+                "status": status,
+                "connected": status == "connected",
                 "transport": transport,
                 "endpoint": endpoint,
                 "tools": server_tools,
@@ -250,8 +332,6 @@ def _build_tools(state: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
-    # If there are mcp_* tools registered for servers not in config (shouldn't
-    # happen, but be defensive), show them under an "unknown" group.
     known_prefixes = {f"mcp_{s}_" for s in mcp_servers_cfg}
     orphaned = [n for n in mcp_tool_names if not any(n.startswith(p) for p in known_prefixes)]
     if orphaned:
@@ -280,12 +360,33 @@ def _build_channels(state: dict[str, Any]) -> dict[str, Any]:
 def _build_cron(state: dict[str, Any]) -> dict[str, Any]:
     cron = state.get("cron")
     if cron is None:
-        return {"enabled": False, "jobs_count": 0, "next_run_ms": None}
+        return {"enabled": False, "jobs": []}
+
     s = cron.status()
+    jobs_list = []
+    try:
+        for job in cron.list_jobs(include_disabled=True):
+            jobs_list.append({
+                "id": job.id,
+                "name": job.name,
+                "enabled": job.enabled,
+                "schedule_kind": job.schedule.kind,
+                "schedule_expr": job.schedule.expr or (
+                    f"every {job.schedule.every_ms // 1000}s" if job.schedule.every_ms else None
+                ),
+                "next_run_ms": job.state.next_run_at_ms,
+                "last_run_ms": job.state.last_run_at_ms,
+                "last_status": job.state.last_status,
+                "last_error": job.state.last_error,
+            })
+    except Exception:
+        pass
+
     return {
         "enabled": s.get("enabled", False),
         "jobs_count": s.get("jobs", 0),
         "next_run_ms": s.get("next_wake_at_ms"),
+        "jobs": jobs_list,
     }
 
 
@@ -306,4 +407,38 @@ def _build_system(state: dict[str, Any]) -> dict[str, Any]:
         "heartbeat_enabled": hb_enabled,
         "heartbeat_interval_s": hb_interval,
         "heartbeat_running": hb_running,
+    }
+
+
+def _build_memory(state: dict[str, Any]) -> dict[str, Any]:
+    """Build memory system status."""
+    agent = state.get("agent")
+    workspace = getattr(agent, "workspace", None) if agent else None
+    if workspace is None:
+        return {"available": False}
+
+    memory_dir = workspace / "memory"
+    memory_file = memory_dir / "MEMORY.md"
+    history_file = memory_dir / "HISTORY.md"
+
+    memory_size = 0
+    history_lines = 0
+
+    if memory_file.exists():
+        try:
+            memory_size = memory_file.stat().st_size
+        except OSError:
+            pass
+
+    if history_file.exists():
+        try:
+            with open(history_file, encoding="utf-8") as f:
+                history_lines = sum(1 for _ in f)
+        except OSError:
+            pass
+
+    return {
+        "available": True,
+        "memory_size_bytes": memory_size,
+        "history_lines": history_lines,
     }

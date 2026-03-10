@@ -9,76 +9,82 @@
 <body>
 <div id="app">
 
+  <!-- Zone 1: Top Bar -->
   <header>
-    <span class="header-name" id="agent-name">WorldClaw</span>
-    <div class="header-meta" id="header-meta">
-      <span class="badge status-initializing"><span class="spinner"></span> Loading…</span>
+    <div class="header-left">
+      <span class="header-name" id="agent-name">WorldClaw</span>
+      <div class="header-badges" id="header-badges">
+        <span class="badge status-initializing"><span class="spinner"></span> Loading</span>
+      </div>
     </div>
-    <span id="last-updated"></span>
-    <button id="refresh-btn">↻ Refresh</button>
+    <div class="header-cards" id="header-cards"></div>
+    <div class="header-right">
+      <span id="last-updated"></span>
+      <button id="refresh-btn" title="Refresh now">Refresh</button>
+    </div>
   </header>
+
+  <!-- Zone 2: Tabbed Primary View -->
+  <nav class="tab-bar">
+    <button class="tab active" data-tab="activity">Activity</button>
+    <button class="tab" data-tab="system">System</button>
+  </nav>
 
   <main>
 
-    <!-- Sessions (full width) -->
-    <div class="panel" id="sessions-panel">
-      <div class="panel-header">
-        Sessions
-        <span class="panel-count" id="sessions-count"></span>
+    <!-- Activity Tab -->
+    <div class="tab-content active" id="tab-activity">
+      <div class="activity-feed" id="activity-feed">
+        <div class="empty"><span class="spinner"></span> Loading</div>
       </div>
-      <div class="panel-body">
-        <div class="session-list" id="session-list">
-          <div class="empty"><span class="spinner"></span> Loading…</div>
+    </div>
+
+    <!-- System Tab -->
+    <div class="tab-content" id="tab-system">
+      <div class="system-grid">
+        <div class="panel">
+          <div class="panel-header">Channels</div>
+          <div class="panel-body" id="sys-channels"></div>
         </div>
-      </div>
-    </div>
-
-    <!-- Session detail drawer (full width, hidden until a session is clicked) -->
-    <div id="session-detail">
-      <div id="session-detail-header">
-        <span>Session: </span>
-        <span id="session-detail-title" style="font-family:var(--mono);font-size:12px;color:var(--accent)"></span>
-        <button id="session-detail-close" onclick="closeSession()">✕</button>
-      </div>
-      <div id="session-messages"></div>
-    </div>
-
-    <!-- Tools & MCP -->
-    <div class="panel">
-      <div class="panel-header">Tools &amp; MCP Servers</div>
-      <div class="panel-body">
-        <div class="tools-section">
-          <div class="tools-section-label">Built-in</div>
-          <div class="tool-chips" id="builtin-tools">
-            <span class="empty"><span class="spinner"></span></span>
+        <div class="panel">
+          <div class="panel-header">Message Bus</div>
+          <div class="panel-body" id="sys-bus"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">Tools
+            <span class="panel-count" id="tools-count"></span>
           </div>
+          <div class="panel-body" id="sys-tools"></div>
         </div>
-        <div class="tools-section">
-          <div class="tools-section-label">MCP Servers</div>
-          <div id="mcp-servers">
-            <span class="empty"><span class="spinner"></span></span>
-          </div>
+        <div class="panel">
+          <div class="panel-header">Scheduled Tasks</div>
+          <div class="panel-body" id="sys-cron"></div>
         </div>
-      </div>
-    </div>
-
-    <!-- Channels -->
-    <div class="panel">
-      <div class="panel-header">Channels</div>
-      <div class="panel-body" id="channels-body">
-        <div class="empty"><span class="spinner"></span></div>
-      </div>
-    </div>
-
-    <!-- System -->
-    <div class="panel">
-      <div class="panel-header">System</div>
-      <div class="panel-body" id="system-body">
-        <div class="empty"><span class="spinner"></span></div>
+        <div class="panel">
+          <div class="panel-header">MCP Servers</div>
+          <div class="panel-body" id="sys-mcp"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">Memory</div>
+          <div class="panel-body" id="sys-memory"></div>
+        </div>
       </div>
     </div>
 
   </main>
+
+  <!-- Zone 3: Session Inspector Drawer -->
+  <div id="session-drawer">
+    <div id="drawer-header">
+      <div id="drawer-title-row">
+        <span id="drawer-title"></span>
+        <button id="drawer-close" onclick="closeDrawer()">Close</button>
+      </div>
+      <div id="drawer-stats"></div>
+    </div>
+    <div id="drawer-messages"></div>
+  </div>
+
 </div>
 <script src="/static/app.js"></script>
 </body>

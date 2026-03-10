@@ -1,37 +1,14 @@
 'use strict';
 
-// ── State ──────────────────────────────────────────────────────────────────
+// -- State --------------------------------------------------------------------
 let _data = null;
-let _selectedSession = null;
+let _openSession = null;
 let _refreshTimer = null;
+let _sessionTimer = null;
 const REFRESH_MS = 5000;
+const SESSION_REFRESH_MS = 2000;
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function fmt_uptime(seconds) {
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return `${h}h ${m}m`;
-}
-
-function fmt_ago(isoStr) {
-  if (!isoStr) return '—';
-  const diff = Math.floor((Date.now() - new Date(isoStr)) / 1000);
-  if (diff < 5)   return 'just now';
-  if (diff < 60)  return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
-}
-
-function fmt_next_run(ms) {
-  if (!ms) return '—';
-  const diff = Math.floor((ms - Date.now()) / 1000);
-  if (diff <= 0) return 'soon';
-  return 'in ' + fmt_uptime(diff);
-}
+// -- Helpers ------------------------------------------------------------------
 
 function esc(str) {
   return String(str ?? '')
@@ -41,15 +18,56 @@ function esc(str) {
     .replace(/"/g, '&quot;');
 }
 
-// ── Fetch ──────────────────────────────────────────────────────────────────
+function fmtUptime(seconds) {
+  if (seconds == null) return '\u2014';
+  if (seconds < 60) return seconds + 's';
+  if (seconds < 3600) return Math.floor(seconds / 60) + 'm ' + (seconds % 60) + 's';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return h + 'h ' + m + 'm';
+}
+
+function fmtAgo(isoStr) {
+  if (!isoStr) return '\u2014';
+  const diff = Math.floor((Date.now() - new Date(isoStr)) / 1000);
+  if (diff < 5) return 'just now';
+  if (diff < 60) return diff + 's ago';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
+}
+
+function fmtCountdown(ms) {
+  if (!ms) return '\u2014';
+  const diff = Math.floor((ms - Date.now()) / 1000);
+  if (diff <= 0) return 'due now';
+  return 'in ' + fmtUptime(diff);
+}
+
+function fmtBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function fmtToolList(toolsObj) {
+  if (!toolsObj || Object.keys(toolsObj).length === 0) return '';
+  return Object.entries(toolsObj)
+    .map(function(pair) {
+      return pair[1] > 1 ? pair[0] + ' \u00d7' + pair[1] : pair[0];
+    })
+    .join(', ');
+}
+
+// -- Fetch --------------------------------------------------------------------
 
 async function fetchDashboard() {
   try {
     const res = await fetch('/api/dashboard');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     _data = await res.json();
     render(_data);
-    updateLastUpdated();
+    updateTimestamp();
   } catch (e) {
     console.warn('Dashboard fetch failed:', e);
   }
@@ -58,7 +76,7 @@ async function fetchDashboard() {
 async function fetchSession(key) {
   try {
     const res = await fetch('/api/session/' + encodeURIComponent(key));
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) return null;
     return await res.json();
   } catch (e) {
     console.warn('Session fetch failed:', e);
@@ -66,222 +84,424 @@ async function fetchSession(key) {
   }
 }
 
-// ── Render ─────────────────────────────────────────────────────────────────
+// -- Render: Main dispatch ----------------------------------------------------
 
 function render(data) {
   if (data.status === 'initializing') {
-    renderInitializing();
+    document.getElementById('agent-name').textContent = 'WorldClaw';
+    document.getElementById('header-badges').innerHTML =
+      '<span class="badge status-initializing"><span class="spinner"></span> Initializing</span>';
     return;
   }
   renderHeader(data.identity);
-  renderSessions(data.sessions || []);
-  renderTools(data.tools || {});
-  renderChannels(data.channels || {});
-  renderSystem(data);
+  renderHeaderCards(data);
+  renderActivity(data.activity || []);
+
+  // System tab (only render if visible to save work, or on first load)
+  renderSystemChannels(data.channels || {});
+  renderSystemBus(data.system || {});
+  renderSystemTools(data.tools || {});
+  renderSystemCron(data.cron || {});
+  renderSystemMCP(data.tools || {});
+  renderSystemMemory(data.memory || {});
 }
 
-function renderInitializing() {
-  document.getElementById('agent-name').textContent = 'WorldClaw';
-  document.getElementById('header-meta').innerHTML =
-    '<span class="badge status-initializing"><span class="spinner"></span> Initializing…</span>';
-}
+// -- Render: Header -----------------------------------------------------------
 
 function renderHeader(id) {
   if (!id) return;
   document.getElementById('agent-name').textContent = id.name || 'nanobot';
-  const statusClass = 'status-' + (id.status || 'idle');
-  const statusLabel = id.status === 'processing'
+  var statusClass = 'status-' + (id.status || 'idle');
+  var statusLabel = id.status === 'processing'
     ? '<span class="spinner"></span> Processing'
-    : id.status || 'idle';
-  document.getElementById('header-meta').innerHTML = `
-    <span class="badge model">${esc(id.model)}</span>
-    <span class="badge ${statusClass}">${statusLabel}</span>
-    <span class="badge">up ${fmt_uptime(id.uptime_seconds || 0)}</span>
-  `;
+    : (id.status || 'idle');
+  document.getElementById('header-badges').innerHTML =
+    '<span class="badge model">' + esc(id.model) + '</span>' +
+    '<span class="badge ' + statusClass + '">' + statusLabel + '</span>' +
+    '<span class="badge">up ' + fmtUptime(id.uptime_seconds || 0) + '</span>';
 }
 
-function renderSessions(sessions) {
-  const list = document.getElementById('session-list');
-  const count = document.getElementById('sessions-count');
-  count.textContent = `${sessions.length} session${sessions.length !== 1 ? 's' : ''}`;
+function renderHeaderCards(data) {
+  var activity = data.activity || [];
+  var identity = data.identity || {};
 
-  if (sessions.length === 0) {
-    list.innerHTML = '<div class="empty">No sessions yet.</div>';
+  // Count sessions with activity in last 24h
+  var now = Date.now();
+  var sessions24h = 0;
+  activity.forEach(function(e) {
+    if (e.updated_at) {
+      var diff = now - new Date(e.updated_at).getTime();
+      if (diff < 86400000) sessions24h++;
+    }
+  });
+
+  var activeNow = identity.active_count || 0;
+  var errors = activity.filter(function(e) { return e.error; }).length;
+
+  var el = document.getElementById('header-cards');
+  el.innerHTML =
+    cardHtml('Sessions', sessions24h, 'today') +
+    cardHtml('Active', activeNow, 'now') +
+    cardHtml('Errors', errors, 'total', errors > 0 ? 'card-error' : '');
+}
+
+function cardHtml(label, value, sub, cls) {
+  return '<div class="summary-card ' + (cls || '') + '">' +
+    '<div class="card-value">' + esc(value) + '</div>' +
+    '<div class="card-label">' + esc(label) + '</div>' +
+    '<div class="card-sub">' + esc(sub) + '</div>' +
+    '</div>';
+}
+
+// -- Render: Activity Feed ----------------------------------------------------
+
+function renderActivity(entries) {
+  var el = document.getElementById('activity-feed');
+  if (entries.length === 0) {
+    el.innerHTML = '<div class="empty">No sessions yet.</div>';
     return;
   }
 
-  list.innerHTML = sessions.map(s => {
-    const active = s.active;
-    const indClass = active ? 'active' : '';
-    const rowClass = active ? 'active-session' : '';
-    const msgs = s.message_count ? `${s.message_count} msg${s.message_count !== 1 ? 's' : ''}` : '';
-    const ago = fmt_ago(s.updated_at);
-    const preview = s.last_preview || (active ? 'Processing…' : '');
-    return `
-      <div class="session-row ${rowClass}" data-key="${esc(s.key)}" onclick="openSession(this)">
-        <span class="session-indicator ${indClass}" title="${active ? 'active' : 'idle'}"></span>
-        <span class="session-key">${esc(s.key)}</span>
-        <span class="session-preview">${esc(preview)}</span>
-        <span class="session-meta">${esc(ago)}</span>
-        <span class="session-msgs">${esc(msgs)}</span>
-      </div>`;
+  el.innerHTML = entries.map(function(e) {
+    var isActive = e.active;
+    var statusDot = isActive
+      ? '<span class="act-dot active" title="Active"></span>'
+      : '<span class="act-dot" title="Idle"></span>';
+    var statusLabel = isActive ? 'ACTIVE' : 'DONE';
+    var statusClass = isActive ? 'act-status-active' : 'act-status-done';
+
+    var channel = e.channel ? '<span class="act-channel">' + esc(e.channel) + '</span>' : '';
+    var tools = fmtToolList(e.tools_used);
+    var toolsHtml = tools
+      ? '<div class="act-tools">Tools: ' + esc(tools) + '</div>'
+      : '';
+
+    var prompt = e.user_prompt
+      ? '<div class="act-prompt">' + esc(e.user_prompt) + '</div>'
+      : '';
+
+    var response = '';
+    if (!isActive && e.last_response) {
+      response = '<div class="act-response">' + esc(e.last_response) + '</div>';
+    } else if (isActive) {
+      response = '<div class="act-response act-working"><span class="spinner"></span> Working</div>';
+    }
+
+    var meta = '<span class="act-iter">' + (e.iterations || 0) + ' turns</span>';
+    meta += '<span class="act-msgs">' + (e.message_count || 0) + ' msgs</span>';
+
+    var errorBadge = e.error ? '<span class="badge act-error">error</span>' : '';
+
+    return '<div class="act-entry ' + (isActive ? 'act-entry-active' : '') + '" data-key="' + esc(e.key) + '" onclick="openDrawer(this)">' +
+      '<div class="act-header">' +
+        statusDot +
+        '<span class="' + statusClass + '">' + statusLabel + '</span>' +
+        channel +
+        '<span class="act-key">' + esc(e.key) + '</span>' +
+        errorBadge +
+        '<span class="act-time">' + fmtAgo(e.updated_at) + '</span>' +
+      '</div>' +
+      prompt +
+      '<div class="act-detail">' +
+        '<div class="act-meta">' + meta + '</div>' +
+        toolsHtml +
+      '</div>' +
+      response +
+    '</div>';
   }).join('');
 }
 
-function renderTools(tools) {
-  const builtin = tools.builtin || [];
-  const mcp = tools.mcp || [];
+// -- Render: System Tab -------------------------------------------------------
 
-  // Built-in chips
-  const builtinEl = document.getElementById('builtin-tools');
-  builtinEl.innerHTML = builtin.length
-    ? builtin.map(n => `<span class="tool-chip">${esc(n)}</span>`).join('')
-    : '<span class="empty">None registered</span>';
-
-  // MCP servers
-  const mcpEl = document.getElementById('mcp-servers');
-  if (mcp.length === 0) {
-    mcpEl.innerHTML = '<div class="empty">No MCP servers configured.</div>';
-    return;
-  }
-  mcpEl.innerHTML = mcp.map(srv => {
-    const connClass = srv.connected ? 'connected' : 'disconnected';
-    const connLabel = srv.connected ? 'connected' : 'disconnected';
-    const toolChips = srv.tools.length
-      ? srv.tools.map(t => `<span class="tool-chip">${esc(t)}</span>`).join('')
-      : '<span style="color:var(--muted);font-size:11px">no tools</span>';
-    return `
-      <div class="mcp-server-card">
-        <div class="mcp-server-header">
-          <span class="conn-dot ${connClass}" title="${connLabel}"></span>
-          <span class="mcp-server-name">${esc(srv.server)}</span>
-          <span class="mcp-transport">${esc(srv.transport)}</span>
-        </div>
-        ${srv.endpoint ? `<div class="mcp-endpoint">${esc(srv.endpoint)}</div>` : ''}
-        <div class="tool-chips">${toolChips}</div>
-        <div style="font-size:10px;color:var(--muted);margin-top:6px">
-          ${srv.tool_count} tool${srv.tool_count !== 1 ? 's' : ''} · timeout ${srv.tool_timeout}s
-        </div>
-      </div>`;
-  }).join('');
-}
-
-function renderChannels(channels) {
-  const el = document.getElementById('channels-body');
-  const names = Object.keys(channels);
+function renderSystemChannels(channels) {
+  var el = document.getElementById('sys-channels');
+  var names = Object.keys(channels);
   if (names.length === 0) {
     el.innerHTML = '<div class="empty">No channels enabled.</div>';
     return;
   }
-  el.innerHTML = '<div class="status-grid">' + names.map(name => {
-    const ch = channels[name];
-    const ok = ch.running || ch.enabled;
-    const dot = ok ? 'dot-ok' : 'dot-off';
-    const label = ok ? '● running' : '○ stopped';
-    return `
-      <div class="status-row">
-        <span class="status-label">${esc(name)}</span>
-        <span class="status-value ${dot}">${label}</span>
-      </div>`;
+  el.innerHTML = '<div class="status-grid">' + names.map(function(name) {
+    var ch = channels[name];
+    var ok = ch.running || ch.enabled;
+    return '<div class="status-row">' +
+      '<span class="status-label">' + esc(name) + '</span>' +
+      '<span class="status-value ' + (ok ? 'dot-ok' : 'dot-off') + '">' +
+        (ok ? 'running' : 'stopped') +
+      '</span></div>';
   }).join('') + '</div>';
 }
 
-function renderSystem(data) {
-  const sys = data.system || {};
-  const cron = data.cron || {};
-  const el = document.getElementById('system-body');
-
-  const rows = [
-    ['Inbound queue',  sys.inbound_queue_depth ?? '—', sys.inbound_queue_depth === 0 ? 'dot-ok' : 'dot-err'],
-    ['Outbound queue', sys.outbound_queue_depth ?? '—', sys.outbound_queue_depth === 0 ? 'dot-ok' : 'dot-err'],
+function renderSystemBus(sys) {
+  var el = document.getElementById('sys-bus');
+  var rows = [
+    ['Inbound queue', sys.inbound_queue_depth ?? '\u2014', sys.inbound_queue_depth === 0 ? 'dot-ok' : 'dot-warn'],
+    ['Outbound queue', sys.outbound_queue_depth ?? '\u2014', sys.outbound_queue_depth === 0 ? 'dot-ok' : 'dot-warn'],
     ['Heartbeat',
       sys.heartbeat_enabled
-        ? `● every ${sys.heartbeat_interval_s}s`
-        : '○ disabled',
+        ? 'every ' + sys.heartbeat_interval_s + 's'
+        : 'disabled',
       sys.heartbeat_enabled ? 'dot-ok' : 'dot-off'],
-    ['Cron',
-      cron.enabled
-        ? `● ${cron.jobs_count} job${cron.jobs_count !== 1 ? 's' : ''} · next ${fmt_next_run(cron.next_run_ms)}`
-        : '○ disabled',
-      cron.enabled && cron.jobs_count > 0 ? 'dot-ok' : 'dot-off'],
   ];
-
-  el.innerHTML = '<div class="status-grid">' + rows.map(([label, val, cls]) => `
-    <div class="status-row">
-      <span class="status-label">${esc(label)}</span>
-      <span class="status-value ${cls}">${esc(val)}</span>
-    </div>`).join('') + '</div>';
+  el.innerHTML = '<div class="status-grid">' + rows.map(function(r) {
+    return '<div class="status-row">' +
+      '<span class="status-label">' + esc(r[0]) + '</span>' +
+      '<span class="status-value ' + r[2] + '">' + esc(r[1]) + '</span>' +
+    '</div>';
+  }).join('') + '</div>';
 }
 
-// ── Session detail drawer ──────────────────────────────────────────────────
+function renderSystemTools(tools) {
+  var builtin = tools.builtin || [];
+  var el = document.getElementById('sys-tools');
+  document.getElementById('tools-count').textContent = builtin.length + ' built-in';
 
-async function openSession(rowEl) {
-  const key = rowEl.dataset.key;
-  if (!key) return;
-  _selectedSession = key;
-
-  const detail = document.getElementById('session-detail');
-  const titleEl = document.getElementById('session-detail-title');
-  const msgsEl = document.getElementById('session-messages');
-
-  titleEl.textContent = key;
-  msgsEl.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
-  detail.classList.add('open');
-  detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-  const session = await fetchSession(key);
-  if (!session) {
-    msgsEl.innerHTML = '<div class="empty">Failed to load session.</div>';
+  if (builtin.length === 0) {
+    el.innerHTML = '<div class="empty">None registered</div>';
     return;
   }
+  el.innerHTML = '<div class="tool-chips">' +
+    builtin.map(function(n) {
+      return '<span class="tool-chip">' + esc(n) + '</span>';
+    }).join('') + '</div>';
+}
+
+function renderSystemCron(cron) {
+  var el = document.getElementById('sys-cron');
+  if (!cron.enabled) {
+    el.innerHTML = '<div class="empty">Cron disabled</div>';
+    return;
+  }
+
+  var jobs = cron.jobs || [];
+  if (jobs.length === 0) {
+    el.innerHTML = '<div class="status-grid"><div class="status-row">' +
+      '<span class="status-label">Status</span>' +
+      '<span class="status-value dot-ok">Running, no jobs</span></div></div>';
+    return;
+  }
+
+  el.innerHTML = '<div class="cron-jobs">' + jobs.map(function(j) {
+    var statusDot = j.last_status === 'ok' ? 'dot-ok'
+      : j.last_status === 'error' ? 'dot-err'
+      : 'dot-off';
+    var schedule = j.schedule_expr || j.schedule_kind || '';
+    var nextRun = j.next_run_ms ? fmtCountdown(j.next_run_ms) : '\u2014';
+    var lastStatus = j.last_status || 'never run';
+
+    return '<div class="cron-job">' +
+      '<div class="cron-job-header">' +
+        '<span class="cron-dot ' + statusDot + '"></span>' +
+        '<span class="cron-name">' + esc(j.name) + '</span>' +
+        (!j.enabled ? '<span class="badge">disabled</span>' : '') +
+      '</div>' +
+      '<div class="cron-detail">' +
+        '<span>' + esc(schedule) + '</span>' +
+        '<span>Next: ' + nextRun + '</span>' +
+        '<span>Last: ' + esc(lastStatus) + '</span>' +
+      '</div>' +
+      (j.last_error ? '<div class="cron-error">' + esc(j.last_error) + '</div>' : '') +
+    '</div>';
+  }).join('') + '</div>';
+}
+
+function renderSystemMCP(tools) {
+  var mcp = tools.mcp || [];
+  var el = document.getElementById('sys-mcp');
+  if (mcp.length === 0) {
+    el.innerHTML = '<div class="empty">No MCP servers configured.</div>';
+    return;
+  }
+  el.innerHTML = mcp.map(function(srv) {
+    var connClass = srv.connected ? 'connected' : 'disconnected';
+    var statusText = srv.status || (srv.connected ? 'connected' : 'disconnected');
+    var toolChips = srv.tools.length
+      ? '<div class="tool-chips">' + srv.tools.map(function(t) {
+          return '<span class="tool-chip">' + esc(t) + '</span>';
+        }).join('') + '</div>'
+      : '<span class="muted">no tools</span>';
+    return '<div class="mcp-card">' +
+      '<div class="mcp-header">' +
+        '<span class="conn-dot ' + connClass + '"></span>' +
+        '<span class="mcp-name">' + esc(srv.server) + '</span>' +
+        '<span class="mcp-transport">' + esc(srv.transport) + '</span>' +
+      '</div>' +
+      (srv.endpoint ? '<div class="mcp-endpoint">' + esc(srv.endpoint) + '</div>' : '') +
+      '<div class="muted" style="font-size:11px;margin:2px 0">' + esc(statusText) + '</div>' +
+      toolChips +
+      '<div class="muted" style="font-size:10px;margin-top:6px">' +
+        srv.tool_count + ' tool' + (srv.tool_count !== 1 ? 's' : '') + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function renderSystemMemory(mem) {
+  var el = document.getElementById('sys-memory');
+  if (!mem.available) {
+    el.innerHTML = '<div class="empty">Memory not available</div>';
+    return;
+  }
+  el.innerHTML = '<div class="status-grid">' +
+    '<div class="status-row">' +
+      '<span class="status-label">MEMORY.md</span>' +
+      '<span class="status-value">' + fmtBytes(mem.memory_size_bytes || 0) + '</span>' +
+    '</div>' +
+    '<div class="status-row">' +
+      '<span class="status-label">HISTORY.md</span>' +
+      '<span class="status-value">' + (mem.history_lines || 0) + ' lines</span>' +
+    '</div>' +
+  '</div>';
+}
+
+// -- Session Inspector Drawer -------------------------------------------------
+
+async function openDrawer(rowEl) {
+  var key = rowEl.dataset.key;
+  if (!key) return;
+  _openSession = key;
+
+  var drawer = document.getElementById('session-drawer');
+  var titleEl = document.getElementById('drawer-title');
+  var statsEl = document.getElementById('drawer-stats');
+  var msgsEl = document.getElementById('drawer-messages');
+
+  titleEl.textContent = key;
+  statsEl.innerHTML = '';
+  msgsEl.innerHTML = '<div class="empty"><span class="spinner"></span> Loading</div>';
+  drawer.classList.add('open');
+  drawer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  await loadSessionIntoDrawer(key);
+
+  // Auto-refresh for active sessions
+  clearInterval(_sessionTimer);
+  var entry = (_data && _data.activity || []).find(function(e) { return e.key === key; });
+  if (entry && entry.active) {
+    _sessionTimer = setInterval(function() {
+      if (_openSession === key) loadSessionIntoDrawer(key);
+    }, SESSION_REFRESH_MS);
+  }
+}
+
+async function loadSessionIntoDrawer(key) {
+  var session = await fetchSession(key);
+  if (!session || _openSession !== key) return;
+
+  var statsEl = document.getElementById('drawer-stats');
+  var msgsEl = document.getElementById('drawer-messages');
+
+  if (session.error) {
+    msgsEl.innerHTML = '<div class="empty">Session not found.</div>';
+    return;
+  }
+
+  // Stats bar
+  var stats = session.stats || {};
+  var toolUsage = stats.tool_usage || {};
+  var toolSummary = fmtToolList(toolUsage);
+
+  statsEl.innerHTML =
+    '<span>' + session.message_count + ' messages</span>' +
+    (toolSummary ? '<span>Tools: ' + esc(toolSummary) + '</span>' : '') +
+    (stats.unconsolidated != null
+      ? '<span>Unconsolidated: ' + stats.unconsolidated + '</span>'
+      : '');
 
   if (!session.messages || session.messages.length === 0) {
     msgsEl.innerHTML = '<div class="empty">No messages in this session.</div>';
     return;
   }
 
-  msgsEl.innerHTML = session.messages.map(m => {
-    const roleClass = 'msg-' + (m.role || 'system');
-    const roleLabel = m.role || 'system';
-    const content = esc(m.content || '');
-    const ts = m.timestamp ? `<div class="msg-timestamp">${esc(m.timestamp)}</div>` : '';
-
-    let toolCallsHtml = '';
-    if (m.tool_calls && m.tool_calls.length) {
-      toolCallsHtml = '<div class="msg-tool-call">' +
-        m.tool_calls.map(tc =>
-          `<span class="tool-call-chip">${esc(tc.name)}(${esc(tc.arguments || '')})</span>`
-        ).join('') + '</div>';
-    }
-
-    let nameHtml = '';
-    if (m.name) nameHtml = `<span style="color:var(--yellow);margin-right:4px">${esc(m.name)}</span>`;
-
-    return `
-      <div class="msg ${roleClass}">
-        <div class="msg-role">${roleLabel}</div>
-        ${nameHtml}
-        <div class="msg-content">${content}</div>
-        ${toolCallsHtml}
-        ${ts}
-      </div>`;
-  }).join('');
-
-  // Scroll to bottom of message list
+  // Group messages: merge assistant + its tool_calls + subsequent tool results
+  var grouped = groupMessages(session.messages);
+  msgsEl.innerHTML = grouped.map(renderMessageGroup).join('');
   msgsEl.scrollTop = msgsEl.scrollHeight;
 }
 
-function closeSession() {
-  _selectedSession = null;
-  const detail = document.getElementById('session-detail');
-  detail.classList.remove('open');
+function groupMessages(messages) {
+  // Group: each "user" or "assistant" message starts a group.
+  // Tool results attach to the preceding assistant group.
+  var groups = [];
+  var current = null;
+
+  for (var i = 0; i < messages.length; i++) {
+    var m = messages[i];
+    var role = m.role || 'system';
+
+    if (role === 'tool') {
+      // Attach to current group if it's an assistant group
+      if (current && current.role === 'assistant') {
+        current.toolResults.push(m);
+      } else {
+        groups.push({ role: 'tool', message: m, toolResults: [] });
+      }
+    } else {
+      current = { role: role, message: m, toolResults: [] };
+      groups.push(current);
+    }
+  }
+  return groups;
 }
 
-// ── Refresh ────────────────────────────────────────────────────────────────
+function renderMessageGroup(group) {
+  var m = group.message;
+  var role = group.role;
+  var roleClass = 'msg-' + role;
+  var content = esc(m.content || '');
+  var ts = m.timestamp
+    ? '<div class="msg-ts">' + esc(m.timestamp) + '</div>'
+    : '';
 
-function updateLastUpdated() {
-  const el = document.getElementById('last-updated');
-  if (el) el.textContent = 'updated ' + fmt_ago(new Date().toISOString());
+  // Tool calls inline
+  var toolCallsHtml = '';
+  if (m.tool_calls && m.tool_calls.length) {
+    toolCallsHtml = m.tool_calls.map(function(tc, idx) {
+      var result = group.toolResults[idx];
+      var resultContent = result ? esc(result.content || '') : '';
+      var toolName = result && result.name ? result.name : tc.name;
+      return '<div class="tool-block">' +
+        '<div class="tool-block-header">' + esc(toolName) + '</div>' +
+        '<div class="tool-block-args">' + esc(tc.arguments || '') + '</div>' +
+        (resultContent ? '<div class="tool-block-result">' + resultContent + '</div>' : '') +
+      '</div>';
+    }).join('');
+  }
+
+  // Name label for tool messages shown standalone
+  var nameHtml = m.name ? '<span class="msg-name">' + esc(m.name) + '</span>' : '';
+
+  return '<div class="msg ' + roleClass + '">' +
+    '<div class="msg-role">' + role + '</div>' +
+    nameHtml +
+    (content ? '<div class="msg-content">' + content + '</div>' : '') +
+    toolCallsHtml +
+    ts +
+  '</div>';
+}
+
+function closeDrawer() {
+  _openSession = null;
+  clearInterval(_sessionTimer);
+  document.getElementById('session-drawer').classList.remove('open');
+}
+
+// -- Tabs ---------------------------------------------------------------------
+
+function initTabs() {
+  document.querySelectorAll('.tab').forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+      document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+      tab.classList.add('active');
+      document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    });
+  });
+}
+
+// -- Polling ------------------------------------------------------------------
+
+function updateTimestamp() {
+  var el = document.getElementById('last-updated');
+  if (el) el.textContent = 'updated ' + fmtAgo(new Date().toISOString());
 }
 
 function startPolling() {
@@ -296,15 +516,18 @@ function stopPolling() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+// -- Init ---------------------------------------------------------------------
+
+document.addEventListener('DOMContentLoaded', function() {
+  initTabs();
   document.getElementById('refresh-btn').addEventListener('click', fetchDashboard);
   fetchDashboard();
   startPolling();
 
-  // Pause polling when tab is hidden; resume (with immediate fetch) on return
-  document.addEventListener('visibilitychange', () => {
+  document.addEventListener('visibilitychange', function() {
     if (document.hidden) {
       stopPolling();
+      clearInterval(_sessionTimer);
     } else {
       fetchDashboard();
       startPolling();
