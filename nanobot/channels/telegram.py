@@ -132,10 +132,9 @@ class TelegramChannel(BaseChannel):
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
         # Streaming draft support
-        self._draft_ids: dict[str, int] = {}  # chat_id -> base draft_id (increments per message)
-        self._draft_contents: dict[str, str] = {}  # chat_id -> last sent draft content
-        self._draft_locks: dict[str, asyncio.Lock] = {}  # chat_id -> lock for draft operations
-        self._message_counters: dict[str, int] = {}  # chat_id -> message counter for unique draft_ids
+        self._draft_ids: dict[int, int] = {}  # chat_id (int) -> current draft_id
+        self._draft_contents: dict[int, str] = {}  # chat_id (int) -> last sent draft content
+        self._draft_locks: dict[int, asyncio.Lock] = {}  # chat_id (int) -> lock for draft operations
 
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -158,10 +157,10 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("new", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
 
-        # Add message handler for text, photos, voice, documents
+        # Add message handler for text, photos, voice, documents, stickers
         self._app.add_handler(
             MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL)
+                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL | filters.Sticker.ALL)
                 & ~filters.COMMAND,
                 self._on_message
             )
@@ -217,7 +216,9 @@ class TelegramChannel(BaseChannel):
     def _get_media_type(path: str) -> str:
         """Guess media type from file extension."""
         ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
-        if ext in ("jpg", "jpeg", "png", "gif", "webp"):
+        if ext == "webp":
+            return "sticker"
+        if ext in ("jpg", "jpeg", "png", "gif"):
             return "photo"
         if ext == "ogg":
             return "voice"
@@ -242,24 +243,10 @@ class TelegramChannel(BaseChannel):
             await self._send_draft(msg)
             return
 
-        # Final message - stop typing
+        # Final message - stop typing indicator
         self._stop_typing(msg.chat_id)
 
-        # Check if we need to finalize a draft
-        try:
-            chat_id = int(msg.chat_id)
-        except ValueError:
-            logger.error("Invalid chat_id: {}", msg.chat_id)
-            return
-
-        had_draft = chat_id in self._draft_contents and self._draft_contents[chat_id]
-
-        if had_draft:
-            # Finalize draft (send permanent message and clear draft state)
-            await self._finalize_draft(msg)
-            return  # Important: return to avoid duplicate send
-
-        # No draft - proceed with normal message sending
+        # Clear draft (sends draft content as regular message if any, then clears visual state)
         await self._clear_draft(msg.chat_id)
 
         try:
@@ -277,10 +264,33 @@ class TelegramChannel(BaseChannel):
                     allow_sending_without_reply=True
                 )
 
+        # Send stickers by file_id (if provided in metadata)
+        sticker_file_ids = msg.metadata.get("sticker_file_ids", [])
+        for file_id in sticker_file_ids:
+            try:
+                await self._app.bot.send_sticker(
+                    chat_id=chat_id,
+                    sticker=file_id,
+                    reply_parameters=reply_params
+                )
+            except Exception as e:
+                logger.error("Failed to send sticker by file_id {}: {}", file_id, e)
+
         # Send media files
         for media_path in (msg.media or []):
             try:
                 media_type = self._get_media_type(media_path)
+
+                # Special handling for stickers (.webp files)
+                if media_type == "sticker":
+                    with open(media_path, 'rb') as f:
+                        await self._app.bot.send_sticker(
+                            chat_id=chat_id,
+                            sticker=f,
+                            reply_parameters=reply_params
+                        )
+                    continue
+
                 sender = {
                     "photo": self._app.bot.send_photo,
                     "voice": self._app.bot.send_voice,
@@ -376,14 +386,11 @@ class TelegramChannel(BaseChannel):
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
 
-        # Clear draft state when receiving new message to avoid false "had_draft" detection
-        # This prevents the bug where residual draft state causes messages not to send
-        str_chat_id = str(chat_id)
-        await self._clear_draft(str_chat_id)
-
         # Build content from text and/or media
         content_parts = []
         media_paths = []
+        sticker_file_ids = []  # Track sticker file_ids for metadata
+        sticker_emojis = []    # Track sticker emojis for metadata
 
         # Text content
         if message.text:
@@ -398,6 +405,9 @@ class TelegramChannel(BaseChannel):
         if message.photo:
             media_file = message.photo[-1]  # Largest photo
             media_type = "image"
+        elif message.sticker:
+            media_file = message.sticker
+            media_type = "sticker"
         elif message.voice:
             media_file = message.voice
             media_type = "voice"
@@ -434,6 +444,14 @@ class TelegramChannel(BaseChannel):
                         content_parts.append(f"[transcription: {transcription}]")
                     else:
                         content_parts.append(f"[{media_type}: {file_path}]")
+                elif media_type == "sticker":
+                    # Include sticker emoji and file_id for the agent
+                    emoji = getattr(media_file, 'emoji', None) or ''
+                    file_id = media_file.file_id
+                    content_parts.append(f"[sticker: {emoji} file_id={file_id}]")
+                    # Also add to metadata for easy access
+                    sticker_file_ids.append(file_id)
+                    sticker_emojis.append(emoji)
                 else:
                     content_parts.append(f"[{media_type}: {file_path}]")
 
@@ -445,6 +463,8 @@ class TelegramChannel(BaseChannel):
         content = "\n".join(content_parts) if content_parts else "[empty message]"
 
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
+
+        str_chat_id = str(chat_id)
 
         # Telegram media groups: buffer briefly, forward as one aggregated turn.
         if media_group_id := getattr(message, "media_group_id", None):
@@ -482,7 +502,9 @@ class TelegramChannel(BaseChannel):
                 "user_id": user.id,
                 "username": user.username,
                 "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
+                "is_group": message.chat.type != "private",
+                "sticker_file_ids": sticker_file_ids,
+                "sticker_emojis": sticker_emojis,
             }
         )
 
@@ -551,25 +573,41 @@ class TelegramChannel(BaseChannel):
             self._draft_locks[chat_id] = asyncio.Lock()
 
         async with self._draft_locks[chat_id]:
-            # Generate unique draft_id for each message (using counter + timestamp)
-            # This ensures each message gets its own draft_id, preventing overlap
-            if chat_id not in self._message_counters:
-                self._message_counters[chat_id] = 0
-            
-            # Only increment counter when content is empty (new message starting)
-            if chat_id not in self._draft_contents or not self._draft_contents.get(chat_id):
-                self._message_counters[chat_id] += 1
-            
-            # Create unique draft_id: base_timestamp + message_counter
-            base_id = int(time.time() * 1000) % 1000000
-            draft_id = base_id + self._message_counters[chat_id] * 1000
+            # Get or create draft_id for this chat (increments for each new conversation)
+            if chat_id not in self._draft_ids:
+                self._draft_ids[chat_id] = int(time.time() * 1000) % 1000000
 
-            # Skip if content hasn't changed significantly
+            draft_id = self._draft_ids[chat_id]
+
             last_content = self._draft_contents.get(chat_id, "")
-            if msg.content == last_content or (
-                len(msg.content) < 50 and msg.content.startswith(last_content)
-            ):
-                return
+            is_tool_hint = msg.metadata.get("_tool_hint", False)
+
+            # Check if this is a continuation of the previous draft
+            is_continuation = (
+                msg.content == last_content or
+                (len(msg.content) < 50 and msg.content.startswith(last_content)) or
+                (last_content and len(last_content) >= 20 and msg.content.startswith(last_content[:20]))
+            )
+
+            if is_continuation:
+                # Same message being updated, skip if no significant change
+                if msg.content == last_content:
+                    return
+            elif last_content and not is_tool_hint:
+                # Content jumped to a new message - send the old content as regular message first
+                try:
+                    html = _markdown_to_telegram_html(last_content[:4000])
+                    await self._app.bot.send_message(
+                        chat_id=chat_id,
+                        text=html,
+                        parse_mode="HTML",
+                    )
+                    logger.debug("Sent previous draft as regular message before new draft")
+                    # Generate new draft_id for the new message
+                    self._draft_ids[chat_id] = int(time.time() * 1000) % 1000000
+                    draft_id = self._draft_ids[chat_id]
+                except Exception as e:
+                    logger.warning("Failed to send previous draft: {}", e)
 
             # Limit content length for draft (Telegram has limits)
             draft_text = msg.content[:4000] if len(msg.content) > 4000 else msg.content
@@ -584,60 +622,51 @@ class TelegramChannel(BaseChannel):
                     text=html,
                     parse_mode="HTML",
                 )
-                self._draft_contents[chat_id] = msg.content
-                self._draft_ids[chat_id] = draft_id  # Store current draft_id for finalization
+                # Only save content if it's not a tool_hint
+                # Tool hints are transient and shouldn't overwrite real content
+                is_tool_hint = msg.metadata.get("_tool_hint", False)
+                if not is_tool_hint:
+                    self._draft_contents[chat_id] = msg.content
             except Exception as e:
                 logger.debug("Draft send failed (non-critical): {}", e)
 
     async def _clear_draft(self, chat_id: str) -> None:
-        """Clear draft state after final message is sent."""
-        try:
-            cid = int(chat_id)
-            self._draft_contents.pop(cid, None)
-            self._draft_ids.pop(cid, None)
-            # Keep message counter for next message (don't reset)
-        except ValueError:
-            pass
+        """Clear draft by sending empty text, then clear local state.
 
-    async def _finalize_draft(self, msg: OutboundMessage) -> None:
-        """Finalize draft by sending a permanent message to replace the temporary draft.
-
-        This prevents Telegram from recycling the draft message.
+        According to Telegram Bot API 9.3+, sending empty text to the same
+        draft_id clears the draft animation on the client.
+        
+        Note: This method only clears the visual draft state. The actual content
+        sending is handled by _send_draft() (for content transitions) and send()
+        (for final message). This avoids duplicate message sending.
         """
-        try:
-            chat_id = int(msg.chat_id)
-        except ValueError:
-            logger.error("Invalid chat_id: {}", msg.chat_id)
+        if not self._app:
             return
 
-        # Check if we had a draft for this chat
-        had_draft = chat_id in self._draft_contents and self._draft_contents[chat_id]
-
-        # If we had a draft, send the final message to make it permanent
-        if had_draft:
-            logger.debug("Finalizing draft for chat {}", chat_id)
-
-            # Send the final permanent message
-            if msg.content and msg.content != "[empty message]":
+        try:
+            cid = int(chat_id)
+            draft_id = self._draft_ids.get(cid)
+            
+            if draft_id:
                 try:
-                    html = _markdown_to_telegram_html(msg.content)
-                    await self._app.bot.send_message(
-                        chat_id=chat_id,
-                        text=html,
-                        parse_mode="HTML",
+                    # Send empty draft to clear the visual draft state
+                    await self._app.bot.send_message_draft(
+                        chat_id=cid,
+                        draft_id=draft_id,
+                        text="",
                     )
+                    logger.debug("Cleared draft {} for chat {}", draft_id, cid)
                 except Exception as e:
-                    logger.warning("HTML parse failed in finalize, falling back to plain text: {}", e)
-                    try:
-                        await self._app.bot.send_message(
-                            chat_id=chat_id,
-                            text=msg.content,
-                        )
-                    except Exception as e2:
-                        logger.error("Error sending final message: {}", e2)
-
-        # Clear draft state regardless (including draft_id to prevent reuse)
-        await self._clear_draft(msg.chat_id)
+                    # Don't clear local state on failure - allow retry
+                    logger.warning("Draft clear failed, keeping state for retry: {}", e)
+                    return
+            
+            # Clear local state
+            self._draft_contents.pop(cid, None)
+            # Generate new draft_id for next conversation
+            self._draft_ids[cid] = int(time.time() * 1000) % 1000000
+        except ValueError:
+            pass
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
@@ -648,10 +677,11 @@ class TelegramChannel(BaseChannel):
         if mime_type:
             ext_map = {
                 "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
+                "image/webp": ".webp",
                 "audio/ogg": ".ogg", "audio/mpeg": ".mp3", "audio/mp4": ".m4a",
             }
             if mime_type in ext_map:
                 return ext_map[mime_type]
 
-        type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
+        type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "sticker": ".webp", "file": ""}
         return type_map.get(media_type, "")
