@@ -1,8 +1,8 @@
 """Tool registry for dynamic tool management."""
 
-from typing import Any
+from typing import Any, Callable
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, ToolResult
 
 
 class ToolRegistry:
@@ -35,13 +35,31 @@ class ToolRegistry:
         """Get all tool definitions in OpenAI format."""
         return [tool.to_schema() for tool in self._tools.values()]
 
-    async def execute(self, name: str, params: dict[str, Any]) -> str:
-        """Execute a tool by name with given parameters."""
+    async def execute(
+        self,
+        name: str,
+        params: dict[str, Any],
+        on_progress: Callable[..., Any] | None = None,
+    ) -> tuple[str, str | None]:
+        """
+        Execute a tool by name with given parameters.
+
+        Args:
+            name: Tool name to execute.
+            params: Tool parameters.
+            on_progress: Optional callback for display content (display_content, display_type).
+
+        Returns:
+            Tuple of (content_for_llm, display_for_user).
+            - content_for_llm: Sent to LLM and included in context.
+            - display_for_user: Optional formatted content for user display (deprecated, use on_progress).
+        """
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
 
         tool = self._tools.get(name)
         if not tool:
-            return f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
+            content = f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
+            return content + _HINT, None
 
         try:
             # Attempt to cast parameters to match schema types
@@ -50,13 +68,31 @@ class ToolRegistry:
             # Validate parameters
             errors = tool.validate_params(params)
             if errors:
-                return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _HINT
+                content = f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _HINT
+                return content, None
+
             result = await tool.execute(**params)
-            if isinstance(result, str) and result.startswith("Error"):
-                return result + _HINT
-            return result
+
+            # Handle ToolResult with separate LLM content and user display
+            if isinstance(result, ToolResult):
+                if result.display and on_progress:
+                    # Send display content through callback (not to LLM)
+                    # Pass display_type as keyword argument for compatibility with existing callbacks
+                    await on_progress(result.display, display_type=result.display_type)
+                # Return only content for LLM context
+                if isinstance(result.content, str) and result.content.startswith("Error"):
+                    return result.content + _HINT, None
+                return result.content, None
+
+            # Backward compatibility: direct string return
+            result_str = str(result)
+            if result_str.startswith("Error"):
+                return result_str + _HINT, None
+            return result_str, None
+
         except Exception as e:
-            return f"Error executing {name}: {str(e)}" + _HINT
+            content = f"Error executing {name}: {str(e)}" + _HINT
+            return content, None
 
     @property
     def tool_names(self) -> list[str]:
