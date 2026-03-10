@@ -42,6 +42,11 @@ This is a fork of [HKUDS/nanobot](https://github.com/HKUDS/nanobot) with the fol
 - `x-session-affinity` header on the custom provider for backend cache locality
 - DEBUG-level logging of prompt cache hit/miss statistics
 
+### Memory Consolidation
+- Configurable `memoryModel` setting to use a different model for memory consolidation
+- Replaced tool-call based consolidation with structured text parsing for broader model compatibility
+- Consolidation inherits the agent's temperature setting
+
 ### Configuration & Extensibility
 - `agents.disabled_tools` config list to disable specific tools (e.g. `["exec"]` to remove shell access)
 - Webhook endpoint (`POST /notify`) for ingesting external events into the message bus
