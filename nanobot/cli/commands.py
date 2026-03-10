@@ -255,6 +255,23 @@ def _make_provider(config: Config):
         console.print("Set one in ~/.nanobot/config.json under providers section")
         raise typer.Exit(1)
 
+    # --- Endpoint rotation pool ---
+    if p and p.endpoints:
+        from nanobot.providers.endpoint_pool import EndpointPool
+
+        sorted_eps = sorted(p.endpoints, key=lambda e: e.priority)
+        providers: list[LiteLLMProvider] = []
+        for ep in sorted_eps:
+            providers.append(LiteLLMProvider(
+                api_key=ep.api_key or p.api_key,
+                api_base=ep.api_base or config.get_api_base(model),
+                default_model=ep.model or model,
+                extra_headers=ep.extra_headers or (p.extra_headers if p else None),
+                provider_name=provider_name,
+            ))
+        cooldown = sorted_eps[0].cooldown_seconds if sorted_eps else 60.0
+        return EndpointPool(providers, cooldown_seconds=cooldown)
+
     return LiteLLMProvider(
         api_key=p.api_key if p else None,
         api_base=config.get_api_base(model),
