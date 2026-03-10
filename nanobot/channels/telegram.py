@@ -540,6 +540,16 @@ class TelegramChannel(BaseChannel):
         if len(self._message_threads) > 1000:
             self._message_threads.pop(next(iter(self._message_threads)))
 
+    async def _try_react_to_message(self, message) -> None:
+        """Add an early emoji reaction to inbound messages when Telegram supports it."""
+        reaction = getattr(self.config, "react_emoji", "")
+        if not reaction:
+            return
+        try:
+            await message.set_reaction(reaction)
+        except Exception as e:
+            logger.debug("Telegram reaction skipped for {}: {}", getattr(message, "message_id", "?"), e)
+
     async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Forward slash commands to the bus for unified handling in AgentLoop."""
         if not update.message or not update.effective_user:
@@ -571,6 +581,7 @@ class TelegramChannel(BaseChannel):
 
         if not await self._is_group_message_for_bot(message):
             return
+        await self._try_react_to_message(message)
 
         # Build content from text and/or media
         content_parts = []

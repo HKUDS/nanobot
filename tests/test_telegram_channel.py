@@ -102,6 +102,11 @@ def _make_telegram_update(
     reply_to_message=None,
 ):
     user = SimpleNamespace(id=12345, username="alice", first_name="Alice")
+    reaction_calls: list[str] = []
+
+    async def set_reaction(emoji: str) -> None:
+        reaction_calls.append(emoji)
+
     message = SimpleNamespace(
         chat=SimpleNamespace(type=chat_type, is_forum=False),
         chat_id=-100123,
@@ -117,6 +122,8 @@ def _make_telegram_update(
         media_group_id=None,
         message_thread_id=None,
         message_id=1,
+        set_reaction=set_reaction,
+        reaction_calls=reaction_calls,
     )
     return SimpleNamespace(message=message, effective_user=user)
 
@@ -242,6 +249,29 @@ async def test_group_policy_mention_ignores_unmentioned_group_message() -> None:
 
     assert handled == []
     assert channel._app.bot.get_me_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_group_policy_mention_ignored_group_message_gets_no_reaction() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            group_policy="mention",
+            react_emoji="👀",
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    update = _make_telegram_update(text="hello everyone")
+
+    channel._handle_message = lambda **kwargs: None
+    channel._start_typing = lambda _chat_id: None
+
+    await channel._on_message(update, None)
+
+    assert update.message.reaction_calls == []
 
 
 @pytest.mark.asyncio
