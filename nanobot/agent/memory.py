@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio 
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -111,14 +112,14 @@ class MemoryStore:
 {chr(10).join(lines)}"""
 
         try:
-            response = await provider.chat(
+            response = await syncio.wait_for(provider.chat(
                 messages=[
                     {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
                     {"role": "user", "content": prompt},
                 ],
                 tools=_SAVE_MEMORY_TOOL,
                 model=model,
-            )
+            ), timeout=120
 
             if not response.has_tool_calls:
                 logger.warning("Memory consolidation: LLM did not call save_memory, skipping")
@@ -152,6 +153,9 @@ class MemoryStore:
             session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
             logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)
             return True
+        except asyncio.TimeoutError:
+            logger.warning("Memory consolidation timed out afther 120s")
+            return False 
         except Exception:
             logger.exception("Memory consolidation failed")
             return False
