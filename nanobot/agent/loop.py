@@ -191,7 +191,7 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await self.provider.chat(
+            response = await self.provider.chat_with_retry(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model,

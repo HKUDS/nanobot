@@ -130,7 +130,7 @@ class MemoryStore:
             if reasoning_effort is not None:
                 chat_kwargs["reasoning_effort"] = reasoning_effort
 
-            response = await provider.chat(**chat_kwargs)
+            response = await provider.chat_with_retry(**chat_kwargs)
 
             if not response.has_tool_calls:
                 logger.warning("Memory consolidation: LLM did not call save_memory, skipping")
