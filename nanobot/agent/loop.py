@@ -111,6 +111,8 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
         self._register_default_tools()
+        self._pending_inputs: dict[str, asyncio.Future] = {}
+        self._auto_approve_sessions: set[str] = set()
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -152,6 +154,33 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
+    async def _ask_user(
+            self, session_key: str, channel: str, chat_id: str, prompt: str, timeout: int = 300
+    ) -> str:
+        """
+        Send a prompt to the user and suspend the current task until a reply is received
+        on the message bus, or until the timeout is reached.
+        """
+        await self.bus.publish_outbound(OutboundMessage(
+            channel=channel, chat_id=chat_id, content=prompt
+        ))
+
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+
+        if not hasattr(self, "_pending_inputs"):
+            self._pending_inputs = {}
+
+        self._pending_inputs[session_key] = future
+
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(f"User confirmation timed out for session {session_key}")
+            return "timeout"
+        finally:
+            await self._pending_inputs.pop(session_key, None)
+
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
         for name in ("message", "spawn", "cron"):
@@ -179,6 +208,9 @@ class AgentLoop:
 
     async def _run_agent_loop(
         self,
+        session_key: str,
+        channel: str,
+        chat_id: str,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
@@ -228,6 +260,57 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+
+                    # === Interception logic for user confirmation BEGIN ===
+                    if tool_call.name == "exec" and self.exec_config.require_confirmation:
+                        cmd = ""
+                        try:
+                            args_dict = tool_call.arguments if isinstance(tool_call.arguments, dict) else json.loads(
+                                tool_call.arguments)
+                            cmd = args_dict.get("command", "").strip()
+                        except Exception as e:
+                            logger.warning(f"Failed to parse exec arguments for whitelist check: {e}")
+
+                        safe_cmds = ("ls", "pwd", "whoami", "echo", "cat", "tree", "dir", "git status", "git log")
+
+                        is_whitelisted = any(cmd == sc or cmd.startswith(sc + " ") for sc in safe_cmds)
+
+                        if is_whitelisted:
+                            logger.info(f"Command whitelisted, executing silently: {cmd[:50]}")
+                        # 如果不在白名单内，且当前 session 尚未被授权“全部同意”
+                        elif session_key not in self._auto_approve_sessions:
+                            prompt = (
+                                f"⚠️ **WARNING: AI requests to execute a shell command** ⚠️\n\n"
+                                f"**Arguments:**\n`{args_str}`\n\n"
+                                f"Reply with:\n"
+                                f"- **'y'** to allow this execution\n"
+                                f"- **'n'** to deny\n"
+                                f"- **'a'** to allow this and ALL future commands in this session."
+                            )
+
+                            choice = await self._ask_user(session_key, channel, chat_id, prompt, timeout=300)
+                            choice_clean = choice.strip().lower() if isinstance(choice, str) else ""
+
+                            if choice_clean == "timeout":
+                                result = "Action cancelled: User did not respond in time (timeout)."
+                                messages = self.context.add_tool_result(
+                                    messages, tool_call.id, tool_call.name, result
+                                )
+                                continue
+
+                            if choice_clean in ['a', 'all']:
+                                logger.info(f"User granted auto-approval for session {session_key}")
+                                self._auto_approve_sessions.add(session_key)
+                            elif choice_clean not in ['y', 'yes']:
+                                logger.info("User denied the execution of the command.")
+                                result = "Action cancelled: User denied permission to execute this command."
+                                messages = self.context.add_tool_result(
+                                    messages, tool_call.id, tool_call.name, result
+                                )
+                                continue
+                    # === Interception logic END ===
+
+                    # Normal tool execution flow
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
@@ -270,6 +353,8 @@ class AgentLoop:
 
             if msg.content.strip().lower() == "/stop":
                 await self._handle_stop(msg)
+            elif msg.session_key in self._pending_inputs:
+                self._pending_inputs[msg.session_key].set_result(msg.content)
             else:
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
@@ -347,7 +432,7 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(session.key,msg.channel,msg.chat_id,messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -387,6 +472,7 @@ class AgentLoop:
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
+            self._auto_approve_sessions.discard(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
         if cmd == "/help":
@@ -433,6 +519,9 @@ class AgentLoop:
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
+            session.key,
+            msg.channel,
+            msg.chat_id,
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
