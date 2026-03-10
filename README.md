@@ -732,6 +732,14 @@ Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account.
 nanobot provider login openai-codex
 ```
 
+If you need to switch accounts or bypass a stale cached Codex token, force a fresh OAuth login:
+
+```bash
+nanobot provider login openai-codex --force
+```
+
+This removes the cached Codex OAuth token first, then starts the interactive login flow again.
+
 **2. Set model** (merge into `~/.nanobot/config.json`):
 ```json
 {
@@ -1048,6 +1056,7 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
 | `nanobot provider login openai-codex` | OAuth login for providers |
+| `nanobot provider login openai-codex --force` | Force a fresh Codex OAuth login |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
 
