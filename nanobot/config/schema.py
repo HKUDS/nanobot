@@ -276,6 +276,8 @@ class HeartbeatConfig(Base):
 
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
+    shared_session: bool = False  # Use target channel's session key instead of isolated "heartbeat"
+    send_reasoning: bool = False  # Auto-deliver full agent response; when False only explicit message tool calls reach the user
 
 
 class GatewayConfig(Base):

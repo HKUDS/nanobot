@@ -411,9 +411,10 @@ def gateway(
         async def _silent(*_args, **_kwargs):
             pass
 
+        session_key = f"{channel}:{chat_id}" if hb_cfg.shared_session else "heartbeat"
         return await agent.process_direct(
             tasks,
-            session_key="heartbeat",
+            session_key=session_key,
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
@@ -433,7 +434,7 @@ def gateway(
         provider=provider,
         model=agent.model,
         on_execute=on_heartbeat_execute,
-        on_notify=on_heartbeat_notify,
+        on_notify=on_heartbeat_notify if hb_cfg.send_reasoning else None,
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
     )
