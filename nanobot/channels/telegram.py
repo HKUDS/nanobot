@@ -6,6 +6,7 @@ import asyncio
 import re
 import time
 import unicodedata
+from collections import OrderedDict
 
 from loguru import logger
 from telegram import BotCommand, ReplyParameters, Update
@@ -179,6 +180,7 @@ class TelegramChannel(BaseChannel):
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
         self._message_threads: dict[tuple[str, int], int] = {}
+        self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -496,6 +498,17 @@ class TelegramChannel(BaseChannel):
         user = update.effective_user
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
+        
+        # Deduplication check
+        message_id = str(message.message_id)
+        if message_id in self._processed_message_ids:
+            return
+        self._processed_message_ids[message_id] = None
+        
+        # Trim cache
+        while len(self._processed_message_ids) > 1000:
+            self._processed_message_ids.popitem(last=False)
+        
         self._remember_thread_context(message)
 
         # Store chat_id for replies
