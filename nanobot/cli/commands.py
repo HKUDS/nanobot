@@ -261,6 +261,7 @@ def _make_provider(config: Config):
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=provider_name,
+        num_retries=config.agents.defaults.llm_retries,
     )
 
 
