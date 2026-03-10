@@ -238,6 +238,8 @@ class AgentsConfig(Base):
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
 
+    profiles: dict[str, AgentDefaults] = Field(default_factory=dict)
+
 
 class ProviderConfig(Base):
     """LLM provider configuration."""
@@ -254,6 +256,7 @@ class ProvidersConfig(Base):
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
+    qiniuyun: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
     groq: ProviderConfig = Field(default_factory=ProviderConfig)

@@ -137,7 +137,6 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             merged = f"{runtime_ctx}\n\n{user_content}"
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
-
         return [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
             *history,

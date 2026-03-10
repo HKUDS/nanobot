@@ -226,7 +226,7 @@ def _make_provider(config: Config):
 
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     from nanobot.providers.custom_provider import CustomProvider
-    if provider_name == "custom":
+    if provider_name in ["custom", "qiniuyun"]:
         return CustomProvider(
             api_key=p.api_key if p else "no-key",
             api_base=config.get_api_base(model) or "http://localhost:8000/v1",
@@ -291,6 +291,7 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
 @app.command()
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    profile: str = typer.Option("defaults", "--profile", "-pf", help="Model profile to use"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
@@ -310,7 +311,10 @@ def gateway(
         logging.basicConfig(level=logging.DEBUG)
 
     config = _load_runtime_config(config, workspace)
-
+    if profile != "defaults":
+        agent_config = config.agents.profiles[profile]
+        config.agents.defaults = agent_config
+        
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
@@ -478,6 +482,7 @@ def gateway(
 @app.command()
 def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
+    profile: str = typer.Option("defaults", "--profile", "-p", help="Model profile to use"),
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
@@ -493,6 +498,9 @@ def agent(
     from nanobot.cron.service import CronService
 
     config = _load_runtime_config(config, workspace)
+    if profile != "defaults":
+        agent_config = config.agents.profiles[profile]
+        config.agents.defaults = agent_config
     sync_workspace_templates(config.workspace_path)
 
     bus = MessageBus()

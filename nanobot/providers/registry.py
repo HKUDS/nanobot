@@ -79,7 +79,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         litellm_prefix="",
         is_direct=True,
     ),
-
+    ProviderSpec(
+        name="qiniuyun",
+        keywords=(),
+        env_key="",
+        display_name="QiNiuYun",
+        litellm_prefix="",
+        is_gateway=True,
+        is_local=False,
+        is_direct=True,
+        strip_model_prefix=False,
+        default_api_base="https://api.qnaigc.com/v1"
+    ),
     # === Azure OpenAI (direct API calls with API version 2024-10-21) =====
     ProviderSpec(
         name="azure_openai",
