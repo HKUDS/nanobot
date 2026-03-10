@@ -134,6 +134,7 @@ class TelegramChannel(BaseChannel):
         # Streaming draft support
         self._draft_ids: dict[int, int] = {}  # chat_id (int) -> current draft_id
         self._draft_contents: dict[int, str] = {}  # chat_id (int) -> last sent draft content
+        self._draft_message_ids: dict[int, int] = {}  # chat_id (int) -> draft message_id for editing
         self._draft_locks: dict[int, asyncio.Lock] = {}  # chat_id (int) -> lock for draft operations
 
     async def start(self) -> None:
@@ -246,9 +247,6 @@ class TelegramChannel(BaseChannel):
         # Final message - stop typing indicator
         self._stop_typing(msg.chat_id)
 
-        # Clear draft (sends draft content as regular message if any, then clears visual state)
-        await self._clear_draft(msg.chat_id)
-
         try:
             chat_id = int(msg.chat_id)
         except ValueError:
@@ -312,6 +310,12 @@ class TelegramChannel(BaseChannel):
                     reply_parameters=reply_params
                 )
 
+        # Try to convert draft to final message by editing (no visual flicker)
+        if await self._edit_draft_to_final(msg):
+            logger.debug("Edited draft to final message for chat {}", chat_id)
+            return
+
+        # No draft to edit, send as new message
         # Send text content
         if msg.content and msg.content != "[empty message]":
             for chunk in _split_message(msg.content):
@@ -594,20 +598,40 @@ class TelegramChannel(BaseChannel):
                 if msg.content == last_content:
                     return
             elif last_content and not is_tool_hint:
-                # Content jumped to a new message - send the old content as regular message first
-                try:
-                    html = _markdown_to_telegram_html(last_content[:4000])
+                # Content jumped to a new message - convert old draft to final message by editing
+                draft_msg_id = self._draft_message_ids.get(chat_id)
+                html = _markdown_to_telegram_html(last_content[:4000])
+
+                if draft_msg_id:
+                    try:
+                        # Edit the draft message to final (no visual flicker)
+                        await self._app.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=draft_msg_id,
+                            text=html,
+                            parse_mode="HTML",
+                        )
+                        logger.debug("Edited previous draft to final message before new draft")
+                    except Exception as e:
+                        # If edit fails, send as new message
+                        logger.warning("Failed to edit draft to final, sending as new message: {}", e)
+                        await self._app.bot.send_message(
+                            chat_id=chat_id,
+                            text=html,
+                            parse_mode="HTML",
+                        )
+                else:
+                    # No draft message_id, send as new message
                     await self._app.bot.send_message(
                         chat_id=chat_id,
                         text=html,
                         parse_mode="HTML",
                     )
                     logger.debug("Sent previous draft as regular message before new draft")
-                    # Generate new draft_id for the new message
-                    self._draft_ids[chat_id] = int(time.time() * 1000) % 1000000
-                    draft_id = self._draft_ids[chat_id]
-                except Exception as e:
-                    logger.warning("Failed to send previous draft: {}", e)
+
+                # Generate new draft_id for the new message
+                self._draft_ids[chat_id] = int(time.time() * 1000) % 1000000
+                draft_id = self._draft_ids[chat_id]
 
             # Limit content length for draft (Telegram has limits)
             draft_text = msg.content[:4000] if len(msg.content) > 4000 else msg.content
@@ -616,12 +640,15 @@ class TelegramChannel(BaseChannel):
             html = _markdown_to_telegram_html(draft_text)
 
             try:
-                await self._app.bot.send_message_draft(
+                result = await self._app.bot.send_message_draft(
                     chat_id=chat_id,
                     draft_id=draft_id,
                     text=html,
                     parse_mode="HTML",
                 )
+                # Save message_id for later editing to final message
+                if result and hasattr(result, 'message_id'):
+                    self._draft_message_ids[chat_id] = result.message_id
                 # Only save content if it's not a tool_hint
                 # Tool hints are transient and shouldn't overwrite real content
                 is_tool_hint = msg.metadata.get("_tool_hint", False)
@@ -631,42 +658,69 @@ class TelegramChannel(BaseChannel):
                 logger.debug("Draft send failed (non-critical): {}", e)
 
     async def _clear_draft(self, chat_id: str) -> None:
-        """Clear draft by sending empty text, then clear local state.
+        """Clear draft state only (don't send empty draft to avoid visual flicker).
 
-        According to Telegram Bot API 9.3+, sending empty text to the same
-        draft_id clears the draft animation on the client.
+        Since send_message_draft returns bool (not Message with message_id),
+        we can't use edit_message_text to convert draft to final message.
+        Instead, we rely on _send_draft() to send regular messages when content
+        jumps to a new message, and only clear local state here.
         
-        Note: This method only clears the visual draft state. The actual content
-        sending is handled by _send_draft() (for content transitions) and send()
-        (for final message). This avoids duplicate message sending.
+        This avoids the visual flicker of: draft disappear → regular message appear.
         """
         if not self._app:
             return
 
         try:
             cid = int(chat_id)
-            draft_id = self._draft_ids.get(cid)
-            
-            if draft_id:
-                try:
-                    # Send empty draft to clear the visual draft state
-                    await self._app.bot.send_message_draft(
-                        chat_id=cid,
-                        draft_id=draft_id,
-                        text="",
-                    )
-                    logger.debug("Cleared draft {} for chat {}", draft_id, cid)
-                except Exception as e:
-                    # Don't clear local state on failure - allow retry
-                    logger.warning("Draft clear failed, keeping state for retry: {}", e)
-                    return
-            
-            # Clear local state
+
+            # Only clear local state, don't send empty draft
+            # The draft content has already been sent as regular message by _send_draft()
             self._draft_contents.pop(cid, None)
+            self._draft_message_ids.pop(cid, None)
             # Generate new draft_id for next conversation
             self._draft_ids[cid] = int(time.time() * 1000) % 1000000
+            logger.debug("Cleared draft state for chat {}", cid)
         except ValueError:
             pass
+
+    async def _edit_draft_to_final(self, msg: OutboundMessage) -> bool:
+        """Convert draft to final message by editing (no visual flicker).
+
+        Returns True if successfully edited, False if no draft to edit.
+        """
+        if not self._app:
+            return False
+
+        try:
+            chat_id = int(msg.chat_id)
+        except ValueError:
+            return False
+
+        draft_msg_id = self._draft_message_ids.get(chat_id)
+        if not draft_msg_id:
+            return False
+
+        # Edit the draft message to final content
+        if msg.content and msg.content != "[empty message]":
+            try:
+                html = _markdown_to_telegram_html(msg.content[:4000])
+                await self._app.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=draft_msg_id,
+                    text=html,
+                    parse_mode="HTML",
+                )
+                logger.debug("Edited draft {} to final message for chat {}", draft_msg_id, chat_id)
+                # Clear draft state after successful edit
+                self._draft_contents.pop(chat_id, None)
+                self._draft_message_ids.pop(chat_id, None)
+                self._draft_ids[chat_id] = int(time.time() * 1000) % 1000000
+                return True
+            except Exception as e:
+                logger.warning("Failed to edit draft to final: {}", e)
+                return False
+
+        return False
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
