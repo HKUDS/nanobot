@@ -219,6 +219,15 @@ class ChannelsConfig(Base):
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
+class MemorySharingConfig(Base):
+    """Memory sharing configuration for multi-instance memory migration."""
+
+    enabled: bool = True  # Whether this instance allows other instances to read its memory
+    allow_from: list[str] = Field(
+        default_factory=list
+    )  # Whitelist of instance names allowed to read (empty = all allowed when enabled)
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -232,6 +241,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    memory_sharing: MemorySharingConfig = Field(default_factory=MemorySharingConfig)
 
 
 class AgentsConfig(Base):
