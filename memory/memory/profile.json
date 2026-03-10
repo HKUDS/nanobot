@@ -1,0 +1,47 @@
+{
+  "preferences": [
+    "User prefers concise bullet-point responses.",
+    "User prefers CLI-first workflows.",
+    "User prefers professional technical tone."
+  ],
+  "stable_facts": [
+    "API authentication method is OAuth2.",
+    "Deployment region is us-east-1.",
+    "Primary runtime environment is nanobot workspace on Linux.",
+    "Memory backend is mem0 with local qdrant storage."
+  ],
+  "active_projects": [
+    "Memory relevance lift rollout is in progress.",
+    "Agent configuration remains separated from runtime state under ~/.nanobot."
+  ],
+  "relationships": [
+    "Carlos collaborates with platform and infrastructure teams.",
+    "Decisions needing user input are escalated directly to Carlos."
+  ],
+  "constraints": [
+    "Commands must avoid destructive operations unless explicitly requested.",
+    "Use env > ~/.nanobot/config.json > code defaults for memory rollout config."
+  ],
+  "conflicts": [
+    {
+      "id": "seed-conflict-open-1",
+      "field": "stable_facts",
+      "old": "Deployment region is eu-west-1.",
+      "new": "Deployment region is us-east-1.",
+      "status": "needs_user",
+      "resolution": "",
+      "created_at": "2026-03-01T10:00:00+00:00"
+    },
+    {
+      "id": "seed-conflict-resolved-1",
+      "field": "stable_facts",
+      "old": "Model is legacy-gpt.",
+      "new": "Model is openai/gpt-oss-120b.",
+      "status": "resolved",
+      "resolution": "keep_new",
+      "created_at": "2026-02-28T10:00:00+00:00",
+      "resolved_at": "2026-02-28T11:00:00+00:00"
+    }
+  ],
+  "updated_at": "2026-03-06T00:41:06.705434+00:00"
+}

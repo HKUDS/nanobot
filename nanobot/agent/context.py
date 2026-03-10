@@ -341,7 +341,12 @@ class ContextBuilder:
             logger.warning("Memory context retrieval failed; continuing without memory")
             memory = ""
         if memory:
-            parts.append(f"# Memory\n\n{memory}")
+            parts.append(
+                "# Memory\n\n"
+                "**Answer from these facts first.** Use the exact names, regions, "
+                "and terms below — do not substitute general knowledge.\n\n"
+                + memory
+            )
 
         # Feedback summary — surface correction stats so the agent adapts
         events_file = self.memory.persistence.events_file

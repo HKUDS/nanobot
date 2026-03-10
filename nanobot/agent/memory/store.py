@@ -3918,7 +3918,7 @@ class MemoryStore:
         lines: list[str] = []
 
         if long_term_text:
-            lines.append("## Long-term Memory")
+            lines.append("## Long-term Memory (project-specific — cite these verbatim)")
             lines.append(long_term_text)
 
         if fitted_profile_lines:
@@ -3938,7 +3938,7 @@ class MemoryStore:
 
         if episodic_lines:
             lines.append("## Relevant Episodic Memories")
-            lines.append("Past events and interactions:")
+            lines.append("Past events and interactions (cite specific details):")
             lines.extend(episodic_lines)
 
         if include_reflection and reflection_lines:
