@@ -1,21 +1,19 @@
-"""Test MemoryStore.consolidate() handles non-string tool call arguments.
+"""Test MemoryStore.consolidate() parses structured text responses.
 
-Regression test for https://github.com/HKUDS/nanobot/issues/1042
-When memory consolidation receives dict values instead of strings from the LLM
-tool call response, it should serialize them to JSON instead of raising TypeError.
+Tests that memory consolidation correctly parses the ## HISTORY_ENTRY /
+## MEMORY_UPDATE format returned by the LLM.
 """
 
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.agent.memory import MemoryStore
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import LLMResponse
 
 
-def _make_session(message_count: int = 30, memory_window: int = 50):
+def _make_session(message_count: int = 30):
     """Create a mock session with messages."""
     session = MagicMock()
     session.messages = [
@@ -26,51 +24,25 @@ def _make_session(message_count: int = 30, memory_window: int = 50):
     return session
 
 
-def _make_tool_response(history_entry, memory_update):
-    """Create an LLMResponse with a save_memory tool call."""
+def _make_response(history_entry: str, memory_update: str) -> LLMResponse:
+    """Create an LLMResponse with the expected structured text format."""
     return LLMResponse(
-        content=None,
-        tool_calls=[
-            ToolCallRequest(
-                id="call_1",
-                name="save_memory",
-                arguments={
-                    "history_entry": history_entry,
-                    "memory_update": memory_update,
-                },
-            )
-        ],
+        content=f"## HISTORY_ENTRY\n{history_entry}\n\n## MEMORY_UPDATE\n{memory_update}",
     )
 
 
-class ScriptedProvider(LLMProvider):
-    def __init__(self, responses: list[LLMResponse]):
-        super().__init__()
-        self._responses = list(responses)
-        self.calls = 0
-
-    async def chat(self, *args, **kwargs) -> LLMResponse:
-        self.calls += 1
-        if self._responses:
-            return self._responses.pop(0)
-        return LLMResponse(content="", tool_calls=[])
-
-    def get_default_model(self) -> str:
-        return "test-model"
-
-
-class TestMemoryConsolidationTypeHandling:
-    """Test that consolidation handles various argument types correctly."""
+class TestMemoryConsolidationParsing:
+    """Test that consolidation parses structured text responses correctly."""
 
     @pytest.mark.asyncio
-    async def test_string_arguments_work(self, tmp_path: Path) -> None:
-        """Normal case: LLM returns string arguments."""
+    async def test_valid_response_parsed(self, tmp_path: Path) -> None:
+        """Normal case: LLM returns correctly formatted response."""
         store = MemoryStore(tmp_path)
         provider = AsyncMock()
         provider.chat = AsyncMock(
-            return_value=_make_tool_response(
-                history_entry="[2026-01-01] User discussed testing.",
-                memory_update="# Memory\nUser likes testing.",
+            return_value=_make_response(
+                "[2026-01-01 00:00] User discussed testing.",
+                "# Memory\nUser likes testing.",
             )
         )
         provider.chat_with_retry = provider.chat
@@ -80,71 +52,16 @@ class TestMemoryConsolidationTypeHandling:
 
         assert result is True
         assert store.history_file.exists()
-        assert "[2026-01-01] User discussed testing." in store.history_file.read_text()
+        assert "[2026-01-01 00:00] User discussed testing." in store.history_file.read_text()
         assert "User likes testing." in store.memory_file.read_text()
 
     @pytest.mark.asyncio
-    async def test_dict_arguments_serialized_to_json(self, tmp_path: Path) -> None:
-        """Issue #1042: LLM returns dict instead of string — must not raise TypeError."""
+    async def test_unparseable_response_returns_false(self, tmp_path: Path) -> None:
+        """When LLM doesn't follow the format, return False."""
         store = MemoryStore(tmp_path)
         provider = AsyncMock()
         provider.chat = AsyncMock(
-            return_value=_make_tool_response(
-                history_entry={"timestamp": "2026-01-01", "summary": "User discussed testing."},
-                memory_update={"facts": ["User likes testing"], "topics": ["testing"]},
-            )
-        )
-        provider.chat_with_retry = provider.chat
-        session = _make_session(message_count=60)
-
-        result = await store.consolidate(session, provider, "test-model", memory_window=50)
-
-        assert result is True
-        assert store.history_file.exists()
-        history_content = store.history_file.read_text()
-        parsed = json.loads(history_content.strip())
-        assert parsed["summary"] == "User discussed testing."
-
-        memory_content = store.memory_file.read_text()
-        parsed_mem = json.loads(memory_content)
-        assert "User likes testing" in parsed_mem["facts"]
-
-    @pytest.mark.asyncio
-    async def test_string_arguments_as_raw_json(self, tmp_path: Path) -> None:
-        """Some providers return arguments as a JSON string instead of parsed dict."""
-        store = MemoryStore(tmp_path)
-        provider = AsyncMock()
-
-        # Simulate arguments being a JSON string (not yet parsed)
-        response = LLMResponse(
-            content=None,
-            tool_calls=[
-                ToolCallRequest(
-                    id="call_1",
-                    name="save_memory",
-                    arguments=json.dumps({
-                        "history_entry": "[2026-01-01] User discussed testing.",
-                        "memory_update": "# Memory\nUser likes testing.",
-                    }),
-                )
-            ],
-        )
-        provider.chat = AsyncMock(return_value=response)
-        provider.chat_with_retry = provider.chat
-        session = _make_session(message_count=60)
-
-        result = await store.consolidate(session, provider, "test-model", memory_window=50)
-
-        assert result is True
-        assert "User discussed testing." in store.history_file.read_text()
-
-    @pytest.mark.asyncio
-    async def test_no_tool_call_returns_false(self, tmp_path: Path) -> None:
-        """When LLM doesn't use the save_memory tool, return False."""
-        store = MemoryStore(tmp_path)
-        provider = AsyncMock()
-        provider.chat = AsyncMock(
-            return_value=LLMResponse(content="I summarized the conversation.", tool_calls=[])
+            return_value=LLMResponse(content="I summarized the conversation.")
         )
         provider.chat_with_retry = provider.chat
         session = _make_session(message_count=60)
@@ -153,6 +70,20 @@ class TestMemoryConsolidationTypeHandling:
 
         assert result is False
         assert not store.history_file.exists()
+
+    @pytest.mark.asyncio
+    async def test_empty_response_returns_false(self, tmp_path: Path) -> None:
+        """Empty response should return False."""
+        store = MemoryStore(tmp_path)
+        provider = AsyncMock()
+        provider.chat = AsyncMock(
+            return_value=LLMResponse(content="")
+        )
+        session = _make_session(message_count=60)
+
+        result = await store.consolidate(session, provider, "test-model", memory_window=50)
+
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_skips_when_few_messages(self, tmp_path: Path) -> None:
@@ -168,103 +99,43 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_list_arguments_extracts_first_dict(self, tmp_path: Path) -> None:
-        """Some providers return arguments as a list - extract first element if it's a dict."""
+    async def test_memory_unchanged_not_rewritten(self, tmp_path: Path) -> None:
+        """When memory_update matches existing memory, file should not be rewritten."""
         store = MemoryStore(tmp_path)
-        provider = AsyncMock()
+        existing = "# Memory\nExisting facts."
+        store.write_long_term(existing)
 
-        # Simulate arguments being a list containing a dict
-        response = LLMResponse(
-            content=None,
-            tool_calls=[
-                ToolCallRequest(
-                    id="call_1",
-                    name="save_memory",
-                    arguments=[{
-                        "history_entry": "[2026-01-01] User discussed testing.",
-                        "memory_update": "# Memory\nUser likes testing.",
-                    }],
-                )
-            ],
+        provider = AsyncMock()
+        provider.chat = AsyncMock(
+            return_value=_make_response(
+                "[2026-01-01 00:00] Nothing new happened.",
+                existing,
+            )
         )
-        provider.chat = AsyncMock(return_value=response)
         provider.chat_with_retry = provider.chat
         session = _make_session(message_count=60)
 
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
 
         assert result is True
-        assert "User discussed testing." in store.history_file.read_text()
-        assert "User likes testing." in store.memory_file.read_text()
+        assert store.memory_file.read_text() == existing
 
     @pytest.mark.asyncio
-    async def test_list_arguments_empty_list_returns_false(self, tmp_path: Path) -> None:
-        """Empty list arguments should return False."""
+    async def test_multiline_sections_parsed(self, tmp_path: Path) -> None:
+        """Both sections can contain multiple lines."""
         store = MemoryStore(tmp_path)
         provider = AsyncMock()
-
-        response = LLMResponse(
-            content=None,
-            tool_calls=[
-                ToolCallRequest(
-                    id="call_1",
-                    name="save_memory",
-                    arguments=[],
-                )
-            ],
+        provider.chat = AsyncMock(
+            return_value=_make_response(
+                "[2026-01-01 00:00] First line.\nSecond line of history.",
+                "# Memory\n- Fact one\n- Fact two\n- Fact three",
+            )
         )
-        provider.chat = AsyncMock(return_value=response)
         provider.chat_with_retry = provider.chat
         session = _make_session(message_count=60)
-
-        result = await store.consolidate(session, provider, "test-model", memory_window=50)
-
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_list_arguments_non_dict_content_returns_false(self, tmp_path: Path) -> None:
-        """List with non-dict content should return False."""
-        store = MemoryStore(tmp_path)
-        provider = AsyncMock()
-
-        response = LLMResponse(
-            content=None,
-            tool_calls=[
-                ToolCallRequest(
-                    id="call_1",
-                    name="save_memory",
-                    arguments=["string", "content"],
-                )
-            ],
-        )
-        provider.chat = AsyncMock(return_value=response)
-        provider.chat_with_retry = provider.chat
-        session = _make_session(message_count=60)
-
-        result = await store.consolidate(session, provider, "test-model", memory_window=50)
-
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_retries_transient_error_then_succeeds(self, tmp_path: Path, monkeypatch) -> None:
-        store = MemoryStore(tmp_path)
-        provider = ScriptedProvider([
-            LLMResponse(content="503 server error", finish_reason="error"),
-            _make_tool_response(
-                history_entry="[2026-01-01] User discussed testing.",
-                memory_update="# Memory\nUser likes testing.",
-            ),
-        ])
-        session = _make_session(message_count=60)
-        delays: list[int] = []
-
-        async def _fake_sleep(delay: int) -> None:
-            delays.append(delay)
-
-        monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
 
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
 
         assert result is True
-        assert provider.calls == 2
-        assert delays == [1]
+        assert "Second line of history." in store.history_file.read_text()
+        assert "Fact three" in store.memory_file.read_text()

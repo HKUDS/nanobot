@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,31 +15,21 @@ if TYPE_CHECKING:
     from nanobot.session.manager import Session
 
 
-_SAVE_MEMORY_TOOL = [
-    {
-        "type": "function",
-        "function": {
-            "name": "save_memory",
-            "description": "Save the memory consolidation result to persistent storage.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "history_entry": {
-                        "type": "string",
-                        "description": "A paragraph (2-5 sentences) summarizing key events/decisions/topics. "
-                        "Start with [YYYY-MM-DD HH:MM]. Include detail useful for grep search.",
-                    },
-                    "memory_update": {
-                        "type": "string",
-                        "description": "Full updated long-term memory as markdown. Include all existing "
-                        "facts plus new ones. Return unchanged if nothing new.",
-                    },
-                },
-                "required": ["history_entry", "memory_update"],
-            },
-        },
-    }
-]
+_CONSOLIDATION_SYSTEM = """\
+You are a memory consolidation agent. Output EXACTLY the following format with no other text:
+
+## HISTORY_ENTRY
+A paragraph (2-5 sentences) summarizing key events/decisions/topics from the conversation. \
+Start with [YYYY-MM-DD HH:MM]. Include detail useful for grep search.
+
+## MEMORY_UPDATE
+Full updated long-term memory as markdown. Include all existing facts plus new ones. \
+Return the existing memory unchanged if nothing new."""
+
+_SECTION_RE = re.compile(
+    r"##\s*HISTORY_ENTRY\s*\n(.*?)\n##\s*MEMORY_UPDATE\s*\n(.*)",
+    re.DOTALL,
+)
 
 
 class MemoryStore:
@@ -103,7 +93,7 @@ class MemoryStore:
             lines.append(f"[{m.get('timestamp', '?')[:16]}] {m['role'].upper()}{tools}: {m['content']}")
 
         current_memory = self.read_long_term()
-        prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
+        prompt = f"""Process this conversation and produce your consolidation.
 
 ## Current Long-term Memory
 {current_memory or "(empty)"}
@@ -114,42 +104,29 @@ class MemoryStore:
         try:
             response = await provider.chat_with_retry(
                 messages=[
-                    {"role": "system", "content": "You are a memory consolidation agent. Your ONLY job is to call the save_memory tool. Do NOT respond with text. You MUST call save_memory."},
+                    {"role": "system", "content": _CONSOLIDATION_SYSTEM},
                     {"role": "user", "content": prompt},
                 ],
-                tools=_SAVE_MEMORY_TOOL,
                 model=model,
                 temperature=temperature,
             )
 
-            if not response.has_tool_calls:
-                logger.warning("Memory consolidation: LLM did not call save_memory, skipping")
+            if not response.content:
+                logger.warning("Memory consolidation: empty response from LLM, skipping")
                 return False
 
-            args = response.tool_calls[0].arguments
-            # Some providers return arguments as a JSON string instead of dict
-            if isinstance(args, str):
-                args = json.loads(args)
-            # Some providers return arguments as a list (handle edge case)
-            if isinstance(args, list):
-                if args and isinstance(args[0], dict):
-                    args = args[0]
-                else:
-                    logger.warning("Memory consolidation: unexpected arguments as empty or non-dict list")
-                    return False
-            if not isinstance(args, dict):
-                logger.warning("Memory consolidation: unexpected arguments type {}", type(args).__name__)
+            match = _SECTION_RE.search(response.content)
+            if not match:
+                logger.warning("Memory consolidation: could not parse response, skipping")
                 return False
 
-            if entry := args.get("history_entry"):
-                if not isinstance(entry, str):
-                    entry = json.dumps(entry, ensure_ascii=False)
+            entry = match.group(1).strip()
+            update = match.group(2).strip()
+
+            if entry:
                 self.append_history(entry)
-            if update := args.get("memory_update"):
-                if not isinstance(update, str):
-                    update = json.dumps(update, ensure_ascii=False)
-                if update != current_memory:
-                    self.write_long_term(update)
+            if update and update != current_memory:
+                self.write_long_term(update)
 
             session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
             logger.info("Memory consolidation done: {} messages, last_consolidated={}", len(session.messages), session.last_consolidated)
