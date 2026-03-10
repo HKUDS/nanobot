@@ -697,30 +697,30 @@ class TelegramChannel(BaseChannel):
             return False
 
         draft_msg_id = self._draft_message_ids.get(chat_id)
-        if not draft_msg_id:
+        draft_content = self._draft_contents.get(chat_id)
+        if not draft_msg_id or not draft_content:
             return False
 
         # Edit the draft message to final content
-        if msg.content and msg.content != "[empty message]":
-            try:
-                html = _markdown_to_telegram_html(msg.content[:4000])
-                await self._app.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=draft_msg_id,
-                    text=html,
-                    parse_mode="HTML",
-                )
-                logger.debug("Edited draft {} to final message for chat {}", draft_msg_id, chat_id)
-                # Clear draft state after successful edit
-                self._draft_contents.pop(chat_id, None)
-                self._draft_message_ids.pop(chat_id, None)
-                self._draft_ids[chat_id] = int(time.time() * 1000) % 1000000
-                return True
-            except Exception as e:
-                logger.warning("Failed to edit draft to final: {}", e)
-                return False
-
-        return False
+        # Use draft_content (saved during streaming) instead of msg.content
+        # because msg might be a sticker/media message with empty content
+        try:
+            html = _markdown_to_telegram_html(draft_content[:4000])
+            await self._app.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=draft_msg_id,
+                text=html,
+                parse_mode="HTML",
+            )
+            logger.debug("Edited draft {} to final message for chat {}", draft_msg_id, chat_id)
+            # Clear draft state after successful edit
+            self._draft_contents.pop(chat_id, None)
+            self._draft_message_ids.pop(chat_id, None)
+            self._draft_ids[chat_id] = int(time.time() * 1000) % 1000000
+            return True
+        except Exception as e:
+            logger.warning("Failed to edit draft to final: {}", e)
+            return False
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
