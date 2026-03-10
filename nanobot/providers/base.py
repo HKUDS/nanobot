@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import hashlib
 from typing import Any
 
 
@@ -101,6 +102,13 @@ class LLMProvider(ABC):
             sanitized.append(clean)
         return sanitized
 
+    @staticmethod
+    def _session_affinity(session_id: str | None) -> str | None:
+        """Build a stable, provider-safe affinity key from a session ID."""
+        if not session_id:
+            return None
+        return hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:32]
+
     @abstractmethod
     async def chat(
         self,
@@ -110,6 +118,7 @@ class LLMProvider(ABC):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        session_id: str | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request.
@@ -120,6 +129,7 @@ class LLMProvider(ABC):
             model: Model identifier (provider-specific).
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
+            session_id: Stable session identifier used for backend sticky routing.
         
         Returns:
             LLMResponse with content and/or tool calls.
