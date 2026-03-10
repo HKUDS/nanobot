@@ -40,7 +40,26 @@ class _ACPDispatchError(RuntimeError):
         self.partial_response = partial_response
 
 
+class _SessionCapabilities:
+    def __init__(self) -> None:
+        self.available_models: list[str] = []
+        self.current_model: str | None = None
+        self.available_agents: list[str] = []
+        self.current_agent: str | None = None
+
+
 class ACPDispatcher:
+    _HELP_TEXT = (
+        "🐈 nanobot commands:\n"
+        "/new — Start a new conversation\n"
+        "/stop — Stop the current task\n"
+        "/help — Show available commands\n"
+        "/models — List available/current models\n"
+        "/set_model <model_id> — Switch model\n"
+        "/agents — List available/current agents\n"
+        "/set_agent <agent_id> — Switch agent"
+    )
+
     def __init__(
         self,
         *,
@@ -65,8 +84,80 @@ class ACPDispatcher:
         self._session_locks: dict[str, asyncio.Lock] = {}
         self._process_locks: dict[str, asyncio.Lock] = {}
         self._session_states: dict[str, _StreamState] = {}
+        self._session_caps: dict[str, _SessionCapabilities] = {}
         self._active_tasks: dict[str, list[asyncio.Task[Any]]] = {}
         self.last_target: tuple[str, str] | None = None
+
+    @staticmethod
+    def _pick(obj: Any, *names: str) -> Any:
+        for name in names:
+            if hasattr(obj, name):
+                return getattr(obj, name)
+        return None
+
+    @staticmethod
+    def _parse_command(content: str) -> tuple[str, str]:
+        raw = content.strip()
+        if not raw:
+            return "", ""
+        parts = raw.split(maxsplit=1)
+        cmd = parts[0].lower()
+        arg = parts[1].strip() if len(parts) > 1 else ""
+        return cmd, arg
+
+    def _update_caps_from_session_payload(self, session_id: str, payload: Any) -> None:
+        caps = self._session_caps.setdefault(session_id, _SessionCapabilities())
+        models = self._pick(payload, "models")
+        if models is not None:
+            current = self._pick(models, "current_model_id", "currentModelId")
+            if isinstance(current, str) and current:
+                caps.current_model = current
+            available = self._pick(models, "available_models", "availableModels") or []
+            parsed_models: list[str] = []
+            for entry in available:
+                model_id = self._pick(entry, "model_id", "modelId")
+                if isinstance(model_id, str) and model_id:
+                    parsed_models.append(model_id)
+            if parsed_models:
+                caps.available_models = parsed_models
+
+        modes = self._pick(payload, "modes")
+        if modes is not None:
+            current = self._pick(modes, "current_mode_id", "currentModeId")
+            if isinstance(current, str) and current:
+                caps.current_agent = current
+            available = self._pick(modes, "available_modes", "availableModes") or []
+            parsed_agents: list[str] = []
+            for entry in available:
+                mode_id = self._pick(entry, "id")
+                if isinstance(mode_id, str) and mode_id:
+                    parsed_agents.append(mode_id)
+            if parsed_agents:
+                caps.available_agents = parsed_agents
+
+    async def _list_models_command(self, session_id: str) -> str:
+        caps = self._session_caps.get(session_id)
+        if not caps or not caps.available_models:
+            return "No model catalog returned by current ACP backend for this session."
+        lines = []
+        current = caps.current_model
+        for model_id in caps.available_models:
+            prefix = "* " if current == model_id else "  "
+            lines.append(f"{prefix}{model_id}")
+        header = f"Current model: {current}" if current else "Current model: unknown"
+        return "\n".join([header, "Available models:", *lines])
+
+    async def _list_agents_command(self, session_id: str) -> str:
+        caps = self._session_caps.get(session_id)
+        if not caps or not caps.available_agents:
+            return "No agent/mode catalog returned by current ACP backend for this session."
+        lines = []
+        current = caps.current_agent
+        for agent_id in caps.available_agents:
+            prefix = "* " if current == agent_id else "  "
+            lines.append(f"{prefix}{agent_id}")
+        header = f"Current agent: {current}" if current else "Current agent: unknown"
+        return "\n".join([header, "Available agents:", *lines])
 
     async def _emit_progress(
         self,
@@ -105,7 +196,13 @@ class ACPDispatcher:
         )
 
     async def _handle_session_update(self, session_id: str, update: Any) -> None:
-        from acp.schema import AgentMessageChunk, TextContentBlock, ToolCallProgress, ToolCallStart
+        from acp.schema import (
+            AgentMessageChunk,
+            CurrentModeUpdate,
+            TextContentBlock,
+            ToolCallProgress,
+            ToolCallStart,
+        )
 
         state = self._session_states.get(session_id)
         if state is None:
@@ -125,6 +222,11 @@ class ACPDispatcher:
             status = getattr(update.status, "value", update.status) if update.status else None
             if status:
                 await self._emit_progress(state.on_progress, status, tool_hint=True)
+
+        if isinstance(update, CurrentModeUpdate):
+            caps = self._session_caps.get(session_id)
+            if caps is not None:
+                caps.current_agent = update.current_mode_id
 
     async def _ensure_connection(self) -> None:
         if self._conn is not None:
@@ -188,6 +290,7 @@ class ACPDispatcher:
                 mcp_servers=self._convert_mcp_servers(),
             )
             self._session_map[session_key] = response.session_id
+            self._update_caps_from_session_payload(response.session_id, response)
             return response.session_id
 
     def _convert_mcp_servers(self) -> list[Any]:
@@ -297,21 +400,87 @@ class ACPDispatcher:
                 origin = msg.chat_id if ":" in msg.chat_id else f"cli:{msg.chat_id}"
                 key = origin
 
-            command = msg.content.strip().lower()
+            command, arg = self._parse_command(msg.content)
             if command == "/help":
                 await self.bus.publish_outbound(
                     OutboundMessage(
                         channel=msg.channel,
                         chat_id=msg.chat_id,
-                        content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands",
+                        content=self._HELP_TEXT,
                     )
                 )
                 return
             if command == "/new":
-                self._session_map.pop(key, None)
+                old_session_id = self._session_map.pop(key, None)
+                if old_session_id:
+                    self._session_caps.pop(old_session_id, None)
                 await self.bus.publish_outbound(
                     OutboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id, content="New session started."
+                    )
+                )
+                return
+            if command == "/models":
+                session_id = await self._ensure_session(key)
+                content = await self._list_models_command(session_id)
+                await self.bus.publish_outbound(
+                    OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
+                )
+                return
+            if command == "/agents":
+                session_id = await self._ensure_session(key)
+                content = await self._list_agents_command(session_id)
+                await self.bus.publish_outbound(
+                    OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
+                )
+                return
+            if command == "/set_model":
+                if not arg:
+                    await self.bus.publish_outbound(
+                        OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content="Usage: /set_model <model_id>",
+                        )
+                    )
+                    return
+                await self._ensure_connection()
+                if self._conn is None:
+                    raise RuntimeError("ACP connection is not available")
+                session_id = await self._ensure_session(key)
+                await self._conn.set_session_model(model_id=arg, session_id=session_id)
+                caps = self._session_caps.setdefault(session_id, _SessionCapabilities())
+                caps.current_model = arg
+                await self.bus.publish_outbound(
+                    OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content=f"Model switched to: {arg}",
+                    )
+                )
+                return
+            if command == "/set_agent":
+                if not arg:
+                    await self.bus.publish_outbound(
+                        OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content="Usage: /set_agent <agent_id>",
+                        )
+                    )
+                    return
+                await self._ensure_connection()
+                if self._conn is None:
+                    raise RuntimeError("ACP connection is not available")
+                session_id = await self._ensure_session(key)
+                await self._conn.set_session_mode(mode_id=arg, session_id=session_id)
+                caps = self._session_caps.setdefault(session_id, _SessionCapabilities())
+                caps.current_agent = arg
+                await self.bus.publish_outbound(
+                    OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content=f"Agent switched to: {arg}",
                     )
                 )
                 return
