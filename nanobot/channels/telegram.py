@@ -464,6 +464,10 @@ class TelegramChannel(BaseChannel):
             "is_group": message.chat.type != "private",
             "message_thread_id": getattr(message, "message_thread_id", None),
             "is_forum": bool(getattr(message.chat, "is_forum", False)),
+            # Convert Telegram UTC message date to local machine timezone with millisecond precision
+            "sent_at": message.date.astimezone().isoformat(timespec="milliseconds")
+            if message.date
+            else None,
         }
 
     async def _ensure_bot_identity(self) -> tuple[int | None, str | None]:
