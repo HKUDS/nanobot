@@ -36,6 +36,7 @@ class MCPToolWrapper(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
+
         try:
             result = await asyncio.wait_for(
                 self._session.call_tool(self._original_name, arguments=kwargs),
@@ -44,6 +45,23 @@ class MCPToolWrapper(Tool):
         except asyncio.TimeoutError:
             logger.warning("MCP tool '{}' timed out after {}s", self._name, self._tool_timeout)
             return f"(MCP tool call timed out after {self._tool_timeout}s)"
+        except asyncio.CancelledError:
+            # MCP SDK's anyio cancel scopes can leak CancelledError on timeout/failure.
+            # Re-raise only if our task was externally cancelled (e.g. /stop).
+            task = asyncio.current_task()
+            if task is not None and task.cancelling() > 0:
+                raise
+            logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
+            return "(MCP tool call was cancelled)"
+        except Exception as exc:
+            logger.exception(
+                "MCP tool '{}' failed: {}: {}",
+                self._name,
+                type(exc).__name__,
+                exc,
+            )
+            return f"(MCP tool call failed: {type(exc).__name__})"
+
         parts = []
         for block in result.content:
             if isinstance(block, types.TextContent):
