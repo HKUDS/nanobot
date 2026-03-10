@@ -191,7 +191,59 @@ When a Xiaohongshu MCP server is available:
      server with the agreed content.
   4. Return the resulting draft ID / URL / metadata to the user.
 
-## 5. Safety and policy notes
+## 5. Optional local workspace–based workflow (when no remote drafts)
+
+Some Xiaohongshu MCP implementations might not expose a robust "remote draft"
+endpoint, or a user may prefer to keep drafts fully local. In those cases,
+the agent can fall back to a **workspace-based draft workflow**:
+
+1. **Choose a workspace drafts directory**
+   - Use a dedicated directory under the active workspace, for example:
+     - `~/.nanobot/workspace/xhs_drafts/` (or an equivalent path configured by the user).
+   - For each note, create a subdirectory named like:
+     - `YYYYMMDD_HHMM_short-topic-slug`
+       - e.g. `20260310_2049_virtual-cell-intro`.
+
+2. **Step A — Generate and save the draft text**
+   - After drafting title/body according to this Skill:
+     - Save the content as `draft.md` inside the note folder.
+     - Report back to the user:
+       - Where the draft was saved,
+       - A short summary of the content.
+   - **Pause here** and wait for the user's review/edits before doing anything else.
+
+3. **Step B — Collect and compress images (after user confirms text)**
+   - Once the user confirms the text:
+     - Collect or generate candidate images (e.g. from allowed sources or
+       image-generation tools) and store them inside the same folder.
+   - To reduce upload failures/timeouts:
+     - Prefer reasonable resolutions (e.g. max width ~1080–2048px).
+     - Compress images (e.g. via Pillow or similar tooling) so each file is
+       reasonably small (hundreds of KB to a couple MB, not tens of MB).
+     - Use formats like JPEG when appropriate.
+   - After preparing images:
+     - List the final image files and their purposes (cover/inside images) to
+       the user.
+   - **Pause again** and wait for explicit confirmation before attempting any
+     publish step.
+
+4. **Step C — Publish only on explicit authorization**
+   - If the user clearly says "可以直接发布了" / "现在就发" / equivalent:
+     - Read `draft.md` and the corresponding image files from the folder.
+     - Either:
+       - Call a Xiaohongshu MCP "publish" tool with the parsed title/body/tags
+         and image paths, or
+       - Invoke a user-provided script/HTTP endpoint that performs publishing.
+   - If the user **does not** explicitly authorize publishing:
+     - Leave the content as a local draft only.
+
+This local workflow is especially useful when:
+
+- The MCP server has flaky or missing draft APIs.
+- Network conditions make large image uploads prone to timeouts.
+- The user wants an extra manual QA step before anything is pushed to Xiaohongshu.
+
+## 6. Safety and policy notes
 
 - Respect Xiaohongshu's platform rules and local laws:
   - Avoid spammy behavior, low-quality mass posting, or misleading claims.
