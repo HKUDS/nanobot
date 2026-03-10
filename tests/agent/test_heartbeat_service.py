@@ -16,6 +16,9 @@ class DummyProvider(LLMProvider):
         self.calls += 1
         return self._responses.pop(0) if self._responses else LLMResponse(content="", tool_calls=[])
 
+    def get_default_model(self) -> str:
+        return "test-model"
+
 
 def mk_service(tmp_path, provider=None, **kwargs):
     return HeartbeatService(
@@ -28,9 +31,6 @@ def mk_service(tmp_path, provider=None, **kwargs):
 
 def tool_resp(arguments: dict) -> LLMResponse:
     return LLMResponse(content="", tool_calls=[ToolCallRequest(id="hb_1", name="heartbeat", arguments=arguments)])
-
-    def get_default_model(self) -> str:
-        return "test-model"
 
 
 @pytest.mark.asyncio
