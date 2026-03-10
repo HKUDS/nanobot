@@ -12,17 +12,29 @@
   </p>
 </div>
 
-🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw) 
+🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw).
 
-⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
+⚡️ Delivers core agent functionality with **99% fewer lines of code** than OpenClaw.
 
-📏 Real-time line count: **3,935 lines** (run `bash core_agent_lines.sh` to verify anytime)
+📏 Real-time line count: run `bash core_agent_lines.sh` to verify anytime.
 
 ## 📢 News
 
+- **2026-03-08** 🚀 Released **v0.1.4.post4** — a reliability-packed release with safer defaults, better multi-instance support, sturdier MCP, and major channel and provider improvements. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post4) for details.
+- **2026-03-07** 🚀 Azure OpenAI provider, WhatsApp media, QQ group chats, and more Telegram/Feishu polish.
+- **2026-03-06** 🪄 Lighter providers, smarter media handling, and sturdier memory and CLI compatibility.
+- **2026-03-05** ⚡️ Telegram draft streaming, MCP SSE support, and broader channel reliability fixes.
+- **2026-03-04** 🛠️ Dependency cleanup, safer file reads, and another round of test and Cron fixes.
+- **2026-03-03** 🧠 Cleaner user-message merging, safer multimodal saves, and stronger Cron guards.
+- **2026-03-02** 🛡️ Safer default access control, sturdier Cron reloads, and cleaner Matrix media handling.
+- **2026-03-01** 🌐 Web proxy support, smarter Cron reminders, and Feishu rich-text parsing improvements.
 - **2026-02-28** 🚀 Released **v0.1.4.post3** — cleaner context, hardened session history, and smarter agent. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post3) for details.
 - **2026-02-27** 🧠 Experimental thinking mode support, DingTalk media messages, Feishu and QQ channel fixes.
 - **2026-02-26** 🛡️ Session poisoning fix, WhatsApp dedup, Windows path guard, Mistral compatibility.
+
+<details>
+<summary>Earlier news</summary>
+
 - **2026-02-25** 🧹 New Matrix channel, cleaner session context, auto workspace template sync.
 - **2026-02-24** 🚀 Released **v0.1.4.post2** — a reliability-focused release with a redesigned heartbeat, prompt cache optimization, and hardened provider & channel stability. See [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post2) for details.
 - **2026-02-23** 🔧 Virtual tool-call heartbeat, prompt cache optimization, Slack mrkdwn fixes.
@@ -30,10 +42,6 @@
 - **2026-02-21** 🎉 Released **v0.1.4.post1** — new providers, media support across channels, and major stability improvements. See [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post1) for details.
 - **2026-02-20** 🐦 Feishu now receives multimodal files from users. More reliable memory under the hood.
 - **2026-02-19** ✨ Slack now sends files, Discord splits long messages, and subagents work in CLI mode.
-
-<details>
-<summary>Earlier news</summary>
-
 - **2026-02-18** ⚡️ nanobot now supports VolcEngine, MCP custom auth headers, and Anthropic prompt caching.
 - **2026-02-17** 🎉 Released **v0.1.4** — MCP support, progress streaming, new providers, and multiple channel improvements. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4) for details.
 - **2026-02-16** 🦞 nanobot now integrates a [ClawHub](https://clawhub.ai) skill — search and install public agent skills.
@@ -113,6 +121,29 @@ uv tool install nanobot-ai
 
 ```bash
 pip install nanobot-ai
+```
+
+### Update to latest version
+
+**PyPI / pip**
+
+```bash
+pip install -U nanobot-ai
+nanobot --version
+```
+
+**uv**
+
+```bash
+uv tool upgrade nanobot-ai
+nanobot --version
+```
+
+**Using WhatsApp?** Rebuild the local bridge after upgrading:
+
+```bash
+rm -rf ~/.nanobot/bridge
+nanobot channels login
 ```
 
 ## 🚀 Quick Start
@@ -293,11 +324,17 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
     "discord": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
+      "allowFrom": ["YOUR_USER_ID"],
+      "groupPolicy": "mention"
     }
   }
 }
 ```
+
+> `groupPolicy` controls how the bot responds in group channels:
+> - `"mention"` (default) — Only respond when @mentioned
+> - `"open"` — Respond to all messages
+> DMs always respond when the sender is in `allowFrom`.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator
@@ -361,7 +398,7 @@ pip install nanobot-ai[matrix]
 
 | Option | Description |
 |--------|-------------|
-| `allowFrom` | User IDs allowed to interact. Empty = all senders. |
+| `allowFrom` | User IDs allowed to interact. Empty denies all; use `["*"]` to allow everyone. |
 | `groupPolicy` | `open` (default), `mention`, or `allowlist`. |
 | `groupAllowFrom` | Room allowlist (used when policy is `allowlist`). |
 | `allowRoomMentions` | Accept `@room` mentions in mention mode. |
@@ -413,6 +450,10 @@ nanobot channels login
 # Terminal 2
 nanobot gateway
 ```
+
+> WhatsApp bridge updates are not applied automatically for existing installations.
+> After upgrading nanobot, rebuild the local bridge with:
+> `rm -rf ~/.nanobot/bridge && nanobot channels login`
 
 </details>
 
@@ -658,12 +699,14 @@ Config file: `~/.nanobot/config.json`
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
 > - **VolcEngine Coding Plan**: If you're on VolcEngine's coding plan, set `"apiBase": "https://ark.cn-beijing.volces.com/api/coding/v3"` in your volcengine provider config.
+> - **Alibaba Cloud Coding Plan**: If you're on the Alibaba Cloud Coding Plan (BaiLian), set `"apiBase": "https://coding.dashscope.aliyuncs.com/v1"` in your dashscope provider config.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
 | `custom` | Any OpenAI-compatible endpoint (direct, no LiteLLM) | — |
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
+| `azure_openai` | LLM (Azure OpenAI) | [portal.azure.com](https://portal.azure.com) |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
@@ -703,6 +746,12 @@ nanobot provider login openai-codex
 **3. Chat:**
 ```bash
 nanobot agent -m "Hello!"
+
+# Target a specific workspace/config locally
+nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello!"
+
+# One-off workspace override on top of that config
+nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -m "Hello!"
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
@@ -875,21 +924,124 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 > [!TIP]
 > For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
-> **Change in source / post-`v0.1.4.post3`:** In `v0.1.4.post3` and earlier, an empty `allowFrom` means "allow all senders". In newer versions (including building from source), **empty `allowFrom` denies all access by default**. To allow all senders, set `"allowFrom": ["*"]`.
+> In `v0.1.4.post3` and earlier, an empty `allowFrom` allowed all senders. Since `v0.1.4.post4`, empty `allowFrom` denies all access by default. To allow all senders, set `"allowFrom": ["*"]`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
-| `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
+| `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
 
 
-## CLI Reference
+## 🧩 Multiple Instances
+
+Run multiple nanobot instances simultaneously with separate configs and runtime data. Use `--config` as the main entrypoint, and optionally use `--workspace` to override the workspace for a specific run.
+
+### Quick Start
+
+```bash
+# Instance A - Telegram bot
+nanobot gateway --config ~/.nanobot-telegram/config.json
+
+# Instance B - Discord bot  
+nanobot gateway --config ~/.nanobot-discord/config.json
+
+# Instance C - Feishu bot with custom port
+nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
+```
+
+### Path Resolution
+
+When using `--config`, nanobot derives its runtime data directory from the config file location. The workspace still comes from `agents.defaults.workspace` unless you override it with `--workspace`.
+
+To open a CLI session against one of these instances locally:
+
+```bash
+nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello from Telegram instance"
+nanobot agent -c ~/.nanobot-discord/config.json -m "Hello from Discord instance"
+
+# Optional one-off workspace override
+nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
+```
+
+> `nanobot agent` starts a local CLI agent using the selected workspace/config. It does not attach to or proxy through an already running `nanobot gateway` process.
+
+| Component | Resolved From | Example |
+|-----------|---------------|---------|
+| **Config** | `--config` path | `~/.nanobot-A/config.json` |
+| **Workspace** | `--workspace` or config | `~/.nanobot-A/workspace/` |
+| **Cron Jobs** | config directory | `~/.nanobot-A/cron/` |
+| **Media / runtime state** | config directory | `~/.nanobot-A/media/` |
+
+### How It Works
+
+- `--config` selects which config file to load
+- By default, the workspace comes from `agents.defaults.workspace` in that config
+- If you pass `--workspace`, it overrides the workspace from the config file
+
+### Minimal Setup
+
+1. Copy your base config into a new instance directory.
+2. Set a different `agents.defaults.workspace` for that instance.
+3. Start the instance with `--config`.
+
+Example config:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.nanobot-telegram/workspace",
+      "model": "anthropic/claude-sonnet-4-6"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "YOUR_TELEGRAM_BOT_TOKEN"
+    }
+  },
+  "gateway": {
+    "port": 18790
+  }
+}
+```
+
+Start separate instances:
+
+```bash
+nanobot gateway --config ~/.nanobot-telegram/config.json
+nanobot gateway --config ~/.nanobot-discord/config.json
+```
+
+Override workspace for one-off runs when needed:
+
+```bash
+nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobot-telegram-test
+```
+
+### Common Use Cases
+
+- Run separate bots for Telegram, Discord, Feishu, and other platforms
+- Keep testing and production instances isolated
+- Use different models or providers for different teams
+- Serve multiple tenants with separate configs and runtime data
+
+### Notes
+
+- Each instance must use a different port if they run at the same time
+- Use a different workspace per instance if you want isolated memory, sessions, and skills
+- `--workspace` overrides the workspace defined in the config file
+- Cron jobs and runtime media/state are derived from the config directory
+
+## 💻 CLI Reference
 
 | Command | Description |
 |---------|-------------|
 | `nanobot onboard` | Initialize config & workspace |
 | `nanobot agent -m "..."` | Chat with the agent |
+| `nanobot agent -w <workspace>` | Chat against a specific workspace |
+| `nanobot agent -w <workspace> -c <config>` | Chat against a specific workspace/config |
 | `nanobot agent` | Interactive chat mode |
 | `nanobot agent --no-markdown` | Show plain-text replies |
 | `nanobot agent --logs` | Show runtime logs during chat |
