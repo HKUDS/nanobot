@@ -421,7 +421,7 @@ class ProvidersConfig(Base):
 class HeartbeatConfig(Base):
     """Heartbeat service configuration."""
 
-    enabled: bool = True
+    enabled: bool = False
     interval_s: int = 30 * 60  # 30 minutes
     model: str | None = None  # Override agent default model for heartbeat
 

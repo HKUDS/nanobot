@@ -1,16 +1,11 @@
-# Heartbeat Tasks
+# Heartbeat (System Internal)
 
-This file is checked every 30 minutes by your nanobot agent.
-Add tasks below that you want the agent to work on periodically.
+This file is for system-level periodic checks only (health checks, maintenance).
+The heartbeat service is disabled by default.
 
-If this file has no tasks (only headers and comments), the agent will skip the heartbeat.
+For user-facing periodic tasks, reminders, and recurring checks, use the `cron` tool instead.
 
 ## Active Tasks
 
-<!-- Add your periodic tasks below this line -->
-
-
-## Completed
-
-<!-- Move completed tasks here or delete them -->
+<!-- System-internal tasks only -->
 
