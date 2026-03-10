@@ -179,6 +179,8 @@ class TelegramChannel(BaseChannel):
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
         self._message_threads: dict[tuple[str, int], int] = {}
+        self._bot_username: str | None = None
+        self._bot_id: int | None = None
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -242,6 +244,8 @@ class TelegramChannel(BaseChannel):
 
         # Get bot info and register command menu
         bot_info = await self._app.bot.get_me()
+        self._bot_username = bot_info.username.lower() if bot_info.username else None
+        self._bot_id = bot_info.id
         logger.info("Telegram bot @{} connected", bot_info.username)
 
         try:
@@ -472,6 +476,59 @@ class TelegramChannel(BaseChannel):
         if len(self._message_threads) > 1000:
             self._message_threads.pop(next(iter(self._message_threads)))
 
+    def _is_group_chat(self, message) -> bool:
+        """Return True for Telegram group/supergroup chats."""
+        return getattr(message.chat, "type", None) in {"group", "supergroup"}
+
+    def _is_bot_mentioned(self, message) -> bool:
+        """Check whether the bot is explicitly mentioned in a Telegram message."""
+        if not self._bot_username:
+            return False
+
+        entities = list(getattr(message, "entities", None) or [])
+        entities.extend(getattr(message, "caption_entities", None) or [])
+        for entity in entities:
+            if getattr(entity, "type", None) == "mention":
+                text = (message.text or message.caption or "")
+                mention_text = text[entity.offset: entity.offset + entity.length].lstrip("@").lower()
+                if mention_text == self._bot_username:
+                    return True
+
+        text = (message.text or message.caption or "").lower()
+        return f"@{self._bot_username}" in text
+
+    def _is_reply_to_bot(self, message) -> bool:
+        """Check whether this message replies to a bot-authored message."""
+        reply = getattr(message, "reply_to_message", None)
+        if not reply or not getattr(reply, "from_user", None):
+            return False
+        from_user = reply.from_user
+        if self._bot_id is not None and from_user.id == self._bot_id:
+            return True
+        return bool(getattr(from_user, "is_bot", False) and self._bot_username and from_user.username and from_user.username.lower() == self._bot_username)
+
+    def _should_respond_in_group(self, message) -> bool:
+        """Apply group response policy for Telegram group chats."""
+        policy = getattr(self.config, "group_policy", "open")
+        if policy == "open":
+            return True
+        if policy == "mention":
+            if self._is_bot_mentioned(message) or self._is_reply_to_bot(message):
+                return True
+            logger.debug("Telegram group message in {} ignored (bot not mentioned)", message.chat_id)
+            return False
+        return True
+
+    async def _try_react_to_message(self, message) -> None:
+        """Add an early emoji reaction to inbound messages when Telegram supports it."""
+        reaction = getattr(self.config, "react_emoji", "")
+        if not reaction:
+            return
+        try:
+            await message.set_reaction(reaction)
+        except Exception as e:
+            logger.debug("Telegram reaction skipped for {}: {}", getattr(message, "message_id", "?"), e)
+
     async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Forward slash commands to the bus for unified handling in AgentLoop."""
         if not update.message or not update.effective_user:
@@ -500,6 +557,13 @@ class TelegramChannel(BaseChannel):
 
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
+
+        # Best-effort early acknowledgment before normal processing/reply.
+        await self._try_react_to_message(message)
+
+        # In silent group mode, receive everything but only process when explicitly addressed.
+        if self._is_group_chat(message) and not self._should_respond_in_group(message):
+            return
 
         # Build content from text and/or media
         content_parts = []
