@@ -3,17 +3,23 @@ import asyncio
 import pytest
 
 from nanobot.heartbeat.service import HeartbeatService
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 
-class DummyProvider:
+class DummyProvider(LLMProvider):
     def __init__(self, responses: list[LLMResponse]):
+        super().__init__()
         self._responses = list(responses)
+        self.calls = 0
 
     async def chat(self, *args, **kwargs) -> LLMResponse:
+        self.calls += 1
         if self._responses:
             return self._responses.pop(0)
         return LLMResponse(content="", tool_calls=[])
+
+    def get_default_model(self) -> str:
+        return "test-model"
 
 
 @pytest.mark.asyncio
@@ -115,3 +121,40 @@ async def test_trigger_now_returns_none_when_decision_is_skip(tmp_path) -> None:
     )
 
     assert await service.trigger_now() is None
+
+
+@pytest.mark.asyncio
+async def test_decide_retries_transient_error_then_succeeds(tmp_path, monkeypatch) -> None:
+    provider = DummyProvider([
+        LLMResponse(content="429 rate limit", finish_reason="error"),
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={"action": "run", "tasks": "check open tasks"},
+                )
+            ],
+        ),
+    ])
+
+    delays: list[int] = []
+
+    async def _fake_sleep(delay: int) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+    )
+
+    action, tasks = await service._decide("heartbeat content")
+
+    assert action == "run"
+    assert tasks == "check open tasks"
+    assert provider.calls == 2
+    assert delays == [1]
