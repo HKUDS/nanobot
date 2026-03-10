@@ -6,15 +6,21 @@ from pathlib import Path
 from nanobot.config.schema import Config
 
 
+# Global variable to store current config path (for multi-instance support)
+_current_config_path: Path | None = None
+
+
+def set_config_path(path: Path) -> None:
+    """Set the current config path (used to derive data directory)."""
+    global _current_config_path
+    _current_config_path = path
+
+
 def get_config_path() -> Path:
-    """Get the default configuration file path."""
+    """Get the configuration file path."""
+    if _current_config_path:
+        return _current_config_path
     return Path.home() / ".nanobot" / "config.json"
-
-
-def get_data_dir() -> Path:
-    """Get the nanobot data directory."""
-    from nanobot.utils.helpers import get_data_path
-    return get_data_path()
 
 
 def load_config(config_path: Path | None = None) -> Config:
