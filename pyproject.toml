@@ -60,6 +60,12 @@ dev = [
     "mistune>=3.0.0,<4.0.0",
     "nh3>=0.2.17,<1.0.0",
 ]
+a2a = [
+    "a2a-sdk[http-server]>=0.2.0",
+]
+all = [
+    "a2a-sdk[http-server]>=0.2.0",
+]
 
 [project.scripts]
 nanobot = "nanobot.cli.commands:app"

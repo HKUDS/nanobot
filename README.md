@@ -208,6 +208,7 @@ Connect nanobot to your favorite chat platform.
 | **Slack** | Bot token + App-Level token |
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
+| **A2A** | Just enable — Agent-to-Agent protocol for multi-agent systems |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -674,6 +675,49 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 ```bash
 nanobot gateway
 ```
+
+</details>
+
+<details>
+<summary><b>A2A Protocol</b> (Agent-to-Agent)</summary>
+
+Expose your nanobot as an A2A-compatible agent that other agents can discover and call.
+
+```bash
+pip install "nanobot-ai[a2a]"
+```
+
+**Configure**
+
+```json
+{
+  "channels": {
+    "a2a": {
+      "enabled": true,
+      "port": 8080,
+      "publicHost": "https://my-agent.example.com"
+    }
+  }
+}
+```
+
+**Run**
+
+```bash
+nanobot gateway
+```
+
+Your agent will be discoverable at:
+- Agent Card: `http://localhost:8080/.well-known/agent.json`
+- A2A Endpoint: `http://localhost:8080/`
+
+nanobot can also **call other A2A agents** using the built-in `call_a2a_agent` tool:
+
+```
+User: Ask the travel agent at https://travel.example.com to book a flight to Paris
+```
+
+See [A2A Protocol](https://a2a-protocol.org) for more info.
 
 </details>
 
