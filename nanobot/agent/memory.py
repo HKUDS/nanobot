@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -40,6 +40,42 @@ _SAVE_MEMORY_TOOL = [
         },
     }
 ]
+
+
+def _get_provider_name(provider: Any) -> str | None:
+    """Best-effort extraction of provider name for memory tool-choice strategy."""
+    provider_name = getattr(provider, "provider_name", None)
+    if isinstance(provider_name, str) and provider_name:
+        return provider_name.lower()
+
+    gateway = getattr(provider, "_gateway", None)
+    gateway_name = getattr(gateway, "name", None)
+    if isinstance(gateway_name, str) and gateway_name:
+        return gateway_name.lower()
+
+    return None
+
+
+def _build_memory_tool_choice(provider: Any) -> dict[str, Any] | str | None:
+    """Return a provider-compatible tool_choice for memory consolidation.
+
+    Some providers behind gateways such as OpenRouter reject explicit OpenAI-style
+    function forcing:
+        {"type": "function", "function": {"name": "save_memory"}}
+
+    To avoid provider-specific request failures, only use forced function tool
+    choice for known-compatible providers, and fall back to a safer strategy for
+    OpenRouter and unknown providers.
+    """
+    provider_name = _get_provider_name(provider)
+
+    if provider_name == "openai":
+        return {"type": "function", "function": {"name": "save_memory"}}
+
+    if provider_name == "openrouter":
+        return "auto"
+
+    return "auto"
 
 
 class MemoryStore:
@@ -111,12 +147,14 @@ class MemoryStore:
 {chr(10).join(lines)}"""
 
         try:
+            tool_choice = _build_memory_tool_choice(provider)
             response = await provider.chat(
                 messages=[
                     {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
                     {"role": "user", "content": prompt},
                 ],
                 tools=_SAVE_MEMORY_TOOL,
+                tool_choice=tool_choice,
                 model=model,
             )
 

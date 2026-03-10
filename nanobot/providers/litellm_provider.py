@@ -214,6 +214,7 @@ class LiteLLMProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        tool_choice: dict[str, Any] | str | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -267,7 +268,7 @@ class LiteLLMProvider(LLMProvider):
         
         if tools:
             kwargs["tools"] = tools
-            kwargs["tool_choice"] = "auto"
+            kwargs["tool_choice"] = tool_choice if tool_choice is not None else "auto"
 
         try:
             response = await acompletion(**kwargs)

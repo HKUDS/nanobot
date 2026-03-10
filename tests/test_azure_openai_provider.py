@@ -101,6 +101,12 @@ def test_prepare_request_payload():
     payload_with_tools = provider._prepare_request_payload("gpt-4o", messages, tools=tools)
     assert payload_with_tools["tools"] == tools
     assert payload_with_tools["tool_choice"] == "auto"
+
+    forced_choice = {"type": "function", "function": {"name": "save_memory"}}
+    payload_with_forced_tool_choice = provider._prepare_request_payload(
+        "gpt-4o", messages, tools=tools, tool_choice=forced_choice
+    )
+    assert payload_with_forced_tool_choice["tool_choice"] == forced_choice
     
     # Test with reasoning_effort
     payload_with_reasoning = provider._prepare_request_payload(

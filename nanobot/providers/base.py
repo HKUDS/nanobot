@@ -110,6 +110,7 @@ class LLMProvider(ABC):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        tool_choice: dict[str, Any] | str | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request.

@@ -32,6 +32,7 @@ class OpenAICodexProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        tool_choice: dict[str, Any] | str | None = None,
     ) -> LLMResponse:
         model = model or self.default_model
         system_prompt, input_items = _convert_messages(messages)
@@ -48,7 +49,7 @@ class OpenAICodexProvider(LLMProvider):
             "text": {"verbosity": "medium"},
             "include": ["reasoning.encrypted_content"],
             "prompt_cache_key": _prompt_cache_key(messages),
-            "tool_choice": "auto",
+            "tool_choice": _normalize_codex_tool_choice(tool_choice),
             "parallel_tool_calls": True,
         }
 
@@ -224,6 +225,19 @@ def _split_tool_call_id(tool_call_id: Any) -> tuple[str, str | None]:
 def _prompt_cache_key(messages: list[dict[str, Any]]) -> str:
     raw = json.dumps(messages, ensure_ascii=True, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _normalize_codex_tool_choice(tool_choice: dict[str, Any] | str | None) -> str:
+    """Normalize generic tool_choice values to the Codex Responses API shape.
+
+    The Responses API clearly supports string values such as "auto". We avoid
+    passing chat-completions-specific dict forms like
+    {"type": "function", "function": {"name": "save_memory"}} until their
+    compatibility is explicitly confirmed for Codex.
+    """
+    if isinstance(tool_choice, str) and tool_choice:
+        return tool_choice
+    return "auto"
 
 
 async def _iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], None]:

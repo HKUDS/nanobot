@@ -11,8 +11,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory import MemoryStore, _build_memory_tool_choice
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.providers.litellm_provider import LiteLLMProvider
 
 
 def _make_session(message_count: int = 30, memory_window: int = 50):
@@ -220,3 +221,26 @@ class TestMemoryConsolidationTypeHandling:
         result = await store.consolidate(session, provider, "test-model", memory_window=50)
 
         assert result is False
+
+
+def test_memory_tool_choice_for_openai_provider() -> None:
+    provider = LiteLLMProvider(provider_name="openai")
+
+    assert _build_memory_tool_choice(provider) == {
+        "type": "function",
+        "function": {"name": "save_memory"},
+    }
+
+
+def test_memory_tool_choice_for_openrouter_provider() -> None:
+    provider = LiteLLMProvider(provider_name="openrouter")
+
+    assert _build_memory_tool_choice(provider) == "auto"
+
+
+def test_memory_tool_choice_for_unknown_provider_is_conservative() -> None:
+    provider = MagicMock()
+    provider.provider_name = None
+    provider._gateway = None
+
+    assert _build_memory_tool_choice(provider) == "auto"
