@@ -21,6 +21,7 @@ from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.places import PlacesSearchTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -54,10 +55,16 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 40,
         temperature: float = 0.1,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
         max_tokens: int = 4096,
         memory_window: int = 100,
         reasoning_effort: str | None = None,
         exa_api_key: str | None = None,
+        places_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
@@ -73,10 +80,16 @@ class AgentLoop:
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.temperature = temperature
+        self.top_p = top_p
+        self.top_k = top_k
+        self.min_p = min_p
+        self.presence_penalty = presence_penalty
+        self.frequency_penalty = frequency_penalty
         self.max_tokens = max_tokens
         self.memory_window = memory_window
         self.reasoning_effort = reasoning_effort
         self.exa_api_key = exa_api_key
+        self.places_api_key = places_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -90,9 +103,15 @@ class AgentLoop:
             bus=bus,
             model=self.model,
             temperature=self.temperature,
+            top_p=self.top_p,
+            top_k=self.top_k,
+            min_p=self.min_p,
+            presence_penalty=self.presence_penalty,
+            frequency_penalty=self.frequency_penalty,
             max_tokens=self.max_tokens,
             reasoning_effort=reasoning_effort,
             exa_api_key=exa_api_key,
+            places_api_key=places_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
@@ -122,6 +141,7 @@ class AgentLoop:
         ))
         self.tools.register(WebSearchTool(api_key=self.exa_api_key))
         self.tools.register(WebFetchTool(api_key=self.exa_api_key))
+        self.tools.register(PlacesSearchTool(api_key=self.places_api_key))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
@@ -193,6 +213,11 @@ class AgentLoop:
                 tools=self.tools.get_definitions(),
                 model=self.model,
                 temperature=self.temperature,
+                top_p=self.top_p,
+                top_k=self.top_k,
+                min_p=self.min_p,
+                presence_penalty=self.presence_penalty,
+                frequency_penalty=self.frequency_penalty,
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
             )

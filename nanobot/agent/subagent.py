@@ -11,6 +11,7 @@ from loguru import logger
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.agent.tools.places import PlacesSearchTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -28,9 +29,15 @@ class SubagentManager:
         bus: MessageBus,
         model: str | None = None,
         temperature: float = 0.7,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
         max_tokens: int = 4096,
         reasoning_effort: str | None = None,
         exa_api_key: str | None = None,
+        places_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
     ):
@@ -40,9 +47,15 @@ class SubagentManager:
         self.bus = bus
         self.model = model or provider.get_default_model()
         self.temperature = temperature
+        self.top_p = top_p
+        self.top_k = top_k
+        self.min_p = min_p
+        self.presence_penalty = presence_penalty
+        self.frequency_penalty = frequency_penalty
         self.max_tokens = max_tokens
         self.reasoning_effort = reasoning_effort
         self.exa_api_key = exa_api_key
+        self.places_api_key = places_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
@@ -106,7 +119,8 @@ class SubagentManager:
             ))
             tools.register(WebSearchTool(api_key=self.exa_api_key))
             tools.register(WebFetchTool(api_key=self.exa_api_key))
-            
+            tools.register(PlacesSearchTool(api_key=self.places_api_key))
+
             system_prompt = self._build_subagent_prompt()
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
@@ -126,6 +140,11 @@ class SubagentManager:
                     tools=tools.get_definitions(),
                     model=self.model,
                     temperature=self.temperature,
+                    top_p=self.top_p,
+                    top_k=self.top_k,
+                    min_p=self.min_p,
+                    presence_penalty=self.presence_penalty,
+                    frequency_penalty=self.frequency_penalty,
                     max_tokens=self.max_tokens,
                     reasoning_effort=self.reasoning_effort,
                 )

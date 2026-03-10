@@ -298,10 +298,18 @@ class WebSearchConfig(Base):
     max_results: int = 5
 
 
+class PlacesConfig(Base):
+    """Google Places API configuration."""
+
+    api_key: str = ""  # Google Places API key
+    max_results: int = 5
+
+
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    places: PlacesConfig = Field(default_factory=PlacesConfig)
 
 
 class ExecToolConfig(Base):

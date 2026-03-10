@@ -135,10 +135,10 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("new", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
 
-        # Add message handler for text, photos, voice, documents
+        # Add message handler for text, photos, voice, documents, location
         self._app.add_handler(
             MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL)
+                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL | filters.LOCATION)
                 & ~filters.COMMAND,
                 self._on_message
             )
@@ -332,7 +332,7 @@ class TelegramChannel(BaseChannel):
         )
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle incoming messages (text, photos, voice, documents)."""
+        """Handle incoming messages (text, photos, voice, documents, location)."""
         if not update.message or not update.effective_user:
             return
 
@@ -370,6 +370,12 @@ class TelegramChannel(BaseChannel):
         elif message.document:
             media_file = message.document
             media_type = "file"
+
+        # Handle location
+        if message.location:
+            lat = message.location.latitude
+            lon = message.location.longitude
+            content_parts.append(f"[location: {lat}, {lon}]")
 
         # Download media if present
         if media_file and self._app:

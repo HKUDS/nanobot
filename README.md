@@ -15,6 +15,27 @@ Docker Compose now uses `network_mode: host` for the gateway service, allowing c
 - **Ports**: The gateway binds directly to host port 18790 (no port mapping needed)
 - **Linux only**: Host network mode works on Linux; macOS/Windows users should use `host.docker.internal`
 
+### Google Places API
+
+Added `places_search` tool for location-based searches (restaurants, cafes, attractions, etc.):
+
+```json
+{
+  "tools": {
+    "web": {
+      "places": {
+        "apiKey": "YOUR_GOOGLE_PLACES_API_KEY",
+        "maxResults": 5
+      }
+    }
+  }
+}
+```
+
+- Send a location message to nanobot, then ask "find restaurants near me"
+- Returns names, addresses, ratings, reviews, and opening hours
+- Requires Google Cloud project with Places API enabled
+
 ### Heartbeat Quiet Hours
 
 The heartbeat service now supports quiet hours to prevent notifications during specific times:
