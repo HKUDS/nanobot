@@ -581,6 +581,8 @@ class TelegramChannel(BaseChannel):
 
         if not await self._is_group_message_for_bot(message):
             return
+
+        # Best-effort early acknowledgment before normal processing/reply.
         await self._try_react_to_message(message)
 
         # Build content from text and/or media
