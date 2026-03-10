@@ -29,6 +29,22 @@ class BackpressureConfig(Base):
     base_retry_delay: float = 1.0  # Base delay between retries (with exponential backoff)
     max_retry_delay: float = 30.0  # Maximum delay cap for exponential backoff
 
+    @field_validator('max_retries')
+    @classmethod
+    def validate_max_retries(cls, v: int) -> int:
+        """Validate max_retries is non-negative."""
+        if v < 0:
+            raise ValueError("max_retries must be non-negative")
+        return v
+    
+    @field_validator('timeout_seconds', 'base_retry_delay', 'max_retry_delay')
+    @classmethod
+    def validate_positive_delays(cls, v: float) -> float:
+        """Validate delay/timeout values are positive."""
+        if v < 0:
+            raise ValueError("Delay and timeout values must be non-negative")
+        return v
+
 
 class WhatsAppConfig(Base):
     """WhatsApp channel configuration."""

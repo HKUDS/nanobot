@@ -268,7 +268,7 @@ class TestConfigurationValidation:
     """Test strict configuration validation."""
 
     def test_ignore_unknown_fields(self):
-        \"\"\"Test that unknown config fields are ignored for backward compatibility.\"\"\"
+        """Test that unknown config fields are ignored for backward compatibility."""
         from nanobot.config.schema import MochatConfig
         
         # Should succeed and ignore the typo
