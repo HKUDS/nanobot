@@ -4,21 +4,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from nanobot.config.schema import LLMRetryConfig
 from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 from nanobot.providers.base import LLMResponse
-def _retry_config(max_attempts: int = 3) -> LLMRetryConfig:
-    return LLMRetryConfig(
-        enabled=True,
-        max_attempts=max_attempts,
-        initial_delay_ms=0,
-        max_delay_ms=0,
-        backoff_multiplier=1.0,
-        jitter_ratio=0.0,
-    )
-
-
-
 
 def test_azure_openai_provider_init():
     """Test AzureOpenAIProvider initialization without deployment_name."""
@@ -326,17 +313,18 @@ async def test_chat_api_error():
         assert "Azure OpenAI API Error 401" in result.content
         assert "Invalid authentication credentials" in result.content
         assert result.finish_reason == "error"
+        assert result.error is not None
+        assert result.error.retryable is False
         assert mock_context.post.await_count == 1
 
 
 @pytest.mark.asyncio
 async def test_chat_retries_retryable_api_error():
-    """Test chat retries retryable Azure HTTP errors before succeeding."""
+    """Test chat_with_retry retries retryable Azure HTTP errors before succeeding."""
     provider = AzureOpenAIProvider(
         api_key="test-key",
         api_base="https://test-resource.openai.azure.com",
         default_model="gpt-4o",
-        retry_config=_retry_config(max_attempts=2),
     )
 
     success_response_data = {
@@ -361,7 +349,7 @@ async def test_chat_retries_retryable_api_error():
         mock_client.return_value.__aenter__.return_value = mock_context
 
         messages = [{"role": "user", "content": "Hello"}]
-        result = await provider.chat(messages)
+        result = await provider.chat_with_retry(messages)
 
         assert result.content == "Recovered"
         assert result.finish_reason == "stop"
@@ -388,6 +376,7 @@ async def test_chat_connection_error():
         assert isinstance(result, LLMResponse)
         assert "Error calling Azure OpenAI: Connection failed" in result.content
         assert result.finish_reason == "error"
+        assert result.error is not None
         assert mock_context.post.await_count == 1
 
 

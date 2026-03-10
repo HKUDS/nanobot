@@ -11,7 +11,6 @@ import httpx
 from loguru import logger
 from oauth_cli_kit import get_token as get_codex_token
 
-from nanobot.config.schema import LLMRetryConfig
 from nanobot.providers.base import LLMProvider, LLMResponse, ProviderRequestError, ToolCallRequest
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
@@ -21,15 +20,11 @@ DEFAULT_ORIGINATOR = "nanobot"
 class OpenAICodexProvider(LLMProvider):
     """Use Codex OAuth to call the Responses API."""
 
-    def __init__(
-        self,
-        default_model: str = "openai-codex/gpt-5.1-codex",
-        retry_config: LLMRetryConfig | None = None,
-    ):
-        super().__init__(api_key=None, api_base=None, retry_config=retry_config)
+    def __init__(self, default_model: str = "openai-codex/gpt-5.1-codex"):
+        super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
 
-    async def _chat_once(
+    async def chat(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
@@ -67,33 +62,21 @@ class OpenAICodexProvider(LLMProvider):
 
         try:
             try:
-                content, tool_calls, finish_reason = await _request_codex(
-                    url,
-                    headers,
-                    body,
-                    verify=True,
-                    retryable_status_codes=set(self.retry_config.retryable_status_codes),
-                )
+                content, tool_calls, finish_reason = await _request_codex(url, headers, body, verify=True)
             except Exception as e:
                 if "CERTIFICATE_VERIFY_FAILED" not in str(e):
                     raise
                 logger.warning("SSL certificate verification failed for Codex API; retrying with verify=False")
-                content, tool_calls, finish_reason = await _request_codex(
-                    url,
-                    headers,
-                    body,
-                    verify=False,
-                    retryable_status_codes=set(self.retry_config.retryable_status_codes),
-                )
+                content, tool_calls, finish_reason = await _request_codex(url, headers, body, verify=False)
             return LLMResponse(
                 content=content,
                 tool_calls=tool_calls,
                 finish_reason=finish_reason,
             )
-        except ProviderRequestError:
-            raise
+        except ProviderRequestError as e:
+            return self._error_response(e)
         except Exception as e:
-            raise self._wrap_exception(e, prefix="Error calling Codex") from e
+            return self._error_response(self._wrap_exception(e, prefix="Error calling Codex"))
 
     def get_default_model(self) -> str:
         return self.default_model
@@ -122,7 +105,6 @@ async def _request_codex(
     headers: dict[str, str],
     body: dict[str, Any],
     verify: bool,
-    retryable_status_codes: set[int],
 ) -> tuple[str, list[ToolCallRequest], str]:
     async with httpx.AsyncClient(timeout=60.0, verify=verify) as client:
         async with client.stream("POST", url, headers=headers, json=body) as response:
@@ -130,7 +112,7 @@ async def _request_codex(
                 text = await response.aread()
                 raise ProviderRequestError(
                     message=f"Error calling Codex: {_friendly_error(response.status_code, text.decode('utf-8', 'ignore'))}",
-                    retryable=response.status_code in retryable_status_codes,
+                    retryable=LLMProvider._is_retryable_status_code(response.status_code),
                     status_code=response.status_code,
                 )
             return await _consume_sse(response)

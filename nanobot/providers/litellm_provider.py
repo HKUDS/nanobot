@@ -12,8 +12,7 @@ import litellm
 from litellm import acompletion
 from loguru import logger
 
-from nanobot.config.schema import LLMRetryConfig
-from nanobot.providers.base import LLMProvider, LLMResponse, ProviderRequestError, ToolCallRequest
+from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
 
 # Standard chat-completion message keys.
@@ -42,9 +41,8 @@ class LiteLLMProvider(LLMProvider):
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
-        retry_config: LLMRetryConfig | None = None,
     ):
-        super().__init__(api_key, api_base, retry_config=retry_config)
+        super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
 
@@ -209,7 +207,7 @@ class LiteLLMProvider(LLMProvider):
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
         return sanitized
 
-    async def _chat_once(
+    async def chat(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
@@ -218,7 +216,7 @@ class LiteLLMProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
     ) -> LLMResponse:
-        """Send a single chat completion request via LiteLLM."""
+        """Send a chat completion request via LiteLLM."""
         original_model = model or self.default_model
         model = self._resolve_model(original_model)
         extra_msg_keys = self._extra_msg_keys(original_model, model)
@@ -266,14 +264,12 @@ class LiteLLMProvider(LLMProvider):
         except Exception as e:
             status_code = self._extract_status_code(e)
             if status_code is not None:
-                raise ProviderRequestError(
-                    message=f"Error calling LLM: {str(e)}",
-                    retryable=status_code in set(self.retry_config.retryable_status_codes),
-                    status_code=status_code,
-                ) from e
+                return self._error_response(
+                    self._status_error(f"Error calling LLM: {str(e)}", status_code)
+                )
             if isinstance(e, (httpx.TimeoutException, httpx.TransportError)):
-                raise self._wrap_exception(e, prefix="Error calling LLM") from e
-            raise self._wrap_exception(e, prefix="Error calling LLM") from e
+                return self._error_response(self._wrap_exception(e, prefix="Error calling LLM"))
+            return self._error_response(self._wrap_exception(e, prefix="Error calling LLM"))
 
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""

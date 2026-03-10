@@ -1,90 +1,103 @@
+import asyncio
+
 import httpx
 import pytest
 
-from nanobot.config.schema import LLMRetryConfig
 from nanobot.providers.base import LLMProvider, LLMResponse, ProviderRequestError
 
 
-class DummyProvider(LLMProvider):
-    def __init__(self, outcomes, retry_config: LLMRetryConfig | None = None):
-        super().__init__(retry_config=retry_config)
-        self._outcomes = list(outcomes)
+class ScriptedProvider(LLMProvider):
+    def __init__(self, responses):
+        super().__init__()
+        self._responses = list(responses)
         self.calls = 0
 
-    async def _chat_once(
-        self,
-        messages,
-        tools=None,
-        model=None,
-        max_tokens=4096,
-        temperature=0.7,
-        reasoning_effort=None,
-    ) -> LLMResponse:
+    async def chat(self, *args, **kwargs) -> LLMResponse:
         self.calls += 1
-        outcome = self._outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
+        response = self._responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
 
     def get_default_model(self) -> str:
-        return "dummy"
-
-
-def _retry_config(max_attempts: int = 3) -> LLMRetryConfig:
-    return LLMRetryConfig(
-        enabled=True,
-        max_attempts=max_attempts,
-        initial_delay_ms=0,
-        max_delay_ms=0,
-        backoff_multiplier=1.0,
-        jitter_ratio=0.0,
-    )
+        return "test-model"
 
 
 @pytest.mark.asyncio
-async def test_provider_retries_retryable_error_until_success():
-    provider = DummyProvider(
-        [
-            ProviderRequestError("temporary upstream failure", retryable=True, status_code=503),
-            LLMResponse(content="ok"),
-        ],
-        retry_config=_retry_config(max_attempts=2),
-    )
+async def test_chat_with_retry_retries_structured_retryable_error(monkeypatch) -> None:
+    provider = ScriptedProvider([
+        LLMResponse(
+            content="temporary upstream failure",
+            finish_reason="error",
+            error=ProviderRequestError(
+                "temporary upstream failure",
+                retryable=True,
+                status_code=503,
+            ),
+        ),
+        LLMResponse(content="ok"),
+    ])
+    delays: list[int] = []
 
-    result = await provider.chat(messages=[{"role": "user", "content": "hello"}])
+    async def _fake_sleep(delay: int) -> None:
+        delays.append(delay)
 
-    assert result.content == "ok"
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.finish_reason == "stop"
+    assert response.content == "ok"
     assert provider.calls == 2
+    assert delays == [1]
 
 
 @pytest.mark.asyncio
-async def test_provider_does_not_retry_non_retryable_error():
-    provider = DummyProvider(
-        [
-            ProviderRequestError("bad request", retryable=False, status_code=400),
-            LLMResponse(content="unreachable"),
-        ],
-        retry_config=_retry_config(max_attempts=3),
-    )
+async def test_chat_with_retry_does_not_retry_structured_non_retryable_error(monkeypatch) -> None:
+    provider = ScriptedProvider([
+        LLMResponse(
+            content="bad request",
+            finish_reason="error",
+            error=ProviderRequestError("bad request", retryable=False, status_code=400),
+        ),
+    ])
+    delays: list[int] = []
 
-    result = await provider.chat(messages=[{"role": "user", "content": "hello"}])
+    async def _fake_sleep(delay: int) -> None:
+        delays.append(delay)
 
-    assert result.finish_reason == "error"
-    assert result.content == "bad request"
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.content == "bad request"
     assert provider.calls == 1
+    assert delays == []
 
 
 @pytest.mark.asyncio
-async def test_provider_retries_generic_timeout_exception():
-    provider = DummyProvider(
-        [
-            httpx.ReadTimeout("timed out"),
-            LLMResponse(content="recovered"),
-        ],
-        retry_config=_retry_config(max_attempts=2),
-    )
+async def test_chat_with_retry_keeps_legacy_string_matching(monkeypatch) -> None:
+    provider = ScriptedProvider([
+        httpx.ReadTimeout("timed out"),
+        LLMResponse(content="recovered"),
+    ])
+    delays: list[int] = []
 
-    result = await provider.chat(messages=[{"role": "user", "content": "hello"}])
+    async def _fake_sleep(delay: int) -> None:
+        delays.append(delay)
 
-    assert result.content == "recovered"
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.content == "recovered"
     assert provider.calls == 2
+    assert delays == [1]
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_preserves_cancelled_error() -> None:
+    provider = ScriptedProvider([asyncio.CancelledError()])
+
+    with pytest.raises(asyncio.CancelledError):
+        await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])

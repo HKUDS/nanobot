@@ -248,24 +248,9 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
-class LLMRetryConfig(Base):
-    """Shared retry policy for all LLM providers."""
-
-    enabled: bool = True
-    max_attempts: int = 3
-    initial_delay_ms: int = 500
-    max_delay_ms: int = 8000
-    backoff_multiplier: float = 2.0
-    jitter_ratio: float = 0.2
-    retryable_status_codes: list[int] = Field(
-        default_factory=lambda: [408, 429, 500, 502, 503, 504]
-    )
-
-
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
-    retry: LLMRetryConfig = Field(default_factory=LLMRetryConfig)
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
