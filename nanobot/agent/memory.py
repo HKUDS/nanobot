@@ -143,6 +143,9 @@ class MemoryStore:
             return True
         except Exception:
             logger.exception("Memory consolidation failed")
+            if not archive_all:
+                session.last_consolidated = len(session.messages) - keep_count
+                logger.info("Memory consolidation failed: advancing last_consolidated to {} to prevent retry storm", session.last_consolidated)
             return False
 
 
