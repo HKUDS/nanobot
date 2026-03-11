@@ -33,6 +33,7 @@ class TelegramConfig(Base):
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )
     reply_to_message: bool = False  # If true, bot replies quote the original message
+    group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned or replied to, "open" responds to all
 
 
 class FeishuConfig(Base):
@@ -199,6 +200,16 @@ class QQConfig(Base):
     )  # Allowed user openids (empty = public access)
 
 
+class WecomConfig(Base):
+    """WeCom (Enterprise WeChat) AI Bot channel configuration."""
+
+    enabled: bool = False
+    bot_id: str = ""  # Bot ID from WeCom AI Bot platform
+    secret: str = ""  # Bot Secret from WeCom AI Bot platform
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
+    welcome_message: str = ""  # Welcome message for enter_chat event
+
+
 class XmppConfig(Base):
     """XMPP channel configuration."""
 
@@ -221,7 +232,6 @@ class XmppConfig(Base):
     # Examples: "upload.example.com" or "*.example.com" for subdomains
     upload_domain: str = ""  # Domain to match for HTTP File Upload URLs
 
-
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -237,6 +247,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    wecom: WecomConfig = Field(default_factory=WecomConfig)
     xmpp: XmppConfig = Field(default_factory=XmppConfig)
 
 
@@ -249,10 +260,17 @@ class AgentDefaults(Base):
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
     max_tokens: int = 8192
+    context_window_tokens: int = 65_536
     temperature: float = 0.1
     max_tool_iterations: int = 40
-    memory_window: int = 100
+    # Deprecated compatibility field: accepted from old configs but ignored at runtime.
+    memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+
+    @property
+    def should_warn_deprecated_memory_window(self) -> bool:
+        """Return True when old memoryWindow is present without contextWindowTokens."""
+        return self.memory_window is not None and "context_window_tokens" not in self.model_fields_set
 
 
 class AgentsConfig(Base):
@@ -286,6 +304,7 @@ class ProvidersConfig(Base):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
+    ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
@@ -389,15 +408,24 @@ class Config(BaseSettings):
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
-                if spec.is_oauth or p.api_key:
+                if spec.is_oauth or spec.is_local or p.api_key:
                     return p, spec.name
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
-                if spec.is_oauth or p.api_key:
+                if spec.is_oauth or spec.is_local or p.api_key:
                     return p, spec.name
+
+        # Fallback: configured local providers can route models without
+        # provider-specific keywords (for example plain "llama3.2" on Ollama).
+        for spec in PROVIDERS:
+            if not spec.is_local:
+                continue
+            p = getattr(self.providers, spec.name, None)
+            if p and p.api_base:
+                return p, spec.name
 
         # Fallback: gateways first, then others (follows registry order)
         # OAuth providers are NOT valid fallbacks — they require explicit model selection
@@ -425,7 +453,7 @@ class Config(BaseSettings):
         return p.api_key if p else None
 
     def get_api_base(self, model: str | None = None) -> str | None:
-        """Get API base URL for the given model. Applies default URLs for known gateways."""
+        """Get API base URL for the given model. Applies default URLs for gateway/local providers."""
         from nanobot.providers.registry import find_by_name
 
         p, name = self._match_provider(model)
@@ -436,7 +464,7 @@ class Config(BaseSettings):
         # to avoid polluting the global litellm.api_base.
         if name:
             spec = find_by_name(name)
-            if spec and spec.is_gateway and spec.default_api_base:
+            if spec and (spec.is_gateway or spec.is_local) and spec.default_api_base:
                 return spec.default_api_base
         return None
 

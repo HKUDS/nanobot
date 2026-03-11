@@ -14,6 +14,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import FeishuConfig
 
 import importlib.util
@@ -243,11 +244,11 @@ class FeishuChannel(BaseChannel):
     """
 
     name = "feishu"
+    display_name = "Feishu"
 
-    def __init__(self, config: FeishuConfig, bus: MessageBus, groq_api_key: str = ""):
+    def __init__(self, config: FeishuConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: FeishuConfig = config
-        self.groq_api_key = groq_api_key
         self._client: Any = None
         self._ws_client: Any = None
         self._ws_thread: threading.Thread | None = None
@@ -732,8 +733,7 @@ class FeishuChannel(BaseChannel):
             (file_path, content_text) - file_path is None if download failed
         """
         loop = asyncio.get_running_loop()
-        media_dir = Path.home() / ".nanobot" / "media"
-        media_dir.mkdir(parents=True, exist_ok=True)
+        media_dir = get_media_dir("feishu")
 
         data, filename = None, None
 
@@ -753,8 +753,9 @@ class FeishuChannel(BaseChannel):
                     None, self._download_file_sync, message_id, file_key, msg_type
                 )
                 if not filename:
-                    ext = {"audio": ".opus", "media": ".mp4"}.get(msg_type, "")
-                    filename = f"{file_key[:16]}{ext}"
+                    filename = file_key[:16]
+                if msg_type == "audio" and not filename.endswith(".opus"):
+                    filename = f"{filename}.opus"
 
         if data and filename:
             file_path = media_dir / filename
@@ -927,16 +928,10 @@ class FeishuChannel(BaseChannel):
                 if file_path:
                     media_paths.append(file_path)
 
-                # Transcribe audio using Groq Whisper
-                if msg_type == "audio" and file_path and self.groq_api_key:
-                    try:
-                        from nanobot.providers.transcription import GroqTranscriptionProvider
-                        transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
-                        transcription = await transcriber.transcribe(file_path)
-                        if transcription:
-                            content_text = f"[transcription: {transcription}]"
-                    except Exception as e:
-                        logger.warning("Failed to transcribe audio: {}", e)
+                if msg_type == "audio" and file_path:
+                    transcription = await self.transcribe_audio(file_path)
+                    if transcription:
+                        content_text = f"[transcription: {transcription}]"
 
                 content_parts.append(content_text)
 

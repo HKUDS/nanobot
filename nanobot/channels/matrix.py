@@ -37,8 +37,9 @@ except ImportError as e:
     ) from e
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.loader import get_data_dir
+from nanobot.config.paths import get_data_dir, get_media_dir
 from nanobot.utils.helpers import safe_filename
 
 TYPING_NOTICE_TIMEOUT_MS = 30_000
@@ -146,15 +147,15 @@ class MatrixChannel(BaseChannel):
     """Matrix (Element) channel using long-polling sync."""
 
     name = "matrix"
+    display_name = "Matrix"
 
-    def __init__(self, config: Any, bus, *, restrict_to_workspace: bool = False,
-                 workspace: Path | None = None):
+    def __init__(self, config: Any, bus: MessageBus):
         super().__init__(config, bus)
         self.client: AsyncClient | None = None
         self._sync_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
-        self._restrict_to_workspace = restrict_to_workspace
-        self._workspace = workspace.expanduser().resolve() if workspace else None
+        self._restrict_to_workspace = False
+        self._workspace: Path | None = None
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
 
@@ -490,9 +491,7 @@ class MatrixChannel(BaseChannel):
         return False
 
     def _media_dir(self) -> Path:
-        d = get_data_dir() / "media" / "matrix"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        return get_media_dir("matrix")
 
     @staticmethod
     def _event_source_content(event: RoomMessage) -> dict[str, Any]:
@@ -679,7 +678,14 @@ class MatrixChannel(BaseChannel):
         parts: list[str] = []
         if isinstance(body := getattr(event, "body", None), str) and body.strip():
             parts.append(body.strip())
-        if marker:
+
+        if attachment and attachment.get("type") == "audio":
+            transcription = await self.transcribe_audio(attachment["path"])
+            if transcription:
+                parts.append(f"[transcription: {transcription}]")
+            else:
+                parts.append(marker)
+        elif marker:
             parts.append(marker)
 
         await self._start_typing_keepalive(room.room_id)
