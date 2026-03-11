@@ -42,6 +42,9 @@ class ExecTool(Tool):
     def name(self) -> str:
         return "exec"
 
+    _MAX_TIMEOUT = 600
+    _MAX_OUTPUT = 10_000
+
     @property
     def description(self) -> str:
         return "Execute a shell command and return its output. Use with caution."
@@ -53,22 +56,36 @@ class ExecTool(Tool):
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The shell command to execute"
+                    "description": "The shell command to execute",
                 },
                 "working_dir": {
                     "type": "string",
-                    "description": "Optional working directory for the command"
-                }
+                    "description": "Optional working directory for the command",
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": (
+                        "Timeout in seconds. Increase for long-running commands "
+                        "like compilation or installation (default 60, max 600)."
+                    ),
+                    "minimum": 1,
+                    "maximum": 600,
+                },
             },
-            "required": ["command"]
+            "required": ["command"],
         }
-    
-    async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
+
+    async def execute(
+        self, command: str, working_dir: str | None = None,
+        timeout: int | None = None, **kwargs: Any,
+    ) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
-        
+
+        effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
+
         env = os.environ.copy()
         if self.path_append:
             env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
@@ -81,35 +98,32 @@ class ExecTool(Tool):
                 cwd=cwd,
                 env=env,
             )
-            
+
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
-                    timeout=self.timeout
+                    timeout=effective_timeout,
                 )
             except asyncio.TimeoutError:
                 process.kill()
-                # Wait for the process to fully terminate so pipes are
-                # drained and file descriptors are released.
                 try:
                     await asyncio.wait_for(process.wait(), timeout=5.0)
                 except asyncio.TimeoutError:
                     pass
-                return f"Error: Command timed out after {self.timeout} seconds"
-            
+                return f"Error: Command timed out after {effective_timeout} seconds"
+
             output_parts = []
-            
+
             if stdout:
                 output_parts.append(stdout.decode("utf-8", errors="replace"))
-            
+
             if stderr:
                 stderr_text = stderr.decode("utf-8", errors="replace")
                 if stderr_text.strip():
                     output_parts.append(f"STDERR:\n{stderr_text}")
-            
-            if process.returncode != 0:
-                output_parts.append(f"\nExit code: {process.returncode}")
-            
+
+            output_parts.append(f"\nExit code: {process.returncode}")
+
             result = "\n".join(output_parts) if output_parts else "(no output)"
             
             # Truncate very long output (configurable via environment variables)
@@ -130,7 +144,7 @@ class ExecTool(Tool):
                     result = result[:max_len] + f"\n... (truncated, {truncated_count} more chars)"
             
             return result
-            
+
         except Exception as e:
             return f"Error executing command: {str(e)}"
 
@@ -155,7 +169,8 @@ class ExecTool(Tool):
 
             for raw in self._extract_absolute_paths(cmd):
                 try:
-                    p = Path(raw.strip()).resolve()
+                    expanded = os.path.expandvars(raw.strip())
+                    p = Path(expanded).expanduser().resolve()
                 except Exception:
                     continue
                 if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
@@ -166,5 +181,6 @@ class ExecTool(Tool):
     @staticmethod
     def _extract_absolute_paths(command: str) -> list[str]:
         win_paths = re.findall(r"[A-Za-z]:\\[^\s\"'|><;]+", command)   # Windows: C:\...
-        posix_paths = re.findall(r"(?:^|[\s|>])(/[^\s\"'>]+)", command) # POSIX: /absolute only
-        return win_paths + posix_paths
+        posix_paths = re.findall(r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
+        home_paths = re.findall(r"(?:^|[\s|>'\"])(~[^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~
+        return win_paths + posix_paths + home_paths
