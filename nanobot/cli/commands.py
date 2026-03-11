@@ -694,6 +694,15 @@ def channels_status():
         dc.gateway_url
     )
 
+    # Matrix
+    mx = config.channels.matrix
+    mx_config = mx.homeserver if mx.homeserver else "[dim]not configured[/dim]"
+    table.add_row(
+        "Matrix",
+        "✓" if mx.enabled else "✗",
+        mx_config
+    )
+
     # Feishu
     fs = config.channels.feishu
     fs_config = f"app_id: {fs.app_id[:10]}..." if fs.app_id else "[dim]not configured[/dim]"
