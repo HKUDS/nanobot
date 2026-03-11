@@ -1212,7 +1212,7 @@ class AgentLoop:
             self.tools._tools = self._saved_tools
 
     async def close_mcp(self) -> None:
-        """Close MCP connections."""
+        """Close MCP connections and other async resources."""
         if self._mcp_stack:
             try:
                 await self._mcp_stack.aclose()
@@ -1223,6 +1223,11 @@ class AgentLoop:
             await self.provider.aclose()
         except (RuntimeError, OSError, AttributeError) as e:
             logger.debug("Provider cleanup failed: {}", e)
+        if hasattr(self, "memory_store") and self.memory_store.graph:
+            try:
+                await self.memory_store.graph.close()
+            except (RuntimeError, OSError) as e:
+                logger.debug("Graph driver cleanup failed: {}", e)
 
     def stop(self) -> None:
         """Stop the agent loop."""
