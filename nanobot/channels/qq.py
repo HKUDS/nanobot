@@ -1,6 +1,7 @@
 """QQ channel implementation using botpy SDK."""
 
 import asyncio
+import hashlib
 from collections import deque
 from typing import TYPE_CHECKING
 
@@ -60,6 +61,7 @@ class QQChannel(BaseChannel):
         self.config: QQConfig = config
         self._client: "botpy.Client | None" = None
         self._processed_ids: deque = deque(maxlen=1000)
+        self._processed_hashes: deque = deque(maxlen=1000)  # 内容哈希去重
         self._msg_seq: int = 1  # 消息序列号，避免被 QQ API 去重
         self._chat_type_cache: dict[str, str] = {}
 
@@ -132,14 +134,22 @@ class QQChannel(BaseChannel):
     async def _on_message(self, data: "C2CMessage | GroupMessage", is_group: bool = False) -> None:
         """Handle incoming message from QQ."""
         try:
-            # Dedup by message ID
-            if data.id in self._processed_ids:
-                return
-            self._processed_ids.append(data.id)
-
             content = (data.content or "").strip()
             if not content:
                 return
+            
+            # Dedup by message ID
+            if data.id in self._processed_ids:
+                logger.debug("QQ message {} already processed (ID dedup)", data.id)
+                return
+            self._processed_ids.append(data.id)
+            
+            # Dedup by content hash (for duplicate messages from different servers)
+            content_hash = hashlib.md5(f"{data.author}:{content}".encode()).hexdigest()[:16]
+            if content_hash in self._processed_hashes:
+                logger.warning("QQ message {} detected as duplicate by content hash (author={}, content={})", data.id, data.author, content[:50])
+                return
+            self._processed_hashes.append(content_hash)
 
             if is_group:
                 chat_id = data.group_openid

@@ -187,6 +187,11 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        
+        # Tool call deduplication tracking
+        _tool_call_history: list[tuple[str, str]] = []  # (name, args_hash)
+        _MAX_DUPLICATE_COUNT = 3
+        _HISTORY_WINDOW = 10
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -228,10 +233,38 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    
+                    # Tool call deduplication check
+                    args_hash = f"{tool_call.name}:{args_str}"
+                    _tool_call_history.append((tool_call.name, args_hash))
+                    if len(_tool_call_history) > _HISTORY_WINDOW:
+                        _tool_call_history.pop(0)
+                    
+                    # Count duplicates in recent history
+                    duplicate_count = sum(1 for _, h in _tool_call_history if h == args_hash)
+                    if duplicate_count >= _MAX_DUPLICATE_COUNT:
+                        logger.warning("Detected {} duplicate calls to {} with same arguments. Breaking loop.", duplicate_count, tool_call.name)
+                        final_content = (
+                            f"⚠️ **检测到循环**：连续 {duplicate_count} 次调用相同的工具（{tool_call.name}）。"
+                            f"\n\n这可能是以下原因导致的："
+                            f"\n1. 目标代码不存在（如尝试编辑不存在的函数）"
+                            f"\n2. 工具调用参数错误"
+                            f"\n3. LLM 陷入重复模式"
+                            f"\n\n建议："
+                            f"\n- 检查目标是否存在"
+                            f"\n- 明确指定修改意图"
+                            f"\n- 使用 /new 开始新会话"
+                        )
+                        break
+                    
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+                
+                # Check if we broke due to duplicate detection
+                if final_content and "检测到循环" in final_content:
+                    break
             else:
                 clean = self._strip_think(response.content)
                 # Don't persist error responses to session history — they can
