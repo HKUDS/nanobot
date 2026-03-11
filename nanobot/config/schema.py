@@ -317,6 +317,13 @@ class WebSearchConfig(Base):
     max_results: int = 5
 
 
+class TranscriptionConfig(Base):
+    """Transcription service configuration."""
+
+    provider: str = ""  # Provider name (e.g. "groq", "openai", "mistral")
+    model: str = ""  # Model name for transcription (e.g. "whisper-large-v3")
+
+
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
@@ -362,6 +369,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
 
     @property
     def workspace_path(self) -> Path:

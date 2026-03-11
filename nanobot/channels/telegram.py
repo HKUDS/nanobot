@@ -167,8 +167,8 @@ class TelegramChannel(BaseChannel):
         BotCommand("restart", "Restart the bot"),
     ]
 
-    def __init__(self, config: TelegramConfig, bus: MessageBus):
-        super().__init__(config, bus)
+    def __init__(self, config: TelegramConfig, bus: MessageBus, transcription_service=None):
+        super().__init__(config, bus, transcription_service)
         self.config: TelegramConfig = config
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies

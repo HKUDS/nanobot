@@ -10,6 +10,7 @@ from loguru import logger
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
+from nanobot.providers.transcription import create_transcription_service
 
 
 class ChannelManager:
@@ -27,6 +28,7 @@ class ChannelManager:
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
+        self.transcription_service = None
 
         self._init_channels()
 
@@ -34,7 +36,7 @@ class ChannelManager:
         """Initialize channels discovered via pkgutil scan."""
         from nanobot.channels.registry import discover_channel_names, load_channel_class
 
-        groq_key = self.config.providers.groq.api_key
+        self.transcription_service = create_transcription_service(self.config)
 
         for modname in discover_channel_names():
             section = getattr(self.config.channels, modname, None)
@@ -42,8 +44,7 @@ class ChannelManager:
                 continue
             try:
                 cls = load_channel_class(modname)
-                channel = cls(section, self.bus)
-                channel.transcription_api_key = groq_key
+                channel = cls(section, self.bus, self.transcription_service)
                 self.channels[modname] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except ImportError as e:

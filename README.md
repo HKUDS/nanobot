@@ -759,7 +759,7 @@ Config file: `~/.nanobot/config.json`
 ### Providers
 
 > [!TIP]
-> - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
+> - **Voice Transcription**: nanobot now supports multi-provider voice transcription. Configure the `transcription` block to enable automatic transcription of voice messages in Telegram and Feishu.
 > - **VolcEngine / BytePlus Coding Plan**: Use dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan` instead of the pay-per-use `volcengine` / `byteplus` providers.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
@@ -914,6 +914,95 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
   }
 }
 ```
+
+</details>
+
+<details>
+<summary><b>Voice Transcription</b></summary>
+
+nanobot supports automatic voice message transcription in Telegram and Feishu channels. The transcription service supports multiple providers following the LiteLLM-first pattern.
+
+**Supported Providers:**
+- **Groq**: Uses LiteLLM transcription (recommended, free Whisper API)
+- **OpenAI**: Uses LiteLLM transcription
+- **Mistral**: Uses direct AsyncOpenAI client (LiteLLM doesn't support Mistral transcription yet)
+- **Custom endpoints**: Use direct AsyncOpenAI client with your own OpenAI-compatible transcription endpoint
+
+**Configuration:**
+
+Add a `transcription` block to your `~/.nanobot/config.json`:
+
+```json
+{
+  "transcription": {
+    "provider": "groq",
+    "model": "whisper-large-v3"
+  },
+  "providers": {
+    "groq": {
+      "apiKey": "YOUR_GROQ_API_KEY"
+    }
+  }
+}
+```
+
+**Examples:**
+
+**Groq (recommended, free):**
+```json
+{
+  "transcription": {
+    "provider": "groq",
+    "model": "whisper-large-v3"
+  }
+}
+```
+
+**OpenAI:**
+```json
+{
+  "transcription": {
+    "provider": "openai",
+    "model": "whisper-1"
+  }
+}
+```
+
+**Mistral (direct client):**
+```json
+{
+  "transcription": {
+    "provider": "mistral",
+    "model": "mistral-large-latest"
+  },
+  "providers": {
+    "mistral": {
+      "apiKey": "YOUR_MISTRAL_API_KEY",
+      "apiBase": "https://api.mistral.ai/v1"
+    }
+  }
+}
+```
+
+**Custom endpoint:**
+```json
+{
+  "transcription": {
+    "provider": "custom",
+    "model": "your-model-name"
+  },
+  "providers": {
+    "custom": {
+      "apiKey": "your-api-key",
+      "apiBase": "https://your-custom-endpoint.com/v1"
+    }
+  }
+}
+```
+
+> **Note:** Transcription is **opt-in** — if you don't configure the `transcription` block, voice messages will be handled as regular audio files without automatic transcription.
+
+> **Migration:** If you were previously using Groq's auto-detection for transcription, you now need to explicitly configure the `transcription` block as shown above.
 
 </details>
 
