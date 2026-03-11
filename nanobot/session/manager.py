@@ -44,9 +44,14 @@ class Session:
         self.updated_at = datetime.now()
 
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input, aligned to a user turn."""
+        """Return unconsolidated messages for LLM input, aligned to a user turn.
+
+        - max_messages > 0: return last N messages
+        - max_messages <= 0: return all unconsolidated messages (no limit)
+        """
         unconsolidated = self.messages[self.last_consolidated:]
-        sliced = unconsolidated[-max_messages:]
+        # max_messages <= 0 means no limit; Python's [-0:] returns entire list which is wrong
+        sliced = unconsolidated if max_messages <= 0 else unconsolidated[-max_messages:]
 
         # Drop leading non-user messages to avoid orphaned tool_result blocks
         for i, m in enumerate(sliced):
@@ -60,6 +65,15 @@ class Session:
             for k in ("tool_calls", "tool_call_id", "name"):
                 if k in m:
                     entry[k] = m[k]
+            # Filter image_url from multimodal content for models that don't support vision
+            if isinstance(entry.get("content"), list):
+                filtered = []
+                for c in entry["content"]:
+                    if c.get("type") == "image_url":
+                        filtered.append({"type": "text", "text": "[image]"})
+                    else:
+                        filtered.append(c)
+                entry["content"] = filtered
             out.append(entry)
         return out
 
