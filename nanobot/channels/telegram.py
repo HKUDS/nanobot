@@ -658,14 +658,10 @@ class TelegramChannel(BaseChannel):
                 logger.debug("Draft send failed (non-critical): {}", e)
 
     async def _clear_draft(self, chat_id: str) -> None:
-        """Clear draft state only (don't send empty draft to avoid visual flicker).
+        """Clear draft state, first converting draft to final message if needed.
 
-        Since send_message_draft returns bool (not Message with message_id),
-        we can't use edit_message_text to convert draft to final message.
-        Instead, we rely on _send_draft() to send regular messages when content
-        jumps to a new message, and only clear local state here.
-        
-        This avoids the visual flicker of: draft disappear → regular message appear.
+        When called (e.g., before sending media/sticker), we must save the draft
+        content as a regular message to avoid losing it.
         """
         if not self._app:
             return
@@ -673,8 +669,33 @@ class TelegramChannel(BaseChannel):
         try:
             cid = int(chat_id)
 
-            # Only clear local state, don't send empty draft
-            # The draft content has already been sent as regular message by _send_draft()
+            # First, try to edit draft to final message (no visual flicker)
+            draft_content = self._draft_contents.get(cid)
+            draft_msg_id = self._draft_message_ids.get(cid)
+
+            if draft_content and draft_msg_id:
+                try:
+                    html = _markdown_to_telegram_html(draft_content[:4000])
+                    await self._app.bot.edit_message_text(
+                        chat_id=cid,
+                        message_id=draft_msg_id,
+                        text=html,
+                        parse_mode="HTML",
+                    )
+                    logger.debug("Saved draft as final message before clear for chat {}", cid)
+                except Exception as e:
+                    # If edit fails (e.g., message deleted), send as new message
+                    logger.warning("Failed to edit draft, sending as new message: {}", e)
+                    try:
+                        await self._app.bot.send_message(
+                            chat_id=cid,
+                            text=html,
+                            parse_mode="HTML",
+                        )
+                    except Exception as e2:
+                        logger.error("Failed to send draft as message: {}", e2)
+
+            # Clear local state
             self._draft_contents.pop(cid, None)
             self._draft_message_ids.pop(cid, None)
             # Generate new draft_id for next conversation
