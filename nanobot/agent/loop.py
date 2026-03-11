@@ -171,10 +171,26 @@ class AgentLoop:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
         def _fmt(tc):
             args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
-            val = next(iter(args.values()), None) if isinstance(args, dict) else None
+            if not isinstance(args, dict):
+                return tc.name
+
+            # For file operations, prefer showing the file path over content
+            if tc.name in ("write_file", "edit_file", "read_file"):
+                path = args.get("path", "")
+                if path:
+                    return f'{tc.name}("{path}")'
+
+            val = next(iter(args.values()), None)
             if not isinstance(val, str):
                 return tc.name
-            return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
+            
+            # Replace newlines for cleaner display
+            val = val.replace("\n", " ")
+
+            # Truncate if too long (using 100 instead of 40 for more context)
+            if len(val) > 100:
+                val = val[:100] + "…"
+            return f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
     async def _run_agent_loop(
@@ -202,9 +218,9 @@ class AgentLoop:
 
             if response.has_tool_calls:
                 if on_progress:
-                    thought = self._strip_think(response.content)
-                    if thought:
-                        await on_progress(thought)
+                    clean = self._strip_think(response.content)
+                    if clean:
+                        await on_progress(clean)
                     await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
                 tool_call_dicts = [
@@ -228,7 +244,14 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+
+                    # Execute tool and handle ToolResult (separate display vs LLM content)
+                    result, _ = await self.tools.execute(
+                        tool_call.name,
+                        tool_call.arguments,
+                        on_progress=on_progress,
+                    )
+
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -298,6 +321,9 @@ class AgentLoop:
                 response = await self._process_message(msg)
                 if response is not None:
                     await self.bus.publish_outbound(response)
+                    if 'system' == msg.channel:
+                        # Decrement background task counter after system message processing
+                        self.bus.decrement_background()
                 elif msg.channel == "cli":
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,
@@ -424,10 +450,12 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id,
         )
 
-        async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
+        async def _bus_progress(content: str, *, tool_hint: bool = False, display_type: str = "text") -> None:
+            """Publish progress message to bus."""
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             meta["_tool_hint"] = tool_hint
+            meta["_display_type"] = display_type
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))

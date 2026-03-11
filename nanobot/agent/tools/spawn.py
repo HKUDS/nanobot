@@ -54,6 +54,8 @@ class SpawnTool(Tool):
 
     async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
         """Spawn a subagent to execute the given task."""
+        # Increment background task counter
+        self._manager.bus.increment_background()
         return await self._manager.spawn(
             task=task,
             label=label,

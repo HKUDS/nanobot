@@ -535,13 +535,19 @@ def agent(
         # Animated spinner is safe to use with prompt_toolkit input handling
         return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
 
-    async def _cli_progress(content: str, *, tool_hint: bool = False) -> None:
+    async def _cli_progress(content: str, *, tool_hint: bool = False, display_type: str = "text") -> None:
         ch = agent_loop.channels_config
         if ch and tool_hint and not ch.send_tool_hints:
             return
         if ch and not tool_hint and not ch.send_progress:
             return
-        console.print(f"  [dim]↳ {content}[/dim]")
+        
+        # For rich display types, use print() directly to preserve ANSI codes
+        if display_type in ("diff", "write_preview", "exec_output", "list_result"):
+            print(content, end="")
+        else:
+            console.print("  ↳ ", end="")
+            console.print(Markdown(content), style="dim")
 
     if message:
         # Single message mode — direct call, no bus needed
@@ -591,13 +597,22 @@ def agent(
                         msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
                         if msg.metadata.get("_progress"):
                             is_tool_hint = msg.metadata.get("_tool_hint", False)
+                            display_type = msg.metadata.get("_display_type", "text")
                             ch = agent_loop.channels_config
                             if ch and is_tool_hint and not ch.send_tool_hints:
                                 pass
                             elif ch and not is_tool_hint and not ch.send_progress:
                                 pass
+                            elif display_type in ("diff", "write_preview", "exec_output", "list_result"):
+                                # For these types, use print() for better formatting control
+                                print(msg.content, end="")
                             else:
-                                console.print(f"  [dim]↳ {msg.content}[/dim]")
+                                console.print("  ↳ ", end="")
+                                console.print(Markdown(msg.content), style="dim")
+                        elif 'email' == msg.channel:
+                            # For email channel, print the response directly without waiting for turn_done
+                            console.print()
+                            _print_agent_response(msg.content, render_markdown=markdown)
                         elif not turn_done.is_set():
                             if msg.content:
                                 turn_response.append(msg.content)
@@ -615,6 +630,10 @@ def agent(
             try:
                 while True:
                     try:
+                        # Wait for background tasks (subagents) to complete
+                        while bus.has_pending_background:
+                            await asyncio.sleep(0.1)
+
                         _flush_pending_tty_input()
                         user_input = await _read_interactive_input_async()
                         command = user_input.strip()

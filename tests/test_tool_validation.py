@@ -85,7 +85,7 @@ def test_validate_params_ignores_unknown_fields() -> None:
 async def test_registry_returns_validation_error() -> None:
     reg = ToolRegistry()
     reg.register(SampleTool())
-    result = await reg.execute("sample", {"query": "hi"})
+    result, _ = await reg.execute("sample", {"query": "hi"})
     assert "Invalid parameters" in result
 
 
