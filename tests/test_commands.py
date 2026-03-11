@@ -134,6 +134,30 @@ def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
 
 
+def test_make_provider_passes_codex_timeout_and_retries(monkeypatch):
+    from nanobot.cli.commands import _make_provider
+
+    config = Config()
+    config.agents.defaults.model = "openai-codex/gpt-5.1-codex"
+    config.providers.openai_codex.timeout = 222.0
+    config.providers.openai_codex.max_retries = 2
+
+    captured: dict[str, object] = {}
+
+    class _FakeCodexProvider:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider.OpenAICodexProvider", _FakeCodexProvider)
+
+    provider = _make_provider(config)
+
+    assert isinstance(provider, _FakeCodexProvider)
+    assert captured["default_model"] == "openai-codex/gpt-5.1-codex"
+    assert captured["timeout_s"] == 222.0
+    assert captured["max_retries"] == 2
+
+
 @pytest.fixture
 def mock_agent_runtime(tmp_path):
     """Mock agent command dependencies for focused CLI tests."""
