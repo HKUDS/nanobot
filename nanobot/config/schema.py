@@ -281,6 +281,7 @@ class ProvidersConfig(Base):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
+    ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
@@ -384,15 +385,24 @@ class Config(BaseSettings):
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
-                if spec.is_oauth or p.api_key:
+                if spec.is_oauth or spec.is_local or p.api_key:
                     return p, spec.name
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
-                if spec.is_oauth or p.api_key:
+                if spec.is_oauth or spec.is_local or p.api_key:
                     return p, spec.name
+
+        # Fallback: configured local providers can route models without
+        # provider-specific keywords (for example plain "llama3.2" on Ollama).
+        for spec in PROVIDERS:
+            if not spec.is_local:
+                continue
+            p = getattr(self.providers, spec.name, None)
+            if p and p.api_base:
+                return p, spec.name
 
         # Fallback: gateways first, then others (follows registry order)
         # OAuth providers are NOT valid fallbacks — they require explicit model selection
@@ -420,7 +430,7 @@ class Config(BaseSettings):
         return p.api_key if p else None
 
     def get_api_base(self, model: str | None = None) -> str | None:
-        """Get API base URL for the given model. Applies default URLs for known gateways."""
+        """Get API base URL for the given model. Applies default URLs for gateway/local providers."""
         from nanobot.providers.registry import find_by_name
 
         p, name = self._match_provider(model)
@@ -431,7 +441,7 @@ class Config(BaseSettings):
         # to avoid polluting the global litellm.api_base.
         if name:
             spec = find_by_name(name)
-            if spec and spec.is_gateway and spec.default_api_base:
+            if spec and (spec.is_gateway or spec.is_local) and spec.default_api_base:
                 return spec.default_api_base
         return None
 

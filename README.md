@@ -778,6 +778,7 @@ Config file: `~/.nanobot/config.json`
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
+| `ollama` | LLM (local, Ollama) | — |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
@@ -840,6 +841,37 @@ Connects directly to any OpenAI-compatible endpoint — LM Studio, llama.cpp, To
 ```
 
 > For local servers that don't require a key, set `apiKey` to any non-empty string (e.g. `"no-key"`).
+
+</details>
+
+<details>
+<summary><b>Ollama (local)</b></summary>
+
+Run a local model with Ollama, then add to config:
+
+**1. Start Ollama** (example):
+```bash
+ollama run llama3.2
+```
+
+**2. Add to config** (partial — merge into `~/.nanobot/config.json`):
+```json
+{
+  "providers": {
+    "ollama": {
+      "apiBase": "http://localhost:11434"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "ollama",
+      "model": "llama3.2"
+    }
+  }
+}
+```
+
+> `provider: "auto"` also works when `providers.ollama.apiBase` is configured, but setting `"provider": "ollama"` is the clearest option.
 
 </details>
 

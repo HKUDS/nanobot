@@ -215,6 +215,7 @@ def onboard():
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
+    from nanobot.providers.base import GenerationSettings
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
@@ -224,46 +225,50 @@ def _make_provider(config: Config):
 
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
-        return OpenAICodexProvider(default_model=model)
-
+        provider = OpenAICodexProvider(default_model=model)
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
-    from nanobot.providers.custom_provider import CustomProvider
-    if provider_name == "custom":
-        return CustomProvider(
+    elif provider_name == "custom":
+        from nanobot.providers.custom_provider import CustomProvider
+        provider = CustomProvider(
             api_key=p.api_key if p else "no-key",
             api_base=config.get_api_base(model) or "http://localhost:8000/v1",
             default_model=model,
         )
-
     # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
-    if provider_name == "azure_openai":
+    elif provider_name == "azure_openai":
         if not p or not p.api_key or not p.api_base:
             console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
             console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
             console.print("Use the model field to specify the deployment name.")
             raise typer.Exit(1)
-        
-        return AzureOpenAIProvider(
+        provider = AzureOpenAIProvider(
             api_key=p.api_key,
             api_base=p.api_base,
             default_model=model,
         )
+    else:
+        from nanobot.providers.litellm_provider import LiteLLMProvider
+        from nanobot.providers.registry import find_by_name
+        spec = find_by_name(provider_name)
+        if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and (spec.is_oauth or spec.is_local)):
+            console.print("[red]Error: No API key configured.[/red]")
+            console.print("Set one in ~/.nanobot/config.json under providers section")
+            raise typer.Exit(1)
+        provider = LiteLLMProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            provider_name=provider_name,
+        )
 
-    from nanobot.providers.litellm_provider import LiteLLMProvider
-    from nanobot.providers.registry import find_by_name
-    spec = find_by_name(provider_name)
-    if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
-        console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers section")
-        raise typer.Exit(1)
-
-    return LiteLLMProvider(
-        api_key=p.api_key if p else None,
-        api_base=config.get_api_base(model),
-        default_model=model,
-        extra_headers=p.extra_headers if p else None,
-        provider_name=provider_name,
+    defaults = config.agents.defaults
+    provider.generation = GenerationSettings(
+        temperature=defaults.temperature,
+        max_tokens=defaults.max_tokens,
+        reasoning_effort=defaults.reasoning_effort,
     )
+    return provider
 
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
@@ -341,10 +346,7 @@ def gateway(
         provider=provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
-        temperature=config.agents.defaults.temperature,
-        max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        reasoning_effort=config.agents.defaults.reasoning_effort,
         context_window_tokens=config.agents.defaults.context_window_tokens,
         brave_api_key=config.tools.web.search.api_key or None,
         web_proxy=config.tools.web.proxy or None,
@@ -527,10 +529,7 @@ def agent(
         provider=provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
-        temperature=config.agents.defaults.temperature,
-        max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        reasoning_effort=config.agents.defaults.reasoning_effort,
         context_window_tokens=config.agents.defaults.context_window_tokens,
         brave_api_key=config.tools.web.search.api_key or None,
         web_proxy=config.tools.web.proxy or None,

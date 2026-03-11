@@ -114,6 +114,35 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     assert config.get_provider_name() == "openai_codex"
 
 
+def test_config_matches_explicit_ollama_prefix_without_api_key():
+    config = Config()
+    config.agents.defaults.model = "ollama/llama3.2"
+
+    assert config.get_provider_name() == "ollama"
+    assert config.get_api_base() == "http://localhost:11434"
+
+
+def test_config_explicit_ollama_provider_uses_default_localhost_api_base():
+    config = Config()
+    config.agents.defaults.provider = "ollama"
+    config.agents.defaults.model = "llama3.2"
+
+    assert config.get_provider_name() == "ollama"
+    assert config.get_api_base() == "http://localhost:11434"
+
+
+def test_config_auto_detects_ollama_from_local_api_base():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "llama3.2"}},
+            "providers": {"ollama": {"apiBase": "http://localhost:11434"}},
+        }
+    )
+
+    assert config.get_provider_name() == "ollama"
+    assert config.get_api_base() == "http://localhost:11434"
+
+
 def test_find_by_model_prefers_explicit_prefix_over_generic_codex_keyword():
     spec = find_by_model("github-copilot/gpt-5.3-codex")
 

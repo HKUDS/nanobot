@@ -28,9 +28,6 @@ class SubagentManager:
         workspace: Path,
         bus: MessageBus,
         model: str | None = None,
-        temperature: float = 0.7,
-        max_tokens: int = 4096,
-        reasoning_effort: str | None = None,
         brave_api_key: str | None = None,
         web_proxy: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
@@ -41,9 +38,6 @@ class SubagentManager:
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.reasoning_effort = reasoning_effort
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
@@ -128,9 +122,6 @@ class SubagentManager:
                     messages=messages,
                     tools=tools.get_definitions(),
                     model=self.model,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    reasoning_effort=self.reasoning_effort,
                 )
 
                 if response.has_tool_calls:
