@@ -13,31 +13,9 @@ class FeishuClient:
     BASE_URL = "https://open.feishu.cn/open-apis"
     
     def __init__(self, app_id: str = None, app_secret: str = None):
-        # 优先读取 nanobot 配置文件
-        if not app_id or not app_secret:
-            config = self._load_nanobot_config()
-            app_id = app_id or config.get("appId") or os.getenv("FEISHU_APP_ID")
-            app_secret = app_secret or config.get("appSecret") or os.getenv("FEISHU_APP_SECRET")
-        
-        self.app_id = app_id
-        self.app_secret = app_secret
+        self.app_id = app_id or os.getenv("FEISHU_APP_ID")
+        self.app_secret = app_secret or os.getenv("FEISHU_APP_SECRET")
         self._tenant_access_token: Optional[str] = None
-    
-    def _load_nanobot_config(self) -> Dict[str, str]:
-        """从 nanobot config.json 读取飞书配置"""
-        config_path = os.path.expanduser("~/.nanobot/config.json")
-        try:
-            with open(config_path, "r") as f:
-                config = json.load(f)
-                feishu = config.get("channels", {}).get("feishu", {})
-                if feishu.get("enabled"):
-                    return {
-                        "appId": feishu.get("appId"),
-                        "appSecret": feishu.get("appSecret")
-                    }
-        except Exception:
-            pass
-        return {}
     
     def _get_tenant_access_token(self) -> str:
         """获取 tenant_access_token"""
