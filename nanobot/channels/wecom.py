@@ -36,6 +36,7 @@ class WecomChannel(BaseChannel):
     """
 
     name = "wecom"
+    display_name = "WeCom"
 
     def __init__(self, config: WecomConfig, bus: MessageBus):
         super().__init__(config, bus)

@@ -114,6 +114,7 @@ class DingTalkChannel(BaseChannel):
     """
 
     name = "dingtalk"
+    display_name = "DingTalk"
     _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
     _AUDIO_EXTS = {".amr", ".mp3", ".wav", ".ogg", ".m4a", ".aac"}
     _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}

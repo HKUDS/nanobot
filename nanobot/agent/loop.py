@@ -203,14 +203,7 @@ class AgentLoop:
                     await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
                 tool_call_dicts = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments, ensure_ascii=False)
-                        }
-                    }
+                    tc.to_openai_tool_call()
                     for tc in response.tool_calls
                 ]
                 messages = self.context.add_assistant_message(

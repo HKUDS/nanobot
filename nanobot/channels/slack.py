@@ -21,6 +21,7 @@ class SlackChannel(BaseChannel):
     """Slack channel using Socket Mode."""
 
     name = "slack"
+    display_name = "Slack"
 
     def __init__(self, config: SlackConfig, bus: MessageBus):
         super().__init__(config, bus)

@@ -1,6 +1,7 @@
 """Base LLM provider interface."""
 
 import asyncio
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -14,6 +15,24 @@ class ToolCallRequest:
     id: str
     name: str
     arguments: dict[str, Any]
+    provider_specific_fields: dict[str, Any] | None = None
+    function_provider_specific_fields: dict[str, Any] | None = None
+
+    def to_openai_tool_call(self) -> dict[str, Any]:
+        """Serialize to an OpenAI-style tool_call payload."""
+        tool_call = {
+            "id": self.id,
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "arguments": json.dumps(self.arguments, ensure_ascii=False),
+            },
+        }
+        if self.provider_specific_fields:
+            tool_call["provider_specific_fields"] = self.provider_specific_fields
+        if self.function_provider_specific_fields:
+            tool_call["function"]["provider_specific_fields"] = self.function_provider_specific_fields
+        return tool_call
 
 
 @dataclass
