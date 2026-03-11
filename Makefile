@@ -16,7 +16,7 @@ test-verbose:
 	$(PYTHON) -m pytest tests/ -v
 
 test-cov:
-	$(PYTHON) -m pytest tests/ --cov=nanobot --cov-report=term-missing
+	$(PYTHON) -m pytest tests/ --cov=nanobot --cov-report=term-missing --cov-fail-under=85
 
 lint:
 	ruff check nanobot/ tests/

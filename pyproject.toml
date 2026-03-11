@@ -140,3 +140,12 @@ disallow_untyped_defs = true
 [[tool.mypy.overrides]]
 module = "nanobot.agent.tools.base"
 disallow_untyped_defs = true
+
+[tool.coverage.run]
+source = ["nanobot"]
+omit = ["nanobot/templates/*"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_empty = true
