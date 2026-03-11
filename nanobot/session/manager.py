@@ -60,6 +60,15 @@ class Session:
             for k in ("tool_calls", "tool_call_id", "name"):
                 if k in m:
                     entry[k] = m[k]
+            # Filter image_url from multimodal content for models that don't support vision
+            if isinstance(entry.get("content"), list):
+                filtered = []
+                for c in entry["content"]:
+                    if c.get("type") == "image_url":
+                        filtered.append({"type": "text", "text": "[image]"})
+                    else:
+                        filtered.append(c)
+                entry["content"] = filtered
             out.append(entry)
         return out
 
