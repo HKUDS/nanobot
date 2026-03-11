@@ -14,6 +14,8 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
+from nanobot.hooks.manager import HookManager
+from nanobot.hooks.base import HookContext
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -27,7 +29,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, OpenVikingConfig
     from nanobot.cron.service import CronService
 
 
@@ -61,6 +63,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        openviking_config: OpenVikingConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -90,6 +93,16 @@ class AgentLoop:
             restrict_to_workspace=restrict_to_workspace,
         )
 
+        self.openviking_config = openviking_config
+        self._current_session_key: str = "default"
+        self._current_sender_id: str = ""
+        self._current_channel: str = ""
+        self._viking_client_initialized = False
+        self.hook_manager = HookManager()
+        if openviking_config and openviking_config.enabled:
+            self._register_openviking_hooks()
+        self._register_self_improvement_hooks()
+
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
@@ -105,6 +118,7 @@ class AgentLoop:
             context_window_tokens=context_window_tokens,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
+            on_consolidated=self._fire_compact_hook,
         )
         self._register_default_tools()
 
@@ -125,6 +139,107 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+        if self.openviking_config and self.openviking_config.enabled:
+            self._register_openviking_tools()
+
+    def _register_openviking_hooks(self) -> None:
+        """Register OpenViking hooks."""
+        try:
+            from nanobot.hooks.openviking import register_openviking_hooks
+            register_openviking_hooks(self.hook_manager)
+        except Exception:
+            logger.exception("Failed to register OpenViking hooks")
+
+    def _register_self_improvement_hooks(self) -> None:
+        """Register self-improvement hooks for error detection."""
+        try:
+            from nanobot.hooks.self_improvement import register_self_improvement_hooks
+            register_self_improvement_hooks(self.hook_manager)
+        except Exception:
+            logger.exception("Failed to register self-improvement hooks")
+
+    async def _ensure_viking_client(self) -> None:
+        """Lazily create VikingClient and inject into ContextBuilder, tools, and hooks."""
+        if self._viking_client_initialized:
+            return
+        self._viking_client_initialized = True
+        if not (self.openviking_config and self.openviking_config.enabled):
+            return
+        try:
+            from nanobot.openviking import HAS_OPENVIKING
+            if not HAS_OPENVIKING:
+                return
+            from nanobot.openviking.client import VikingClient
+            client = await VikingClient.from_config()
+
+            max_commits = getattr(self.openviking_config, "max_concurrent_commits", 1)
+            client.set_max_concurrent_commits(max_commits)
+
+            self.context.set_viking_client(client)
+
+            from nanobot.agent.tools.openviking import _OVTool
+            _OVTool._shared_client = client
+
+            for hooks in self.hook_manager._hooks.values():
+                for hook in hooks:
+                    if hasattr(hook, "set_client"):
+                        hook.set_client(client)
+
+            logger.info("OpenViking client initialised (mode={})", self.openviking_config.mode)
+        except Exception:
+            logger.exception("Failed to initialise OpenViking client — continuing without it")
+
+    def _register_openviking_tools(self) -> None:
+        """Register OpenViking tools when enabled."""
+        try:
+            from nanobot.openviking import HAS_OPENVIKING
+            if not HAS_OPENVIKING:
+                logger.warning("OpenViking enabled in config but package not installed")
+                return
+
+            from nanobot.agent.tools.openviking import (
+                OVReadTool,
+                OVListTool,
+                OVSearchTool,
+                OVGrepTool,
+                OVGlobTool,
+                OVUserMemorySearchTool,
+                OVMemoryCommitTool,
+                OVAddResourceTool,
+            )
+
+            for cls in (OVReadTool, OVListTool, OVSearchTool, OVGrepTool, OVGlobTool,
+                        OVUserMemorySearchTool, OVAddResourceTool):
+                self.tools.register(cls(ov_config=self.openviking_config))
+
+            self.tools.register(OVMemoryCommitTool(
+                ov_config=self.openviking_config,
+                session_key_fn=lambda: self._current_session_key,
+            ))
+            logger.info("Registered {} OpenViking tools", 8)
+        except Exception:
+            logger.exception("Failed to register OpenViking tools")
+
+    async def _fire_compact_hook(
+        self, messages: list[dict], session_key: str,
+    ) -> None:
+        """Fire the message.compact hook after successful memory consolidation."""
+        if not self.hook_manager.has_hooks("message.compact"):
+            return
+
+        class _MsgBag:
+            """Lightweight stand-in for Session so the hook can read .messages."""
+            def __init__(self, msgs: list[dict]) -> None:
+                self.messages = msgs
+
+        ctx = HookContext(
+            event_type="message.compact",
+            session_key=session_key,
+            sender_id=self._current_sender_id,
+            channel=self._current_channel,
+        )
+        await self.hook_manager.fire("message.compact", ctx, session=_MsgBag(messages))
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -224,6 +339,24 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+
+                    if self.hook_manager.has_hooks("tool.post_call"):
+                        ctx = HookContext(
+                            event_type="tool.post_call",
+                            session_key=self._current_session_key,
+                            sender_id=self._current_sender_id,
+                            channel=self._current_channel,
+                        )
+                        hook_results = await self.hook_manager.fire(
+                            "tool.post_call", ctx,
+                            tool_name=tool_call.name,
+                            params=tool_call.arguments,
+                            result=result,
+                        )
+                        for hr in hook_results:
+                            if isinstance(hr, dict) and "result" in hr:
+                                result = hr["result"]
+
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -245,8 +378,8 @@ class AgentLoop:
         if final_content is None and iteration >= self.max_iterations:
             logger.warning("Max iterations ({}) reached", self.max_iterations)
             final_content = (
-                f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
-                "without completing the task. You can try breaking the task into smaller steps."
+                f"当前任务较为复杂，未能完成全部操作。"
+                "建议将任务拆分为更小的步骤后重试。"
             )
 
         return final_content, tools_used, messages
@@ -255,6 +388,7 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
+        await self._ensure_viking_client()
         logger.info("Agent loop started")
 
         while self._running:
@@ -339,7 +473,7 @@ class AgentLoop:
             await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
-            messages = self.context.build_messages(
+            messages = await self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
@@ -354,6 +488,9 @@ class AgentLoop:
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         key = session_key or msg.session_key
+        self._current_session_key = key
+        self._current_sender_id = msg.sender_id
+        self._current_channel = msg.channel
         session = self.sessions.get_or_create(key)
 
         # Slash commands
@@ -391,11 +528,13 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=0)
-        initial_messages = self.context.build_messages(
+        initial_messages = await self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            sender_id=msg.sender_id,
+            sender_name=msg.metadata.get("sender_name"),
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:

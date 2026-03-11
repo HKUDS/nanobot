@@ -36,7 +36,12 @@ class CronTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Schedule reminders and recurring tasks. Actions: add, list, remove."
+        return (
+            "Schedule reminders and recurring tasks. "
+            "Actions: add, list, remove, update. "
+            "Supports isolated sessions (default, no main-session pollution) "
+            "and main sessions (system event injected into heartbeat)."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -45,10 +50,10 @@ class CronTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["add", "list", "remove"],
+                    "enum": ["add", "list", "remove", "update"],
                     "description": "Action to perform",
                 },
-                "message": {"type": "string", "description": "Reminder message (for add)"},
+                "message": {"type": "string", "description": "Reminder/task message (for add/update)"},
                 "every_seconds": {
                     "type": "integer",
                     "description": "Interval in seconds (for recurring tasks)",
@@ -65,7 +70,22 @@ class CronTool(Tool):
                     "type": "string",
                     "description": "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00')",
                 },
-                "job_id": {"type": "string", "description": "Job ID (for remove)"},
+                "job_id": {"type": "string", "description": "Job ID (for remove/update)"},
+                "session": {
+                    "type": "string",
+                    "enum": ["isolated", "main"],
+                    "description": "Execution mode: isolated (dedicated cron session) or main (inject into heartbeat). Default: isolated",
+                },
+                "wake_mode": {
+                    "type": "string",
+                    "enum": ["now", "next-heartbeat"],
+                    "description": "When to wake (for main session). Default: now",
+                },
+                "delivery_mode": {
+                    "type": "string",
+                    "enum": ["announce", "webhook", "none"],
+                    "description": "How to deliver output. Default: announce for isolated, none for main",
+                },
             },
             "required": ["action"],
         }
@@ -79,16 +99,21 @@ class CronTool(Tool):
         tz: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
+        session: str = "isolated",
+        wake_mode: str = "now",
+        delivery_mode: str | None = None,
         **kwargs: Any,
     ) -> str:
         if action == "add":
             if self._in_cron_context.get():
                 return "Error: cannot schedule new jobs from within a cron job execution"
-            return self._add_job(message, every_seconds, cron_expr, tz, at)
+            return self._add_job(message, every_seconds, cron_expr, tz, at, session, wake_mode, delivery_mode)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
             return self._remove_job(job_id)
+        elif action == "update":
+            return self._update_job(job_id, message, delivery_mode)
         return f"Unknown action: {action}"
 
     def _add_job(
@@ -98,6 +123,9 @@ class CronTool(Tool):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
+        session_target: str,
+        wake_mode: str,
+        delivery_mode: str | None,
     ) -> str:
         if not message:
             return "Error: message is required for add"
@@ -113,7 +141,9 @@ class CronTool(Tool):
             except (KeyError, Exception):
                 return f"Error: unknown timezone '{tz}'"
 
-        # Build schedule
+        if session_target not in ("isolated", "main"):
+            return "Error: session must be 'isolated' or 'main'"
+
         delete_after = False
         if every_seconds:
             schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
@@ -140,14 +170,21 @@ class CronTool(Tool):
             channel=self._channel,
             to=self._chat_id,
             delete_after_run=delete_after,
+            session_target=session_target,
+            wake_mode=wake_mode,
+            delivery_mode=delivery_mode,
         )
-        return f"Created job '{job.name}' (id: {job.id})"
+        return f"Created job '{job.name}' (id: {job.id}, session: {session_target})"
 
     def _list_jobs(self) -> str:
-        jobs = self._cron.list_jobs()
+        jobs = self._cron.list_jobs(include_disabled=True)
         if not jobs:
             return "No scheduled jobs."
-        lines = [f"- {j.name} (id: {j.id}, {j.schedule.kind})" for j in jobs]
+        lines = []
+        for j in jobs:
+            status = "enabled" if j.enabled else "disabled"
+            err_info = f" [errors: {j.state.consecutive_errors}]" if j.state.consecutive_errors else ""
+            lines.append(f"- {j.name} (id: {j.id}, {j.schedule.kind}, {j.session_target}, {status}{err_info})")
         return "Scheduled jobs:\n" + "\n".join(lines)
 
     def _remove_job(self, job_id: str | None) -> str:
@@ -155,4 +192,19 @@ class CronTool(Tool):
             return "Error: job_id is required for remove"
         if self._cron.remove_job(job_id):
             return f"Removed job {job_id}"
+        return f"Job {job_id} not found"
+
+    def _update_job(self, job_id: str | None, message: str = "", delivery_mode: str | None = None) -> str:
+        if not job_id:
+            return "Error: job_id is required for update"
+        patch: dict[str, Any] = {}
+        if message:
+            patch["message"] = message
+        if delivery_mode:
+            patch["delivery_mode"] = delivery_mode
+        if not patch:
+            return "Error: nothing to update"
+        result = self._cron.update_job(job_id, **patch)
+        if result:
+            return f"Updated job '{result.name}' ({result.id})"
         return f"Job {job_id} not found"

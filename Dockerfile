@@ -17,7 +17,7 @@ WORKDIR /app
 # Install Python dependencies first (cached layer)
 COPY pyproject.toml README.md LICENSE ./
 RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
-    uv pip install --system --no-cache . && \
+    uv pip install --system --no-cache hatchling . && \
     rm -rf nanobot bridge
 
 # Copy the full source and install
@@ -31,7 +31,7 @@ RUN npm install && npm run build
 WORKDIR /app
 
 # Create config directory
-RUN mkdir -p /root/.nanobot
+RUN mkdir -p /root/.hiperone
 
 # Gateway default port
 EXPOSE 18790

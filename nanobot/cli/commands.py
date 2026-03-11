@@ -204,7 +204,7 @@ def onboard():
 
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
-    console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
+    console.print("  1. Add your API key to [cyan]~/.hiperone/config.json[/cyan]")
     console.print("     Get one at: https://openrouter.ai/keys")
     console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
@@ -238,7 +238,7 @@ def _make_provider(config: Config):
     elif provider_name == "azure_openai":
         if not p or not p.api_key or not p.api_base:
             console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
-            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
+            console.print("Set them in ~/.hiperone/config.json under providers.azure_openai section")
             console.print("Use the model field to specify the deployment name.")
             raise typer.Exit(1)
         provider = AzureOpenAIProvider(
@@ -337,8 +337,10 @@ def gateway(
     session_manager = SessionManager(config.workspace_path)
 
     # Create cron service first (callback set after agent creation)
+    # Use workspace path for per-instance cron store
+    cron_cfg = config.gateway.cron
     cron_store_path = get_cron_dir() / "jobs.json"
-    cron = CronService(cron_store_path)
+    cron = CronService(cron_store_path, max_concurrent_runs=cron_cfg.max_concurrent_runs)
 
     # Create agent with cron service
     agent = AgentLoop(
@@ -356,47 +358,91 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        openviking_config=config.openviking,
     )
 
-    # Set cron callback (needs agent)
+    # Set cron callback (needs agent + heartbeat)
     async def on_cron_job(job: CronJob) -> str | None:
-        """Execute a cron job through the agent."""
+        """Execute a cron job through the agent (isolated or main session)."""
         from nanobot.agent.tools.cron import CronTool
         from nanobot.agent.tools.message import MessageTool
-        reminder_note = (
-            "[Scheduled Task] Timer finished.\n\n"
-            f"Task '{job.name}' has been triggered.\n"
-            f"Scheduled instruction: {job.payload.message}"
-        )
 
         # Prevent the agent from scheduling new cron jobs during execution
         cron_tool = agent.tools.get("cron")
         cron_token = None
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
+
         try:
-            response = await agent.process_direct(
-                reminder_note,
-                session_key=f"cron:{job.id}",
-                channel=job.payload.channel or "cli",
-                chat_id=job.payload.to or "direct",
-            )
+            if job.session_target == "main":
+                return await _run_main_session_job(job)
+            return await _run_isolated_job(job)
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
                 cron_tool.reset_cron_context(cron_token)
 
-        message_tool = agent.tools.get("message")
-        if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-            return response
+    async def _run_isolated_job(job: CronJob) -> str | None:
+        """Run a job in a dedicated cron:<id> session."""
+        from nanobot.agent.tools.message import MessageTool
 
-        if job.payload.deliver and job.payload.to and response:
+        reminder_note = (
+            f"[cron: {job.name}]\n\n"
+            f"Scheduled instruction: {job.payload.message}"
+        )
+        d = job.delivery
+        ch = d.channel or job.payload.channel or "cli"
+        target = d.to or job.payload.to or "direct"
+
+        response = await agent.process_direct(
+            reminder_note,
+            session_key=f"cron:{job.id}",
+            channel=ch,
+            chat_id=target,
+        )
+
+        message_tool = agent.tools.get("message")
+        already_sent = isinstance(message_tool, MessageTool) and message_tool._sent_in_turn
+
+        if not already_sent and d.mode == "announce" and target and response:
+            from nanobot.bus.events import OutboundMessage
+            await bus.publish_outbound(OutboundMessage(
+                channel=ch, chat_id=target, content=response,
+            ))
+        elif not already_sent and d.mode == "webhook" and d.to and response:
+            await _webhook_deliver(d.to, response, job)
+        elif not already_sent and job.payload.deliver and job.payload.to and response:
             from nanobot.bus.events import OutboundMessage
             await bus.publish_outbound(OutboundMessage(
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to,
-                content=response
+                content=response,
             ))
+
         return response
+
+    async def _run_main_session_job(job: CronJob) -> str | None:
+        """Inject a system event into the heartbeat cycle."""
+        event_text = (
+            f"[Scheduled Event: {job.name}]\n"
+            f"{job.payload.message}"
+        )
+        if job.wake_mode == "now" and heartbeat:
+            return await on_heartbeat_execute(event_text)
+        return event_text
+
+    async def _webhook_deliver(url: str, content: str, job: CronJob) -> None:
+        """POST job output to a webhook URL."""
+        import aiohttp
+        try:
+            payload = {"jobId": job.id, "name": job.name, "content": content}
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)):
+                    pass
+        except Exception as e:
+            if not job.delivery.best_effort:
+                raise
+            logger.warning("Cron: webhook delivery failed for '{}': {}", job.name, e)
+
     cron.on_job = on_cron_job
 
     # Create channel manager
@@ -538,6 +584,7 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        openviking_config=config.openviking,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -669,6 +716,177 @@ def agent(
                 await agent_loop.close_mcp()
 
         asyncio.run(run_interactive())
+
+
+@app.command()
+def web(
+    port: int = typer.Option(18080, "--port", "-p", help="Web server port"),
+    host: str = typer.Option("0.0.0.0", "--host", help="Web server host"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """Start the web interface with full gateway stack.
+
+    Runs the agent loop, all enabled channels (including web), cron, and
+    heartbeat services.  The web channel is force-enabled so the browser
+    can communicate via WebSocket.
+    """
+    from nanobot.config.loader import load_config
+    from nanobot.config.paths import get_data_dir
+    from nanobot.bus.queue import MessageBus
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.channels.manager import ChannelManager
+    from nanobot.session.manager import SessionManager
+    from nanobot.cron.service import CronService
+    from nanobot.cron.types import CronJob
+    from nanobot.heartbeat.service import HeartbeatService
+
+    if verbose:
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+
+    console.print(f"{__logo__} Starting nanobot web on {host}:{port}...")
+
+    config = load_config()
+
+    # Force-enable web channel with CLI host/port
+    config.channels.web.enabled = True
+    config.channels.web.host = host
+    config.channels.web.port = port
+
+    bus = MessageBus()
+    provider = _make_provider(config)
+    session_manager = SessionManager(config.workspace_path)
+
+    cron_cfg = config.gateway.cron
+    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    cron = CronService(cron_store_path, max_concurrent_runs=cron_cfg.max_concurrent_runs)
+
+    agent = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=config.workspace_path,
+        model=config.agents.defaults.model,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        brave_api_key=config.tools.web.search.api_key or None,
+        exec_config=config.tools.exec,
+        cron_service=cron,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        session_manager=session_manager,
+        openviking_config=config.openviking,
+    )
+
+    # Cron callback (with cron context protection)
+    async def on_cron_job(job: CronJob) -> str | None:
+        from nanobot.agent.tools.cron import CronTool
+        from nanobot.agent.tools.message import MessageTool
+
+        cron_tool = agent.tools.get("cron")
+        cron_token = None
+        if isinstance(cron_tool, CronTool):
+            cron_token = cron_tool.set_cron_context(True)
+
+        try:
+            if job.session_target == "main":
+                event_text = f"[Scheduled Event: {job.name}]\n{job.payload.message}"
+                if job.wake_mode == "now":
+                    return await on_heartbeat_execute(event_text)
+                return event_text
+
+            # Isolated execution
+            reminder_note = f"[cron: {job.name}]\n\nScheduled instruction: {job.payload.message}"
+            d = job.delivery
+            ch = d.channel or job.payload.channel or "cli"
+            target = d.to or job.payload.to or "direct"
+
+            response = await agent.process_direct(
+                reminder_note,
+                session_key=f"cron:{job.id}",
+                channel=ch,
+                chat_id=target,
+            )
+
+            message_tool = agent.tools.get("message")
+            already_sent = isinstance(message_tool, MessageTool) and message_tool._sent_in_turn
+
+            if not already_sent and d.mode == "announce" and target and response:
+                from nanobot.bus.events import OutboundMessage
+                await bus.publish_outbound(OutboundMessage(channel=ch, chat_id=target, content=response))
+            elif not already_sent and job.payload.deliver and job.payload.to and response:
+                from nanobot.bus.events import OutboundMessage
+                await bus.publish_outbound(OutboundMessage(
+                    channel=job.payload.channel or "cli",
+                    chat_id=job.payload.to,
+                    content=response or "",
+                ))
+            return response
+        finally:
+            if isinstance(cron_tool, CronTool) and cron_token is not None:
+                cron_tool.reset_cron_context(cron_token)
+    cron.on_job = on_cron_job
+
+    # Create heartbeat service
+    async def on_heartbeat_execute(tasks: str) -> str:
+        """Phase 2: execute heartbeat tasks through the full agent loop."""
+        channel, chat_id = _pick_heartbeat_target()
+
+        async def _silent(*_args, **_kwargs):
+            pass
+
+        return await agent.process_direct(
+            tasks,
+            session_key="heartbeat",
+            channel=channel,
+            chat_id=chat_id,
+            on_progress=_silent,
+        )
+
+    async def on_heartbeat_notify(response: str) -> None:
+        """Deliver a heartbeat response to the user's channel."""
+        from nanobot.bus.events import OutboundMessage
+        channel, chat_id = _pick_heartbeat_target()
+        if channel == "cli":
+            return  # No external channel available to deliver to
+        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+
+    hb_cfg = config.gateway.heartbeat
+    heartbeat = HeartbeatService(
+        workspace=config.workspace_path,
+        provider=provider,
+        model=agent.model,
+        on_execute=on_heartbeat_execute,
+        on_notify=on_heartbeat_notify,
+        interval_s=hb_cfg.interval_s,
+        enabled=hb_cfg.enabled,
+    )
+
+    # Channel manager (web channel will be created here since we set enabled=True)
+    channels = ChannelManager(config, bus, session_manager=session_manager, cron_service=cron)
+
+    if channels.enabled_channels:
+        console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
+
+    cron_status = cron.status()
+    if cron_status["jobs"] > 0:
+        console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
+
+    console.print(f"[green]✓[/green] Heartbeat: every 30m")
+
+    async def run():
+        try:
+            await cron.start()
+            await heartbeat.start()
+            await asyncio.gather(
+                agent.run(),
+                channels.start_all(),
+            )
+        except KeyboardInterrupt:
+            console.print("\nShutting down...")
+            heartbeat.stop()
+            cron.stop()
+            agent.stop()
+            await channels.stop_all()
+
+    asyncio.run(run())
 
 
 # ============================================================================
@@ -858,6 +1076,291 @@ def channels_login():
         console.print(f"[red]Bridge failed: {e}[/red]")
     except FileNotFoundError:
         console.print("[red]npm not found. Please install Node.js.[/red]")
+
+
+# ============================================================================
+# Cron Commands
+# ============================================================================
+
+
+cron_app = typer.Typer(help="Manage scheduled cron jobs")
+app.add_typer(cron_app, name="cron")
+
+
+@cron_app.command("list")
+def cron_list(
+    all: bool = typer.Option(False, "--all", "-a", help="Include disabled jobs"),
+):
+    """List scheduled cron jobs."""
+    from nanobot.config.paths import get_data_dir
+    from nanobot.cron.service import CronService
+
+    store_path = get_data_dir() / "cron" / "jobs.json"
+    svc = CronService(store_path)
+    jobs = svc.list_jobs(include_disabled=all)
+
+    if not jobs:
+        console.print("[dim]No scheduled jobs.[/dim]")
+        return
+
+    table = Table(title="Cron Jobs")
+    table.add_column("ID", style="cyan")
+    table.add_column("Name", style="white")
+    table.add_column("Schedule", style="yellow")
+    table.add_column("Session", style="blue")
+    table.add_column("Status", style="green")
+    table.add_column("Errors", style="red")
+    table.add_column("Next Run")
+
+    for j in jobs:
+        if j.schedule.kind == "every" and j.schedule.every_ms:
+            secs = j.schedule.every_ms // 1000
+            sched_str = f"every {secs // 60}m" if secs >= 60 else f"every {secs}s"
+        elif j.schedule.kind == "cron":
+            sched_str = j.schedule.expr or ""
+        else:
+            sched_str = "one-time"
+
+        status_str = "[green]enabled[/green]" if j.enabled else "[dim]disabled[/dim]"
+        error_str = str(j.state.consecutive_errors) if j.state.consecutive_errors else ""
+
+        from datetime import datetime, timezone
+        if j.state.next_run_at_ms:
+            next_dt = datetime.fromtimestamp(j.state.next_run_at_ms / 1000, tz=timezone.utc)
+            next_str = next_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+        else:
+            next_str = "[dim]—[/dim]"
+
+        table.add_row(j.id, j.name, sched_str, j.session_target, status_str, error_str, next_str)
+
+    console.print(table)
+
+
+@cron_app.command("add")
+def cron_add(
+    name: str = typer.Option(..., "--name", "-n", help="Job name"),
+    message: str = typer.Option(..., "--message", "-m", help="Task message / prompt"),
+    cron_expr: str | None = typer.Option(None, "--cron", help="Cron expression (e.g. '0 9 * * *')"),
+    every: str | None = typer.Option(None, "--every", help="Interval (e.g. '30m', '2h', '60s')"),
+    at: str | None = typer.Option(None, "--at", help="One-shot ISO datetime (e.g. '2026-03-05T10:00:00')"),
+    tz: str | None = typer.Option(None, "--tz", help="IANA timezone for cron expressions"),
+    session: str = typer.Option("isolated", "--session", "-s", help="isolated or main"),
+    wake_mode: str = typer.Option("now", "--wake", help="now or next-heartbeat"),
+    announce: bool = typer.Option(False, "--announce", help="Enable announce delivery"),
+    channel: str | None = typer.Option(None, "--channel", help="Delivery channel (e.g. whatsapp, telegram)"),
+    to: str | None = typer.Option(None, "--to", help="Delivery target (e.g. phone number, chat ID)"),
+    delete_after_run: bool = typer.Option(False, "--delete-after-run", help="Delete job after successful run"),
+    exact: bool = typer.Option(False, "--exact", help="Disable stagger (force exact timing)"),
+):
+    """Add a new cron job."""
+    from nanobot.config.paths import get_data_dir
+    from nanobot.cron.service import CronService
+    from nanobot.cron.types import CronSchedule
+
+    store_path = get_data_dir() / "cron" / "jobs.json"
+    svc = CronService(store_path)
+
+    stagger_ms = 0 if exact else None
+
+    if cron_expr:
+        schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz, stagger_ms=stagger_ms)
+    elif every:
+        seconds = _parse_duration_to_seconds(every)
+        if seconds <= 0:
+            console.print("[red]Invalid duration. Use e.g. 30s, 5m, 2h[/red]")
+            raise typer.Exit(1)
+        schedule = CronSchedule(kind="every", every_ms=seconds * 1000)
+    elif at:
+        from datetime import datetime as dt
+        try:
+            parsed = dt.fromisoformat(at)
+        except ValueError:
+            console.print(f"[red]Invalid ISO datetime: {at}[/red]")
+            raise typer.Exit(1)
+        schedule = CronSchedule(kind="at", at_ms=int(parsed.timestamp() * 1000))
+        if not delete_after_run:
+            delete_after_run = True
+    else:
+        console.print("[red]One of --cron, --every, or --at is required[/red]")
+        raise typer.Exit(1)
+
+    delivery_mode = "announce" if announce else None
+
+    try:
+        job = svc.add_job(
+            name=name,
+            schedule=schedule,
+            message=message,
+            deliver=announce,
+            channel=channel,
+            to=to,
+            delete_after_run=delete_after_run,
+            session_target=session,
+            wake_mode=wake_mode,
+            delivery_mode=delivery_mode,
+        )
+        console.print(f"[green]✓[/green] Created job '{job.name}' (id: {job.id}, session: {session})")
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@cron_app.command("remove")
+def cron_remove(
+    job_id: str = typer.Argument(..., help="Job ID to remove"),
+):
+    """Remove a cron job."""
+    from nanobot.config.paths import get_data_dir
+    from nanobot.cron.service import CronService
+
+    store_path = get_data_dir() / "cron" / "jobs.json"
+    svc = CronService(store_path)
+
+    if svc.remove_job(job_id):
+        console.print(f"[green]✓[/green] Removed job {job_id}")
+    else:
+        console.print(f"[red]Job {job_id} not found[/red]")
+        raise typer.Exit(1)
+
+
+@cron_app.command("run")
+def cron_run(
+    job_id: str = typer.Argument(..., help="Job ID to run"),
+    force: bool = typer.Option(True, "--force/--due", help="Force run even if disabled"),
+):
+    """Manually trigger a cron job."""
+    import asyncio
+
+    from nanobot.config.paths import get_data_dir
+    from nanobot.cron.service import CronService
+
+    store_path = get_data_dir() / "cron" / "jobs.json"
+    svc = CronService(store_path)
+
+    async def _run():
+        return await svc.run_job(job_id, force=force)
+
+    result = asyncio.run(_run())
+    if result:
+        console.print(f"[green]✓[/green] Job {job_id} executed")
+    else:
+        console.print(f"[red]Job {job_id} not found or disabled[/red]")
+        raise typer.Exit(1)
+
+
+@cron_app.command("runs")
+def cron_runs(
+    job_id: str = typer.Option(..., "--id", help="Job ID"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Number of recent runs to show"),
+):
+    """Show run history for a cron job."""
+    from nanobot.config.paths import get_data_dir
+    from nanobot.cron.service import CronService
+
+    store_path = get_data_dir() / "cron" / "jobs.json"
+    svc = CronService(store_path)
+    records = svc.get_run_history(job_id, limit=limit)
+
+    if not records:
+        console.print(f"[dim]No run history for job {job_id}.[/dim]")
+        return
+
+    table = Table(title=f"Run History: {job_id}")
+    table.add_column("Timestamp", style="cyan")
+    table.add_column("Status", style="green")
+    table.add_column("Duration", style="yellow")
+    table.add_column("Error", style="red")
+
+    from datetime import datetime, timezone
+    for r in reversed(records):
+        ts = datetime.fromtimestamp(r["timestampMs"] / 1000, tz=timezone.utc)
+        ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
+        status = r["status"]
+        status_styled = f"[green]{status}[/green]" if status == "ok" else f"[red]{status}[/red]"
+        dur_str = f"{r['durationMs']}ms"
+        err_str = (r.get("error") or "")[:60]
+        table.add_row(ts_str, status_styled, dur_str, err_str)
+
+    console.print(table)
+
+
+@cron_app.command("edit")
+def cron_edit(
+    job_id: str = typer.Argument(..., help="Job ID to edit"),
+    message: str | None = typer.Option(None, "--message", "-m", help="New task message"),
+    name: str | None = typer.Option(None, "--name", "-n", help="New job name"),
+    session: str | None = typer.Option(None, "--session", help="isolated or main"),
+    wake_mode: str | None = typer.Option(None, "--wake", help="now or next-heartbeat"),
+    delivery_mode: str | None = typer.Option(None, "--delivery", help="announce, webhook, or none"),
+    exact: bool = typer.Option(False, "--exact", help="Force exact timing (stagger=0)"),
+    enable: bool | None = typer.Option(None, "--enable/--disable", help="Enable or disable the job"),
+):
+    """Edit an existing cron job."""
+    from nanobot.config.paths import get_data_dir
+    from nanobot.cron.service import CronService
+
+    store_path = get_data_dir() / "cron" / "jobs.json"
+    svc = CronService(store_path)
+
+    patch: dict = {}
+    if message is not None:
+        patch["message"] = message
+    if name is not None:
+        patch["name"] = name
+    if session is not None:
+        patch["session_target"] = session
+    if wake_mode is not None:
+        patch["wake_mode"] = wake_mode
+    if delivery_mode is not None:
+        patch["delivery_mode"] = delivery_mode
+    if enable is not None:
+        patch["enabled"] = enable
+
+    if not patch and not exact:
+        console.print("[yellow]Nothing to update.[/yellow]")
+        return
+
+    result = svc.update_job(job_id, **patch)
+    if result:
+        console.print(f"[green]✓[/green] Updated job '{result.name}' ({result.id})")
+    else:
+        console.print(f"[red]Job {job_id} not found[/red]")
+        raise typer.Exit(1)
+
+
+@cron_app.command("status")
+def cron_status():
+    """Show cron service status."""
+    from nanobot.config.paths import get_data_dir
+    from nanobot.cron.service import CronService
+
+    store_path = get_data_dir() / "cron" / "jobs.json"
+    svc = CronService(store_path)
+    st = svc.status()
+
+    console.print(f"Cron enabled: {'[green]yes[/green]' if st['enabled'] else '[dim]no (gateway not running)[/dim]'}")
+    console.print(f"Jobs: {st['jobs']}")
+    if st["next_wake_at_ms"]:
+        from datetime import datetime, timezone
+        next_dt = datetime.fromtimestamp(st["next_wake_at_ms"] / 1000, tz=timezone.utc)
+        console.print(f"Next wake: {next_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+
+
+def _parse_duration_to_seconds(s: str) -> int:
+    """Parse a human duration string like '30s', '5m', '2h' to seconds."""
+    s = s.strip().lower()
+    if s.endswith("s"):
+        return int(s[:-1])
+    elif s.endswith("m"):
+        return int(s[:-1]) * 60
+    elif s.endswith("h"):
+        return int(s[:-1]) * 3600
+    elif s.endswith("d"):
+        return int(s[:-1]) * 86400
+    try:
+        return int(s)
+    except ValueError:
+        return 0
 
 
 # ============================================================================

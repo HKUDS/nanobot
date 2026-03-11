@@ -27,21 +27,21 @@ npx --yes clawhub@latest search "web scraping" --limit 5
 ## Install
 
 ```bash
-npx --yes clawhub@latest install <slug> --workdir ~/.nanobot/workspace
+npx --yes clawhub@latest install <slug> --workdir ~/.hiperone/workspace
 ```
 
-Replace `<slug>` with the skill name from search results. This places the skill into `~/.nanobot/workspace/skills/`, where nanobot loads workspace skills from. Always include `--workdir`.
+Replace `<slug>` with the skill name from search results. This places the skill into `~/.hiperone/workspace/skills/`, where nanobot loads workspace skills from. Always include `--workdir`.
 
 ## Update
 
 ```bash
-npx --yes clawhub@latest update --all --workdir ~/.nanobot/workspace
+npx --yes clawhub@latest update --all --workdir ~/.hiperone/workspace
 ```
 
 ## List installed
 
 ```bash
-npx --yes clawhub@latest list --workdir ~/.nanobot/workspace
+npx --yes clawhub@latest list --workdir ~/.hiperone/workspace
 ```
 
 ## Notes
@@ -49,5 +49,5 @@ npx --yes clawhub@latest list --workdir ~/.nanobot/workspace
 - Requires Node.js (`npx` comes with it).
 - No API key needed for search and install.
 - Login (`npx --yes clawhub@latest login`) is only required for publishing.
-- `--workdir ~/.nanobot/workspace` is critical — without it, skills install to the current directory instead of the nanobot workspace.
+- `--workdir ~/.hiperone/workspace` is critical — without it, skills install to the current directory instead of the nanobot workspace.
 - After install, remind the user to start a new session to load the skill.

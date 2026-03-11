@@ -516,7 +516,7 @@ class TestNewCommandArchival:
         loop.sessions.save(session)
         before_count = len(session.messages)
 
-        async def _failing_consolidate(_messages) -> bool:
+        async def _failing_consolidate(_messages, **kwargs) -> bool:
             return False
 
         loop.memory_consolidator.consolidate_messages = _failing_consolidate  # type: ignore[method-assign]
@@ -542,7 +542,7 @@ class TestNewCommandArchival:
 
         archived_count = -1
 
-        async def _fake_consolidate(messages) -> bool:
+        async def _fake_consolidate(messages, **kwargs) -> bool:
             nonlocal archived_count
             archived_count = len(messages)
             return True
@@ -567,7 +567,7 @@ class TestNewCommandArchival:
             session.add_message("assistant", f"resp{i}")
         loop.sessions.save(session)
 
-        async def _ok_consolidate(_messages) -> bool:
+        async def _ok_consolidate(_messages, **kwargs) -> bool:
             return True
 
         loop.memory_consolidator.consolidate_messages = _ok_consolidate  # type: ignore[method-assign]
@@ -578,3 +578,67 @@ class TestNewCommandArchival:
         assert response is not None
         assert "new session started" in response.content.lower()
         assert loop.sessions.get_or_create("cli:test").messages == []
+
+
+class TestOrphanedToolMessageProtection:
+    """Test that orphaned tool messages (no preceding assistant with tool_calls) are handled."""
+
+    def test_get_history_drops_orphaned_leading_tool_messages(self):
+        """get_history drops leading tool messages that have no preceding tool_calls."""
+        session = Session(key="test:orphan")
+        session.messages = [
+            {"role": "tool", "tool_call_id": "tc1", "name": "read_file", "content": "result1"},
+            {"role": "assistant", "content": "some text"},
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "response"},
+        ]
+        history = session.get_history()
+        assert history[0]["role"] == "user"
+        assert history[0]["content"] == "hello"
+        assert len(history) == 2
+
+    def test_get_history_returns_empty_when_no_user_message(self):
+        """get_history returns empty list when no user message exists in window."""
+        session = Session(key="test:no_user")
+        session.messages = [
+            {"role": "tool", "tool_call_id": "tc1", "name": "exec", "content": "ok"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "tc2", "type": "function", "function": {"name": "exec", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "tc2", "name": "exec", "content": "done"},
+            {"role": "assistant", "content": "result"},
+        ]
+        history = session.get_history()
+        assert history == []
+
+    def test_get_history_only_tool_and_assistant_messages(self):
+        """get_history returns empty when session is all tool/assistant pairs."""
+        session = Session(key="test:tools_only")
+        for i in range(10):
+            session.messages.append(
+                {"role": "assistant", "content": "", "tool_calls": [{"id": f"tc{i}", "type": "function", "function": {"name": "exec", "arguments": "{}"}}]}
+            )
+            session.messages.append(
+                {"role": "tool", "tool_call_id": f"tc{i}", "name": "exec", "content": f"result{i}"}
+            )
+        history = session.get_history()
+        assert history == []
+
+    def test_trim_aligns_to_user_boundary(self):
+        """get_history drops leading non-user messages so history starts at a user turn."""
+        session = Session(key="test:trim_align")
+        for i in range(5):
+            session.add_message("user", f"msg{i}")
+            session.add_message("assistant", f"resp{i}")
+        for i in range(10):
+            session.messages.append(
+                {"role": "assistant", "content": "", "tool_calls": [{"id": f"tc{i}", "type": "function", "function": {"name": "exec", "arguments": "{}"}}]}
+            )
+            session.messages.append(
+                {"role": "tool", "tool_call_id": f"tc{i}", "name": "exec", "content": f"result{i}"}
+            )
+
+        # Mark early messages as consolidated so the window starts mid-stream
+        session.last_consolidated = 8
+
+        history = session.get_history()
+        assert len(history) > 0
+        assert history[0]["role"] == "user"

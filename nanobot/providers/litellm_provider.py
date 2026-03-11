@@ -1,6 +1,7 @@
 """LiteLLM provider implementation for multi-provider support."""
 
 import hashlib
+import json
 import os
 import secrets
 import string
@@ -191,6 +192,8 @@ class LiteLLMProvider(LLMProvider):
         for clean in sanitized:
             # Keep assistant tool_calls[].id and tool tool_call_id in sync after
             # shortening, otherwise strict providers reject the broken linkage.
+            # Also ensure function.arguments is always a valid JSON object string —
+            # some providers (Dashscope) reject arrays or non-string values.
             if isinstance(clean.get("tool_calls"), list):
                 normalized_tool_calls = []
                 for tc in clean["tool_calls"]:
@@ -199,6 +202,26 @@ class LiteLLMProvider(LLMProvider):
                         continue
                     tc_clean = dict(tc)
                     tc_clean["id"] = map_id(tc_clean.get("id"))
+
+                    fn = tc_clean.get("function")
+                    if isinstance(fn, dict):
+                        fn = dict(fn)
+                        args = fn.get("arguments")
+                        if isinstance(args, str):
+                            try:
+                                parsed = json_repair.loads(args)
+                            except Exception:
+                                parsed = args
+                            if isinstance(parsed, list):
+                                parsed = parsed[0] if len(parsed) == 1 and isinstance(parsed[0], dict) else {"raw": parsed}
+                            if isinstance(parsed, dict):
+                                fn["arguments"] = json.dumps(parsed, ensure_ascii=False)
+                        elif isinstance(args, dict):
+                            fn["arguments"] = json.dumps(args, ensure_ascii=False)
+                        elif args is not None:
+                            fn["arguments"] = json.dumps({"raw": args}, ensure_ascii=False)
+                        tc_clean["function"] = fn
+
                     normalized_tool_calls.append(tc_clean)
                 clean["tool_calls"] = normalized_tool_calls
 
