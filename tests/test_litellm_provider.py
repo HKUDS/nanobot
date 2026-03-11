@@ -4,8 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from types import SimpleNamespace
-
 from nanobot.providers.litellm_provider import LiteLLMProvider
 
 

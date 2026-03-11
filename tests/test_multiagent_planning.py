@@ -100,6 +100,7 @@ def _loop(tmp_path: Path, provider: LLMProvider, **kw: Any) -> AgentLoop:
     # Wire up coordinator with default roles so delegation is available.
     registry = build_default_registry("general")
     loop._coordinator = Coordinator(provider=provider, registry=registry, default_role="general")
+    loop._dispatcher.coordinator = loop._coordinator
     loop._wire_delegate_tools()
     return loop
 

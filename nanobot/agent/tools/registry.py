@@ -15,11 +15,11 @@
 """
 
 import asyncio
+import time
 from typing import Any
 
-from loguru import logger
-
 from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tracing import bind_trace
 from nanobot.errors import ToolExecutionError, ToolNotFoundError, ToolValidationError
 
 
@@ -76,11 +76,16 @@ class ToolRegistry:
 
     async def _execute_inner(self, name: str, tool: Tool, params: dict[str, Any]) -> ToolResult:
         """Run validation and execute, wrapping errors."""
+        t0 = time.monotonic()
 
         try:
             errors = tool.validate_params(params)
             if errors:
                 validation_err = ToolValidationError(name, errors)
+                bind_trace().debug(
+                    "Tool {} validation_error duration_ms={:.0f}",
+                    name, (time.monotonic() - t0) * 1000,
+                )
                 return ToolResult.fail(str(validation_err) + self._HINT, error_type="validation")
 
             raw = await tool.execute(**params)
@@ -102,13 +107,26 @@ class ToolRegistry:
                 if not result.output.endswith(self._HINT):
                     result.output += self._HINT
 
+            duration_ms = (time.monotonic() - t0) * 1000
+            bind_trace().debug(
+                "Tool {} success={} duration_ms={:.0f}",
+                name, result.success, duration_ms,
+            )
             return result
 
         except ToolExecutionError as e:
-            logger.opt(exception=True).debug("Tool '{}' raised {}", name, e.error_type)
+            duration_ms = (time.monotonic() - t0) * 1000
+            bind_trace().debug(
+                "Tool {} error={} duration_ms={:.0f}",
+                name, e.error_type, duration_ms,
+            )
             return ToolResult.fail(str(e) + self._HINT, error_type=e.error_type)
-        except Exception as e:
-            logger.opt(exception=True).debug("Tool '{}' raised", name)
+        except Exception as e:  # crash-barrier: user-provided tool execution
+            duration_ms = (time.monotonic() - t0) * 1000
+            bind_trace().debug(
+                "Tool {} error=unknown duration_ms={:.0f}",
+                name, duration_ms,
+            )
             return ToolResult.fail(
                 f"Error executing {name}: {str(e)}" + self._HINT, error_type="unknown"
             )

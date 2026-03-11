@@ -60,7 +60,7 @@ class OpenAICodexProvider(LLMProvider):
                 content, tool_calls, finish_reason = await _request_codex(
                     url, headers, body, verify=True
                 )
-            except Exception as e:
+            except Exception as e:  # re-raised unless SSL cert error
                 if "CERTIFICATE_VERIFY_FAILED" not in str(e):
                     raise
                 logger.warning(
@@ -74,7 +74,7 @@ class OpenAICodexProvider(LLMProvider):
                 tool_calls=tool_calls,
                 finish_reason=finish_reason,
             )
-        except Exception as e:
+        except Exception as e:  # crash-barrier: varied API/network errors
             return LLMResponse(
                 content=f"Error calling Codex: {str(e)}",
                 finish_reason="error",
@@ -258,7 +258,7 @@ async def _iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], 
                     continue
                 try:
                     yield json.loads(data)
-                except Exception:
+                except (ValueError, KeyError):
                     continue
             continue
         buffer.append(line)
@@ -303,7 +303,7 @@ async def _consume_sse(response: httpx.Response) -> tuple[str, list[ToolCallRequ
                 args_raw = buf.get("arguments") or item.get("arguments") or "{}"
                 try:
                     args = json.loads(args_raw)
-                except Exception:
+                except (ValueError, KeyError):
                     args = {"raw": args_raw}
                 tool_calls.append(
                     ToolCallRequest(

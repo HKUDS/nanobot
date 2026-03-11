@@ -16,6 +16,7 @@ from nanobot.channels.mochat import (
     resolve_require_mention,
     resolve_was_mentioned,
 )
+from nanobot.channels.retry import ChannelHealth
 
 
 def _cfg() -> SimpleNamespace:
@@ -45,6 +46,7 @@ def _channel() -> MochatChannel:
     ch._flush_delayed_entries = AsyncMock()
     ch._dispatch_entries = AsyncMock()
     ch._api_send = AsyncMock(return_value={"ok": True})
+    ch._health = ChannelHealth()
     return ch
 
 

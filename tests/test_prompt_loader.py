@@ -1,0 +1,184 @@
+"""Tests for nanobot.agent.prompt_loader — template loading and caching."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from nanobot.agent.prompt_loader import PromptLoader
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _write_prompt(base: Path, name: str, content: str) -> Path:
+    d = base / "prompts"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / f"{name}.md"
+    p.write_text(content, encoding="utf-8")
+    return p
+
+
+# ---------------------------------------------------------------------------
+# Core loading
+# ---------------------------------------------------------------------------
+
+
+class TestPromptLoaderGet:
+    def test_builtin_prompt(self, tmp_path: Path):
+        """Built-in prompts should load from templates/prompts/."""
+        builtin_dir = tmp_path / "templates" / "prompts"
+        builtin_dir.mkdir(parents=True)
+        (builtin_dir / "plan.md").write_text("Plan prompt text")
+
+        # Monkey-patch the built-in dir
+        import nanobot.agent.prompt_loader as mod
+
+        orig = mod._BUILTIN_DIR
+        mod._BUILTIN_DIR = builtin_dir
+        try:
+            loader = PromptLoader()
+            assert loader.get("plan") == "Plan prompt text"
+        finally:
+            mod._BUILTIN_DIR = orig
+
+    def test_missing_prompt_returns_empty(self):
+        loader = PromptLoader()
+        # With an invalid workspace, falls through to builtin; if not found → ""
+        loader._workspace = Path("/nonexistent")
+        import nanobot.agent.prompt_loader as mod
+
+        orig = mod._BUILTIN_DIR
+        mod._BUILTIN_DIR = Path("/also_nonexistent")
+        try:
+            result = loader.get("totally_missing")
+            assert result == ""
+        finally:
+            mod._BUILTIN_DIR = orig
+
+    def test_caching(self, tmp_path: Path):
+        """Second call for the same name should use cache."""
+        builtin_dir = tmp_path / "templates" / "prompts"
+        builtin_dir.mkdir(parents=True)
+        (builtin_dir / "greet.md").write_text("Hello")
+
+        import nanobot.agent.prompt_loader as mod
+
+        orig = mod._BUILTIN_DIR
+        mod._BUILTIN_DIR = builtin_dir
+        try:
+            loader = PromptLoader()
+            first = loader.get("greet")
+            # Modify the file on disk — should still return cached
+            (builtin_dir / "greet.md").write_text("Changed")
+            second = loader.get("greet")
+            assert first == second == "Hello"
+        finally:
+            mod._BUILTIN_DIR = orig
+
+
+# ---------------------------------------------------------------------------
+# Workspace overrides
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceOverride:
+    def test_override_takes_precedence(self, tmp_path: Path):
+        """Workspace prompts/ directory overrides builtins."""
+        builtin_dir = tmp_path / "builtins" / "prompts"
+        builtin_dir.mkdir(parents=True)
+        (builtin_dir / "plan.md").write_text("builtin plan")
+
+        workspace = tmp_path / "workspace"
+        _write_prompt(workspace, "plan", "overridden plan")
+
+        import nanobot.agent.prompt_loader as mod
+
+        orig = mod._BUILTIN_DIR
+        mod._BUILTIN_DIR = builtin_dir
+        try:
+            loader = PromptLoader(workspace=workspace)
+            assert loader.get("plan") == "overridden plan"
+        finally:
+            mod._BUILTIN_DIR = orig
+
+    def test_fallback_to_builtin(self, tmp_path: Path):
+        """When workspace override doesn't exist, fall back to builtin."""
+        builtin_dir = tmp_path / "builtins" / "prompts"
+        builtin_dir.mkdir(parents=True)
+        (builtin_dir / "plan.md").write_text("builtin plan")
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        import nanobot.agent.prompt_loader as mod
+
+        orig = mod._BUILTIN_DIR
+        mod._BUILTIN_DIR = builtin_dir
+        try:
+            loader = PromptLoader(workspace=workspace)
+            assert loader.get("plan") == "builtin plan"
+        finally:
+            mod._BUILTIN_DIR = orig
+
+
+# ---------------------------------------------------------------------------
+# Preload & clear
+# ---------------------------------------------------------------------------
+
+
+class TestPreloadAndClear:
+    def test_preload_populates_cache(self, tmp_path: Path):
+        builtin_dir = tmp_path / "prompts"
+        builtin_dir.mkdir()
+        (builtin_dir / "a.md").write_text("aaa")
+        (builtin_dir / "b.md").write_text("bbb")
+
+        import nanobot.agent.prompt_loader as mod
+
+        orig = mod._BUILTIN_DIR
+        mod._BUILTIN_DIR = builtin_dir
+        try:
+            loader = PromptLoader()
+            loader.preload()
+            assert "a" in loader._cache
+            assert "b" in loader._cache
+        finally:
+            mod._BUILTIN_DIR = orig
+
+    def test_clear_drops_cache(self):
+        loader = PromptLoader()
+        loader._cache["test"] = "value"
+        loader.clear()
+        assert "test" not in loader._cache
+
+    def test_preload_no_dir_is_noop(self, tmp_path: Path):
+        """Preload with a non-existent builtin dir should not crash."""
+        import nanobot.agent.prompt_loader as mod
+
+        orig = mod._BUILTIN_DIR
+        mod._BUILTIN_DIR = tmp_path / "nonexistent"
+        try:
+            loader = PromptLoader()
+            loader.preload()  # no error
+            assert loader._cache == {}
+        finally:
+            mod._BUILTIN_DIR = orig
+
+
+# ---------------------------------------------------------------------------
+# Module singleton
+# ---------------------------------------------------------------------------
+
+
+class TestModuleSingleton:
+    def test_singleton_exists(self):
+        from nanobot.agent.prompt_loader import prompts
+
+        assert isinstance(prompts, PromptLoader)
+
+    def test_singleton_is_stable(self):
+        from nanobot.agent.prompt_loader import prompts as p1
+        from nanobot.agent.prompt_loader import prompts as p2
+
+        assert p1 is p2

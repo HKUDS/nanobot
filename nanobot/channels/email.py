@@ -19,6 +19,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.retry import retry_send
 from nanobot.config.schema import EmailConfig
 
 
@@ -93,7 +94,7 @@ class EmailChannel(BaseChannel):
                         content=item["content"],
                         metadata=item.get("metadata", {}),
                     )
-            except Exception as e:
+            except Exception as e:  # crash-barrier: email/IMAP
                 logger.error("Email polling error: {}", e)
 
             await asyncio.sleep(poll_seconds)
@@ -146,11 +147,10 @@ class EmailChannel(BaseChannel):
             email_msg["In-Reply-To"] = in_reply_to
             email_msg["References"] = in_reply_to
 
-        try:
+        async def _do_send() -> None:
             await asyncio.to_thread(self._smtp_send, email_msg)
-        except Exception as e:
-            logger.error("Error sending email to {}: {}", to_addr, e)
-            raise
+
+        await retry_send(_do_send, channel_name=self.name, health=self._health)
 
     def _validate_config(self) -> bool:
         missing = []
@@ -322,7 +322,7 @@ class EmailChannel(BaseChannel):
         finally:
             try:
                 client.logout()
-            except Exception:
+            except Exception:  # crash-barrier: email/IMAP
                 pass
 
         return messages
@@ -360,7 +360,7 @@ class EmailChannel(BaseChannel):
             return ""
         try:
             return str(make_header(decode_header(value)))
-        except Exception:
+        except Exception:  # crash-barrier: email/IMAP
             return value
 
     @classmethod
@@ -375,7 +375,7 @@ class EmailChannel(BaseChannel):
                 content_type = part.get_content_type()
                 try:
                     payload = part.get_content()
-                except Exception:
+                except Exception:  # crash-barrier: email/IMAP
                     payload_bytes = part.get_payload(decode=True) or b""
                     charset = part.get_content_charset() or "utf-8"
                     payload = payload_bytes.decode(charset, errors="replace")
@@ -393,7 +393,7 @@ class EmailChannel(BaseChannel):
 
         try:
             payload = msg.get_content()
-        except Exception:
+        except Exception:  # crash-barrier: email/IMAP
             payload_bytes = msg.get_payload(decode=True) or b""
             charset = msg.get_content_charset() or "utf-8"
             payload = payload_bytes.decode(charset, errors="replace")

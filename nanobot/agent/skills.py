@@ -261,7 +261,7 @@ class SkillsLoader:
                         len(instances),
                         ", ".join(t.name for t in instances),
                     )
-            except Exception:
+            except Exception:  # crash-barrier: dynamic module loading
                 logger.exception("Failed to load custom tools from skill '{}'", name)
         return tools
 
@@ -295,7 +295,7 @@ class SkillsLoader:
         sys.modules[module_name] = mod
         try:
             spec.loader.exec_module(mod)
-        except Exception:
+        except Exception:  # crash-barrier: arbitrary module execution
             sys.modules.pop(module_name, None)
             raise
 
@@ -312,7 +312,7 @@ class SkillsLoader:
             ):
                 try:
                     instances.append(obj())
-                except Exception:
+                except Exception:  # crash-barrier: arbitrary constructor
                     logger.warning(
                         "Skill '{}': could not instantiate tool class '{}'",
                         skill_name,
@@ -341,7 +341,7 @@ class SkillsLoader:
                     raw = yaml.safe_load(match.group(1))
                     if isinstance(raw, dict):
                         return raw
-                except Exception:
+                except Exception:  # crash-barrier: third-party YAML library
                     pass
 
         return None

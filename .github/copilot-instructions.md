@@ -27,6 +27,9 @@ skill system, multi-agent coordination with knowledge-graph memory. Single-proce
 nanobot/
 ├── agent/                # Core agent engine
 │   ├── loop.py          # Plan-Act-Observe-Reflect main loop
+│   ├── streaming.py     # Streaming LLM call with think-tag stripping
+│   ├── verifier.py      # Answer verification via LLM + grounding confidence
+│   ├── consolidation.py # Memory consolidation orchestration + fallback archival
 │   ├── context.py       # Prompt assembly + token budgeting
 │   ├── coordinator.py   # Multi-agent coordinator with LLM-based intent routing
 │   ├── registry.py      # AgentRegistry: maps role names to AgentRoleConfig
@@ -66,6 +69,7 @@ nanobot/
 │   └── loader.py        # Config file loading + migration
 ├── channels/            # Chat platform integrations
 │   ├── base.py          # BaseChannel ABC
+│   ├── retry.py         # Shared retry helpers, health tracking, reconnection loop
 │   ├── manager.py       # ChannelManager (multi-channel orchestration)
 │   ├── telegram.py      # Telegram (with group mention policy)
 │   ├── discord.py       # Discord
@@ -119,6 +123,7 @@ NanobotError (base, has recoverable flag)
 - **`__all__`** in every `__init__.py` — list all public exports
 - **Tool results**: always return `ToolResult.ok(...)` or `ToolResult.fail(...)`, never bare strings
 - **Error handling**: use typed exceptions from `nanobot/errors.py` — never bare `Exception`
+- **`except Exception`**: narrow to specific types when possible; mark intentionally-broad catches with `# crash-barrier: <reason>`
 - **Imports**: group as stdlib → third-party → local, enforced by ruff `I` rules
 
 ## Testing
@@ -167,3 +172,47 @@ make clean          # Remove build artifacts
 2. Optionally add `tools.py` for custom `Tool` subclasses
 3. Skills are auto-discovered by `SkillsLoader` in `nanobot/agent/skills.py`
 4. Reference: `nanobot/skills/weather/` as minimal template
+
+## Architecture & Refactoring Rules
+
+Architecture decisions are recorded in `docs/adr/`. Read them before making structural
+changes. The module ownership map and import rules are in `docs/architecture.md`.
+
+### Module Boundaries
+
+Each top-level package has explicit import rules. Key forbidden imports:
+
+- `channels/` must **never** import from `agent/loop`, `agent/tools/`, or `agent/memory/`
+- `providers/` must **never** import from `agent/` or `channels/`
+- `config/` must **never** import from `agent/`, `channels/`, or `providers/`
+- `bus/` must **never** import from `agent/`, `channels/`, or `providers/`
+- `agent/tools/` must **never** import from `channels/`
+
+### Refactoring Principles
+
+- **Refactor by seams, not by folders** — extract sub-services before moving directories
+- **One PR, one change** — never combine unrelated refactors
+- **Tests first** — add test coverage before extracting code
+- **Preserve public API** — `__all__` exports must not change without an ADR
+- **No speculative abstraction** — only abstract when there are ≥2 implementations
+- **Verify after every change** — run `make lint && make typecheck` after every edit
+
+Full guidelines: `docs/refactoring-principles.md`
+
+### Key ADRs
+
+- **ADR-001**: Modular monolith — refactor within current package structure, no microservices
+- **ADR-002**: Agent loop ownership — extract `ToolExecutor` and `DelegationDispatcher`
+- **ADR-003**: Memory architecture — typed `MemoryEvent`, mem0-first with local fallback
+- **ADR-004**: Tool execution contract — keep `Tool` ABC + `ToolResult`, extract executor
+- **ADR-005**: Observability — structured logging + correlation IDs before OpenTelemetry
+
+### Prompt Files
+
+Reusable prompt files are available in `.github/prompts/`:
+
+- `safe-refactor.prompt.md` — incremental refactoring with safety checks
+- `add-tests.prompt.md` — adding tests following project patterns
+- `write-adr.prompt.md` — creating Architecture Decision Records
+- `extract-module.prompt.md` — extracting classes/responsibilities into new files
+- `code-review.prompt.md` — reviewing changes against project standards

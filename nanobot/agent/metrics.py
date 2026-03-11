@@ -108,7 +108,7 @@ class MetricsCollector:
                 tmp.write_text(json.dumps(self._counters, indent=2, default=str))
                 tmp.replace(self._path)
                 self._dirty = False
-            except Exception as exc:
+            except OSError as exc:
                 logger.warning("Failed to flush metrics to {}: {}", self._path, exc)
 
     def flush_sync(self) -> None:
@@ -122,7 +122,7 @@ class MetricsCollector:
             tmp.write_text(json.dumps(self._counters, indent=2, default=str))
             tmp.replace(self._path)
             self._dirty = False
-        except Exception as exc:
+        except OSError as exc:
             logger.warning("Failed to flush metrics to {}: {}", self._path, exc)
 
     # ------------------------------------------------------------------
@@ -140,7 +140,7 @@ class MetricsCollector:
                 parsed = json.loads(raw)
                 if isinstance(parsed, dict):
                     data = parsed
-            except Exception:
+            except (json.JSONDecodeError, OSError):
                 logger.warning("Failed to parse metrics file, starting fresh")
         # Merge defaults for any missing keys
         merged = {**self._defaults, **data}

@@ -6,17 +6,40 @@ from types import SimpleNamespace
 
 import pytest
 
+from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.verifier import AnswerVerifier
 
 
 def _make_loop(tmp_path: Path) -> AgentLoop:
+    from nanobot.agent.delegation import DelegationDispatcher
+
     loop = object.__new__(AgentLoop)
     loop.workspace = tmp_path
-    loop._active_messages = []
+    dispatcher = object.__new__(DelegationDispatcher)
+    dispatcher.active_messages = []
+    dispatcher.routing_trace = []
+    dispatcher.delegation_count = 0
+    dispatcher.workspace = tmp_path
+    dispatcher.scratchpad = None
+    loop._dispatcher = dispatcher
     loop._scratchpad = None
     loop.memory_uncertainty_threshold = 0.6
-    loop._consolidation_locks = {}
-    loop.context = SimpleNamespace(memory=SimpleNamespace(retrieve=lambda *_a, **_k: []))
+    mem_ns = SimpleNamespace(
+        retrieve=lambda *_a, **_k: [],
+        append_history=lambda _t: None,
+    )
+    loop.context = SimpleNamespace(memory=mem_ns)
+    loop._consolidator = ConsolidationOrchestrator(mem_ns)
+    loop._verifier = AnswerVerifier(
+        provider=None,  # type: ignore[arg-type]
+        model="m",
+        temperature=0.0,
+        max_tokens=32,
+        verification_mode="off",
+        memory_uncertainty_threshold=0.6,
+        memory_store=mem_ns,  # type: ignore[arg-type]
+    )
     return loop
 
 
@@ -65,10 +88,11 @@ def test_build_parallel_and_contract_includes_optional_sections(tmp_path: Path) 
             {"role": "research", "label": "done two"},
         ]
     )
+    loop._dispatcher.scratchpad = loop._scratchpad
     loop._active_messages = [{"role": "user", "content": "User request"}]
-    loop._extract_plan_text = lambda: "1. p"  # type: ignore[method-assign]
-    loop._build_execution_context = lambda _tt: "ctx"  # type: ignore[method-assign]
-    loop._gather_recent_tool_results = lambda: "prior"  # type: ignore[method-assign]
+    loop._dispatcher.extract_plan_text = lambda: "1. p"  # type: ignore[method-assign]
+    loop._dispatcher.build_execution_context = lambda _tt: "ctx"  # type: ignore[method-assign]
+    loop._dispatcher.gather_recent_tool_results = lambda: "prior"  # type: ignore[method-assign]
 
     summary = loop._build_parallel_work_summary("code")
     assert "research" in summary
@@ -89,15 +113,17 @@ def test_build_parallel_and_contract_includes_optional_sections(tmp_path: Path) 
 
 def test_verification_helpers_and_lock_lifecycle(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path)
-    assert AgentLoop._looks_like_question("How are you") is True
-    assert AgentLoop._looks_like_question("status update") is False
+    assert AnswerVerifier._looks_like_question("How are you") is True
+    assert AnswerVerifier._looks_like_question("status update") is False
 
-    loop.context = SimpleNamespace(memory=SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": "x"}]))
-    assert loop._estimate_grounding_confidence("q") == 0.0
-    loop.context = SimpleNamespace(memory=SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": 1.3}]))
-    assert loop._estimate_grounding_confidence("q") == 1.0
-    loop.context = SimpleNamespace(memory=SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": 0.2}]))
-    assert loop._should_force_verification("What is this") is True
+    # Test _estimate_grounding_confidence via the verifier
+    v = loop._verifier
+    v._memory = SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": "x"}])
+    assert v._estimate_grounding_confidence("q") == 0.0
+    v._memory = SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": 1.3}])
+    assert v._estimate_grounding_confidence("q") == 1.0
+    v._memory = SimpleNamespace(retrieve=lambda *_a, **_k: [{"score": 0.2}])
+    assert v.should_force_verification("What is this") is True
 
     lock = loop._get_consolidation_lock("s1")
     assert isinstance(lock, asyncio.Lock)
@@ -127,13 +153,15 @@ async def test_attempt_recovery_missing_or_error_paths(tmp_path: Path) -> None:
 def test_fallback_archive_snapshot_success_and_failure(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path)
     sink: list[str] = []
-    loop.context = SimpleNamespace(
-        memory=SimpleNamespace(append_history=lambda text: sink.append(text))
-    )
+    mem_ns = SimpleNamespace(append_history=lambda text: sink.append(text))
+    loop._consolidator = ConsolidationOrchestrator(mem_ns)
     assert loop._fallback_archive_snapshot([
         {"role": "user", "content": "hello", "timestamp": "2026-01-01T00:00:00"}
     ]) is True
     assert sink and "Fallback archive" in sink[0]
 
-    loop.context = SimpleNamespace(memory=SimpleNamespace(append_history=lambda _t: (_ for _ in ()).throw(RuntimeError("x"))))
+    err_mem = SimpleNamespace(
+        append_history=lambda _t: (_ for _ in ()).throw(RuntimeError("x"))
+    )
+    loop._consolidator = ConsolidationOrchestrator(err_mem)
     assert loop._fallback_archive_snapshot([{"role": "user", "content": "hello"}]) is False

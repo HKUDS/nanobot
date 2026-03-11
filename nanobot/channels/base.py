@@ -1,5 +1,7 @@
 """Base channel interface for chat platforms."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -7,6 +9,7 @@ from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.retry import ChannelHealth
 
 
 class BaseChannel(ABC):
@@ -30,6 +33,12 @@ class BaseChannel(ABC):
         self.config = config
         self.bus = bus
         self._running = False
+        self._health = ChannelHealth()
+
+    @property
+    def health(self) -> ChannelHealth:
+        """Per-channel delivery health metrics."""
+        return self._health
 
     @abstractmethod
     async def start(self) -> None:

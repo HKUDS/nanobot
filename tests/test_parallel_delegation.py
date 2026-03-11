@@ -159,6 +159,7 @@ class TestParallelDelegation:
         loop._coordinator = Coordinator(
             provider=provider, registry=registry, default_role="general"
         )
+        loop._dispatcher.coordinator = loop._coordinator
         loop._wire_delegate_tools()
 
         # Delegate to code and research in parallel — neither is in the stack

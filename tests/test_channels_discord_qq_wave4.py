@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -77,7 +76,8 @@ async def test_discord_send_payload_retry_and_fail() -> None:
         raise RuntimeError("x")
 
     ch._http = SimpleNamespace(post=_boom)
-    assert await ch._send_payload("u", {}, {"a": 1}) is False
+    with pytest.raises(RuntimeError):
+        await ch._send_payload("u", {}, {"a": 1})
 
 
 @pytest.mark.asyncio

@@ -104,5 +104,5 @@ class MessageTool(Tool):
             self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
             return ToolResult.ok(f"Message sent to {channel}:{chat_id}{media_info}")
-        except Exception as e:
+        except Exception as e:  # crash-barrier: user send callback
             return ToolResult.fail(f"Error sending message: {str(e)}")

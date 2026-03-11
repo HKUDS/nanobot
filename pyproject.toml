@@ -115,6 +115,10 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "golden: golden regression tests (frozen behavior baselines)",
+    "contract: contract tests for core abstractions",
+]
 
 [tool.mypy]
 python_version = "3.10"

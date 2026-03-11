@@ -1,11 +1,13 @@
 """Configuration schema using Pydantic."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Base(BaseModel):
@@ -189,6 +191,23 @@ class ChannelsConfig(Base):
     qq: QQConfig = Field(default_factory=QQConfig)
 
 
+class Mem0Config(Base):
+    """mem0 vector store adapter tuning."""
+
+    user_id: str = "nanobot"  # mem0 user namespace (was MEM0_USER_ID)
+    add_debug: bool = False  # Log add_text diagnostics (was MEM0_ADD_DEBUG)
+    verify_write: bool = True  # Verify mem0 writes via count (was MEM0_VERIFY_WRITE)
+    force_infer_true: bool = False  # Force infer=True mode (was MEM0_FORCE_INFER_TRUE)
+
+
+class RerankerConfig(Base):
+    """Cross-encoder re-ranker tuning."""
+
+    mode: str = "disabled"  # enabled | shadow | disabled (was NANOBOT_RERANKER_MODE)
+    alpha: float = 0.5  # Blend weight 0.0–1.0 (was NANOBOT_RERANKER_ALPHA)
+    model: str = ""  # Model name; blank = default (was NANOBOT_RERANKER_MODEL)
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -232,6 +251,12 @@ class AgentDefaults(Base):
     graph_neo4j_uri: str = "bolt://localhost:7687"
     graph_neo4j_auth: str = "neo4j/nanobot_graph"
     graph_neo4j_database: str = "neo4j"
+
+    # Reranker
+    reranker: RerankerConfig = Field(default_factory=RerankerConfig)
+
+    # mem0
+    mem0: Mem0Config = Field(default_factory=Mem0Config)
 
 
 class AgentConfig(Base):
@@ -282,6 +307,12 @@ class AgentConfig(Base):
     planning_enabled: bool = True
     verification_mode: str = "on_uncertainty"  # always | on_uncertainty | off
 
+    # Feature flags (can be overridden by root FeaturesConfig kill-switches)
+    delegation_enabled: bool = True
+    memory_enabled: bool = True
+    skills_enabled: bool = True
+    streaming_enabled: bool = True
+
     # Summarization-based compression (Step 3)
     summary_model: str | None = (
         None  # None = use main model; set e.g. "gpt-4o-mini" for cheaper compression
@@ -298,6 +329,15 @@ class AgentConfig(Base):
     graph_neo4j_uri: str = "bolt://localhost:7687"
     graph_neo4j_auth: str = "neo4j/nanobot_graph"
     graph_neo4j_database: str = "neo4j"
+
+    # Reranker / mem0
+    reranker_mode: str = "disabled"
+    reranker_alpha: float = 0.5
+    reranker_model: str = ""
+    mem0_user_id: str = "nanobot"
+    mem0_add_debug: bool = False
+    mem0_verify_write: bool = True
+    mem0_force_infer_true: bool = False
 
     # Vision / multimodal
     vision_model: str = "gpt-4o-mini"
@@ -340,6 +380,13 @@ class AgentConfig(Base):
             "graph_neo4j_uri": defaults.graph_neo4j_uri,
             "graph_neo4j_auth": defaults.graph_neo4j_auth,
             "graph_neo4j_database": defaults.graph_neo4j_database,
+            "reranker_mode": defaults.reranker.mode,
+            "reranker_alpha": defaults.reranker.alpha,
+            "reranker_model": defaults.reranker.model,
+            "mem0_user_id": defaults.mem0.user_id,
+            "mem0_add_debug": defaults.mem0.add_debug,
+            "mem0_verify_write": defaults.mem0.verify_write,
+            "mem0_force_infer_true": defaults.mem0.force_infer_true,
             "vision_model": defaults.vision_model,
         }
         data.update(overrides)
@@ -473,14 +520,42 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class FeaturesConfig(Base):
+    """Feature flags for toggling agent capabilities without code changes."""
+
+    planning_enabled: bool = True
+    verification_enabled: bool = True  # master switch; mode set in AgentConfig
+    delegation_enabled: bool = True
+    memory_enabled: bool = True
+    skills_enabled: bool = True
+    streaming_enabled: bool = True
+
+
+class LLMConfig(Base):
+    """LLM call tuning — consolidates scattered os.getenv() calls."""
+
+    timeout_s: float = 60.0  # Per-call timeout (was NANOBOT_LLM_TIMEOUT_S)
+    max_retries: int = 1  # Retry count (was NANOBOT_LLM_MAX_RETRIES)
+
+
 class Config(BaseSettings):
-    """Root configuration for nanobot."""
+    """Root configuration for nanobot.
+
+    Supports three configuration sources (highest priority first):
+
+    1. **Environment variables** — prefixed with ``NANOBOT_``, nested via ``__``.
+       Example: ``NANOBOT_AGENTS__DEFAULTS__MODEL=gpt-4o``
+    2. **``.env`` file** — loaded from the working directory if present.
+    3. **``~/.nanobot/config.json``** — loaded by ``load_config()``.
+    """
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    features: FeaturesConfig = Field(default_factory=FeaturesConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
 
     @property
     def workspace_path(self) -> Path:
@@ -557,4 +632,11 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")  # type: ignore[typeddict-unknown-key,assignment]
+    model_config = SettingsConfigDict(
+        env_prefix="NANOBOT_",
+        env_nested_delimiter="__",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_ignore_empty=True,
+        extra="ignore",
+    )

@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.message import MessageTool
-from nanobot.agent.tools.web import WebFetchTool, WebSearchTool, _normalize, _strip_tags, _validate_url
+from nanobot.agent.tools.web import (
+    WebFetchTool,
+    WebSearchTool,
+    _normalize,
+    _strip_tags,
+    _validate_url,
+)
 
 
 class _FakeCron:

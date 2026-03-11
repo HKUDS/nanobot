@@ -28,7 +28,10 @@ format:
 typecheck:
 	$(PYTHON) -m mypy nanobot/
 
-check: lint typecheck test
+check: lint typecheck import-check test
+
+import-check:
+	$(PYTHON) scripts/check_imports.py
 
 memory-eval:
 	$(PYTHON) scripts/memory_eval_ci.py \

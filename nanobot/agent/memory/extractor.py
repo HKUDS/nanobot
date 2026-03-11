@@ -427,7 +427,7 @@ class MemoryExtractor:
                             break
                     self.last_extraction_source = "llm"
                     return events, updates
-        except Exception:
+        except Exception:  # crash-barrier: LLM extraction + parsing
             logger.exception(
                 "Structured event extraction failed, falling back to heuristic extraction"
             )

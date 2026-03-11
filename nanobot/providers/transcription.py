@@ -55,6 +55,6 @@ class GroqTranscriptionProvider:
                 response.raise_for_status()
                 data = response.json()
                 return str(data.get("text", ""))
-        except Exception as e:
+        except Exception as e:  # crash-barrier: third-party HTTP transcription
             logger.error("Groq transcription error: {}", e)
             return ""

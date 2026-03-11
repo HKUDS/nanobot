@@ -9,8 +9,7 @@ import pytest
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentConfig
-from nanobot.config.schema import AgentRoleConfig
+from nanobot.config.schema import AgentConfig, AgentRoleConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
 
 

@@ -9,6 +9,7 @@ import pytest
 from nanobot.agent.memory import extractor as extractor_mod
 from nanobot.agent.memory.entity_linker import register_alias, resolve_alias
 from nanobot.agent.memory.mem0_adapter import _Mem0Adapter
+from nanobot.agent.memory.reranker import CrossEncoderReranker
 from nanobot.agent.memory.retrieval import (
     _bm25_score,
     _build_bm25_index,
@@ -16,7 +17,6 @@ from nanobot.agent.memory.retrieval import (
     _local_retrieve,
     _topic_fallback_retrieve,
 )
-from nanobot.agent.memory.reranker import CrossEncoderReranker
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
@@ -46,6 +46,9 @@ def _adapter(tmp_path: Path) -> _Mem0Adapter:
     adapter.last_add_mode = "unknown"
     adapter._infer_true_disabled = False
     adapter._infer_true_disable_reason = ""
+    adapter._add_debug = False
+    adapter._verify_write = True
+    adapter._force_infer_true = False
     return adapter
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any
 
@@ -9,6 +8,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.retry import connection_loop, retry_send
 from nanobot.config.schema import WhatsAppConfig
 
 
@@ -38,35 +38,27 @@ class WhatsAppChannel(BaseChannel):
 
         self._running = True
 
-        while self._running:
-            try:
-                async with websockets.connect(bridge_url) as ws:
-                    self._ws = ws
-                    # Send auth token if configured
-                    if self.config.bridge_token:
-                        await ws.send(
-                            json.dumps({"type": "auth", "token": self.config.bridge_token})
-                        )
-                    self._connected = True
-                    logger.info("Connected to WhatsApp bridge")
+        async def _connect() -> None:
+            async with websockets.connect(bridge_url) as ws:
+                self._ws = ws
+                if self.config.bridge_token:
+                    await ws.send(
+                        json.dumps({"type": "auth", "token": self.config.bridge_token})
+                    )
+                self._connected = True
+                logger.info("Connected to WhatsApp bridge")
 
-                    # Listen for messages
-                    async for message in ws:
-                        try:
-                            await self._handle_bridge_message(str(message))
-                        except Exception as e:
-                            logger.error("Error handling bridge message: {}", e)
+                async for message in ws:
+                    try:
+                        await self._handle_bridge_message(str(message))
+                    except Exception as e:  # crash-barrier: WhatsApp bridge
+                        logger.error("Error handling bridge message: {}", e)
 
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self._connected = False
-                self._ws = None
-                logger.warning("WhatsApp bridge connection error: {}", e)
-
-                if self._running:
-                    logger.info("Reconnecting in 5 seconds...")
-                    await asyncio.sleep(5)
+        try:
+            await connection_loop("WhatsApp", _connect, running_flag=lambda: self._running)
+        finally:
+            self._connected = False
+            self._ws = None
 
     async def stop(self) -> None:
         """Stop the WhatsApp channel."""
@@ -83,11 +75,11 @@ class WhatsAppChannel(BaseChannel):
             logger.warning("WhatsApp bridge not connected")
             return
 
-        try:
+        async def _do_send() -> None:
             payload = {"type": "send", "to": msg.chat_id, "text": msg.content}
-            await self._ws.send(json.dumps(payload, ensure_ascii=False))
-        except Exception as e:
-            logger.error("Error sending WhatsApp message: {}", e)
+            await self._ws.send(json.dumps(payload, ensure_ascii=False))  # type: ignore[union-attr]
+
+        await retry_send(_do_send, channel_name=self.name, health=self._health)
 
     async def _handle_bridge_message(self, raw: str) -> None:
         """Handle a message from the bridge."""

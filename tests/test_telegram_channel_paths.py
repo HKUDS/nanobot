@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.channels.retry import ChannelHealth
 from nanobot.channels.telegram import TelegramChannel
 
 
@@ -25,6 +26,7 @@ def _channel() -> TelegramChannel:
     ch._typing_tasks = {}
     ch._streaming_msg_ids = {}
     ch._handle_message = AsyncMock()
+    ch._health = ChannelHealth()
     return ch
 
 

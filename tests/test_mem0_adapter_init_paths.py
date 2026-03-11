@@ -58,6 +58,9 @@ def _base_adapter(tmp_path: Path) -> _Mem0Adapter:
     a.last_add_mode = "unknown"
     a._infer_true_disabled = False
     a._infer_true_disable_reason = ""
+    a._add_debug = False
+    a._verify_write = True
+    a._force_infer_true = False
     return a
 
 

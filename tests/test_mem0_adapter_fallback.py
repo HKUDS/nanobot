@@ -42,6 +42,9 @@ def _adapter_with_client(client: _FakeClient) -> _Mem0Adapter:
     adapter.last_add_mode = "unknown"
     adapter._infer_true_disabled = False
     adapter._infer_true_disable_reason = ""
+    adapter._add_debug = False
+    adapter._verify_write = True
+    adapter._force_infer_true = False
     return adapter
 
 

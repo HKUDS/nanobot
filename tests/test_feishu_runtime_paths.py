@@ -8,6 +8,7 @@ import pytest
 
 from nanobot.channels import feishu as fs_mod
 from nanobot.channels.feishu import FeishuChannel
+from nanobot.channels.retry import ChannelHealth
 
 
 def _channel() -> FeishuChannel:
@@ -21,6 +22,7 @@ def _channel() -> FeishuChannel:
     ch._running = False
     ch.bus = SimpleNamespace()
     ch._handle_message = AsyncMock()
+    ch._health = ChannelHealth()
     return ch
 
 

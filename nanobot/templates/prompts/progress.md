@@ -1,0 +1,1 @@
+Briefly reflect on progress: which steps of your plan are complete, which remain? Did the tool results achieve the current step's goal? If not, adjust your plan. If all steps are done, produce the final answer.

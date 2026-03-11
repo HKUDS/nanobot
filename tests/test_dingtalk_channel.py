@@ -8,6 +8,7 @@ import pytest
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels import dingtalk as dt_mod
 from nanobot.channels.dingtalk import DingTalkChannel, NanobotDingTalkHandler
+from nanobot.channels.retry import ChannelHealth
 
 
 def _cfg() -> SimpleNamespace:
@@ -24,6 +25,7 @@ def _channel() -> DingTalkChannel:
     ch._token_expiry = 0
     ch._background_tasks = set()
     ch._handle_message = AsyncMock()
+    ch._health = ChannelHealth()
     return ch
 
 

@@ -7,15 +7,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
-from nanobot.agent.tools.base import ToolResult
-from nanobot.agent.loop import _delegation_ancestry
-from nanobot.agent.memory import MemoryStore
+from nanobot.agent.loop import AgentLoop, _delegation_ancestry
+from nanobot.agent.memory import mem0_adapter as mem0_mod
 from nanobot.agent.memory.extractor import MemoryExtractor
 from nanobot.agent.memory.graph import KnowledgeGraph
-from nanobot.agent.memory import mem0_adapter as mem0_mod
 from nanobot.agent.memory.mem0_adapter import _Mem0Adapter
 from nanobot.agent.memory.persistence import MemoryPersistence
+from nanobot.agent.tools.base import ToolResult
 from nanobot.bus.events import InboundMessage, ReactionEvent
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from tests.test_agent_loop import ScriptedProvider, _make_loop
@@ -44,6 +42,9 @@ def _make_adapter(tmp_path: Path) -> _Mem0Adapter:
     adapter.last_add_mode = "unknown"
     adapter._infer_true_disabled = False
     adapter._infer_true_disable_reason = ""
+    adapter._add_debug = False
+    adapter._verify_write = True
+    adapter._force_infer_true = False
     return adapter
 
 
@@ -369,7 +370,7 @@ async def test_loop_connect_mcp_and_tool_parallel_error_path(tmp_path: Path, mon
         SimpleNamespace(name="r2", arguments={}),
         SimpleNamespace(name="w", arguments={}),
     ]
-    results = await loop._execute_tools_parallel(calls)
+    results = await loop.tools.execute_batch(calls)
     assert len(results) == 3
     assert results[1].success is False
 
@@ -467,7 +468,7 @@ async def test_loop_run_agent_loop_malformed_then_final_nudge(tmp_path: Path) ->
     ]
 
     loop._call_llm = AsyncMock(side_effect=responses)  # type: ignore[method-assign]
-    loop._execute_tools_parallel = AsyncMock(return_value=[ToolResult.ok("ok")])  # type: ignore[method-assign]
+    loop.tools.execute_batch = AsyncMock(return_value=[ToolResult.ok("ok")])  # type: ignore[method-assign]
 
     final, _tools, messages = await loop._run_agent_loop([
         {"role": "user", "content": "Please do this task."}
@@ -495,7 +496,7 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(tmp_p
         return [ToolResult.ok("delegated")]
 
     loop._call_llm = AsyncMock(side_effect=responses)  # type: ignore[method-assign]
-    loop._execute_tools_parallel = _exec  # type: ignore[method-assign]
+    loop.tools.execute_batch = _exec  # type: ignore[method-assign]
     final, _tools, msgs = await loop._run_agent_loop([
         {"role": "user", "content": "Do A then B."}
     ])
@@ -511,7 +512,7 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(tmp_p
         LLMResponse(content="done2", tool_calls=[], finish_reason="stop"),
     ]
     loop._call_llm = AsyncMock(side_effect=responses2)  # type: ignore[method-assign]
-    loop._execute_tools_parallel = AsyncMock(return_value=[ToolResult.fail("boom")])  # type: ignore[method-assign]
+    loop.tools.execute_batch = AsyncMock(return_value=[ToolResult.fail("boom")])  # type: ignore[method-assign]
     final2, _tools2, msgs2 = await loop._run_agent_loop([
         {"role": "user", "content": "Read file."}
     ])
@@ -520,18 +521,24 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(tmp_p
 
 
 def test_store_load_rollout_config_env_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    store = _store(tmp_path)
-    monkeypatch.setenv("NANOBOT_MEMORY_ROLLOUT_MODE", "shadow")
-    monkeypatch.setenv("NANOBOT_MEMORY_SHADOW_SAMPLE_RATE", "not-a-number")
-    monkeypatch.setenv("NANOBOT_MEMORY_FALLBACK_ALLOWED_SOURCES", "events,profile")
-    monkeypatch.setenv("NANOBOT_MEMORY_FALLBACK_MAX_SUMMARY_CHARS", "bad")
-    monkeypatch.setenv("NANOBOT_RERANKER_MODE", "enabled")
-    monkeypatch.setenv("NANOBOT_RERANKER_ALPHA", "bad")
+    """Verify rollout overrides flow through _apply_rollout_overrides correctly.
 
-    rollout = store._load_rollout_config()
-    assert rollout["memory_rollout_mode"] == "shadow"
-    assert rollout["memory_fallback_allowed_sources"] == ["events", "profile"]
-    assert rollout["reranker_mode"] == "enabled"
+    Legacy NANOBOT_* env vars no longer read directly by _load_rollout_config;
+    config flows through schema → pydantic-settings → rollout_overrides dict.
+    """
+    store = _store(tmp_path)
+
+    # Simulate what AgentLoop passes via rollout_overrides
+    store._apply_rollout_overrides(
+        {
+            "memory_rollout_mode": "shadow",
+            "memory_fallback_allowed_sources": ["events", "profile"],
+            "reranker_mode": "enabled",
+        }
+    )
+    assert store.rollout["memory_rollout_mode"] == "shadow"
+    assert store.rollout["memory_fallback_allowed_sources"] == ["events", "profile"]
+    assert store.rollout["reranker_mode"] == "enabled"
 
     store._apply_rollout_overrides(
         {
@@ -638,7 +645,7 @@ def test_mem0_load_env_and_api_key_guard_branches(tmp_path: Path, monkeypatch: p
             return self
 
         def resolve(self):
-            raise RuntimeError("r")
+            raise OSError("r")
 
         def exists(self):
             return True
@@ -647,7 +654,7 @@ def test_mem0_load_env_and_api_key_guard_branches(tmp_path: Path, monkeypatch: p
             return True
 
         def read_text(self, encoding: str = "utf-8"):
-            raise RuntimeError("read")
+            raise OSError("read")
 
     class _Workspace:
         def __truediv__(self, _x: str):
@@ -666,8 +673,8 @@ def test_mem0_add_text_and_history_fallback_rejections(tmp_path: Path, monkeypat
             raise RuntimeError("invalid api key")
 
     adapter.client = _AddFailClient()
-    monkeypatch.setenv("NANOBOT_MEM0_ADD_DEBUG", "1")
-    monkeypatch.setenv("NANOBOT_MEM0_VERIFY_WRITE", "1")
+    adapter._add_debug = True
+    adapter._verify_write = True
     adapter.get_all_count = MagicMock(side_effect=[1, 1, 1, 1, 1])  # type: ignore[method-assign]
     adapter._activate_local_fallback = MagicMock(return_value=False)
     assert adapter.add_text("hello") is False
@@ -750,11 +757,21 @@ async def test_loop_run_agent_nudge_and_reaction_and_close_paths(tmp_path: Path,
 
 @pytest.mark.asyncio
 async def test_loop_dispatch_delegation_route_and_exception_paths(tmp_path: Path) -> None:
+    from nanobot.agent.delegation import DelegationDispatcher
+
     loop = object.__new__(AgentLoop)
     loop.role_name = "general"
     loop._coordinator = None
-    loop._delegation_count = 0
-    loop._record_route_trace = MagicMock()
+    # Create a minimal dispatcher so that property proxies work
+    dispatcher = object.__new__(DelegationDispatcher)
+    dispatcher.delegation_count = 0
+    dispatcher.routing_trace = []
+    dispatcher.coordinator = None
+    dispatcher.routing_metrics = None
+    dispatcher.active_messages = None
+    dispatcher.role_name = "general"
+    dispatcher.record_route_trace = MagicMock()
+    loop._dispatcher = dispatcher
 
     with pytest.raises(RuntimeError):
         await loop._dispatch_delegation("", "task", None)
@@ -768,12 +785,12 @@ async def test_loop_dispatch_delegation_route_and_exception_paths(tmp_path: Path
         async def route(_task: str):
             return SimpleNamespace(name="code")
 
-    loop._coordinator = _Coord()
+    dispatcher.coordinator = _Coord()
 
     async def _explode(_role, _task, _context):
         raise RuntimeError("delegated fail")
 
-    loop._execute_delegated_agent = _explode  # type: ignore[method-assign]
+    dispatcher.execute_delegated_agent = _explode  # type: ignore[method-assign]
     token = _delegation_ancestry.set(tuple())
     try:
         with pytest.raises(RuntimeError):
@@ -781,7 +798,7 @@ async def test_loop_dispatch_delegation_route_and_exception_paths(tmp_path: Path
     finally:
         _delegation_ancestry.reset(token)
 
-    assert loop._record_route_trace.call_count >= 2
+    assert dispatcher.record_route_trace.call_count >= 2
 
 
 def test_store_retrieve_core_profile_adjustment_paths(tmp_path: Path) -> None:
@@ -1023,7 +1040,7 @@ def test_mem0_additional_branch_clusters(tmp_path: Path, monkeypatch: pytest.Mon
     adapter.mode = "oss"
     adapter.get_all_count = MagicMock(return_value=0)  # type: ignore[method-assign]
     adapter._activate_local_fallback = MagicMock(return_value=True)
-    monkeypatch.setenv("NANOBOT_MEM0_FORCE_INFER_TRUE", "1")
+    adapter._force_infer_true = True
     assert adapter.add_text("hello") is False
 
 
@@ -1153,5 +1170,5 @@ def test_mem0_remaining_helper_branches(tmp_path: Path, monkeypatch: pytest.Monk
     (adapter._local_mem0_dir / "history.db").write_text("x", encoding="utf-8")
     import sqlite3
 
-    monkeypatch.setattr(sqlite3, "connect", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("db")))
+    monkeypatch.setattr(sqlite3, "connect", lambda *_a, **_k: (_ for _ in ()).throw(sqlite3.OperationalError("db")))
     assert adapter._fallback_search_via_history_db("q", top_k=1) == ([], 0)

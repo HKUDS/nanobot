@@ -212,6 +212,7 @@ class TestDelegationDispatch:
         loop._coordinator = Coordinator(
             provider=provider, registry=registry, default_role="general"
         )
+        loop._dispatcher.coordinator = loop._coordinator
         loop._wire_delegate_tools()
 
         # Simulate being inside a "code" delegation via ContextVar
@@ -236,6 +237,7 @@ class TestDelegationDispatch:
         loop._coordinator = Coordinator(
             provider=provider, registry=registry, default_role="general"
         )
+        loop._dispatcher.coordinator = loop._coordinator
         loop._wire_delegate_tools()
 
         # Currently inside "code" role via ContextVar
@@ -270,6 +272,7 @@ class TestDelegationDispatch:
         loop._coordinator = Coordinator(
             provider=provider, registry=registry, default_role="general"
         )
+        loop._dispatcher.coordinator = loop._coordinator
         loop._wire_delegate_tools()
 
         call_count = 0
@@ -292,6 +295,7 @@ class TestDelegationDispatch:
         loop._coordinator = Coordinator(
             provider=provider, registry=registry, default_role="general"
         )
+        loop._dispatcher.coordinator = loop._coordinator
         loop._wire_delegate_tools()
 
         await loop._dispatch_delegation("code", "write tests", None)
@@ -316,6 +320,7 @@ class TestDelegationDispatch:
         loop._coordinator = Coordinator(
             provider=provider, registry=registry, default_role="general"
         )
+        loop._dispatcher.coordinator = loop._coordinator
         loop._wire_delegate_tools()
 
         # Ancestry is empty (depth 0) — same-role delegation should succeed

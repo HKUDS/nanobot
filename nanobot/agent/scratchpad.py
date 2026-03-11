@@ -95,7 +95,7 @@ class Scratchpad:
                 line = line.strip()
                 if line:
                     self._entries.append(json.loads(line))
-        except Exception:
+        except (json.JSONDecodeError, OSError):
             logger.warning("Failed to load scratchpad {}", self._path)
 
     def _flush(self) -> None:
@@ -106,5 +106,5 @@ class Scratchpad:
                 "\n".join(json.dumps(e, ensure_ascii=False) for e in self._entries) + "\n",
                 encoding="utf-8",
             )
-        except Exception:
+        except OSError:
             logger.warning("Failed to flush scratchpad {}", self._path)

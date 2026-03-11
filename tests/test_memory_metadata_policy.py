@@ -661,8 +661,7 @@ def test_get_memory_context_graph_not_truncated_at_default_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Entity graph section should appear even at the default 900 token budget."""
-    monkeypatch.setenv("NANOBOT_GRAPH_ENABLED", "true")
-    store = MemoryStore(tmp_path)
+    store = MemoryStore(tmp_path, rollout_overrides={"graph_enabled": True})
 
     # Simulate a large profile that previously consumed the whole budget.
     large_profile = {

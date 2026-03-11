@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from nanobot.cron.service import CronService, _compute_next_run, _validate_schedule_for_add

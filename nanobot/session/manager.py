@@ -116,7 +116,7 @@ class SessionManager:
                 try:
                     shutil.move(str(legacy_path), str(path))
                     logger.info("Migrated session {} from legacy path", key)
-                except Exception:
+                except OSError:
                     logger.exception("Failed to migrate session {}", key)
 
         if not path.exists():
@@ -154,7 +154,7 @@ class SessionManager:
                 metadata=metadata,
                 last_consolidated=last_consolidated,
             )
-        except Exception as e:
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
             logger.warning("Failed to load session {}: {}", key, e)
             return None
 
@@ -207,7 +207,7 @@ class SessionManager:
                                     "path": str(path),
                                 }
                             )
-            except Exception:
+            except (json.JSONDecodeError, OSError):
                 continue
 
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)

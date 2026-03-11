@@ -117,7 +117,7 @@ async def run_tool_loop(
                 max_tokens=max_tokens,
             )
             final_result = summary_resp.content
-        except Exception:
+        except Exception:  # crash-barrier: LLM provider errors
             pass
 
     if not final_result:
@@ -257,7 +257,7 @@ class SubagentManager:
             logger.info("Subagent [{}] completed successfully", task_id)
             await self._announce_result(task_id, label, task, final_result or "", origin, "ok")
 
-        except Exception as e:
+        except Exception as e:  # crash-barrier: subagent tool loop
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")

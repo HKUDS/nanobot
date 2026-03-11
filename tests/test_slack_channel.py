@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.channels.retry import ChannelHealth
 from nanobot.channels.slack import SlackChannel
 
 
@@ -30,6 +31,7 @@ def _channel() -> SlackChannel:
     ch._socket_client = None
     ch._bot_user_id = "B123"
     ch._handle_message = AsyncMock()
+    ch._health = ChannelHealth()
     return ch
 
 
@@ -37,11 +39,13 @@ def _channel() -> SlackChannel:
 async def test_start_validation_and_stop() -> None:
     ch = _channel()
     ch.config.bot_token = ""
-    await ch.start()
+    with pytest.raises(ValueError):
+        await ch.start()
 
     ch.config.bot_token = "x"
     ch.config.mode = "invalid"
-    await ch.start()
+    with pytest.raises(ValueError):
+        await ch.start()
 
     ch._socket_client = SimpleNamespace(close=AsyncMock())
     await ch.stop()

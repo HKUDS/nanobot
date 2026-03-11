@@ -39,7 +39,7 @@ def _validate_url(url: str) -> tuple[bool, str]:
         if not p.netloc:
             return False, "Missing domain"
         return True, ""
-    except Exception as e:
+    except ValueError as e:
         return False, str(e)
 
 
@@ -101,7 +101,7 @@ class WebSearchTool(Tool):
                 if desc := item.get("description"):
                     lines.append(f"   {desc}")
             return ToolResult.ok("\n".join(lines))
-        except Exception as e:
+        except Exception as e:  # crash-barrier: third-party httpx + API errors
             return ToolResult.fail(f"Error: {e}")
 
 
@@ -183,7 +183,7 @@ class WebFetchTool(Tool):
                 ensure_ascii=False,
             )
             return ToolResult.ok(output, truncated=truncated)
-        except Exception as e:
+        except Exception as e:  # crash-barrier: third-party httpx + readability errors
             return ToolResult.fail(json.dumps({"error": str(e), "url": url}, ensure_ascii=False))
 
     def _to_markdown(self, html: str) -> str:

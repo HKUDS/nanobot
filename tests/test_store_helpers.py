@@ -22,16 +22,7 @@ def _seed_events(store: MemoryStore, events: list[dict[str, object]]) -> None:
 
 
 class TestMemoryStoreExtraHelpers:
-    def test_env_bool_and_datetime_parsers(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("NB_BOOL_TRUE", "yes")
-        monkeypatch.setenv("NB_BOOL_FALSE", "off")
-        monkeypatch.setenv("NB_BOOL_INVALID", "maybe")
-
-        assert MemoryStore._env_bool("NB_BOOL_TRUE") is True
-        assert MemoryStore._env_bool("NB_BOOL_FALSE") is False
-        assert MemoryStore._env_bool("NB_BOOL_INVALID") is None
-        assert MemoryStore._env_bool("NB_BOOL_MISSING") is None
-
+    def test_datetime_parsers(self) -> None:
         assert MemoryStore._to_datetime("2026-01-01T00:00:00Z") is not None
         assert MemoryStore._to_datetime("invalid") is None
 

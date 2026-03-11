@@ -16,6 +16,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.retry import retry_send
 from nanobot.config.schema import FeishuConfig
 
 try:
@@ -317,7 +318,7 @@ class FeishuChannel(BaseChannel):
             while self._running:
                 try:
                     self._ws_client.start()
-                except Exception as e:
+                except Exception as e:  # crash-barrier: Lark/Feishu API
                     logger.warning("Feishu WebSocket error: {}", e)
                 if self._running:
                     import time
@@ -340,7 +341,7 @@ class FeishuChannel(BaseChannel):
         if self._ws_client:
             try:
                 self._ws_client.stop()
-            except Exception as e:
+            except Exception as e:  # crash-barrier: Lark/Feishu API
                 logger.warning("Error stopping WebSocket client: {}", e)
         logger.info("Feishu bot stopped")
 
@@ -366,7 +367,7 @@ class FeishuChannel(BaseChannel):
                 )
             else:
                 logger.debug("Added {} reaction to message {}", emoji_type, message_id)
-        except Exception as e:
+        except Exception as e:  # crash-barrier: Lark/Feishu API
             logger.warning("Error adding reaction: {}", e)
 
     async def _add_reaction(self, message_id: str, emoji_type: str = "THUMBSUP") -> None:
@@ -503,7 +504,7 @@ class FeishuChannel(BaseChannel):
                         "Failed to upload image: code={}, msg={}", response.code, response.msg
                     )
                     return None
-        except Exception as e:
+        except Exception as e:  # crash-barrier: Lark/Feishu API
             logger.error("Error uploading image {}: {}", file_path, e)
             return None
 
@@ -535,7 +536,7 @@ class FeishuChannel(BaseChannel):
                         "Failed to upload file: code={}, msg={}", response.code, response.msg
                     )
                     return None
-        except Exception as e:
+        except Exception as e:  # crash-barrier: Lark/Feishu API
             logger.error("Error uploading file {}: {}", file_path, e)
             return None
 
@@ -563,7 +564,7 @@ class FeishuChannel(BaseChannel):
                     "Failed to download image: code={}, msg={}", response.code, response.msg
                 )
                 return None, None
-        except Exception as e:
+        except Exception as e:  # crash-barrier: Lark/Feishu API
             logger.error("Error downloading image {}: {}", image_key, e)
             return None, None
 
@@ -593,7 +594,7 @@ class FeishuChannel(BaseChannel):
                     response.msg,
                 )
                 return None, None
-        except Exception:
+        except Exception:  # crash-barrier: Lark/Feishu API
             logger.exception("Error downloading {} {}", resource_type, file_key)
             return None, None
 
@@ -668,7 +669,7 @@ class FeishuChannel(BaseChannel):
                 return False
             logger.debug("Feishu {} message sent to {}", msg_type, receive_id)
             return True
-        except Exception as e:
+        except Exception as e:  # crash-barrier: Lark/Feishu API
             logger.error("Error sending Feishu {} message: {}", msg_type, e)
             return False
 
@@ -678,7 +679,7 @@ class FeishuChannel(BaseChannel):
             logger.warning("Feishu client not initialized")
             return
 
-        try:
+        async def _do_send() -> None:
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
             loop = asyncio.get_running_loop()
 
@@ -725,8 +726,7 @@ class FeishuChannel(BaseChannel):
                     json.dumps(card, ensure_ascii=False),
                 )
 
-        except Exception as e:
-            logger.error("Error sending Feishu message: {}", e)
+        await retry_send(_do_send, channel_name=self.name, health=self._health)
 
     def _on_message_sync(self, data: "P2ImMessageReceiveV1") -> None:
         """
@@ -835,5 +835,5 @@ class FeishuChannel(BaseChannel):
                 },
             )
 
-        except Exception as e:
+        except Exception as e:  # crash-barrier: Lark/Feishu API
             logger.error("Error processing Feishu message: {}", e)

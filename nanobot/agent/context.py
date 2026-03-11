@@ -31,8 +31,10 @@ from typing import Any, Protocol
 from loguru import logger
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools.feedback import feedback_summary
+from nanobot.agent.tracing import bind_trace
 
 # ---------------------------------------------------------------------------
 # Async provider protocol (avoids circular import with providers module)
@@ -129,20 +131,17 @@ def compress_context(
 
     # Phase 3: drop all middle messages (extreme case)
     logger.warning("Context compression dropped all middle messages to fit budget")
+    bind_trace().debug(
+        "compress_context phase=3_drop_all original_tokens={} final_messages={}",
+        current,
+        len(system + tail),
+    )
     return system + tail
 
 
 # ---------------------------------------------------------------------------
 # Summarisation-based compression (async, uses LLM)
 # ---------------------------------------------------------------------------
-
-_SUMMARIZE_SYSTEM = (
-    "You are a context-compression assistant. "
-    "Summarise the following conversation excerpt into a concise digest (≤300 tokens). "
-    "Preserve: tool names used, key results, decisions made, any errors encountered. "
-    "Omit pleasantries and raw data dumps. "
-    "Respond with ONLY the summary text, no preamble."
-)
 
 # In-process cache: hash of serialised middle → summary text
 _summary_cache: dict[str, str] = {}
@@ -236,7 +235,7 @@ async def summarize_and_compress(
         try:
             resp = await provider.chat(
                 messages=[
-                    {"role": "system", "content": _SUMMARIZE_SYSTEM},
+                    {"role": "system", "content": prompts.get("compress")},
                     {"role": "user", "content": digest},
                 ],
                 tools=None,
@@ -247,12 +246,17 @@ async def summarize_and_compress(
             summary_text = (resp.content or "").strip()
             if summary_text:
                 _summary_cache[cache_key] = summary_text
+                bind_trace().debug(
+                    "summarize_and_compress phase=3_llm middle_msgs={} summary_tokens={}",
+                    len(middle),
+                    estimate_tokens(summary_text),
+                )
                 logger.debug(
                     "Summarised {} middle messages into {} tokens",
                     len(middle),
                     estimate_tokens(summary_text),
                 )
-        except Exception:
+        except (RuntimeError, TimeoutError):
             logger.warning("LLM summarisation failed; falling back to drop-all")
             summary_text = None
 
@@ -337,7 +341,7 @@ class ContextBuilder:
                 token_budget=self.memory_token_budget,
                 memory_md_token_cap=self.memory_md_token_cap,
             )
-        except Exception:
+        except (RuntimeError, KeyError, TypeError):
             logger.warning("Memory context retrieval failed; continuing without memory")
             memory = ""
         if memory:

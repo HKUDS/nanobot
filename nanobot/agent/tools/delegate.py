@@ -81,7 +81,7 @@ class DelegateTool(Tool):
             return ToolResult.ok(result)
         except _CycleError as exc:
             return ToolResult.fail(str(exc), error_type="cycle")
-        except Exception as exc:
+        except Exception as exc:  # crash-barrier: delegation dispatch callback
             return ToolResult.fail(f"Delegation failed: {exc}", error_type="delegation")
 
 

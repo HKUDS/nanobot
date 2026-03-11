@@ -16,6 +16,7 @@ from nanobot.channels.feishu import (
     _extract_post_text,
     _extract_share_card_content,
 )
+from nanobot.channels.retry import ChannelHealth
 
 
 def _channel() -> FeishuChannel:
@@ -27,6 +28,7 @@ def _channel() -> FeishuChannel:
     ch._ws_client = None
     ch.bus = SimpleNamespace(publish_inbound=AsyncMock())
     ch.config = SimpleNamespace()
+    ch._health = ChannelHealth()
     return ch
 
 

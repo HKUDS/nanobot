@@ -66,7 +66,7 @@ class CrossEncoderReranker:
         try:
             self._model = _cross_encoder_cls(self._model_name)
             logger.info("Loaded cross-encoder model: %s", self._model_name)
-        except Exception:
+        except Exception:  # crash-barrier: third-party ML model loading
             logger.warning("Failed to load cross-encoder model %s", self._model_name, exc_info=True)
             self._model = None
         return self._model
@@ -112,7 +112,7 @@ class CrossEncoderReranker:
         pairs = [(query, str(item.get("summary", ""))) for item in items]
         try:
             ce_scores: list[float] = [float(s) for s in model.predict(pairs)]
-        except Exception:
+        except Exception:  # crash-barrier: third-party ML model inference
             logger.warning("Cross-encoder prediction failed", exc_info=True)
             return items
 

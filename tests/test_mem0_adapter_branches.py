@@ -123,6 +123,9 @@ def _adapter() -> _Mem0Adapter:
     adapter.last_add_mode = "unknown"
     adapter._infer_true_disabled = False
     adapter._infer_true_disable_reason = ""
+    adapter._add_debug = False
+    adapter._verify_write = True
+    adapter._force_infer_true = False
     return adapter
 
 
@@ -208,7 +211,7 @@ def test_add_text_disables_infer_true_and_falls_back(monkeypatch: pytest.MonkeyP
     adapter = _adapter()
     adapter.mode = "hosted"
     adapter.client = _AddClient()
-    monkeypatch.setenv("NANOBOT_MEM0_VERIFY_WRITE", "0")
+    adapter._verify_write = False
 
     assert adapter.add_text("hello", metadata={"topic": "x"}) is True
     assert adapter._infer_true_disabled is True
@@ -280,8 +283,8 @@ def test_add_text_non_hosted_paths_and_local_fallback(monkeypatch: pytest.Monkey
     adapter = _adapter()
     adapter.mode = "oss"
     adapter.get_all_count = lambda limit=200: 0  # type: ignore[method-assign]
-    monkeypatch.setenv("NANOBOT_MEM0_VERIFY_WRITE", "0")
-    monkeypatch.setenv("NANOBOT_MEM0_FORCE_INFER_TRUE", "1")
+    adapter._verify_write = False
+    adapter._force_infer_true = True
 
     # infer_false_primary fails -> infer_true_forced succeeds
     adapter.client = _AddModeClient([RuntimeError("x"), {"ok": True}])

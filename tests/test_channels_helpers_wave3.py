@@ -11,6 +11,9 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.channels.dingtalk import DingTalkChannel, NanobotDingTalkHandler
 from nanobot.channels.mochat import (
     MochatBufferedEntry,
+    _make_synthetic_event,
+    _safe_dict,
+    _str_field,
     build_buffered_body,
     extract_mention_ids,
     normalize_mochat_content,
@@ -18,9 +21,6 @@ from nanobot.channels.mochat import (
     resolve_mochat_target,
     resolve_require_mention,
     resolve_was_mentioned,
-    _make_synthetic_event,
-    _safe_dict,
-    _str_field,
 )
 from nanobot.channels.slack import SlackChannel
 from nanobot.channels.telegram import TelegramChannel, _markdown_to_telegram_html, _split_message
@@ -31,7 +31,6 @@ from nanobot.config.schema import (
     MochatGroupRule,
     MochatMentionConfig,
     SlackConfig,
-    TelegramConfig,
     WhatsAppConfig,
 )
 

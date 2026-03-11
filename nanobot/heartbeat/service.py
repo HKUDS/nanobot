@@ -78,7 +78,7 @@ class HeartbeatService:
         if self.heartbeat_file.exists():
             try:
                 return self.heartbeat_file.read_text(encoding="utf-8")
-            except Exception:
+            except (OSError, UnicodeDecodeError):
                 return None
         return None
 
@@ -140,7 +140,7 @@ class HeartbeatService:
                     await self._tick()
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except Exception as e:  # crash-barrier: long-running service loop
                 logger.error("Heartbeat error: {}", e)
 
     async def _tick(self) -> None:
@@ -165,7 +165,7 @@ class HeartbeatService:
                 if response and self.on_notify:
                     logger.info("Heartbeat: completed, delivering response")
                     await self.on_notify(response)
-        except Exception:
+        except Exception:  # crash-barrier: LLM + callback chain
             logger.exception("Heartbeat execution failed")
 
     async def trigger_now(self) -> str | None:

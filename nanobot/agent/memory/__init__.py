@@ -27,6 +27,7 @@ Architecture
 - **constants.py** — Shared constants and tool schemas.
 """
 
+from .event import KnowledgeTriple, MemoryEvent
 from .extractor import MemoryExtractor
 from .graph import KnowledgeGraph
 from .mem0_adapter import _Mem0Adapter, _Mem0RuntimeInfo
@@ -48,6 +49,8 @@ from .reranker import CrossEncoderReranker
 from .store import MemoryStore
 
 __all__ = [
+    "KnowledgeTriple",
+    "MemoryEvent",
     "MemoryStore",
     "MemoryExtractor",
     "MemoryPersistence",

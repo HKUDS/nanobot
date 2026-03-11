@@ -47,7 +47,7 @@ def _flush_pending_tty_input() -> None:
         fd = sys.stdin.fileno()
         if not os.isatty(fd):
             return
-    except Exception:
+    except Exception:  # crash-barrier: stdin may not be a tty
         return
 
     try:
@@ -55,7 +55,7 @@ def _flush_pending_tty_input() -> None:
 
         termios.tcflush(fd, termios.TCIFLUSH)
         return
-    except Exception:
+    except (OSError, ImportError, AttributeError):
         pass
 
     try:
@@ -65,7 +65,7 @@ def _flush_pending_tty_input() -> None:
                 break
             if not os.read(fd, 4096):
                 break
-    except Exception:
+    except OSError:
         return
 
 
@@ -77,7 +77,7 @@ def _restore_terminal() -> None:
         import termios
 
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
-    except Exception:
+    except (OSError, ImportError, AttributeError):
         pass
 
 
@@ -90,7 +90,7 @@ def _init_prompt_session() -> None:
         import termios
 
         _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
-    except Exception:
+    except (OSError, ImportError, AttributeError):
         pass
 
     history_file = Path.home() / ".nanobot" / "history" / "cli_history"
@@ -126,7 +126,7 @@ async def _drain_pending_tasks(timeout: float = 0.25) -> None:
         return
     try:
         await asyncio.wait(pending, timeout=timeout)
-    except Exception:
+    except Exception:  # crash-barrier: must not break shutdown
         return
 
 
@@ -300,17 +300,40 @@ def _make_provider(config: Config):
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=provider_name,
+        llm_timeout_s=config.llm.timeout_s,
+        llm_max_retries=config.llm.max_retries,
     )
 
 
 def _make_agent_config(config: Config) -> AgentConfig:
-    """Build an ``AgentConfig`` from the root ``Config``."""
+    """Build an ``AgentConfig`` from the root ``Config``.
+
+    Feature flags from ``config.features`` act as master kill-switches:
+    when a flag is ``False``, the corresponding ``AgentConfig`` field is
+    forced off regardless of the per-agent default.
+    """
     from nanobot.config.schema import AgentConfig
 
-    return AgentConfig.from_defaults(
-        config.agents.defaults,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-    )
+    overrides: dict[str, object] = {
+        "restrict_to_workspace": config.tools.restrict_to_workspace,
+    }
+
+    # Apply feature-flag overrides (only disable, never force-enable)
+    feat = config.features
+    if not feat.planning_enabled:
+        overrides["planning_enabled"] = False
+    if not feat.verification_enabled:
+        overrides["verification_mode"] = "off"
+    if not feat.delegation_enabled:
+        overrides["delegation_enabled"] = False
+    if not feat.memory_enabled:
+        overrides["memory_enabled"] = False
+    if not feat.skills_enabled:
+        overrides["skills_enabled"] = False
+    if not feat.streaming_enabled:
+        overrides["streaming_enabled"] = False
+
+    return AgentConfig.from_defaults(config.agents.defaults, **overrides)
 
 
 # ============================================================================
@@ -904,7 +927,7 @@ def cron_list(
             try:
                 tz = ZoneInfo(job.schedule.tz) if job.schedule.tz else None
                 next_run = _dt.fromtimestamp(ts, tz).strftime("%Y-%m-%d %H:%M")
-            except Exception:
+            except (ValueError, OSError, TypeError):
                 next_run = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
 
         status = "[green]enabled[/green]" if job.enabled else "[dim]disabled[/dim]"
@@ -1146,7 +1169,7 @@ def routing_metrics_cmd():
 
     try:
         data = json.loads(metrics_path.read_text(encoding="utf-8"))
-    except Exception as exc:
+    except (json.JSONDecodeError, FileNotFoundError, UnicodeDecodeError) as exc:
         console.print(f"[red]Failed to read metrics:[/red] {exc}")
         raise typer.Exit(1)
 
@@ -1381,7 +1404,7 @@ def memory_metrics(
             raise typer.Exit(1)
         try:
             payload = json.loads(baseline_path.read_text(encoding="utf-8"))
-        except Exception as exc:
+        except (json.JSONDecodeError, FileNotFoundError, UnicodeDecodeError) as exc:
             console.print(f"[red]Failed to parse baseline file:[/red] {exc}")
             raise typer.Exit(1)
         baseline_metrics = payload.get("metrics", {}) if isinstance(payload, dict) else {}
@@ -1685,7 +1708,7 @@ def memory_eval(
 
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
+    except (json.JSONDecodeError, FileNotFoundError, UnicodeDecodeError) as exc:
         console.print(f"[red]Failed to parse benchmark file:[/red] {exc}")
         raise typer.Exit(1)
 
@@ -2090,7 +2113,7 @@ def _login_openai_codex() -> None:
         token = None
         try:
             token = get_token()
-        except Exception:
+        except Exception:  # crash-barrier: token errors must not prevent login flow
             pass
         if not (token and token.access):
             console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
@@ -2127,7 +2150,7 @@ def _login_github_copilot() -> None:
     try:
         asyncio.run(_trigger())
         console.print("[green]✓ Authenticated with GitHub Copilot[/green]")
-    except Exception as e:
+    except Exception as e:  # crash-barrier: catch all provider/auth errors
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
 

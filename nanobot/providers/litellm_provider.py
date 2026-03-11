@@ -1,6 +1,5 @@
 """LiteLLM provider implementation for multi-provider support."""
 
-import os
 from typing import Any, AsyncIterator
 
 import json_repair
@@ -30,10 +29,15 @@ class LiteLLMProvider(LLMProvider):
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
+        *,
+        llm_timeout_s: float = 60.0,
+        llm_max_retries: int = 1,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self._timeout_s = max(1.0, llm_timeout_s)
+        self._max_retries = max(0, llm_max_retries)
 
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -54,6 +58,8 @@ class LiteLLMProvider(LLMProvider):
 
     def _setup_env(self, api_key: str, api_base: str | None, model: str) -> None:
         """Set environment variables based on detected provider."""
+        import os
+
         spec = self._gateway or find_by_model(model)
         if not spec:
             return
@@ -201,17 +207,8 @@ class LiteLLMProvider(LLMProvider):
             "temperature": temperature,
         }
         # Bound remote latency and retry fan-out so a single request cannot block indefinitely.
-        # Env overrides allow tuning without code changes.
-        try:
-            timeout_s = float(os.getenv("NANOBOT_LLM_TIMEOUT_S", "60"))
-        except ValueError:
-            timeout_s = 60.0
-        try:
-            max_retries = int(os.getenv("NANOBOT_LLM_MAX_RETRIES", "1"))
-        except ValueError:
-            max_retries = 1
-        kwargs["timeout"] = max(1.0, timeout_s)
-        kwargs["num_retries"] = max(0, max_retries)
+        kwargs["timeout"] = self._timeout_s
+        kwargs["num_retries"] = self._max_retries
 
         # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
         self._apply_model_overrides(model, kwargs)
@@ -235,7 +232,7 @@ class LiteLLMProvider(LLMProvider):
         try:
             response = await acompletion(**kwargs)
             return self._parse_response(response)
-        except Exception as e:
+        except Exception as e:  # crash-barrier: LLM provider errors are varied
             # Return error as content for graceful handling
             return LLMResponse(
                 content=f"Error calling LLM: {str(e)}",
@@ -313,16 +310,8 @@ class LiteLLMProvider(LLMProvider):
             "temperature": temperature,
             "stream": True,
         }
-        try:
-            timeout_s = float(os.getenv("NANOBOT_LLM_TIMEOUT_S", "60"))
-        except ValueError:
-            timeout_s = 60.0
-        try:
-            max_retries = int(os.getenv("NANOBOT_LLM_MAX_RETRIES", "1"))
-        except ValueError:
-            max_retries = 1
-        kwargs["timeout"] = max(1.0, timeout_s)
-        kwargs["num_retries"] = max(0, max_retries)
+        kwargs["timeout"] = self._timeout_s
+        kwargs["num_retries"] = self._max_retries
 
         self._apply_model_overrides(resolved, kwargs)
 
@@ -389,7 +378,7 @@ class LiteLLMProvider(LLMProvider):
                         frag = tc_fragments[_idx]
                         try:
                             args = json_repair.loads(frag["arguments"])
-                        except Exception:
+                        except (ValueError, KeyError, TypeError):
                             args = {}
                         tool_calls.append(
                             ToolCallRequest(
@@ -408,7 +397,7 @@ class LiteLLMProvider(LLMProvider):
                     done=done,
                 )
 
-        except Exception as e:
+        except Exception as e:  # crash-barrier: streaming errors are varied
             yield StreamChunk(
                 content_delta=f"Error calling LLM: {e}",
                 finish_reason="error",
@@ -422,5 +411,5 @@ class LiteLLMProvider(LLMProvider):
             return
         try:
             await close_async_clients()
-        except Exception:
+        except (RuntimeError, OSError, AttributeError):
             return

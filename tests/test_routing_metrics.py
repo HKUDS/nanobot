@@ -79,6 +79,7 @@ def _make_loop(tmp_path: Path, provider: LLMProvider | None = None):
     loop._coordinator = Coordinator(
         provider=prov, registry=registry, default_role="general"
     )
+    loop._dispatcher.coordinator = loop._coordinator
     loop._wire_delegate_tools()
 
     # Set up routing metrics (normally done in run())
@@ -86,6 +87,7 @@ def _make_loop(tmp_path: Path, provider: LLMProvider | None = None):
         tmp_path / "memory" / "routing_metrics.json",
         flush_interval_s=300.0,
     )
+    loop._dispatcher.routing_metrics = loop._routing_metrics
     loop._trace_path = tmp_path / "memory" / "routing_trace.jsonl"
     return loop
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +9,6 @@ import pytest
 
 from nanobot.channels.mochat import (
     MAX_SEEN_MESSAGE_IDS,
-    DelayState,
     MochatBufferedEntry,
     MochatChannel,
 )

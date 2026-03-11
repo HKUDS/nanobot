@@ -2,5 +2,6 @@
 
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
+from nanobot.channels.retry import ChannelHealth
 
-__all__ = ["BaseChannel", "ChannelManager"]
+__all__ = ["BaseChannel", "ChannelHealth", "ChannelManager"]
