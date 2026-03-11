@@ -44,6 +44,7 @@ class LiteLLMProvider(LLMProvider):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self.provider_name = provider_name
 
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;

@@ -53,6 +53,12 @@ def _get_provider_name(provider: Any) -> str | None:
     if isinstance(gateway_name, str) and gateway_name:
         return gateway_name.lower()
 
+    default_model = getattr(provider, "default_model", None)
+    if isinstance(default_model, str) and "/" in default_model:
+        prefix = default_model.split("/", 1)[0].lower()
+        if prefix:
+            return prefix
+
     return None
 
 
@@ -148,7 +154,7 @@ class MemoryStore:
 
         try:
             tool_choice = _build_memory_tool_choice(provider)
-            response = await provider.chat(
+            response = await provider.chat_with_retry(
                 messages=[
                     {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
                     {"role": "user", "content": prompt},
