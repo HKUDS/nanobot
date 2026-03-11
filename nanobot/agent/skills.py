@@ -43,26 +43,23 @@ class SkillsLoader:
             List of skill info dicts with 'name', 'path', 'source'.
         """
         skills = []
+        seen_names: set[str] = set()
 
-        # Workspace skills (highest priority)
-        if self.workspace_skills.exists():
-            for skill_dir in self.workspace_skills.iterdir():
-                if skill_dir.is_dir():
-                    skill_file = skill_dir / "SKILL.md"
-                    if skill_file.exists():
-                        skills.append(
-                            {"name": skill_dir.name, "path": str(skill_file), "source": "workspace"}
-                        )
+        # Workspace skills (highest priority) — recursive discovery
+        for skill_dir in self._find_all_skill_dirs(self.workspace_skills):
+            if skill_dir.name not in seen_names:
+                skills.append(
+                    {"name": skill_dir.name, "path": str(skill_dir / "SKILL.md"), "source": "workspace"}
+                )
+                seen_names.add(skill_dir.name)
 
-        # Built-in skills
-        if self.builtin_skills and self.builtin_skills.exists():
-            for skill_dir in self.builtin_skills.iterdir():
-                if skill_dir.is_dir():
-                    skill_file = skill_dir / "SKILL.md"
-                    if skill_file.exists() and not any(s["name"] == skill_dir.name for s in skills):
-                        skills.append(
-                            {"name": skill_dir.name, "path": str(skill_file), "source": "builtin"}
-                        )
+        # Built-in skills — recursive discovery
+        for skill_dir in self._find_all_skill_dirs(self.builtin_skills):
+            if skill_dir.name not in seen_names:
+                skills.append(
+                    {"name": skill_dir.name, "path": str(skill_dir / "SKILL.md"), "source": "builtin"}
+                )
+                seen_names.add(skill_dir.name)
 
         # Filter by requirements
         if filter_unavailable:
@@ -79,17 +76,9 @@ class SkillsLoader:
         Returns:
             Skill content or None if not found.
         """
-        # Check workspace first
-        workspace_skill = self.workspace_skills / name / "SKILL.md"
-        if workspace_skill.exists():
-            return workspace_skill.read_text(encoding="utf-8")
-
-        # Check built-in
-        if self.builtin_skills:
-            builtin_skill = self.builtin_skills / name / "SKILL.md"
-            if builtin_skill.exists():
-                return builtin_skill.read_text(encoding="utf-8")
-
+        skill_dir = self._resolve_skill_dir(name)
+        if skill_dir is not None:
+            return (skill_dir / "SKILL.md").read_text(encoding="utf-8")
         return None
 
     def load_skills_for_context(self, skill_names: list[str]) -> str:
@@ -267,14 +256,11 @@ class SkillsLoader:
 
     def _find_skill_tools_py(self, name: str) -> Path | None:
         """Return the path to a skill's ``tools.py`` if it exists."""
-        # Workspace skills take priority
-        workspace_path = self.workspace_skills / name / "tools.py"
-        if workspace_path.is_file():
-            return workspace_path
-        if self.builtin_skills:
-            builtin_path = self.builtin_skills / name / "tools.py"
-            if builtin_path.is_file():
-                return builtin_path
+        skill_dir = self._resolve_skill_dir(name)
+        if skill_dir is not None:
+            tools_path = skill_dir / "tools.py"
+            if tools_path.is_file():
+                return tools_path
         return None
 
     @staticmethod
@@ -319,6 +305,26 @@ class SkillsLoader:
                         attr_name,
                     )
         return instances
+
+    @staticmethod
+    def _find_all_skill_dirs(root: Path | None) -> list[Path]:
+        """Recursively find all directories containing SKILL.md under *root*."""
+        if root is None or not root.exists():
+            return []
+        return sorted(
+            {p.parent for p in root.rglob("SKILL.md") if p.parent != root},
+            key=lambda d: d.name,
+        )
+
+    def _resolve_skill_dir(self, name: str) -> Path | None:
+        """Resolve a skill name to its directory (workspace first, then builtin)."""
+        for skill_dir in self._find_all_skill_dirs(self.workspace_skills):
+            if skill_dir.name == name:
+                return skill_dir
+        for skill_dir in self._find_all_skill_dirs(self.builtin_skills):
+            if skill_dir.name == name:
+                return skill_dir
+        return None
 
     def get_skill_metadata(self, name: str) -> dict | None:
         """

@@ -14,13 +14,18 @@
   with a retry hint appended so the LLM can self-correct.
 """
 
+from __future__ import annotations
+
 import asyncio
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tracing import bind_trace
 from nanobot.errors import ToolExecutionError, ToolNotFoundError, ToolValidationError
+
+if TYPE_CHECKING:
+    from nanobot.agent.tools.result_cache import ToolResultCache, _ChatProvider
 
 
 class ToolRegistry:
@@ -31,10 +36,25 @@ class ToolRegistry:
     """
 
     _HINT = "\n\n[Analyze the error above and try a different approach.]"
+    _SUMMARY_THRESHOLD = 3000  # chars — cache results larger than this
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
         self._write_lock = asyncio.Lock()
+        self._cache: ToolResultCache | None = None
+        self._summary_provider: _ChatProvider | None = None
+        self._summary_model: str | None = None
+
+    def set_cache(
+        self,
+        cache: ToolResultCache,
+        provider: _ChatProvider | None = None,
+        summary_model: str | None = None,
+    ) -> None:
+        """Attach a result cache and optional LLM summary provider."""
+        self._cache = cache
+        self._summary_provider = provider
+        self._summary_model = summary_model
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
@@ -62,11 +82,28 @@ class ToolRegistry:
         Always returns a ``ToolResult``.  Legacy tools that still return a
         bare string are automatically wrapped.  Non-readonly tools acquire
         a write lock so parallel delegations don't interleave writes.
+
+        When a cache is attached, duplicate calls for the same tool+args
+        return the cached summary without re-executing.
         """
         tool = self._tools.get(name)
         if not tool:
             not_found_err = ToolNotFoundError(name, self.tool_names)
             return ToolResult.fail(str(not_found_err), error_type="not_found")
+
+        # Duplicate-call guard: return cached summary if available
+        if self._cache and tool.readonly and tool.cacheable:
+            hit_key = self._cache.has(name, params)
+            if hit_key:
+                entry = self._cache.get(hit_key)
+                if entry:
+                    logger.info("Cache HIT for {}(…) → {}", name, hit_key)
+                    return ToolResult.ok(
+                        entry.summary,
+                        cache_key=hit_key,
+                        cached=True,
+                        summary=entry.summary,
+                    )
 
         if tool.readonly:
             return await self._execute_inner(name, tool, params)
@@ -115,6 +152,22 @@ class ToolRegistry:
                 result.success,
                 duration_ms,
             )
+
+            # Cache large successful results and generate summary
+            if (
+                result.success
+                and self._cache
+                and tool.cacheable
+                and len(result.output) > self._SUMMARY_THRESHOLD
+            ):
+                await self._cache.store_with_summary(
+                    name,
+                    params,
+                    result,
+                    provider=self._summary_provider,
+                    model=self._summary_model,
+                )
+
             return result
 
         except ToolExecutionError as e:

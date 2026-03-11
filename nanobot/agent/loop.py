@@ -49,11 +49,13 @@ from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tool_executor import ToolExecutor
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool
+from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool, _CycleError
+from nanobot.agent.tools.excel import ExcelFindTool, ExcelGetRowsTool, ReadExcelTool
 from nanobot.agent.tools.feedback import FeedbackTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.result_cache import CacheGetSliceTool, ToolResultCache
 from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
@@ -158,6 +160,7 @@ class AgentLoop:
             "memory_vector_health_enabled": config.memory_vector_health_enabled,
             "memory_auto_reindex_on_empty_vector": config.memory_auto_reindex_on_empty_vector,
             "memory_history_fallback_enabled": config.memory_history_fallback_enabled,
+            "conflict_auto_resolve_gap": config.memory_conflict_auto_resolve_gap,
             "memory_fallback_allowed_sources": config.memory_fallback_allowed_sources
             or ["profile", "events", "mem0_get_all"],
             "memory_fallback_max_summary_chars": config.memory_fallback_max_summary_chars,
@@ -195,6 +198,12 @@ class AgentLoop:
         )
         self.sessions = session_manager or SessionManager(self.workspace)
         self.tools = ToolExecutor(ToolRegistry())
+        self.result_cache = ToolResultCache(workspace=self.workspace)
+        self.tools._registry.set_cache(
+            self.result_cache,
+            provider=provider,
+            summary_model=config.tool_summary_model or None,
+        )
         self.subagents = SubagentManager(
             provider=provider,
             workspace=self.workspace,
@@ -320,6 +329,10 @@ class AgentLoop:
             if _should_register(tool.name):
                 self.tools.register(tool)
 
+        excel_tool = ReadExcelTool(workspace=self.workspace, allowed_dir=allowed_dir)
+        if _should_register(excel_tool.name):
+            self.tools.register(excel_tool)
+
         exec_tool = ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
@@ -366,6 +379,19 @@ class AgentLoop:
         if self.config.skills_enabled:
             for skill_tool in self.context.skills.discover_tools():
                 self.tools.register(skill_tool)
+
+        # Cache retrieval tools
+        cache_slice = CacheGetSliceTool(cache=self.result_cache)
+        if _should_register(cache_slice.name):
+            self.tools.register(cache_slice)
+
+        excel_rows = ExcelGetRowsTool(cache=self.result_cache)
+        if _should_register(excel_rows.name):
+            self.tools.register(excel_rows)
+
+        excel_find = ExcelFindTool(cache=self.result_cache)
+        if _should_register(excel_find.name):
+            self.tools.register(excel_find)
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -578,6 +604,7 @@ class AgentLoop:
                 provider=self.provider,
                 model=summary_model,
                 tool_token_threshold=self.config.tool_result_context_tokens,
+                preserve_recent=20,
             )
 
             tools_def = self.tools.get_definitions()
@@ -1453,14 +1480,11 @@ class AgentLoop:
         except (RuntimeError, KeyError, TypeError):
             logger.exception("Live correction capture failed")
 
-        # Proactively ask for unresolved conflicts discovered during prior consolidation turns.
-        pending_conflict_question = memory_store.ask_user_for_conflict()
-        if pending_conflict_question:
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=pending_conflict_question,
-            )
+        # Defer conflict questions until after the agent answers the user's message.
+        # We check here and append to the response later instead of blocking.
+        pending_conflict_question = memory_store.ask_user_for_conflict(
+            user_message=msg.content,
+        )
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (
@@ -1559,6 +1583,10 @@ class AgentLoop:
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
+
+        # Append deferred conflict question after answering the user's message.
+        if pending_conflict_question:
+            final_content += "\n\n---\n" + pending_conflict_question
 
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
