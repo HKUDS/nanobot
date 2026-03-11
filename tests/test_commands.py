@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from nanobot.cli.commands import app
+from nanobot.cli.commands import app, run_gateway_foreground_loop
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
@@ -290,9 +290,9 @@ def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Pa
         lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
     )
 
-    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+    with pytest.raises(_StopGateway):
+        run_gateway_foreground_loop(config_path=str(config_file))
 
-    assert isinstance(result.exception, _StopGateway)
     assert seen["config_path"] == config_file.resolve()
     assert seen["workspace"] == Path(config.agents.defaults.workspace)
 
@@ -318,12 +318,12 @@ def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) 
         lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
     )
 
-    result = runner.invoke(
-        app,
-        ["gateway", "--config", str(config_file), "--workspace", str(override)],
-    )
+    with pytest.raises(_StopGateway):
+        run_gateway_foreground_loop(
+            config_path=str(config_file),
+            workspace=str(override),
+        )
 
-    assert isinstance(result.exception, _StopGateway)
     assert seen["workspace"] == override
     assert config.workspace_path == override
 
@@ -351,9 +351,9 @@ def test_gateway_uses_config_directory_for_cron_store(monkeypatch, tmp_path: Pat
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _StopCron)
 
-    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+    with pytest.raises(_StopGateway):
+        run_gateway_foreground_loop(config_path=str(config_file))
 
-    assert isinstance(result.exception, _StopGateway)
     assert seen["cron_store"] == config_file.parent / "cron" / "jobs.json"
 
 

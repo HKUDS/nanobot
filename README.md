@@ -261,7 +261,7 @@ nanobot will automatically register, configure `~/.nanobot/config.json`, and con
 **2. Restart gateway**
 
 ```bash
-nanobot gateway
+nanobot gateway restart
 ```
 
 That's it — nanobot handles the rest!
@@ -1045,13 +1045,43 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot agent` | Interactive chat mode |
 | `nanobot agent --no-markdown` | Show plain-text replies |
 | `nanobot agent --logs` | Show runtime logs during chat |
-| `nanobot gateway` | Start the gateway |
+| `nanobot gateway` | Start gateway via runtime facade (macOS/Linux/Windows default managed background; kill switch available) |
+| `nanobot gateway restart` | Unified restart entry (legacy mode returns non-destructive hint) |
+| `nanobot gateway status` | Show gateway runtime mode/reason/platform/status |
+| `nanobot gateway logs` | Show gateway logs or legacy-mode hint |
 | `nanobot status` | Show status |
 | `nanobot provider login openai-codex` | OAuth login for providers |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
+
+### Gateway runtime compatibility (framework phase)
+
+- Unified gateway control semantics are available via `gateway`, `gateway restart`, `gateway status`, and `gateway logs`.
+- Current rollout keeps **Darwin, Linux, and Windows in `background_managed` by default**.
+- `NANOBOT_GATEWAY_MODE=foreground|background` is supported as a runtime mode hint.
+- `NANOBOT_GATEWAY_KILL_SWITCH=1` force-enables legacy foreground mode for emergency rollback.
+- On macOS/Linux/Windows auto mode (`nanobot gateway`), daemon bootstrap failure falls back to legacy foreground with an explainable reason.
+- When explicitly requesting daemon mode (`nanobot gateway --background`), startup failures are surfaced as errors (no silent fallback).
+- Use `--workspace/-w` and `--config/-c` to target an instance consistently across `gateway`, `gateway restart`, `gateway status`, and `gateway logs`.
+- For `restart/status/logs`, pass control flags after the subcommand, for example `nanobot gateway status --workspace ~/.nanobot/botA`.
+
+Examples:
+
+```bash
+# Start instance A
+nanobot gateway --workspace ~/.nanobot/botA --port 18791
+
+# Show instance A status
+nanobot gateway status --workspace ~/.nanobot/botA
+
+# Read instance B logs
+nanobot gateway logs --workspace ~/.nanobot/botB --tail 50 --no-follow
+
+# Restart instance C
+nanobot gateway restart --workspace ~/.nanobot/botC --config ~/.nanobot/botC/config.json
+```
 
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>

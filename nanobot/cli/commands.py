@@ -2,10 +2,12 @@
 
 import asyncio
 import os
+import platform
 import select
 import signal
 import sys
 from pathlib import Path
+from typing import Callable
 
 # Force UTF-8 encoding for Windows console
 if sys.platform == "win32":
@@ -19,6 +21,7 @@ if sys.platform == "win32":
             pass
 
 import typer
+from click.core import ParameterSource
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
@@ -288,14 +291,18 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
 # ============================================================================
 
 
-@app.command()
-def gateway(
-    port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+def run_gateway_foreground_loop(
+    port: int | None = None,
+    verbose: bool = False,
+    workspace: str | None = None,
+    config_path: str | None = None,
 ):
-    """Start the nanobot gateway."""
+    """Run gateway using the legacy foreground execution path.
+
+    This function remains the single source of truth for gateway business
+    execution. Runtime adapters should delegate here instead of duplicating
+    agent/channel/cron setup logic.
+    """
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
@@ -309,7 +316,7 @@ def gateway(
         import logging
         logging.basicConfig(level=logging.DEBUG)
 
-    config = _load_runtime_config(config, workspace)
+    config = _load_runtime_config(config_path, workspace)
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
@@ -467,6 +474,318 @@ def gateway(
             await channels.stop_all()
 
     asyncio.run(run())
+
+
+# Gateway commands are grouped under a sub-app to expose unified runtime
+# semantics: `gateway`, `gateway restart`, `gateway status`, `gateway logs`.
+gateway_app = typer.Typer(
+    help="Start and manage the nanobot gateway runtime.",
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
+app.add_typer(gateway_app, name="gateway")
+
+
+def _resolve_gateway_cli_mode(*, foreground: bool, background: bool) -> str | None:
+    """Normalize CLI mode flags into policy input.
+
+    The policy layer expects a single hint string; CLI keeps ergonomic flags.
+    """
+    if foreground and background:
+        console.print("[red]Error: --foreground and --background cannot be used together.[/red]")
+        raise typer.Exit(1)
+    if foreground:
+        return "foreground"
+    if background:
+        return "background"
+    return None
+
+
+def _print_gateway_runtime_status(status, *, title: str | None = None) -> None:
+    """Render a compact, explainable runtime status summary."""
+    if title is not None:
+        console.print(title)
+    console.print(f"Mode: {status.mode.value}")
+    console.print(f"Reason: {status.reason}")
+    console.print(f"Platform: {status.platform}")
+    console.print(f"Rollout: {status.rollout_stage}")
+    console.print(f"Running: {'yes' if status.running else 'no'}")
+    if status.pid is not None:
+        console.print(f"PID: {status.pid}")
+    if status.pgid is not None:
+        console.print(f"PGID: {status.pgid}")
+    if status.started_at is not None:
+        console.print(f"Started At: {status.started_at}")
+    if status.log_path is not None:
+        console.print(f"Logs: {status.log_path}")
+
+
+def _build_gateway_runtime_facade(
+    *,
+    cli_mode: str | None,
+    workspace: str | None = None,
+    config_path: str | None = None,
+    run_foreground_loop: Callable[[int, bool, str | None, str | None], None] | None = None,
+    prefer_recorded_mode: bool = False,
+    preserve_live_legacy_restart_guard: bool = False,
+):
+    """Create runtime facade and resolved policy for current invocation."""
+    from nanobot.gateway_runtime.facade import GatewayRuntimeFacade
+    from nanobot.gateway_runtime.policy import resolve_runtime_policy
+    from nanobot.gateway_runtime.state_store import (
+        GatewayStateStore,
+        build_gateway_instance_key,
+    )
+
+    resolved_policy = resolve_runtime_policy(
+        cli_mode=cli_mode,
+        platform_name=platform.system(),
+    )
+    instance_key = build_gateway_instance_key(
+        workspace=workspace,
+        config_path=config_path,
+    )
+    state_store = GatewayStateStore(instance_key=instance_key)
+    facade = GatewayRuntimeFacade(
+        run_foreground_loop=run_foreground_loop,
+        policy=resolved_policy,
+        state_store=state_store,
+        prefer_recorded_mode=prefer_recorded_mode,
+        preserve_live_legacy_restart_guard=preserve_live_legacy_restart_guard,
+    )
+    return facade, resolved_policy
+
+
+def _resolve_gateway_effective_port(
+    *,
+    port: int | None,
+    workspace: str | None,
+    config_path: str | None,
+) -> int:
+    """Resolve the actual gateway port with CLI-over-config precedence."""
+    if port is not None:
+        return port
+    loaded = _load_runtime_config(config_path, workspace)
+    return loaded.gateway.port
+
+
+def _validate_gateway_group_options_for_subcommand(
+    *,
+    ctx: typer.Context,
+    port: int | None,
+    verbose: bool,
+    workspace: str | None,
+    config: str | None,
+    foreground: bool,
+    background: bool,
+) -> None:
+    """Reject group-level options when a gateway subcommand is invoked."""
+    has_source_api = hasattr(ctx, "get_parameter_source")
+
+    def _from_commandline(name: str) -> bool:
+        if not has_source_api:
+            return False
+        source = ctx.get_parameter_source(name)
+        return source == ParameterSource.COMMANDLINE
+
+    invalid_options: list[str] = []
+    if _from_commandline("port") or (not has_source_api and port != 18790):
+        invalid_options.append("--port/-p")
+    if _from_commandline("verbose") or (not has_source_api and verbose):
+        invalid_options.append("--verbose/-v")
+    if _from_commandline("workspace") or (not has_source_api and workspace is not None):
+        invalid_options.append("--workspace/-w")
+    if _from_commandline("config") or (not has_source_api and config is not None):
+        invalid_options.append("--config/-c")
+    if _from_commandline("foreground") or (not has_source_api and foreground):
+        invalid_options.append("--foreground")
+    if _from_commandline("background") or (not has_source_api and background):
+        invalid_options.append("--background")
+
+    if not invalid_options:
+        return
+
+    joined = ", ".join(invalid_options)
+    console.print(
+        "[red]Error: "
+        f"gateway group options ({joined}) cannot be used before gateway subcommands. "
+        "Pass options after the subcommand, e.g. "
+        "`nanobot gateway status --background` or `nanobot gateway restart --port 19000`."
+        "[/red]"
+    )
+    raise typer.Exit(1)
+
+
+@gateway_app.callback(invoke_without_command=True)
+def gateway(
+    ctx: typer.Context,
+    port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    foreground: bool = typer.Option(False, "--foreground", help="Force foreground legacy mode"),
+    background: bool = typer.Option(False, "--background", help="Request background managed mode"),
+    runtime_child: bool = typer.Option(
+        False,
+        "--runtime-child",
+        hidden=True,
+        help="Internal flag: run foreground loop directly inside daemon child process.",
+    ),
+):
+    """Start the nanobot gateway."""
+    if runtime_child:
+        run_gateway_foreground_loop(
+            port=port,
+            verbose=verbose,
+            workspace=workspace,
+            config_path=config,
+        )
+        return
+
+    # If a subcommand was specified (restart/status/logs), do not run start().
+    if ctx.invoked_subcommand is not None:
+        _validate_gateway_group_options_for_subcommand(
+            ctx=ctx,
+            port=port,
+            verbose=verbose,
+            workspace=workspace,
+            config=config,
+            foreground=foreground,
+            background=background,
+        )
+        return
+
+    from nanobot.gateway_runtime.models import GatewayStartOptions
+
+    effective_port = _resolve_gateway_effective_port(
+        port=port,
+        workspace=workspace,
+        config_path=config,
+    )
+
+    # Flow: parse explicit CLI mode -> resolve policy -> build facade -> start.
+    cli_mode = _resolve_gateway_cli_mode(foreground=foreground, background=background)
+    facade, policy = _build_gateway_runtime_facade(
+        cli_mode=cli_mode,
+        workspace=workspace,
+        config_path=config,
+        run_foreground_loop=run_gateway_foreground_loop,
+    )
+    console.print(
+        "[dim]"
+        f"Gateway runtime request: preferred_mode={policy.mode.value} "
+        f"reason={policy.reason} platform={policy.platform}"
+        "[/dim]"
+    )
+    try:
+        result = facade.start(
+            GatewayStartOptions(
+                port=effective_port,
+                verbose=verbose,
+                workspace=workspace,
+                config_path=config,
+                cli_mode=cli_mode,
+            )
+        )
+    except Exception as exc:
+        console.print(f"[red]Gateway start failed: {exc}[/red]")
+        raise typer.Exit(1)
+
+    if not result.started:
+        console.print(f"[red]Gateway start failed: {result.message}[/red]")
+        raise typer.Exit(1)
+
+
+@gateway_app.command("restart")
+def gateway_restart(
+    port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    timeout_s: int = typer.Option(20, "--timeout", help="Restart timeout in seconds"),
+    foreground: bool = typer.Option(False, "--foreground", help="Force foreground legacy mode"),
+    background: bool = typer.Option(False, "--background", help="Request background managed mode"),
+):
+    """Restart gateway with unified runtime semantics."""
+    from nanobot.gateway_runtime.models import GatewayStartOptions
+
+    # Keep restart semantics stable; adapter decides whether action is managed
+    # restart or legacy compatibility response.
+    cli_mode = _resolve_gateway_cli_mode(foreground=foreground, background=background)
+    facade, policy = _build_gateway_runtime_facade(
+        cli_mode=cli_mode,
+        workspace=workspace,
+        config_path=config,
+        run_foreground_loop=run_gateway_foreground_loop,
+        prefer_recorded_mode=True,
+        preserve_live_legacy_restart_guard=True,
+    )
+    result = facade.restart(
+        GatewayStartOptions(
+            port=port,
+            verbose=verbose,
+            workspace=workspace,
+            config_path=config,
+            cli_mode=cli_mode,
+        ),
+        timeout_s=timeout_s,
+    )
+    console.print(
+        f"Gateway restart: {result.message} "
+        f"(mode={policy.mode.value}, reason={policy.reason})"
+    )
+    _print_gateway_runtime_status(
+        facade.status(),
+        title="Gateway runtime after restart:",
+    )
+
+
+@gateway_app.command("status")
+def gateway_status(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    foreground: bool = typer.Option(False, "--foreground", help="Force foreground legacy mode"),
+    background: bool = typer.Option(False, "--background", help="Request background managed mode"),
+):
+    """Show gateway runtime status."""
+    # Status is designed to be always callable regardless of runtime mode.
+    cli_mode = _resolve_gateway_cli_mode(foreground=foreground, background=background)
+    facade, _ = _build_gateway_runtime_facade(
+        cli_mode=cli_mode,
+        workspace=workspace,
+        config_path=config,
+        prefer_recorded_mode=True,
+    )
+    status = facade.status()
+    _print_gateway_runtime_status(status)
+
+
+@gateway_app.command("logs")
+def gateway_logs(
+    follow: bool = typer.Option(True, "--follow/--no-follow", help="Follow gateway log output"),
+    tail: int = typer.Option(200, "--tail", help="Number of recent lines to show"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    foreground: bool = typer.Option(False, "--foreground", help="Force foreground legacy mode"),
+    background: bool = typer.Option(False, "--background", help="Request background managed mode"),
+):
+    """Show gateway runtime logs."""
+    # Even in legacy mode, this command should stay available and explain why
+    # no managed background stream is present.
+    cli_mode = _resolve_gateway_cli_mode(foreground=foreground, background=background)
+    facade, _ = _build_gateway_runtime_facade(
+        cli_mode=cli_mode,
+        workspace=workspace,
+        config_path=config,
+        prefer_recorded_mode=True,
+    )
+    _print_gateway_runtime_status(
+        facade.status(),
+        title="Gateway log target:",
+    )
+    code = facade.logs(follow=follow, tail=tail)
+    if code != 0:
+        raise typer.Exit(code)
 
 
 
