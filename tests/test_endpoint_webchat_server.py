@@ -1,5 +1,6 @@
 import threading
 import time
+import os
 from typing import Any
 from flask import Flask, render_template_string, request, jsonify
 import requests
@@ -139,7 +140,7 @@ HTML_PAGE = """<!doctype html>
       try {
         const r = await fetch(endpointUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer """ + os.getenv('NANOBOT_API_KEY', '') + """' },
           body: JSON.stringify({
             input: content,
             user: "web-test-user",
@@ -208,6 +209,7 @@ class TestEndpointWebChat:
             try:
                 response = requests.post(
                     endpoint_url,
+                    headers={ 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + os.getenv('NANOBOT_API_KEY', '') },
                     json=request.json,
                     timeout=getattr(self.config, "request_timeout", 65.0)
                 )

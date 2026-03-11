@@ -127,7 +127,8 @@ class EmailConfig(Base):
 
 class EndpointConfig(Base):
     enabled: bool = False
-    host: str = "0.0.0.0"
+    api_key: str = ""
+    host: str = "127.0.0.1"
     port: int = 8080
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
 
