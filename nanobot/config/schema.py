@@ -200,6 +200,26 @@ class QQConfig(Base):
     )  # Allowed user openids (empty = public access)
 
 
+class GraphEmailAccount(Base):
+    """Single email account configuration for Graph Email."""
+
+    id: str = "default"
+    email: str = ""
+    client_id: str = ""
+    tenant_id: str = "consumers"
+    enabled: bool = True
+
+
+class GraphEmailConfig(Base):
+    """Graph Email channel configuration using Microsoft Graph API."""
+
+    enabled: bool = False
+    accounts: list[GraphEmailAccount] = Field(default_factory=list)
+
+    # Listener settings
+    poll_interval_seconds: int = 300
+    folders: list[str] = Field(default_factory=lambda: ["inbox"])
+    max_messages_per_check: int = 50
 
 
 class ChannelsConfig(Base):
@@ -217,6 +237,7 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    graph_email: GraphEmailConfig = Field(default_factory=GraphEmailConfig)
 
 
 class AgentDefaults(Base):

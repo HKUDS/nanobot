@@ -150,6 +150,20 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
 
+        # Graph Email channel
+        if self.config.channels.graph_email.enabled:
+            try:
+                from nanobot.channels.graph_email import GraphEmailChannel
+                self.channels["graph_email"] = GraphEmailChannel(
+                    self.config.channels.graph_email,
+                    self.bus,
+                )
+                logger.info("Graph Email channel enabled")
+            except ImportError as e:
+                logger.warning("Graph Email channel not available: {}", e)
+            except Exception as e:
+                logger.error("Failed to initialize Graph Email channel: {}", e)
+
         self._validate_allow_from()
 
     def _validate_allow_from(self) -> None:
