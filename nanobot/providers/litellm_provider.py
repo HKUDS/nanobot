@@ -6,6 +6,7 @@ import secrets
 import string
 from typing import Any
 
+import httpx
 import json_repair
 import litellm
 from litellm import acompletion
@@ -215,19 +216,7 @@ class LiteLLMProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
     ) -> LLMResponse:
-        """
-        Send a chat completion request via LiteLLM.
-
-        Args:
-            messages: List of message dicts with 'role' and 'content'.
-            tools: Optional list of tool definitions in OpenAI format.
-            model: Model identifier (e.g., 'anthropic/claude-sonnet-4-5').
-            max_tokens: Maximum tokens in response.
-            temperature: Sampling temperature.
-
-        Returns:
-            LLMResponse with content and/or tool calls.
-        """
+        """Send a chat completion request via LiteLLM."""
         original_model = model or self.default_model
         model = self._resolve_model(original_model)
         extra_msg_keys = self._extra_msg_keys(original_model, model)
@@ -273,11 +262,14 @@ class LiteLLMProvider(LLMProvider):
             response = await acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
-            # Return error as content for graceful handling
-            return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
-                finish_reason="error",
-            )
+            status_code = self._extract_status_code(e)
+            if status_code is not None:
+                return self._error_response(
+                    self._status_error(f"Error calling LLM: {str(e)}", status_code)
+                )
+            if isinstance(e, (httpx.TimeoutException, httpx.TransportError)):
+                return self._error_response(self._wrap_exception(e, prefix="Error calling LLM"))
+            return self._error_response(self._wrap_exception(e, prefix="Error calling LLM"))
 
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""

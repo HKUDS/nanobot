@@ -1,8 +1,9 @@
 import asyncio
 
+import httpx
 import pytest
 
-from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.providers.base import LLMProvider, LLMResponse, ProviderRequestError
 
 
 class ScriptedProvider(LLMProvider):
@@ -23,9 +24,17 @@ class ScriptedProvider(LLMProvider):
 
 
 @pytest.mark.asyncio
-async def test_chat_with_retry_retries_transient_error_then_succeeds(monkeypatch) -> None:
+async def test_chat_with_retry_retries_structured_retryable_error(monkeypatch) -> None:
     provider = ScriptedProvider([
-        LLMResponse(content="429 rate limit", finish_reason="error"),
+        LLMResponse(
+            content="temporary upstream failure",
+            finish_reason="error",
+            error=ProviderRequestError(
+                "temporary upstream failure",
+                retryable=True,
+                status_code=503,
+            ),
+        ),
         LLMResponse(content="ok"),
     ])
     delays: list[int] = []
@@ -44,9 +53,13 @@ async def test_chat_with_retry_retries_transient_error_then_succeeds(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_chat_with_retry_does_not_retry_non_transient_error(monkeypatch) -> None:
+async def test_chat_with_retry_does_not_retry_structured_non_retryable_error(monkeypatch) -> None:
     provider = ScriptedProvider([
-        LLMResponse(content="401 unauthorized", finish_reason="error"),
+        LLMResponse(
+            content="bad request",
+            finish_reason="error",
+            error=ProviderRequestError("bad request", retryable=False, status_code=400),
+        ),
     ])
     delays: list[int] = []
 
@@ -57,18 +70,16 @@ async def test_chat_with_retry_does_not_retry_non_transient_error(monkeypatch) -
 
     response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
 
-    assert response.content == "401 unauthorized"
+    assert response.content == "bad request"
     assert provider.calls == 1
     assert delays == []
 
 
 @pytest.mark.asyncio
-async def test_chat_with_retry_returns_final_error_after_retries(monkeypatch) -> None:
+async def test_chat_with_retry_keeps_legacy_string_matching(monkeypatch) -> None:
     provider = ScriptedProvider([
-        LLMResponse(content="429 rate limit a", finish_reason="error"),
-        LLMResponse(content="429 rate limit b", finish_reason="error"),
-        LLMResponse(content="429 rate limit c", finish_reason="error"),
-        LLMResponse(content="503 final server error", finish_reason="error"),
+        httpx.ReadTimeout("timed out"),
+        LLMResponse(content="recovered"),
     ])
     delays: list[int] = []
 
@@ -79,9 +90,9 @@ async def test_chat_with_retry_returns_final_error_after_retries(monkeypatch) ->
 
     response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
 
-    assert response.content == "503 final server error"
-    assert provider.calls == 4
-    assert delays == [1, 2, 4]
+    assert response.content == "recovered"
+    assert provider.calls == 2
+    assert delays == [1]
 
 
 @pytest.mark.asyncio

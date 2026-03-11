@@ -7,7 +7,6 @@ import pytest
 from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 from nanobot.providers.base import LLMResponse
 
-
 def test_azure_openai_provider_init():
     """Test AzureOpenAIProvider initialization without deployment_name."""
     provider = AzureOpenAIProvider(
@@ -314,6 +313,47 @@ async def test_chat_api_error():
         assert "Azure OpenAI API Error 401" in result.content
         assert "Invalid authentication credentials" in result.content
         assert result.finish_reason == "error"
+        assert result.error is not None
+        assert result.error.retryable is False
+        assert mock_context.post.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_retries_retryable_api_error():
+    """Test chat_with_retry retries retryable Azure HTTP errors before succeeding."""
+    provider = AzureOpenAIProvider(
+        api_key="test-key",
+        api_base="https://test-resource.openai.azure.com",
+        default_model="gpt-4o",
+    )
+
+    success_response_data = {
+        "choices": [{
+            "message": {"content": "Recovered", "role": "assistant"},
+            "finish_reason": "stop",
+        }],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
+    }
+
+    with patch("httpx.AsyncClient") as mock_client:
+        error_response = AsyncMock()
+        error_response.status_code = 503
+        error_response.text = "Service temporarily unavailable"
+
+        success_response = AsyncMock()
+        success_response.status_code = 200
+        success_response.json = Mock(return_value=success_response_data)
+
+        mock_context = AsyncMock()
+        mock_context.post = AsyncMock(side_effect=[error_response, success_response])
+        mock_client.return_value.__aenter__.return_value = mock_context
+
+        messages = [{"role": "user", "content": "Hello"}]
+        result = await provider.chat_with_retry(messages)
+
+        assert result.content == "Recovered"
+        assert result.finish_reason == "stop"
+        assert mock_context.post.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -334,8 +374,10 @@ async def test_chat_connection_error():
         result = await provider.chat(messages)
         
         assert isinstance(result, LLMResponse)
-        assert "Error calling Azure OpenAI: Exception('Connection failed')" in result.content
+        assert "Error calling Azure OpenAI: Connection failed" in result.content
         assert result.finish_reason == "error"
+        assert result.error is not None
+        assert mock_context.post.await_count == 1
 
 
 def test_parse_response_malformed():

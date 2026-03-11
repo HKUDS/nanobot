@@ -6,14 +6,19 @@ import uuid
 from typing import Any
 
 import json_repair
-from openai import AsyncOpenAI
+from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 
 class CustomProvider(LLMProvider):
 
-    def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1", default_model: str = "default"):
+    def __init__(
+        self,
+        api_key: str = "no-key",
+        api_base: str = "http://localhost:8000/v1",
+        default_model: str = "default",
+    ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         # Keep affinity stable for this provider instance to improve backend cache locality.
@@ -38,8 +43,22 @@ class CustomProvider(LLMProvider):
             kwargs.update(tools=tools, tool_choice="auto")
         try:
             return self._parse(await self._client.chat.completions.create(**kwargs))
+        except APIStatusError as e:
+            status_code = e.status_code if isinstance(e.status_code, int) else 500
+            return self._error_response(
+                self._status_error(
+                    f"Error calling Custom provider: {str(e)}",
+                    status_code,
+                )
+            )
+        except (APITimeoutError, APIConnectionError) as e:
+            return self._error_response(
+                self._wrap_exception(e, prefix="Error calling Custom provider")
+            )
         except Exception as e:
-            return LLMResponse(content=f"Error: {e}", finish_reason="error")
+            return self._error_response(
+                self._wrap_exception(e, prefix="Error calling Custom provider")
+            )
 
     def _parse(self, response: Any) -> LLMResponse:
         choice = response.choices[0]

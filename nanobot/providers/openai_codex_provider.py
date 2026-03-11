@@ -11,7 +11,7 @@ import httpx
 from loguru import logger
 from oauth_cli_kit import get_token as get_codex_token
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import LLMProvider, LLMResponse, ProviderRequestError, ToolCallRequest
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_ORIGINATOR = "nanobot"
@@ -73,11 +73,10 @@ class OpenAICodexProvider(LLMProvider):
                 tool_calls=tool_calls,
                 finish_reason=finish_reason,
             )
+        except ProviderRequestError as e:
+            return self._error_response(e)
         except Exception as e:
-            return LLMResponse(
-                content=f"Error calling Codex: {str(e)}",
-                finish_reason="error",
-            )
+            return self._error_response(self._wrap_exception(e, prefix="Error calling Codex"))
 
     def get_default_model(self) -> str:
         return self.default_model
@@ -111,7 +110,11 @@ async def _request_codex(
         async with client.stream("POST", url, headers=headers, json=body) as response:
             if response.status_code != 200:
                 text = await response.aread()
-                raise RuntimeError(_friendly_error(response.status_code, text.decode("utf-8", "ignore")))
+                raise ProviderRequestError(
+                    message=f"Error calling Codex: {_friendly_error(response.status_code, text.decode('utf-8', 'ignore'))}",
+                    retryable=LLMProvider._is_retryable_status_code(response.status_code),
+                    status_code=response.status_code,
+                )
             return await _consume_sse(response)
 
 

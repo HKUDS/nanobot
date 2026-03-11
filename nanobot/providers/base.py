@@ -1,12 +1,14 @@
 """Base LLM provider interface."""
 
+from __future__ import annotations
+
 import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
+import httpx
 from loguru import logger
-
 
 @dataclass
 class ToolCallRequest:
@@ -25,11 +27,27 @@ class LLMResponse:
     usage: dict[str, int] = field(default_factory=dict)
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1 etc.
     thinking_blocks: list[dict] | None = None  # Anthropic extended thinking
+    error: "ProviderRequestError | None" = None
     
     @property
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls."""
         return len(self.tool_calls) > 0
+
+
+@dataclass
+class ProviderRequestError(Exception):
+    """Normalized provider failure with retry metadata."""
+
+    message: str
+    retryable: bool
+    status_code: int | None = None
+
+    def __post_init__(self) -> None:
+        super().__init__(self.message)
+
+    def __str__(self) -> str:
+        return self.message
 
 
 class LLMProvider(ABC):
@@ -41,6 +59,7 @@ class LLMProvider(ABC):
     """
 
     _CHAT_RETRY_DELAYS = (1, 2, 4)
+    _RETRYABLE_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
     _TRANSIENT_ERROR_MARKERS = (
         "429",
         "rate limit",
@@ -172,6 +191,8 @@ class LLMProvider(ABC):
                 )
             except asyncio.CancelledError:
                 raise
+            except ProviderRequestError as exc:
+                response = self._error_response(exc)
             except Exception as exc:
                 response = LLMResponse(
                     content=f"Error calling LLM: {exc}",
@@ -180,10 +201,17 @@ class LLMProvider(ABC):
 
             if response.finish_reason != "error":
                 return response
-            if not self._is_transient_error(response.content):
-                return response
 
-            err = (response.content or "").lower()
+            provider_error = response.error
+            if provider_error is not None:
+                if not provider_error.retryable:
+                    return response
+                err = provider_error.message
+            else:
+                if not self._is_transient_error(response.content):
+                    return response
+                err = (response.content or "").lower()
+
             logger.warning(
                 "LLM transient error (attempt {}/{}), retrying in {}s: {}",
                 attempt,
@@ -204,11 +232,58 @@ class LLMProvider(ABC):
             )
         except asyncio.CancelledError:
             raise
+        except ProviderRequestError as exc:
+            return self._error_response(exc)
         except Exception as exc:
             return LLMResponse(
                 content=f"Error calling LLM: {exc}",
                 finish_reason="error",
             )
+
+    @classmethod
+    def _is_retryable_status_code(cls, status_code: int | None) -> bool:
+        return status_code in cls._RETRYABLE_STATUS_CODES
+
+    def _status_error(self, message: str, status_code: int) -> ProviderRequestError:
+        return ProviderRequestError(
+            message=message,
+            retryable=self._is_retryable_status_code(status_code),
+            status_code=status_code,
+        )
+
+    def _wrap_exception(self, exc: Exception, *, prefix: str) -> ProviderRequestError:
+        status_code = self._extract_status_code(exc)
+        return ProviderRequestError(
+            message=f"{prefix}: {str(exc) or repr(exc)}",
+            retryable=self._is_retryable_exception(exc, status_code),
+            status_code=status_code,
+        )
+
+    @staticmethod
+    def _extract_status_code(exc: Exception) -> int | None:
+        for candidate in (
+            getattr(exc, "status_code", None),
+            getattr(getattr(exc, "response", None), "status_code", None),
+        ):
+            if isinstance(candidate, int):
+                return candidate
+        return None
+
+    @classmethod
+    def _is_retryable_exception(cls, exc: Exception, status_code: int | None = None) -> bool:
+        if status_code is not None:
+            return cls._is_retryable_status_code(status_code)
+        return isinstance(exc, (asyncio.TimeoutError, httpx.TimeoutException, httpx.TransportError))
+
+    @staticmethod
+    def _error_response(error: ProviderRequestError) -> LLMResponse:
+        return LLMResponse(content=error.message, finish_reason="error", error=error)
+
+    @property
+    def provider_label(self) -> str:
+        """Human-readable provider label used in logs and errors."""
+        name = type(self).__name__
+        return name[:-8] if name.endswith("Provider") else name
 
     @abstractmethod
     def get_default_model(self) -> str:
