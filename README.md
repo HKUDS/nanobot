@@ -16,7 +16,7 @@
 
 ⚡️ Delivers core agent functionality in just **~4,000** lines of code — **99% smaller** than Clawdbot's 430k+ lines.
 
-📏 Real-time line count: **3,966 lines** (run `bash core_agent_lines.sh` to verify anytime)
+📏 Real-time line count: **3,966 lines** (run `bash scripts/count-core-lines.sh` to verify anytime)
 
 ## 📢 News
 
