@@ -1,16 +1,20 @@
 """Context builder for assembling agent prompts."""
 
+import asyncio
 import base64
 import mimetypes
 import platform
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.utils.helpers import build_assistant_message, detect_image_mime
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import Config
 
 
 class ContextBuilder:
@@ -19,10 +23,65 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, config: "Config | None" = None):
         self.workspace = workspace
+        self.config = config
         self.memory = MemoryStore(workspace)
-        self.skills = SkillsLoader(workspace)
+
+        # Create skill scanner if security is enabled
+        skill_scanner = None
+        if config and config.security.skill_security.enabled and config.security.vt_token:
+            from nanobot.config.loader import save_config
+            from nanobot.config.schema import ScannedHashEntry
+            from nanobot.security.skill_scanner import SkillScanner
+
+            def save_scan_result(sha256: str, result: str, scanned_at: str, skill_name: str) -> None:
+                """Callback to save scan results to config."""
+                if config:
+                    config.security.skill_security.scanned_hashes[sha256] = ScannedHashEntry(
+                        result=result,
+                        scanned_at=scanned_at,
+                        skill_name=skill_name,
+                    )
+                    try:
+                        save_config(config)
+                    except Exception:
+                        pass  # Ignore save errors
+
+            skill_scanner = SkillScanner(
+                vt_token=config.security.vt_token,
+                skill_security_config={
+                    "enabled": config.security.skill_security.enabled,
+                    "unknown_ttl_seconds": config.security.skill_security.unknown_ttl_seconds,
+                    "whitelist": config.security.skill_security.whitelist,
+                    "scanned_hashes": config.security.skill_security.scanned_hashes,
+                },
+                save_callback=save_scan_result,
+            )
+
+        self.skill_scanner = skill_scanner
+        self.skills = SkillsLoader(workspace, skill_scanner=skill_scanner)
+        self.skills_dirs = [
+            workspace / "skills",
+            Path(__file__).parent.parent / "skills",  # builtin skills
+        ]
+
+    async def preload_skills_security(self) -> None:
+        """Pre-scan all skills at startup to populate cache."""
+        if not self.skill_scanner:
+            return
+
+        skill_paths = [
+            skill_dir / "SKILL.md"
+            for skills_dir in self.skills_dirs
+            if skills_dir.exists()
+            for skill_dir in skills_dir.iterdir()
+            if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists()
+        ]
+
+        if skill_paths:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self.skill_scanner.preload_skills, skill_paths)
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""

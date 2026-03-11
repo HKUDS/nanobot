@@ -7,7 +7,7 @@ import json
 import re
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from loguru import logger
 
@@ -27,7 +27,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig
+    from nanobot.config.schema import ChannelsConfig, Config, ExecToolConfig
     from nanobot.cron.service import CronService
 
 
@@ -64,10 +64,12 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        config: Config | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
         self.channels_config = channels_config
+        self.config = config
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
@@ -82,7 +84,7 @@ class AgentLoop:
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
-        self.context = ContextBuilder(workspace)
+        self.context = ContextBuilder(workspace, config=config)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -120,7 +122,19 @@ class AgentLoop:
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         allowed_dir = self.workspace if self.restrict_to_workspace else None
-        for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
+
+        # Get skill scanner and skills dirs from context builder
+        skill_scanner = getattr(self.context, "skill_scanner", None)
+        skills_dirs = getattr(self.context, "skills_dirs", [])
+
+        # Register file tools with skill security for ReadFileTool
+        self.tools.register(ReadFileTool(
+            workspace=self.workspace,
+            allowed_dir=allowed_dir,
+            skill_scanner=skill_scanner,
+            skills_dirs=skills_dirs,
+        ))
+        for cls in (WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
@@ -267,6 +281,10 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
+
+        # Pre-scan all skills for security (populates cache, avoids blocking user requests)
+        await self.context.preload_skills_security()
+
         logger.info("Agent loop started")
 
         while self._running:

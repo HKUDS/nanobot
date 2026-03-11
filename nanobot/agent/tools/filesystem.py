@@ -1,10 +1,14 @@
 """File system tools: read, write, edit."""
 
+import asyncio
 import difflib
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool
+
+if TYPE_CHECKING:
+    from nanobot.security.skill_scanner import SkillScanner
 
 
 def _resolve_path(
@@ -28,9 +32,17 @@ class ReadFileTool(Tool):
 
     _MAX_CHARS = 128_000  # ~128 KB — prevents OOM from reading huge files into LLM context
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        skill_scanner: "SkillScanner | None" = None,
+        skills_dirs: list[Path] | None = None,
+    ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
+        self._skill_scanner = skill_scanner
+        self._skills_dirs = skills_dirs or []
 
     @property
     def name(self) -> str:
@@ -48,6 +60,19 @@ class ReadFileTool(Tool):
             "required": ["path"],
         }
 
+    def _is_skill_file(self, file_path: Path) -> bool:
+        """Check if the file is a SKILL.md in a skills directory."""
+        if file_path.name != "SKILL.md":
+            return False
+        for skills_dir in self._skills_dirs:
+            try:
+                # Check if file is inside a skills directory
+                file_path.resolve().relative_to(skills_dir.resolve())
+                return True
+            except ValueError:
+                continue
+        return False
+
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
@@ -55,6 +80,12 @@ class ReadFileTool(Tool):
                 return f"Error: File not found: {path}"
             if not file_path.is_file():
                 return f"Error: Not a file: {path}"
+
+            # Security check for skill files (non-blocking via thread pool)
+            if self._skill_scanner and self._is_skill_file(file_path):
+                result = await asyncio.to_thread(self._skill_scanner.check_skill, file_path)
+                if not result.safe:
+                    return f"Error: Access denied - {result.message}"
 
             size = file_path.stat().st_size
             if size > self._MAX_CHARS * 4:  # rough upper bound (UTF-8 chars ≤ 4 bytes)

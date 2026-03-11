@@ -346,6 +346,30 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class ScannedHashEntry(Base):
+    """Cache entry for a scanned skill hash."""
+
+    result: Literal["clean", "malicious", "unknown"]  # Scan result type
+    scanned_at: str  # ISO format timestamp
+    skill_name: str = ""  # Skill name for easier identification
+
+
+class SkillSecurityConfig(Base):
+    """Skill security scanning configuration."""
+
+    enabled: bool = True
+    unknown_ttl_seconds: int = 86400  # 24 hours
+    whitelist: list[str] = Field(default_factory=list)  # Trusted SHA256 hashes
+    scanned_hashes: dict[str, ScannedHashEntry] = Field(default_factory=dict)
+
+
+class SecurityConfig(Base):
+    """Security configuration."""
+
+    vt_token: str = ""  # VirusTotal API token
+    skill_security: SkillSecurityConfig = Field(default_factory=SkillSecurityConfig)
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -354,6 +378,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
 
     @property
     def workspace_path(self) -> Path:

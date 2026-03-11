@@ -242,7 +242,7 @@ def _make_provider(config: Config):
             console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
             console.print("Use the model field to specify the deployment name.")
             raise typer.Exit(1)
-        
+
         return AzureOpenAIProvider(
             api_key=p.api_key,
             api_base=p.api_base,
@@ -354,6 +354,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        config=config,
     )
 
     # Set cron callback (needs agent)
@@ -539,6 +540,7 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        config=config,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on

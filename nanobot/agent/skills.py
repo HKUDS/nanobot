@@ -5,6 +5,10 @@ import os
 import re
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from nanobot.security.skill_scanner import SkillScanner
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
@@ -18,10 +22,16 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
 
-    def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        builtin_skills_dir: Path | None = None,
+        skill_scanner: "SkillScanner | None" = None,
+    ):
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
+        self.skill_scanner = skill_scanner
 
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
@@ -64,18 +74,41 @@ class SkillsLoader:
             name: Skill name (directory name).
 
         Returns:
-            Skill content or None if not found.
+            Skill content or None if not found or blocked by security.
+        """
+        # Find skill path
+        skill_path = self._find_skill_path(name)
+        if not skill_path:
+            return None
+
+        # Security check (all skills, including built-in which may be modified)
+        if self.skill_scanner:
+            result = self.skill_scanner.check_skill(skill_path)
+            if not result.safe:
+                return None  # Blocked by security
+
+        return skill_path.read_text(encoding="utf-8")
+
+    def _find_skill_path(self, name: str) -> Path | None:
+        """
+        Find the path to a skill file.
+
+        Args:
+            name: Skill name (directory name).
+
+        Returns:
+            Path to SKILL.md or None if not found.
         """
         # Check workspace first
         workspace_skill = self.workspace_skills / name / "SKILL.md"
         if workspace_skill.exists():
-            return workspace_skill.read_text(encoding="utf-8")
+            return workspace_skill
 
         # Check built-in
         if self.builtin_skills:
             builtin_skill = self.builtin_skills / name / "SKILL.md"
             if builtin_skill.exists():
-                return builtin_skill.read_text(encoding="utf-8")
+                return builtin_skill
 
         return None
 
@@ -117,14 +150,22 @@ class SkillsLoader:
 
         lines = ["<skills>"]
         for s in all_skills:
-            name = escape_xml(s["name"])
+            name = s["name"]
             path = s["path"]
-            desc = escape_xml(self._get_skill_description(s["name"]))
-            skill_meta = self._get_skill_meta(s["name"])
+
+            # Security check: skip malicious skills
+            # get_skill_metadata calls load_skill which performs security scan
+            meta = self.get_skill_metadata(name)
+            if meta is None and self.skill_scanner:
+                # Skill was blocked by security scanner
+                continue
+
+            desc = escape_xml(self._get_skill_description(name))
+            skill_meta = self._get_skill_meta(name)
             available = self._check_requirements(skill_meta)
 
             lines.append(f"  <skill available=\"{str(available).lower()}\">")
-            lines.append(f"    <name>{name}</name>")
+            lines.append(f"    <name>{escape_xml(name)}</name>")
             lines.append(f"    <description>{desc}</description>")
             lines.append(f"    <location>{path}</location>")
 
