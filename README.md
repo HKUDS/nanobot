@@ -928,7 +928,12 @@ nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
 
 ### Path Resolution
 
-When using `--config`, nanobot derives its runtime data directory from the config file location. The workspace still comes from `agents.defaults.workspace` unless you override it with `--workspace`.
+`--config` only selects which config file to load. Runtime directories are derived from the effective workspace (`agents.defaults.workspace`), unless overridden by `--workspace`.
+
+For ACP backend:
+
+- `dispatch.acp.cwd`: optional, controls ACP process/session working directory.
+- If `dispatch.acp.cwd` is not set, it defaults to the effective workspace.
 
 To open a CLI session against one of these instances locally:
 
@@ -946,14 +951,18 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
 |-----------|---------------|---------|
 | **Config** | `--config` path | `~/.nanobot-A/config.json` |
 | **Workspace** | `--workspace` or config | `~/.nanobot-A/workspace/` |
-| **Cron Jobs** | config directory | `~/.nanobot-A/cron/` |
-| **Media / runtime state** | config directory | `~/.nanobot-A/media/` |
+| **Cron Jobs** | workspace directory | `~/.nanobot-A/workspace/cron/` |
+| **Media / runtime state** | workspace directory | `~/.nanobot-A/workspace/media/` |
+| **ACP cwd** | `dispatch.acp.cwd` or workspace | `~/.nanobot-A/workspace/` |
 
 ### How It Works
 
 - `--config` selects which config file to load
 - By default, the workspace comes from `agents.defaults.workspace` in that config
 - If you pass `--workspace`, it overrides the workspace from the config file
+- `dispatch.acp.cwd` overrides ACP process/session working directory; if omitted, ACP uses workspace
+
+> Legacy note: historical `paths.root` entries in old config files are ignored by current runtime.
 
 ### Minimal Setup
 
@@ -969,6 +978,12 @@ Example config:
     "defaults": {
       "workspace": "~/.nanobot-telegram/workspace",
       "model": "anthropic/claude-sonnet-4-6"
+    }
+  },
+  "dispatch": {
+    "backend": "acp",
+    "acp": {
+      "cwd": "~/.nanobot-telegram/workspace"
     }
   },
   "channels": {
@@ -1008,7 +1023,7 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 - Each instance must use a different port if they run at the same time
 - Use a different workspace per instance if you want isolated memory, sessions, and skills
 - `--workspace` overrides the workspace defined in the config file
-- Cron jobs and runtime media/state are derived from the config directory
+- Cron jobs and runtime media/state are derived from the workspace directory
 
 ## 💻 CLI Reference
 

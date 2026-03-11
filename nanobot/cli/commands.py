@@ -326,6 +326,9 @@ def _load_runtime_config(
             console.print(f"[red]Error: invalid --acp-config override: {exc}[/red]")
             raise typer.Exit(1) from exc
 
+    if not loaded.dispatch.acp.cwd:
+        loaded.dispatch.acp.cwd = str(loaded.workspace_path)
+
     return loaded
 
 

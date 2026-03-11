@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -236,12 +237,19 @@ class ACPDispatcher:
             if self._conn is not None:
                 return
 
+            local_sdk_src = self.workspace / "python-sdk" / "src"
+            if local_sdk_src.exists():
+                local_sdk_src_str = str(local_sdk_src)
+                if local_sdk_src_str not in sys.path:
+                    sys.path.insert(0, local_sdk_src_str)
+                    logger.info("Using local python-sdk from {}", local_sdk_src_str)
+
             from acp import spawn_agent_process
             from acp.schema import ClientCapabilities, Implementation
 
             client = _NanobotACPClient(self)
             env = {**os.environ, **self.acp_config.env}
-            cwd = Path(self.acp_config.cwd).expanduser() if self.acp_config.cwd else self.workspace
+            cwd = self.acp_config.resolve_cwd(self.workspace)
             timeout = max(1, self.acp_config.startup_timeout_seconds)
 
             self._conn_cm = spawn_agent_process(
@@ -250,6 +258,7 @@ class ACPDispatcher:
                 *self.acp_config.args,
                 env=env,
                 cwd=cwd,
+                transport_kwargs={"limit": self.acp_config.stdio_buffer_limit_bytes},
             )
             try:
                 self._conn, self._proc = await asyncio.wait_for(
@@ -284,14 +293,45 @@ class ACPDispatcher:
             await self._ensure_connection()
             if self._conn is None:
                 raise RuntimeError("ACP connection is not available")
-            cwd = Path(self.acp_config.cwd).expanduser() if self.acp_config.cwd else self.workspace
+            cwd = self.acp_config.resolve_cwd(self.workspace)
             response = await self._conn.new_session(
                 cwd=str(cwd),
                 mcp_servers=self._convert_mcp_servers(),
             )
             self._session_map[session_key] = response.session_id
             self._update_caps_from_session_payload(response.session_id, response)
+            await self._apply_session_defaults(response.session_id)
             return response.session_id
+
+    async def _apply_session_defaults(self, session_id: str) -> None:
+        if self._conn is None:
+            return
+
+        caps = self._session_caps.setdefault(session_id, _SessionCapabilities())
+
+        default_model = self.acp_config.default_model
+        if default_model:
+            try:
+                await self._conn.set_session_model(model_id=default_model, session_id=session_id)
+                caps.current_model = default_model
+            except Exception:
+                logger.warning(
+                    "Failed to set ACP default model '{}' for session {}",
+                    default_model,
+                    session_id,
+                )
+
+        default_agent = self.acp_config.default_agent
+        if default_agent:
+            try:
+                await self._conn.set_session_mode(mode_id=default_agent, session_id=session_id)
+                caps.current_agent = default_agent
+            except Exception:
+                logger.warning(
+                    "Failed to set ACP default agent '{}' for session {}",
+                    default_agent,
+                    session_id,
+                )
 
     def _convert_mcp_servers(self) -> list[Any]:
         from acp.schema import EnvVariable, HttpHeader, HttpMcpServer, McpServerStdio, SseMcpServer

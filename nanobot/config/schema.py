@@ -324,22 +324,22 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
-class PathsConfig(Base):
-    """Instance-level filesystem paths."""
-
-    root: str = "~/.nanobot"
-
-
 class ACPBackendConfig(Base):
     """ACP backend process settings."""
 
     command: str = "opencode"
-    args: list[str] = Field(default_factory=lambda: ["acp", "--print-logs", "--log-level", "WARN"])
+    args: list[str] = Field(default_factory=lambda: ["acp", "--log-level", "ERROR"])
     cwd: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
+    stdio_buffer_limit_bytes: int = 50 * 1024 * 1024
     protocol_version: int = 1
+    default_model: str | None = "openai/gpt-5.3-codex/medium"
+    default_agent: str | None = "Hephaestus (Deep Agent)"
     permissions_policy: Literal["strict", "trusted", "yolo"] = "strict"
     startup_timeout_seconds: int = 20
+
+    def resolve_cwd(self, workspace: Path) -> Path:
+        return Path(self.cwd).expanduser() if self.cwd else workspace
 
 
 class DispatchConfig(Base):
@@ -352,18 +352,12 @@ class DispatchConfig(Base):
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
-    paths: PathsConfig = Field(default_factory=PathsConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     dispatch: DispatchConfig = Field(default_factory=DispatchConfig)
-
-    @property
-    def root_path(self) -> Path:
-        """Workspace is the single runtime root."""
-        return self.workspace_path
 
     @property
     def workspace_path(self) -> Path:

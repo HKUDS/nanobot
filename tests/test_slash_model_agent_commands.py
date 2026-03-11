@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -116,6 +117,16 @@ class _DummyACPConn:
         self.mode_calls.append((session_id, mode_id))
 
 
+class _DummyACPConnWithSession(_DummyACPConn):
+    def __init__(self) -> None:
+        super().__init__()
+        self.new_session_calls: list[tuple[str, list[Any]]] = []
+
+    async def new_session(self, cwd: str, mcp_servers: list[Any]):
+        self.new_session_calls.append((cwd, mcp_servers))
+        return SimpleNamespace(session_id="sess-new")
+
+
 def _make_acp_dispatcher() -> tuple[ACPDispatcher, MessageBus, _DummyACPConn]:
     bus = MessageBus()
     conn = _DummyACPConn()
@@ -183,3 +194,27 @@ async def test_acp_set_model_and_set_agent_call_connection() -> None:
     out_agent = await bus.consume_outbound()
     assert out_agent.content == "Agent switched to: plan"
     assert conn.mode_calls == [("sess-1", "plan")]
+
+
+@pytest.mark.asyncio
+async def test_acp_new_session_applies_configured_default_model_and_agent() -> None:
+    bus = MessageBus()
+    conn = _DummyACPConnWithSession()
+    dispatcher = ACPDispatcher(
+        bus=bus,
+        workspace=Path("/tmp"),
+        acp_config=ACPBackendConfig(
+            default_model="anthropic/claude-sonnet-4",
+            default_agent="build",
+        ),
+    )
+    dispatcher._conn = cast(Any, conn)
+
+    session_id = await dispatcher._ensure_session("cli:test")
+
+    assert session_id == "sess-new"
+    assert conn.new_session_calls
+    assert conn.model_calls == [("sess-new", "anthropic/claude-sonnet-4")]
+    assert conn.mode_calls == [("sess-new", "build")]
+    assert dispatcher._session_caps["sess-new"].current_model == "anthropic/claude-sonnet-4"
+    assert dispatcher._session_caps["sess-new"].current_agent == "build"

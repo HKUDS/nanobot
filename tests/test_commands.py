@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from nanobot.cli.commands import app
+from nanobot.cli.commands import _load_runtime_config, app
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
@@ -282,6 +282,34 @@ def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime,
         mock_agent_runtime["native_dispatcher_cls"].call_args.kwargs["config"].workspace_path
         == workspace_path
     )
+
+
+def test_runtime_config_defaults_acp_cwd_to_workspace(monkeypatch, tmp_path: Path) -> None:
+    cfg = Config()
+    workspace = tmp_path / "workspace"
+    cfg.agents.defaults.workspace = str(workspace)
+    cfg.dispatch.acp.cwd = None
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: cfg)
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+
+    loaded = _load_runtime_config()
+
+    assert loaded.dispatch.acp.cwd == str(workspace)
+
+
+def test_runtime_config_keeps_explicit_acp_cwd(monkeypatch, tmp_path: Path) -> None:
+    cfg = Config()
+    cfg.agents.defaults.workspace = str(tmp_path / "workspace")
+    explicit_cwd = tmp_path / "acp-cwd"
+    cfg.dispatch.acp.cwd = str(explicit_cwd)
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: cfg)
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+
+    loaded = _load_runtime_config(workspace=str(tmp_path / "override-workspace"))
+
+    assert loaded.dispatch.acp.cwd == str(explicit_cwd)
 
 
 def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Path) -> None:
