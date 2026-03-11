@@ -456,6 +456,13 @@ def gateway(
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
 
+    # HTTP API channel (opt-in)
+    http_channel = None
+    if config.gateway.api.enabled:
+        from nanobot.channels.http_api import HTTPAPIChannel
+        http_channel = HTTPAPIChannel(config.gateway.api, agent)
+        console.print(f"[green]✓[/green] HTTP API: {config.gateway.host}:{config.gateway.port}")
+
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
@@ -466,10 +473,13 @@ def gateway(
         try:
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
+            tasks = [
                 agent.run(),
                 channels.start_all(),
-            )
+            ]
+            if http_channel:
+                tasks.append(http_channel.start(config.gateway.host, config.gateway.port))
+            await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
