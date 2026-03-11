@@ -91,6 +91,12 @@ class MatrixConfig(Base):
     allow_room_mentions: bool = False
 
 
+class WebChatConfig(Base):
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 8080
+
+
 class EmailConfig(Base):
     """Email channel configuration (IMAP inbound + SMTP outbound)."""
 
@@ -214,6 +220,7 @@ class ChannelsConfig(Base):
     mochat: MochatConfig = Field(default_factory=MochatConfig)
     dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
     email: EmailConfig = Field(default_factory=EmailConfig)
+    webchat: WebChatConfig = Field(default_factory=WebChatConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)

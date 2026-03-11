@@ -115,6 +115,17 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Email channel not available: {}", e)
 
+        # WebChat channel
+        if self.config.channels.webchat.enabled:
+            try:
+                from nanobot.channels.webchat import WebChatChannel
+                self.channels["webchat"] = WebChatChannel(
+                    self.config.channels.webchat, self.bus
+                )
+                logger.info("WebChat channel enabled")
+            except ImportError as e:
+                logger.warning(f"WebChat channel not available: {e}")
+
         # Slack channel
         if self.config.channels.slack.enabled:
             try:

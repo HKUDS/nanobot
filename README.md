@@ -677,6 +677,48 @@ nanobot gateway
 
 </details>
 
+<details>
+<summary><b>WebChat</b></summary>
+
+Chat with nanobot directly through a web interface.
+
+**1. Install dependencies
+
+```bash
+pip install nanobot-ai[webchat]
+```
+
+or
+
+```
+pip install flask[async]
+```
+
+**2. Configure**
+
+> - `host` is 127.0.0.1 by default. Set it to 0.0.0.0 to listen on all interfaces.
+> - `port` defaults to 8080. Set it to the port you want the server to listen on.
+
+```json
+{
+  "channels": {
+    "webchat": {
+      "enabled": true,
+      "host": "0.0.0.0",
+      "port": 8080
+    }
+  }
+}
+```
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+</details>
+
 ## 🌐 Agent Social Network
 
 🐈 nanobot is capable of linking to the agent social network (agent community). **Just send one message and your nanobot joins automatically!**
