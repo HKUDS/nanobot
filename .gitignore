@@ -26,3 +26,5 @@ docs
 .github/prompts/
 node_modules/
 bridge/node_modules/
+.coverage
+.vscode/
