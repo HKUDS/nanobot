@@ -398,6 +398,23 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+    # Mistral: needs "mistral/" prefix for LiteLLM routing.
+    ProviderSpec(
+        name="mistral",
+        keywords=("mistral",),
+        env_key="MISTRAL_API_KEY",
+        display_name="Mistral",
+        litellm_prefix="mistral",  # mistral-large-latest → mistral/mistral-large-latest
+        skip_prefixes=("mistral/",),  # avoid double-prefix
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
     # === Local deployment (matched by config key, NOT by api_base) =========
     # vLLM / any OpenAI-compatible local server.
     # Detected when config key is "vllm" (provider_name="vllm").
