@@ -16,6 +16,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig
 from nanobot.providers.base import LLMProvider
+from nanobot.utils.helpers import build_assistant_message
 
 
 class SubagentManager:
@@ -123,7 +124,7 @@ class SubagentManager:
             while iteration < max_iterations:
                 iteration += 1
 
-                response = await self.provider.chat(
+                response = await self.provider.chat_with_retry(
                     messages=messages,
                     tools=tools.get_definitions(),
                     model=self.model,
@@ -133,7 +134,6 @@ class SubagentManager:
                 )
 
                 if response.has_tool_calls:
-                    # Add assistant message with tool calls
                     tool_call_dicts = [
                         {
                             "id": tc.id,
@@ -145,11 +145,12 @@ class SubagentManager:
                         }
                         for tc in response.tool_calls
                     ]
-                    messages.append({
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": tool_call_dicts,
-                    })
+                    messages.append(build_assistant_message(
+                        response.content or "",
+                        tool_calls=tool_call_dicts,
+                        reasoning_content=response.reasoning_content,
+                        thinking_blocks=response.thinking_blocks,
+                    ))
 
                     # Execute tools
                     for tool_call in response.tool_calls:

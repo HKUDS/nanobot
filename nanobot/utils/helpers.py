@@ -34,6 +34,23 @@ def safe_filename(name: str) -> str:
     return _UNSAFE_CHARS.sub("_", name).strip()
 
 
+def build_assistant_message(
+    content: str | None,
+    tool_calls: list[dict] | None = None,
+    reasoning_content: str | None = None,
+    thinking_blocks: list[dict] | None = None,
+) -> dict:
+    """Build a provider-safe assistant message with optional reasoning fields."""
+    msg: dict = {"role": "assistant", "content": content}
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+    if reasoning_content is not None:
+        msg["reasoning_content"] = reasoning_content
+    if thinking_blocks:
+        msg["thinking_blocks"] = thinking_blocks
+    return msg
+
+
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
     """Sync bundled templates to workspace. Only creates missing files."""
     from importlib.resources import files as pkg_files
