@@ -191,6 +191,8 @@ def onboard():
         save_config(Config())
         console.print(f"[green]✓[/green] Created config at {config_path}")
 
+    console.print("[dim]Config template now uses `maxTokens` + `contextWindowTokens`; `memoryWindow` is no longer a runtime setting.[/dim]")
+
     # Create workspace
     workspace = get_workspace_path()
 
@@ -283,6 +285,16 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     return loaded
 
 
+def _print_deprecated_memory_window_notice(config: Config) -> None:
+    """Warn when running with old memoryWindow-only config."""
+    if config.agents.defaults.should_warn_deprecated_memory_window:
+        console.print(
+            "[yellow]Hint:[/yellow] Detected deprecated `memoryWindow` without "
+            "`contextWindowTokens`. `memoryWindow` is ignored; run "
+            "[cyan]nanobot onboard[/cyan] to refresh your config template."
+        )
+
+
 # ============================================================================
 # Gateway / Server
 # ============================================================================
@@ -310,6 +322,7 @@ def gateway(
         logging.basicConfig(level=logging.DEBUG)
 
     config = _load_runtime_config(config, workspace)
+    _print_deprecated_memory_window_notice(config)
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
@@ -333,8 +346,8 @@ def gateway(
         temperature=config.agents.defaults.temperature,
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
         reasoning_effort=config.agents.defaults.reasoning_effort,
+        context_window_tokens=config.agents.defaults.context_window_tokens,
         brave_api_key=config.tools.web.search.api_key or None,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
@@ -540,6 +553,7 @@ def agent(
     from nanobot.cron.service import CronService
 
     config = _load_runtime_config(config, workspace)
+    _print_deprecated_memory_window_notice(config)
     sync_workspace_templates(config.workspace_path)
 
     bus = MessageBus()
@@ -562,8 +576,8 @@ def agent(
         temperature=config.agents.defaults.temperature,
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
         reasoning_effort=config.agents.defaults.reasoning_effort,
+        context_window_tokens=config.agents.defaults.context_window_tokens,
         brave_api_key=config.tools.web.search.api_key or None,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,

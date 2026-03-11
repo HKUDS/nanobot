@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import weakref
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -13,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
-from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
 from nanobot.hooks.manager import HookManager
 from nanobot.hooks.base import HookContext
@@ -57,8 +56,8 @@ class AgentLoop:
         max_iterations: int = 40,
         temperature: float = 0.1,
         max_tokens: int = 4096,
-        memory_window: int = 100,
         reasoning_effort: str | None = None,
+        context_window_tokens: int = 65_536,
         brave_api_key: str | None = None,
         web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
@@ -78,8 +77,8 @@ class AgentLoop:
         self.max_iterations = max_iterations
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.memory_window = memory_window
         self.reasoning_effort = reasoning_effort
+        self.context_window_tokens = context_window_tokens
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
@@ -118,11 +117,17 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
-        self._consolidating: set[str] = set()  # Session keys with consolidation in progress
-        self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
-        self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
+        self.memory_consolidator = MemoryConsolidator(
+            workspace=workspace,
+            provider=provider,
+            model=self.model,
+            sessions=self.sessions,
+            context_window_tokens=context_window_tokens,
+            build_messages=self.context.build_messages,
+            get_tool_definitions=self.tools.get_definitions,
+        )
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -276,7 +281,7 @@ class AgentLoop:
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
-        """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
+        """Run the agent iteration loop."""
         messages = initial_messages
         iteration = 0
         final_content = None
@@ -285,9 +290,11 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
+            tool_defs = self.tools.get_definitions()
+
             response = await self.provider.chat_with_retry(
                 messages=messages,
-                tools=self.tools.get_definitions(),
+                tools=tool_defs,
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
@@ -454,15 +461,17 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
+            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
-            history = session.get_history(max_messages=self.memory_window)
-            messages = await self.context.build_messages(
+            history = session.get_history(max_messages=0)
+            messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
+            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -478,27 +487,20 @@ class AgentLoop:
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
-            self._consolidating.add(session.key)
             try:
-                async with lock:
-                    snapshot = session.messages[session.last_consolidated:]
-                    if snapshot:
-                        temp = Session(key=session.key)
-                        temp.messages = list(snapshot)
-                        if not await self._consolidate_memory(temp, archive_all=True):
-                            return OutboundMessage(
-                                channel=msg.channel, chat_id=msg.chat_id,
-                                content="Memory archival failed, session not cleared. Please try again.",
-                            )
+                if not await self.memory_consolidator.archive_unconsolidated(session):
+                    return OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content="Memory archival failed, session not cleared. Please try again.",
+                    )
             except Exception:
                 logger.exception("/new archival failed for {}", session.key)
                 return OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
                     content="Memory archival failed, session not cleared. Please try again.",
                 )
-            finally:
-                self._consolidating.discard(session.key)
 
             session.clear()
             self.sessions.save(session)
@@ -509,46 +511,15 @@ class AgentLoop:
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
 
-        unconsolidated = len(session.messages) - session.last_consolidated
-        if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
-            session_clone = session.clone()
-            keep_count = min(10, max(2, self.memory_window // 2))
-            kept = session.messages[-keep_count:] if keep_count else []
-            # Align to a user-message boundary so we never start with
-            # orphaned tool-result messages (which would cause LLM 400s).
-            for i, m in enumerate(kept):
-                if m.get("role") == "user":
-                    kept = kept[i:]
-                    break
-            else:
-                kept = []
-            session.messages = kept
-            session.last_consolidated = 0
-            self.sessions.save(session)
-
-            self._consolidating.add(session.key)
-            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
-
-            async def _consolidate_and_unlock():
-                try:
-                    async with lock:
-                        await self._consolidate_memory(session_clone, archive_all=True)
-                finally:
-                    self._consolidating.discard(session.key)
-                    _task = asyncio.current_task()
-                    if _task is not None:
-                        self._consolidation_tasks.discard(_task)
-
-            _task = asyncio.create_task(_consolidate_and_unlock())
-            self._consolidation_tasks.add(_task)
+        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=self.memory_window)
-        initial_messages = await self.context.build_messages(
+        history = session.get_history(max_messages=0)
+        initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
@@ -574,6 +545,7 @@ class AgentLoop:
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
+        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
@@ -619,25 +591,6 @@ class AgentLoop:
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now()
-
-    async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
-        """Delegate to MemoryStore.consolidate(). Returns True on success."""
-        result = await MemoryStore(self.workspace).consolidate(
-            session, self.provider, self.model,
-            archive_all=archive_all, memory_window=self.memory_window,
-        )
-
-        if result and self.hook_manager.has_hooks("message.compact"):
-            ctx = HookContext(
-                event_type="message.compact",
-                session_id=session.key,
-                session_key=self._current_session_key,
-                sender_id=self._current_sender_id,
-                channel=self._current_channel,
-            )
-            await self.hook_manager.fire("message.compact", ctx, session=session)
-
-        return result
 
     async def process_direct(
         self,

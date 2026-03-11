@@ -14,7 +14,7 @@ from loguru import logger
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
-from nanobot.utils.helpers import detect_image_mime
+from nanobot.utils.helpers import build_assistant_message, detect_image_mime
 
 if TYPE_CHECKING:
     from nanobot.openviking.client import VikingClient
@@ -238,12 +238,10 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         thinking_blocks: list[dict] | None = None,
     ) -> list[dict[str, Any]]:
         """Add an assistant message to the message list."""
-        msg: dict[str, Any] = {"role": "assistant", "content": content}
-        if tool_calls:
-            msg["tool_calls"] = tool_calls
-        if reasoning_content is not None:
-            msg["reasoning_content"] = reasoning_content
-        if thinking_blocks:
-            msg["thinking_blocks"] = thinking_blocks
-        messages.append(msg)
+        messages.append(build_assistant_message(
+            content,
+            tool_calls=tool_calls,
+            reasoning_content=reasoning_content,
+            thinking_blocks=thinking_blocks,
+        ))
         return messages

@@ -57,6 +57,8 @@ class NanobotDingTalkHandler(CallbackHandler):
             content = ""
             if chatbot_msg.text:
                 content = chatbot_msg.text.content.strip()
+            elif chatbot_msg.extensions.get("content", {}).get("recognition"):
+                content = chatbot_msg.extensions["content"]["recognition"].strip()
             if not content:
                 content = message.data.get("text", {}).get("content", "").strip()
 

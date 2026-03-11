@@ -267,6 +267,16 @@ def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime,
     assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == workspace_path
 
 
+def test_agent_warns_about_deprecated_memory_window(mock_agent_runtime):
+    mock_agent_runtime["config"].agents.defaults.memory_window = 100
+
+    result = runner.invoke(app, ["agent", "-m", "hello"])
+
+    assert result.exit_code == 0
+    assert "memoryWindow" in result.stdout
+    assert "contextWindowTokens" in result.stdout
+
+
 def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
@@ -326,6 +336,29 @@ def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) 
     assert isinstance(result.exception, _StopGateway)
     assert seen["workspace"] == override
     assert config.workspace_path == override
+
+
+def test_gateway_warns_about_deprecated_memory_window(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.memory_window = 100
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._make_provider",
+        lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
+    )
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGateway)
+    assert "memoryWindow" in result.stdout
+    assert "contextWindowTokens" in result.stdout
 
 def test_gateway_uses_config_directory_for_cron_store(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"

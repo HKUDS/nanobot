@@ -254,10 +254,17 @@ class AgentDefaults(Base):
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
     max_tokens: int = 8192
+    context_window_tokens: int = 65_536
     temperature: float = 0.1
     max_tool_iterations: int = 40
-    memory_window: int = 100
+    # Deprecated compatibility field: accepted from old configs but ignored at runtime.
+    memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+
+    @property
+    def should_warn_deprecated_memory_window(self) -> bool:
+        """Return True when old memoryWindow is present without contextWindowTokens."""
+        return self.memory_window is not None and "context_window_tokens" not in self.model_fields_set
 
 
 class AgentsConfig(Base):
