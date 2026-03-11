@@ -322,11 +322,19 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
 
 
+class NvidiaConfig(Base):
+    """NVIDIA hosted model configuration."""
+
+    api_key: str = ""
+    default_model: str = "nvidia/llama-3.1-nemotron-ultra-253b-v1"
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    nvidia: NvidiaConfig = Field(default_factory=NvidiaConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
