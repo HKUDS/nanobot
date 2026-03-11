@@ -24,18 +24,48 @@ Log learnings and errors to markdown files for continuous improvement. Important
 | Tool gotchas | Promote to `TOOLS.md` |
 | Behavioral patterns | Promote to `SOUL.md` |
 
+## Workspace Structure
+
+nanobot injects the following workspace files into every session's system prompt:
+
+```
+~/.hiperone/workspace/
+├── AGENTS.md          # Agent workflows, delegation patterns        ← auto-injected
+├── SOUL.md            # Behavioral guidelines, personality          ← auto-injected
+├── USER.md            # Project facts, conventions, user prefs      ← auto-injected
+├── TOOLS.md           # Tool capabilities, integration gotchas      ← auto-injected
+├── memory/
+│   ├── MEMORY.md      # Long-term memory (consolidated facts)      ← auto-injected
+│   └── HISTORY.md     # Grep-searchable session log                ← NOT injected
+├── skills/            # Custom workspace skills
+│   └── <name>/SKILL.md
+└── .learnings/        # This skill's log files                     ← NOT injected
+    ├── LEARNINGS.md   # Corrections, knowledge gaps, best practices
+    ├── ERRORS.md      # Command failures, exceptions
+    └── FEATURE_REQUESTS.md  # User-requested capabilities
+```
+
+**Key distinction**: Files marked `auto-injected` are loaded into the LLM system prompt on every conversation. `.learnings/` files are **not** auto-injected — they serve as a staging area. To make a learning permanent, **promote** it to one of the auto-injected files.
+
 ## Setup
 
-The `.learnings/` directory is automatically created in the nanobot workspace on first startup with three log files:
-- `LEARNINGS.md` — corrections, knowledge gaps, best practices
-- `ERRORS.md` — command failures, exceptions
-- `FEATURE_REQUESTS.md` — user-requested capabilities
+The `.learnings/` directory is automatically created on first startup (`nanobot gateway` or `nanobot agent`).
 
 If the directory is missing for any reason, create it manually:
 
 ```bash
 mkdir -p ~/.hiperone/workspace/.learnings
 ```
+
+## How It Works
+
+This skill operates through two mechanisms:
+
+1. **Error Detection Hook** (automatic): A Python hook (`SelfImprovementHook`) monitors `exec`/`shell` tool output. When it detects a crash-level error (Python exceptions, segfaults, non-zero exit codes), it appends a reminder to the tool result. You will see this as a `[self-improvement]` block after the error output — that's your cue to log the error.
+
+2. **SKILL.md Injection** (automatic): This file is marked `always: true`, so its content is included in your system prompt every session. This teaches you when and how to log learnings.
+
+**What is NOT automatic**: Actually writing to `.learnings/` files, reading them back, and promoting entries to bootstrap files — these all require you to use `write_file`/`read_file`/`edit_file` tools yourself.
 
 ### Promotion Targets
 
@@ -201,6 +231,29 @@ When a learning is broadly applicable (not a one-off fix), promote it to permane
 1. **Distill** the learning into a concise rule or fact
 2. **Add** to appropriate section in target file (create file if needed)
 3. **Update** original entry status to `promoted`
+
+### Promotion Examples
+
+**Learning** (verbose, in `.learnings/ERRORS.md`):
+> 调用飞书审批 API 时传了 user_id 格式的 ID，API 返回 "user id not found"。
+> 必须传 open_id 格式（ou_xxx），不能传 user_id。
+
+**Promoted to `TOOLS.md`** (concise):
+```markdown
+## 飞书审批 API
+- user_id 参数必须传 open_id 格式（ou_xxx），不支持 user_id
+```
+
+**Learning** (verbose, in `.learnings/LEARNINGS.md`):
+> 用户说"调休 明天上午"时，需要自动计算 RFC3339 格式的时间。
+> 之前直接拼字符串导致时区错误，应该用 datetime 库。
+
+**Promoted to `AGENTS.md`** (actionable):
+```markdown
+## 时间处理
+- 所有飞书 API 时间参数必须为 RFC3339 格式，带时区偏移（+08:00）
+- 用 datetime 库计算，不要手动拼字符串
+```
 
 ### Promotion Rule (Recurring Patterns)
 
