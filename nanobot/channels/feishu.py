@@ -14,6 +14,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import FeishuConfig
 
 import importlib.util
@@ -243,6 +244,7 @@ class FeishuChannel(BaseChannel):
     """
 
     name = "feishu"
+    display_name = "Feishu"
 
     def __init__(self, config: FeishuConfig, bus: MessageBus):
         super().__init__(config, bus)
@@ -252,6 +254,12 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+
+    @staticmethod
+    def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
+        """Register an event handler only when the SDK supports it."""
+        method = getattr(builder, method_name, None)
+        return method(handler) if callable(method) else builder
 
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
@@ -273,14 +281,24 @@ class FeishuChannel(BaseChannel):
             .app_secret(self.config.app_secret) \
             .log_level(lark.LogLevel.INFO) \
             .build()
-
-        # Create event handler (only register message receive, ignore other events)
-        event_handler = lark.EventDispatcherHandler.builder(
+        builder = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
             self.config.verification_token or "",
         ).register_p2_im_message_receive_v1(
             self._on_message_sync
-        ).build()
+        )
+        builder = self._register_optional_event(
+            builder, "register_p2_im_message_reaction_created_v1", self._on_reaction_created
+        )
+        builder = self._register_optional_event(
+            builder, "register_p2_im_message_message_read_v1", self._on_message_read
+        )
+        builder = self._register_optional_event(
+            builder,
+            "register_p2_im_chat_access_event_bot_p2p_chat_entered_v1",
+            self._on_bot_p2p_chat_entered,
+        )
+        event_handler = builder.build()
 
         # Create WebSocket client for long connection
         self._ws_client = lark.ws.Client(
@@ -333,6 +351,27 @@ class FeishuChannel(BaseChannel):
         """
         self._running = False
         logger.info("Feishu bot stopped")
+
+    def _is_bot_mentioned(self, message: Any) -> bool:
+        """Check if the bot is @mentioned in the message."""
+        raw_content = message.content or ""
+        if "@_all" in raw_content:
+            return True
+
+        for mention in getattr(message, "mentions", None) or []:
+            mid = getattr(mention, "id", None)
+            if not mid:
+                continue
+            # Bot mentions have no user_id (None or "") but a valid open_id
+            if not getattr(mid, "user_id", None) and (getattr(mid, "open_id", None) or "").startswith("ou_"):
+                return True
+        return False
+
+    def _is_group_message_for_bot(self, message: Any) -> bool:
+        """Allow group messages when policy is open or bot is @mentioned."""
+        if self.config.group_policy == "open":
+            return True
+        return self._is_bot_mentioned(message)
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
@@ -715,8 +754,7 @@ class FeishuChannel(BaseChannel):
             (file_path, content_text) - file_path is None if download failed
         """
         loop = asyncio.get_running_loop()
-        media_dir = Path.home() / ".nanobot" / "media"
-        media_dir.mkdir(parents=True, exist_ok=True)
+        media_dir = get_media_dir("feishu")
 
         data, filename = None, None
 
@@ -736,8 +774,9 @@ class FeishuChannel(BaseChannel):
                     None, self._download_file_sync, message_id, file_key, msg_type
                 )
                 if not filename:
-                    ext = {"audio": ".opus", "media": ".mp4"}.get(msg_type, "")
-                    filename = f"{file_key[:16]}{ext}"
+                    filename = file_key[:16]
+                if msg_type == "audio" and not filename.endswith(".opus"):
+                    filename = f"{filename}.opus"
 
         if data and filename:
             file_path = media_dir / filename
@@ -841,7 +880,7 @@ class FeishuChannel(BaseChannel):
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
 
-    def _on_message_sync(self, data: "P2ImMessageReceiveV1") -> None:
+    def _on_message_sync(self, data: Any) -> None:
         """
         Sync handler for incoming messages (called from WebSocket thread).
         Schedules async handling in the main event loop.
@@ -849,7 +888,7 @@ class FeishuChannel(BaseChannel):
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self._on_message(data), self._loop)
 
-    async def _on_message(self, data: "P2ImMessageReceiveV1") -> None:
+    async def _on_message(self, data: Any) -> None:
         """Handle incoming message from Feishu."""
         try:
             event = data.event
@@ -874,6 +913,10 @@ class FeishuChannel(BaseChannel):
             chat_id = message.chat_id
             chat_type = message.chat_type
             msg_type = message.message_type
+
+            if chat_type == "group" and not self._is_group_message_for_bot(message):
+                logger.debug("Feishu: skipping group message (not mentioned)")
+                return
 
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
@@ -909,6 +952,12 @@ class FeishuChannel(BaseChannel):
                 file_path, content_text = await self._download_and_save_media(msg_type, content_json, message_id)
                 if file_path:
                     media_paths.append(file_path)
+
+                if msg_type == "audio" and file_path:
+                    transcription = await self.transcribe_audio(file_path)
+                    if transcription:
+                        content_text = f"[transcription: {transcription}]"
+
                 content_parts.append(content_text)
 
             elif msg_type in ("share_chat", "share_user", "interactive", "share_calendar_event", "system", "merge_forward"):
@@ -941,3 +990,16 @@ class FeishuChannel(BaseChannel):
 
         except Exception as e:
             logger.error("Error processing Feishu message: {}", e)
+
+    def _on_reaction_created(self, data: Any) -> None:
+        """Ignore reaction events so they do not generate SDK noise."""
+        pass
+
+    def _on_message_read(self, data: Any) -> None:
+        """Ignore read events so they do not generate SDK noise."""
+        pass
+
+    def _on_bot_p2p_chat_entered(self, data: Any) -> None:
+        """Ignore p2p-enter events when a user opens a bot chat."""
+        logger.debug("Bot entered p2p chat (user opened chat window)")
+        pass
