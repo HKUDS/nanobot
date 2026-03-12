@@ -1,6 +1,6 @@
 /* nanobot service worker — cache-first for static, network-only for API */
 
-const VERSION = 'v6';
+const VERSION = 'v7';
 const CACHE   = `nanobot-${VERSION}`;
 const PRECACHE = [
   '/',

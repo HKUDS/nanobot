@@ -1,73 +1,125 @@
-/* ── Session storage ──────────────────────────────────────────────────── */
+/* ── API helpers ──────────────────────────────────────────────────────── */
 
-function getSessions() {
-  try { return JSON.parse(localStorage.getItem('nanobot_sessions') || '[]'); }
-  catch { return []; }
+async function apiCall(method, path, body = null) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== null) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  if (!res.ok) throw new Error(`API ${method} ${path}: ${res.status}`);
+  return res.json();
 }
 
-function saveSessions(list) {
-  localStorage.setItem('nanobot_sessions', JSON.stringify(list));
+/* ── Session cache (in-memory, hydrated from API on init) ─────────────── */
+
+let sessions    = [];   // [{id, name, created, updated, pinned}]
+let historyCache = {};  // id -> [{role, content, hints?, pinned?}]
+let sessionId   = null;
+
+function getSessionMeta(id) {
+  return sessions.find(s => s.id === id) || null;
 }
 
+/** Synchronous read from cache (always populated after ensureHistory). */
 function getHistory(id) {
-  try { return JSON.parse(localStorage.getItem('nanobot_history_' + id) || '[]'); }
-  catch { return []; }
+  return historyCache[id] || [];
 }
 
-function saveHistory(id, history) {
-  localStorage.setItem('nanobot_history_' + id, JSON.stringify(history));
+async function loadSessions() {
+  sessions = await apiCall('GET', '/api/sessions');
 }
 
-function createSession(name = 'New chat') {
-  const id = crypto.randomUUID();
-  const sessions = getSessions();
-  sessions.unshift({ id, name, created: Date.now(), updated: Date.now() });
-  saveSessions(sessions);
-  return id;
+/** Load history for a session if not already cached. */
+async function ensureHistory(id) {
+  if (historyCache[id]) return historyCache[id];
+  try {
+    const data = await apiCall('GET', `/api/sessions/${id}`);
+    historyCache[id] = data.history || [];
+  } catch {
+    historyCache[id] = [];
+  }
+  return historyCache[id];
+}
+
+async function createSession(name = 'New chat') {
+  const s = await apiCall('POST', '/api/sessions', { name });
+  sessions.unshift(s);
+  historyCache[s.id] = [];
+  return s.id;
 }
 
 function renameSession(id, name) {
-  const sessions = getSessions();
-  const s = sessions.find(s => s.id === id);
-  if (s) { s.name = name; s.updated = Date.now(); saveSessions(sessions); }
+  const s = getSessionMeta(id);
+  if (s) {
+    s.name = name;
+    s.updated = Date.now();
+    apiCall('PATCH', `/api/sessions/${id}`, { name }).catch(() => {});
+  }
 }
 
 function touchSession(id) {
-  const sessions = getSessions();
-  const s = sessions.find(s => s.id === id);
-  if (s) { s.updated = Date.now(); saveSessions(sessions); }
+  const s = getSessionMeta(id);
+  if (s) {
+    s.updated = Date.now();
+    apiCall('PATCH', `/api/sessions/${id}`, { touch: true }).catch(() => {});
+  }
 }
 
-function pinSession(id) {
-  const sessions = getSessions();
-  const s = sessions.find(s => s.id === id);
-  if (s) { s.pinned = !s.pinned; saveSessions(sessions); renderSidebar(); }
+async function pinSession(id) {
+  const s = getSessionMeta(id);
+  if (!s) return;
+  s.pinned = !s.pinned;
+  await apiCall('PATCH', `/api/sessions/${id}`, { pinned: s.pinned }).catch(() => {});
+  renderSidebar();
 }
 
-function deleteSession(id) {
-  let sessions = getSessions().filter(s => s.id !== id);
-  saveSessions(sessions);
-  localStorage.removeItem('nanobot_history_' + id);
+async function deleteSession(id) {
+  sessions = sessions.filter(s => s.id !== id);
+  delete historyCache[id];
+  await apiCall('DELETE', `/api/sessions/${id}`).catch(() => {});
   if (id === sessionId) {
-    sessionId = sessions.length > 0 ? sessions[0].id : createSession();
+    if (sessions.length > 0) {
+      sessionId = sessions[0].id;
+    } else {
+      sessionId = await createSession('New chat');
+    }
     localStorage.setItem('nanobot_session', sessionId);
-    replayHistory(sessionId);
+    await replayHistory(sessionId);
   }
   renderSidebar();
 }
 
-/* ── Session init ─────────────────────────────────────────────────────── */
+/** Update in-memory cache and persist to server (fire-and-forget). */
+function saveHistory(id, history) {
+  historyCache[id] = history;
+  apiCall('PUT', `/api/sessions/${id}`, { history }).catch(() => {});
+}
 
-let sessionId;
-{
-  const stored   = localStorage.getItem('nanobot_session');
-  const sessions = getSessions();
-  if (stored && sessions.find(s => s.id === stored)) {
-    sessionId = stored;
-  } else {
-    sessionId = createSession();
-    localStorage.setItem('nanobot_session', sessionId);
+/* ── Migrate old localStorage data to the API (first load only) ───────── */
+
+async function migrateLegacyData() {
+  let legacy;
+  try {
+    legacy = JSON.parse(localStorage.getItem('nanobot_sessions') || '[]');
+  } catch { return; }
+  if (legacy.length === 0) return;
+
+  for (const ls of legacy) {
+    let history = [];
+    try {
+      history = JSON.parse(localStorage.getItem('nanobot_history_' + ls.id) || '[]');
+    } catch {}
+    try {
+      await apiCall('POST', '/api/sessions', {
+        id:      ls.id,
+        name:    ls.name,
+        created: ls.created,
+        updated: ls.updated,
+        pinned:  ls.pinned || false,
+        history,
+      });
+    } catch {}
+    localStorage.removeItem('nanobot_history_' + ls.id);
   }
+  localStorage.removeItem('nanobot_sessions');
 }
 
 /* ── State ────────────────────────────────────────────────────────────── */
@@ -77,15 +129,15 @@ let abortController = null;
 
 /* ── DOM refs ─────────────────────────────────────────────────────────── */
 
-const messagesEl    = document.getElementById('messages');
-const form          = document.getElementById('chat-form');
-const input         = document.getElementById('input');
-const btnSend       = document.getElementById('btn-send');
-const btnNew        = document.getElementById('btn-new');
-const btnMenu       = document.getElementById('btn-menu');
-const sidebar       = document.getElementById('sidebar');
+const messagesEl     = document.getElementById('messages');
+const form           = document.getElementById('chat-form');
+const input          = document.getElementById('input');
+const btnSend        = document.getElementById('btn-send');
+const btnNew         = document.getElementById('btn-new');
+const btnMenu        = document.getElementById('btn-menu');
+const sidebar        = document.getElementById('sidebar');
 const sidebarOverlay = document.getElementById('sidebar-overlay');
-const sessionListEl = document.getElementById('session-list');
+const sessionListEl  = document.getElementById('session-list');
 
 /* ── marked config ────────────────────────────────────────────────────── */
 
@@ -157,15 +209,13 @@ function escapeHtml(str) {
 /* ── Sidebar ──────────────────────────────────────────────────────────── */
 
 function renderSidebar() {
-  const sessions = getSessions();
-  // Pinned sessions first, then by last updated
-  sessions.sort((a, b) => {
+  const sorted = [...sessions].sort((a, b) => {
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
     return (b.updated || 0) - (a.updated || 0);
   });
   sessionListEl.innerHTML = '';
-  for (const s of sessions) {
+  for (const s of sorted) {
     const item = document.createElement('div');
     item.className = 'session-item' + (s.id === sessionId ? ' active' : '') + (s.pinned ? ' pinned' : '');
 
@@ -202,16 +252,15 @@ function renderSidebar() {
       dropdown.classList.toggle('hidden');
     });
 
-    pinItem.addEventListener('click', (e) => {
+    pinItem.addEventListener('click', async (e) => {
       e.stopPropagation();
-      pinSession(s.id);
+      await pinSession(s.id);
       dropdown.classList.add('hidden');
     });
 
-    deleteItem.addEventListener('click', (e) => {
+    deleteItem.addEventListener('click', async (e) => {
       e.stopPropagation();
-      deleteSession(s.id);
-      dropdown.classList.add('hidden');
+      await deleteSession(s.id);
     });
 
     item.appendChild(nameBtn);
@@ -221,13 +270,13 @@ function renderSidebar() {
   }
 }
 
-function switchSession(id) {
+async function switchSession(id) {
   if (id === sessionId || isStreaming) return;
   sessionId = id;
   localStorage.setItem('nanobot_session', id);
   closeSidebar();
   renderSidebar();
-  replayHistory(id);
+  await replayHistory(id);
 }
 
 /* ── Message builders ─────────────────────────────────────────────────── */
@@ -307,14 +356,14 @@ function addMessageActions(el, index) {
     dropdown.classList.add('hidden');
   });
 
-  deleteItem.addEventListener('click', (e) => {
+  deleteItem.addEventListener('click', async (e) => {
     e.stopPropagation();
     if (isStreaming) return;
     const h = getHistory(sessionId);
     h.splice(index, 1);
     saveHistory(sessionId, h);
     dropdown.classList.add('hidden');
-    replayHistory(sessionId);
+    await replayHistory(sessionId);
   });
 }
 
@@ -355,9 +404,9 @@ function appendHint(text, wrapper) {
 
 /* ── History replay ───────────────────────────────────────────────────── */
 
-function replayHistory(id) {
+async function replayHistory(id) {
   messagesEl.innerHTML = '';
-  const history = getHistory(id);
+  const history = await ensureHistory(id);
 
   if (history.length === 0) {
     messagesEl.innerHTML = `
@@ -628,9 +677,9 @@ async function sendMessage(text) {
 
 /* ── New conversation ─────────────────────────────────────────────────── */
 
-function newConversation() {
+async function newConversation() {
   if (isStreaming) return;
-  sessionId = createSession();
+  sessionId = await createSession('New chat');
   localStorage.setItem('nanobot_session', sessionId);
   renderSidebar();
   messagesEl.innerHTML = `
@@ -676,9 +725,35 @@ document.addEventListener('click', () => {
   document.querySelectorAll('.msg-dropdown:not(.hidden), .session-dropdown:not(.hidden)').forEach(d => d.classList.add('hidden'));
 });
 
-renderSidebar();
-replayHistory(sessionId);
-input.focus();
+async function init() {
+  // Migrate any existing localStorage sessions to the API
+  try { await migrateLegacyData(); } catch {}
+
+  // Load sessions from API
+  try {
+    await loadSessions();
+  } catch {
+    sessions = [];
+  }
+
+  // Restore last active session, or pick the first, or create new
+  const lastId = localStorage.getItem('nanobot_session');
+  if (lastId && sessions.find(s => s.id === lastId)) {
+    sessionId = lastId;
+  } else if (sessions.length > 0) {
+    sessionId = sessions[0].id;
+    localStorage.setItem('nanobot_session', sessionId);
+  } else {
+    sessionId = await createSession('New chat');
+    localStorage.setItem('nanobot_session', sessionId);
+  }
+
+  renderSidebar();
+  await replayHistory(sessionId);
+  input.focus();
+}
+
+init();
 
 /* ── Service worker ───────────────────────────────────────────────────── */
 
