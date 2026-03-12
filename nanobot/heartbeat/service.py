@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
@@ -77,6 +78,91 @@ class HeartbeatService:
     def heartbeat_file(self) -> Path:
         return self.workspace / "HEARTBEAT.md"
 
+    @staticmethod
+    def _compute_task_statuses(content: str, now: datetime) -> str:
+        """Parse ## User Tasks section and compute due status in Python.
+
+        Returns a formatted string describing which tasks are DUE NOW and which
+        are not yet due, or "" if no tasks with Schedule fields are found.
+        """
+        # Find the ## User Tasks section
+        user_tasks_match = re.search(r"^## User Tasks\s*$", content, re.MULTILINE)
+        if not user_tasks_match:
+            return ""
+
+        # Find the end of the section (next ## heading or end of string)
+        section_start = user_tasks_match.end()
+        next_section_match = re.search(r"^## ", content[section_start:], re.MULTILINE)
+        if next_section_match:
+            section_end = section_start + next_section_match.start()
+        else:
+            section_end = len(content)
+        section = content[section_start:section_end]
+
+        # Parse each ### TaskName block
+        task_blocks = re.split(r"\n(?=###\s)", section)
+        lines = []
+
+        for block in task_blocks:
+            block = block.strip()
+            if not block.startswith("###"):
+                continue
+
+            # Extract task name
+            name_match = re.match(r"###\s+(.+)", block)
+            if not name_match:
+                continue
+            task_name = name_match.group(1).strip()
+
+            # Extract Schedule field — support YYYY-MM-DD HH:MM or YYYY-MM-DD
+            schedule_match = re.search(
+                r"Schedule:\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)", block
+            )
+            if not schedule_match:
+                continue
+            schedule_str = schedule_match.group(1).strip()
+
+            # Parse schedule datetime
+            if re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", schedule_str):
+                try:
+                    schedule_dt = datetime.strptime(schedule_str, "%Y-%m-%d %H:%M")
+                except ValueError:
+                    continue
+            else:
+                try:
+                    schedule_dt = datetime.strptime(schedule_str, "%Y-%m-%d")
+                except ValueError:
+                    continue
+
+            # Extract Until field and skip expired tasks
+            until_match = re.search(r"Until:\s*(\d{4}-\d{2}-\d{2})", block)
+            if until_match:
+                try:
+                    until_dt = datetime.strptime(until_match.group(1), "%Y-%m-%d")
+                    if now > until_dt:
+                        continue
+                except ValueError:
+                    pass
+
+            now_str = now.strftime("%Y-%m-%d %H:%M")
+            if now >= schedule_dt:
+                lines.append(
+                    f"  - '{task_name}' IS DUE NOW "
+                    f"(scheduled {schedule_str}, now is {now_str})"
+                )
+            else:
+                lines.append(
+                    f"  - '{task_name}' is NOT due until {schedule_str}"
+                )
+
+        if not lines:
+            return ""
+
+        return (
+            "Python-computed task due status (authoritative — trust this over your own date math):\n"
+            + "\n".join(lines)
+        )
+
     def _read_heartbeat_file(self) -> str | None:
         if self.heartbeat_file.exists():
             try:
@@ -90,14 +176,19 @@ class HeartbeatService:
 
         Returns (action, tasks) where action is 'skip' or 'run'.
         """
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        now = datetime.now()
+        now_str = now.strftime("%Y-%m-%d %H:%M")
         last_run_instruction = ""
         if self.last_run_tracking:
-            today_str = datetime.now().strftime("%Y-%m-%d")
-            last_run_instruction = (
-                f"Evaluate each task independently: if a task has a 'Last-run' field dated {today_str}, "
-                "that specific task already ran today — skip it. Other tasks are unaffected. "
-            )
+            computed = self._compute_task_statuses(content, now)
+            if computed:
+                last_run_instruction = computed + "\n"
+            else:
+                today_str = now.strftime("%Y-%m-%d")
+                last_run_instruction = (
+                    f"Evaluate each task independently: if a task has a 'Last-run' field dated {today_str}, "
+                    "that specific task already ran today — skip it. Other tasks are unaffected. "
+                )
         response = await self.provider.chat_with_retry(
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},

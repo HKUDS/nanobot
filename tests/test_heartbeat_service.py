@@ -1,6 +1,6 @@
 import asyncio
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -411,3 +411,145 @@ async def test_decide_retries_transient_error_then_succeeds(tmp_path, monkeypatc
     assert tasks == "check open tasks"
     assert provider.calls == 2
     assert delays == [1]
+
+
+# ---------------------------------------------------------------------------
+# _compute_task_statuses unit tests
+# ---------------------------------------------------------------------------
+
+def _make_heartbeat(tasks_section: str) -> str:
+    return f"# Heartbeat Tasks\n\n## User Tasks\n{tasks_section}\n## Completed\n"
+
+
+def test_compute_task_statuses_due_when_schedule_passed() -> None:
+    """Task with Schedule 1 hour ago appears as DUE NOW."""
+    now = datetime(2026, 3, 12, 10, 0)
+    schedule_dt = now - timedelta(hours=1)
+    schedule_str = schedule_dt.strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        f"\n### Gmail scan\nSchedule: {schedule_str}\nRecur: every 1 day\nAdded: 2026-03-01\n"
+    )
+    result = HeartbeatService._compute_task_statuses(content, now)
+    assert "IS DUE NOW" in result
+    assert "Gmail scan" in result
+
+
+def test_compute_task_statuses_not_due_when_schedule_future() -> None:
+    """Task with Schedule 1 hour from now appears as NOT due."""
+    now = datetime(2026, 3, 12, 10, 0)
+    schedule_dt = now + timedelta(hours=1)
+    schedule_str = schedule_dt.strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        f"\n### Daily morning briefing\nSchedule: {schedule_str}\nRecur: every 1 day\nAdded: 2026-03-01\n"
+    )
+    result = HeartbeatService._compute_task_statuses(content, now)
+    assert "is NOT due" in result
+    assert "Daily morning briefing" in result
+    assert "IS DUE NOW" not in result
+
+
+def test_compute_task_statuses_expired_task_excluded() -> None:
+    """Task with Until yesterday is excluded from output entirely."""
+    now = datetime(2026, 3, 12, 10, 0)
+    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    schedule_str = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        f"\n### Old task\nSchedule: {schedule_str}\nUntil: {yesterday}\nRecur: every 1 day\nAdded: 2026-03-01\n"
+    )
+    result = HeartbeatService._compute_task_statuses(content, now)
+    assert result == ""
+
+
+def test_compute_task_statuses_datetime_precision() -> None:
+    """Task at 10:00: NOT due at 09:59, DUE NOW at exactly 10:00."""
+    content = _make_heartbeat(
+        "\n### Precise task\nSchedule: 2026-03-12 10:00\nRecur: every 1 day\nAdded: 2026-03-01\n"
+    )
+    # One minute before: not due
+    before = datetime(2026, 3, 12, 9, 59)
+    result_before = HeartbeatService._compute_task_statuses(content, before)
+    assert "is NOT due" in result_before
+    assert "IS DUE NOW" not in result_before
+
+    # Exactly on time: due now
+    on_time = datetime(2026, 3, 12, 10, 0)
+    result_on_time = HeartbeatService._compute_task_statuses(content, on_time)
+    assert "IS DUE NOW" in result_on_time
+
+
+def test_compute_task_statuses_empty_when_no_schedule_fields() -> None:
+    """HEARTBEAT.md with tasks but no Schedule fields → returns ''."""
+    content = _make_heartbeat(
+        "\n### Some task\nAdded: 2026-03-01\n"
+    )
+    result = HeartbeatService._compute_task_statuses(content, datetime(2026, 3, 12, 10, 0))
+    assert result == ""
+
+
+def test_compute_task_statuses_multiple_tasks_mixed() -> None:
+    """One due task and one future task both appear with correct labels."""
+    now = datetime(2026, 3, 12, 10, 0)
+    past_str = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    future_str = (now + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        f"\n### Past task\nSchedule: {past_str}\nRecur: every 1 day\nAdded: 2026-03-01\n\n"
+        f"### Future task\nSchedule: {future_str}\nRecur: every 1 day\nAdded: 2026-03-01\n"
+    )
+    result = HeartbeatService._compute_task_statuses(content, now)
+    assert "Past task" in result
+    assert "IS DUE NOW" in result
+    assert "Future task" in result
+    assert "is NOT due" in result
+
+
+@pytest.mark.asyncio
+async def test_decide_prompt_includes_computed_statuses_when_tracking_enabled(tmp_path) -> None:
+    """When last_run_tracking=True and there's a past-schedule task, prompt contains
+    'IS DUE NOW' and 'authoritative'."""
+    now = datetime.now()
+    past_str = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    heartbeat_content = _make_heartbeat(
+        f"\n### Gmail scan\nSchedule: {past_str}\nRecur: every 1 day\nAdded: 2026-03-01\n"
+    )
+    (tmp_path / "HEARTBEAT.md").write_text(heartbeat_content, encoding="utf-8")
+
+    provider = DummyProvider([LLMResponse(content="", tool_calls=[])])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        last_run_tracking=True,
+    )
+
+    await service._decide(heartbeat_content)
+
+    user_content = next(
+        m["content"] for m in provider.last_messages if m["role"] == "user"
+    )
+    assert "IS DUE NOW" in user_content
+    assert "authoritative" in user_content
+
+
+@pytest.mark.asyncio
+async def test_decide_prompt_uses_fallback_when_no_scheduled_tasks(tmp_path) -> None:
+    """When last_run_tracking=True but no Schedule fields, prompt still contains 'Last-run'."""
+    heartbeat_content = _make_heartbeat(
+        "\n### Some task\nAdded: 2026-03-01\n"
+    )
+    (tmp_path / "HEARTBEAT.md").write_text(heartbeat_content, encoding="utf-8")
+
+    provider = DummyProvider([LLMResponse(content="", tool_calls=[])])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        last_run_tracking=True,
+    )
+
+    await service._decide(heartbeat_content)
+
+    user_content = next(
+        m["content"] for m in provider.last_messages if m["role"] == "user"
+    )
+    assert "Last-run" in user_content
+    assert "IS DUE NOW" not in user_content
