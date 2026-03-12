@@ -362,8 +362,8 @@ class FeishuChannel(BaseChannel):
             mid = getattr(mention, "id", None)
             if not mid:
                 continue
-            # Bot mentions have an empty user_id with a valid open_id
-            if getattr(mid, "user_id", None) == "" and (getattr(mid, "open_id", None) or "").startswith("ou_"):
+            # Bot mentions have no user_id (None or "") but a valid open_id
+            if not getattr(mid, "user_id", None) and (getattr(mid, "open_id", None) or "").startswith("ou_"):
                 return True
         return False
 

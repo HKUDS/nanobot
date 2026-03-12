@@ -20,6 +20,7 @@ from nanobot.config.schema import TelegramConfig
 from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
+TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
 
 
 def _strip_md(s: str) -> str:
@@ -453,6 +454,7 @@ class TelegramChannel(BaseChannel):
     @staticmethod
     def _build_message_metadata(message, user) -> dict:
         """Build common Telegram inbound metadata payload."""
+        reply_to = getattr(message, "reply_to_message", None)
         return {
             "message_id": message.message_id,
             "user_id": user.id,
@@ -461,7 +463,72 @@ class TelegramChannel(BaseChannel):
             "is_group": message.chat.type != "private",
             "message_thread_id": getattr(message, "message_thread_id", None),
             "is_forum": bool(getattr(message.chat, "is_forum", False)),
+            "reply_to_message_id": getattr(reply_to, "message_id", None) if reply_to else None,
         }
+
+    @staticmethod
+    def _extract_reply_context(message) -> str | None:
+        """Extract text from the message being replied to, if any."""
+        reply = getattr(message, "reply_to_message", None)
+        if not reply:
+            return None
+        text = getattr(reply, "text", None) or getattr(reply, "caption", None) or ""
+        if len(text) > TELEGRAM_REPLY_CONTEXT_MAX_LEN:
+            text = text[:TELEGRAM_REPLY_CONTEXT_MAX_LEN] + "..."
+        return f"[Reply to: {text}]" if text else None
+
+    async def _download_message_media(
+        self, msg, *, add_failure_content: bool = False
+    ) -> tuple[list[str], list[str]]:
+        """Download media from a message (current or reply). Returns (media_paths, content_parts)."""
+        media_file = None
+        media_type = None
+        if getattr(msg, "photo", None):
+            media_file = msg.photo[-1]
+            media_type = "image"
+        elif getattr(msg, "voice", None):
+            media_file = msg.voice
+            media_type = "voice"
+        elif getattr(msg, "audio", None):
+            media_file = msg.audio
+            media_type = "audio"
+        elif getattr(msg, "document", None):
+            media_file = msg.document
+            media_type = "file"
+        elif getattr(msg, "video", None):
+            media_file = msg.video
+            media_type = "video"
+        elif getattr(msg, "video_note", None):
+            media_file = msg.video_note
+            media_type = "video"
+        elif getattr(msg, "animation", None):
+            media_file = msg.animation
+            media_type = "animation"
+        if not media_file or not self._app:
+            return [], []
+        try:
+            file = await self._app.bot.get_file(media_file.file_id)
+            ext = self._get_extension(
+                media_type,
+                getattr(media_file, "mime_type", None),
+                getattr(media_file, "file_name", None),
+            )
+            media_dir = get_media_dir("telegram")
+            file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
+            await file.download_to_drive(str(file_path))
+            path_str = str(file_path)
+            if media_type in ("voice", "audio"):
+                transcription = await self.transcribe_audio(file_path)
+                if transcription:
+                    logger.info("Transcribed {}: {}...", media_type, transcription[:50])
+                    return [path_str], [f"[transcription: {transcription}]"]
+                return [path_str], [f"[{media_type}: {path_str}]"]
+            return [path_str], [f"[{media_type}: {path_str}]"]
+        except Exception as e:
+            logger.warning("Failed to download message media: {}", e)
+            if add_failure_content:
+                return [], [f"[{media_type}: download failed]"]
+            return [], []
 
     async def _ensure_bot_identity(self) -> tuple[int | None, str | None]:
         """Load bot identity once and reuse it for mention/reply checks."""
@@ -547,7 +614,7 @@ class TelegramChannel(BaseChannel):
         await self._handle_message(
             sender_id=self._sender_id(user),
             chat_id=str(message.chat_id),
-            content=message.text,
+            content=message.text or "",
             metadata=self._build_message_metadata(message, user),
             session_key=self._derive_topic_session_key(message),
         )
@@ -579,54 +646,26 @@ class TelegramChannel(BaseChannel):
         if message.caption:
             content_parts.append(message.caption)
 
-        # Handle media files
-        media_file = None
-        media_type = None
+        # Download current message media
+        current_media_paths, current_media_parts = await self._download_message_media(
+            message, add_failure_content=True
+        )
+        media_paths.extend(current_media_paths)
+        content_parts.extend(current_media_parts)
+        if current_media_paths:
+            logger.debug("Downloaded message media to {}", current_media_paths[0])
 
-        if message.photo:
-            media_file = message.photo[-1]  # Largest photo
-            media_type = "image"
-        elif message.voice:
-            media_file = message.voice
-            media_type = "voice"
-        elif message.audio:
-            media_file = message.audio
-            media_type = "audio"
-        elif message.document:
-            media_file = message.document
-            media_type = "file"
-
-        # Download media if present
-        if media_file and self._app:
-            try:
-                file = await self._app.bot.get_file(media_file.file_id)
-                ext = self._get_extension(
-                    media_type,
-                    getattr(media_file, 'mime_type', None),
-                    getattr(media_file, 'file_name', None),
-                )
-                media_dir = get_media_dir("telegram")
-
-                file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
-                await file.download_to_drive(str(file_path))
-
-                media_paths.append(str(file_path))
-
-                if media_type in ("voice", "audio"):
-                    transcription = await self.transcribe_audio(file_path)
-                    if transcription:
-                        logger.info("Transcribed {}: {}...", media_type, transcription[:50])
-                        content_parts.append(f"[transcription: {transcription}]")
-                    else:
-                        content_parts.append(f"[{media_type}: {file_path}]")
-                else:
-                    content_parts.append(f"[{media_type}: {file_path}]")
-
-                logger.debug("Downloaded {} to {}", media_type, file_path)
-            except Exception as e:
-                logger.error("Failed to download media: {}", e)
-                content_parts.append(f"[{media_type}: download failed]")
-
+        # Reply context: text and/or media from the replied-to message
+        reply = getattr(message, "reply_to_message", None)
+        if reply is not None:
+            reply_ctx = self._extract_reply_context(message)
+            reply_media, reply_media_parts = await self._download_message_media(reply)
+            if reply_media:
+                media_paths = reply_media + media_paths
+                logger.debug("Attached replied-to media: {}", reply_media[0])
+            tag = reply_ctx or (f"[Reply to: {reply_media_parts[0]}]" if reply_media_parts else None)
+            if tag:
+                content_parts.insert(0, tag)
         content = "\n".join(content_parts) if content_parts else "[empty message]"
 
         logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
