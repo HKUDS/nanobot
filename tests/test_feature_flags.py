@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nanobot.config.schema import AgentConfig, AgentDefaults, Config, FeaturesConfig
+from nanobot.config.schema import AgentConfig, AgentDefaults, Config, FeaturesConfig, LogConfig
 
 # ---------------------------------------------------------------------------
 # FeaturesConfig defaults
@@ -125,3 +125,27 @@ class TestFromDefaults:
         ac = AgentConfig.from_defaults(defaults)
         assert ac.graph_enabled is True
         assert ac.graph_neo4j_uri == "bolt://localhost:7687"
+
+
+# ---------------------------------------------------------------------------
+# LogConfig defaults
+# ---------------------------------------------------------------------------
+
+
+class TestLogConfig:
+    def test_defaults(self):
+        lc = LogConfig()
+        assert lc.level == "INFO"
+        assert lc.json_stdout is False
+        assert lc.json_file == ""
+
+    def test_override(self):
+        lc = LogConfig(level="DEBUG", json_stdout=True, json_file="/tmp/nanobot.log")
+        assert lc.level == "DEBUG"
+        assert lc.json_stdout is True
+        assert lc.json_file == "/tmp/nanobot.log"
+
+    def test_config_root_has_log(self):
+        cfg = Config()
+        assert isinstance(cfg.log, LogConfig)
+        assert cfg.log.level == "INFO"

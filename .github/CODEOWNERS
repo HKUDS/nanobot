@@ -1,0 +1,48 @@
+# Nanobot Code Ownership
+# Each line maps a file pattern to one or more owners.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# ── Default owner ─────────────────────────────────────────────
+*                               @carlos
+
+# ── Core agent engine ─────────────────────────────────────────
+nanobot/agent/loop.py           @carlos
+nanobot/agent/streaming.py      @carlos
+nanobot/agent/verifier.py       @carlos
+nanobot/agent/consolidation.py  @carlos
+nanobot/agent/context.py        @carlos
+nanobot/agent/coordinator.py    @carlos
+nanobot/agent/delegation.py     @carlos
+nanobot/agent/tool_executor.py  @carlos
+nanobot/agent/tracing.py        @carlos
+nanobot/agent/prompt_loader.py  @carlos
+
+# ── Memory subsystem ─────────────────────────────────────────
+nanobot/agent/memory/           @carlos
+
+# ── Tool system ───────────────────────────────────────────────
+nanobot/agent/tools/            @carlos
+
+# ── Channel adapters ──────────────────────────────────────────
+nanobot/channels/               @carlos
+
+# ── LLM providers ────────────────────────────────────────────
+nanobot/providers/              @carlos
+
+# ── Configuration ─────────────────────────────────────────────
+nanobot/config/                 @carlos
+
+# ── Message bus ───────────────────────────────────────────────
+nanobot/bus/                    @carlos
+
+# ── Architecture & governance ─────────────────────────────────
+docs/adr/                       @carlos
+docs/architecture.md            @carlos
+docs/operating-policies.md      @carlos
+.github/workflows/              @carlos
+scripts/check_imports.py        @carlos
+scripts/check_prompt_manifest.py @carlos
+
+# ── Prompt assets ─────────────────────────────────────────────
+nanobot/templates/prompts/      @carlos
+prompts_manifest.json           @carlos

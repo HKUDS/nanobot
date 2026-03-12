@@ -116,17 +116,6 @@ async def test_loop_new_exception_and_fallback_archive(tmp_path: Path, monkeypat
     assert out is not None
     assert "failed" in out.content.lower()
 
-    # fallback archive success/failure branches
-    loop.context.memory.append_history = MagicMock()
-    assert loop._fallback_archive_snapshot([
-        {"role": "assistant", "content": "summary", "timestamp": "2026-01-01", "tools_used": ["read_file"]}
-    ]) is True
-
-    loop.context.memory.append_history = MagicMock(side_effect=RuntimeError("io"))
-    assert loop._fallback_archive_snapshot([
-        {"role": "assistant", "content": "summary", "timestamp": "2026-01-01"}
-    ]) is False
-
 
 def test_store_retrieve_core_router_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = _store(

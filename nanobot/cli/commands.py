@@ -263,6 +263,43 @@ def _create_workspace_templates(workspace: Path):
     (workspace / "skills").mkdir(exist_ok=True)
 
 
+def _configure_log_sink(config: Config, log: Any) -> None:
+    """Apply structured logging settings from ``config.log``.
+
+    Adds a JSON file sink when ``config.log.json_file`` is set, and enables
+    loguru's ``serialize`` mode when ``config.log.json`` is ``True``.
+    """
+    from pathlib import Path
+
+    log_cfg = config.log
+    if log_cfg.json_file:
+        path = Path(log_cfg.json_file).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        log.add(
+            str(path),
+            level=log_cfg.level,
+            serialize=True,
+            rotation="10 MB",
+            retention="7 days",
+            enqueue=True,
+        )
+    if log_cfg.json_stdout:
+        # Replace default stderr sink with serialized (JSON) output
+        log.remove()
+        log.add(
+            _sys_stderr,
+            level=log_cfg.level,
+            serialize=True,
+        )
+
+
+def _sys_stderr(message: str) -> None:
+    """Write to stderr — needed as a callable sink for loguru."""
+    import sys
+
+    sys.stderr.write(message)
+
+
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.custom_provider import CustomProvider
@@ -360,10 +397,19 @@ def gateway(
         import logging
 
         logging.basicConfig(level=logging.DEBUG)
+        from loguru import logger as _gw_logger
+
+        _gw_logger.enable("nanobot")
 
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
 
     config = load_config()
+
+    # Apply structured logging config
+    from loguru import logger as _gw_logger2
+
+    _configure_log_sink(config, _gw_logger2)
+
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
@@ -539,6 +585,9 @@ def agent(
         logger.enable("nanobot")
     else:
         logger.disable("nanobot")
+
+    # Apply structured logging config from config.log
+    _configure_log_sink(config, logger)
 
     agent_loop = AgentLoop(
         bus=bus,

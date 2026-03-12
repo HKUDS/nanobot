@@ -516,6 +516,10 @@ entity relationships, and past events. Follow these rules when answering:
         user_content = self._inject_runtime_context(user_content, channel, chat_id)
         messages.append({"role": "user", "content": user_content})  # type: ignore[dict-item]
 
+        bind_trace().debug(
+            "context_built | history={} | skills={} | total_msgs={}",
+            len(history), len(skill_names or []), len(messages),
+        )
         return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:

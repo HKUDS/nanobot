@@ -149,19 +149,3 @@ async def test_attempt_recovery_missing_or_error_paths(tmp_path: Path) -> None:
     msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
     assert await loop._attempt_recovery(SimpleNamespace(channel="c", chat_id="id"), msgs) is None
 
-
-def test_fallback_archive_snapshot_success_and_failure(tmp_path: Path) -> None:
-    loop = _make_loop(tmp_path)
-    sink: list[str] = []
-    mem_ns = SimpleNamespace(append_history=lambda text: sink.append(text))
-    loop._consolidator = ConsolidationOrchestrator(mem_ns)
-    assert loop._fallback_archive_snapshot([
-        {"role": "user", "content": "hello", "timestamp": "2026-01-01T00:00:00"}
-    ]) is True
-    assert sink and "Fallback archive" in sink[0]
-
-    err_mem = SimpleNamespace(
-        append_history=lambda _t: (_ for _ in ()).throw(RuntimeError("x"))
-    )
-    loop._consolidator = ConsolidationOrchestrator(err_mem)
-    assert loop._fallback_archive_snapshot([{"role": "user", "content": "hello"}]) is False

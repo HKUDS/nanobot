@@ -531,6 +531,14 @@ class FeaturesConfig(Base):
     streaming_enabled: bool = True
 
 
+class LogConfig(Base):
+    """Structured logging configuration."""
+
+    level: str = "INFO"  # Loguru level: TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL
+    json_stdout: bool = False  # Emit logs as JSON to stderr (loguru serialize mode)
+    json_file: str = ""  # Path to a JSON log file sink (empty = disabled)
+
+
 class LLMConfig(Base):
     """LLM call tuning — consolidates scattered os.getenv() calls."""
 
@@ -556,6 +564,7 @@ class Config(BaseSettings):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     features: FeaturesConfig = Field(default_factory=FeaturesConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    log: LogConfig = Field(default_factory=LogConfig)
 
     @property
     def workspace_path(self) -> Path:

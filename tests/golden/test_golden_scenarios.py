@@ -479,3 +479,147 @@ class TestGoldenConsecutiveErrorFallback:
         assert "trouble" in result.content.lower() or "try again" in result.content.lower()
         # The agent should have called the LLM 3 times before giving up
         assert len(provider.call_log) == 3
+
+
+# ---------------------------------------------------------------------------
+# Golden 8: Tool failure → reflect → retry → success
+# ---------------------------------------------------------------------------
+
+
+class TestGoldenToolFailureRecovery:
+    """When a tool fails, the agent should inject a reflection/strategy prompt,
+    then succeed on a different approach.  This tests the recovery path.
+    """
+
+    @pytest.mark.asyncio
+    async def test_recover_after_initial_failure(self, tmp_path: Path):
+        # First attempt reads a missing file; second reads an existing one
+        (tmp_path / "backup.txt").write_text("recovered data")
+        provider = ScriptedProvider(
+            [
+                # Step 1: try to read missing file
+                LLMResponse(
+                    content=None,
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="tc1",
+                            name="read_file",
+                            arguments={"path": str(tmp_path / "gone.txt")},
+                        )
+                    ],
+                ),
+                # Step 2: agent reflects and tries backup
+                LLMResponse(
+                    content=None,
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="tc2",
+                            name="read_file",
+                            arguments={"path": str(tmp_path / "backup.txt")},
+                        )
+                    ],
+                ),
+                # Step 3: final answer
+                LLMResponse(content="Found the data in backup.txt."),
+            ]
+        )
+        loop = _make_loop(tmp_path, provider)
+        result = await loop._process_message(_make_inbound("find the data"))
+
+        assert result is not None
+        assert "backup" in result.content.lower() or "found" in result.content.lower()
+        assert len(provider.call_log) == 3
+
+        # The second call should contain a failure-strategy prompt
+        second_systems = _system_messages(provider.call_log[1]["messages"])
+        assert any(
+            "fail" in s.lower() or "alternative" in s.lower() or "strateg" in s.lower()
+            for s in second_systems
+        ), "Agent must inject recovery strategy prompt after tool failure"
+
+        # The third call must include the successful tool result
+        third_tool_results = _tool_result_messages(provider.call_log[2]["messages"])
+        assert any(
+            "recovered data" in tr["content"]
+            for tr in third_tool_results
+        ), "Successful retry result must appear in context"
+
+
+# ---------------------------------------------------------------------------
+# Golden 9: Planning prompt injection
+# ---------------------------------------------------------------------------
+
+
+class TestGoldenPlanningInjection:
+    """When planning_enabled=True and the message looks like a multi-step task,
+    the agent should inject a planning prompt into the LLM context.
+    """
+
+    @pytest.mark.asyncio
+    async def test_planning_prompt_present_for_complex_task(self, tmp_path: Path):
+        provider = ScriptedProvider([
+            LLMResponse(content="1. Read the file\n2. Analyze\n3. Report\n\nDone."),
+        ])
+        loop = _make_loop(tmp_path, provider, planning_enabled=True)
+        await loop._process_message(
+            _make_inbound(
+                "Read all source files in the project, check for security issues, "
+                "and write a detailed report."
+            )
+        )
+
+        assert len(provider.call_log) >= 1
+        # The first call should have a planning-related system prompt
+        first_systems = _system_messages(provider.call_log[0]["messages"])
+        all_system_text = " ".join(first_systems).lower()
+        assert "plan" in all_system_text or "step" in all_system_text, (
+            "Agent must inject a planning prompt for complex multi-step tasks"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Golden 10: Parallel readonly tools — multiple reads in one iteration
+# ---------------------------------------------------------------------------
+
+
+class TestGoldenParallelReadonlyTools:
+    """When the LLM requests multiple readonly tools simultaneously,
+    the agent must execute them all and include all results in the next call.
+    """
+
+    @pytest.mark.asyncio
+    async def test_multiple_read_results_in_context(self, tmp_path: Path):
+        (tmp_path / "a.txt").write_text("alpha")
+        (tmp_path / "b.txt").write_text("beta")
+
+        provider = ScriptedProvider(
+            [
+                LLMResponse(
+                    content=None,
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="tc1",
+                            name="read_file",
+                            arguments={"path": str(tmp_path / "a.txt")},
+                        ),
+                        ToolCallRequest(
+                            id="tc2",
+                            name="read_file",
+                            arguments={"path": str(tmp_path / "b.txt")},
+                        ),
+                    ],
+                ),
+                LLMResponse(content="Both files read."),
+            ]
+        )
+        loop = _make_loop(tmp_path, provider)
+        result = await loop._process_message(_make_inbound("read both"))
+
+        assert result is not None
+        assert len(provider.call_log) == 2
+
+        # The second call must have tool results for BOTH files
+        second_tool_results = _tool_result_messages(provider.call_log[1]["messages"])
+        result_text = " ".join(tr["content"] for tr in second_tool_results)
+        assert "alpha" in result_text, "First parallel tool result missing"
+        assert "beta" in result_text, "Second parallel tool result missing"

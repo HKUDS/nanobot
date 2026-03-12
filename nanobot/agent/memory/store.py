@@ -2033,6 +2033,7 @@ class MemoryStore:
     def append_events(self, events: list[dict[str, Any]]) -> int:
         if not events:
             return 0
+        t0_append = time.monotonic()
         existing_events = [self._ensure_event_provenance(event) for event in self.read_events()]
         existing_ids = {e.get("id") for e in existing_events if e.get("id")}
         written = 0
@@ -2138,6 +2139,10 @@ class MemoryStore:
                         dual_recorded = True
             if write_totals["memory_writes_total"] > 0 or write_totals["memory_write_failures"] > 0:
                 self._record_metrics(write_totals)
+        bind_trace().debug(
+            "memory_append | written={} | merged={} | superseded={} | {:.0f}ms",
+            written, merged, superseded, (time.monotonic() - t0_append) * 1000,
+        )
         return written
 
     async def _ingest_graph_triples(self, events: list[dict[str, Any]]) -> int:

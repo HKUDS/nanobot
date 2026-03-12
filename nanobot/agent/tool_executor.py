@@ -13,9 +13,11 @@ ADR-004) to keep the agent loop focused on orchestration.
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import ToolResult
+from nanobot.agent.tracing import bind_trace
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.base import Tool
@@ -74,6 +76,7 @@ class ToolExecutor:
         via ``asyncio.gather``.  Write-capable tools run sequentially to
         preserve ordering semantics.
         """
+        t0_batch = time.monotonic()
         results: list[ToolResult] = [ToolResult.ok("")] * len(tool_calls)
 
         i = 0
@@ -103,6 +106,11 @@ class ToolExecutor:
                 results[i] = await self._registry.execute(tc.name, tc.arguments)
                 i += 1
 
+        failed = sum(1 for r in results if not r.success)
+        bind_trace().info(
+            "tool_batch_complete | count={} | failed={} | {:.0f}ms",
+            len(tool_calls), failed, (time.monotonic() - t0_batch) * 1000,
+        )
         return results
 
     @staticmethod

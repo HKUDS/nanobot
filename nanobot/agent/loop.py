@@ -740,7 +740,9 @@ class AgentLoop:
                 )
 
                 # Execute tools (parallel for readonly, sequential for writes)
+                t0_tools = time.monotonic()
                 tool_results = await self.tools.execute_batch(response.tool_calls)
+                tools_elapsed_ms = (time.monotonic() - t0_tools) * 1000
 
                 any_failed = False
                 for tool_call, result in zip(response.tool_calls, tool_results):
@@ -748,7 +750,10 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     status = "OK" if result.success else "FAIL"
-                    logger.info("Tool {}: {}({})", status, tool_call.name, args_str[:200])
+                    bind_trace().info(
+                        "tool_exec | {} | {}({}) | {:.0f}ms batch",
+                        status, tool_call.name, args_str[:200], tools_elapsed_ms,
+                    )
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result.to_llm_string()
                     )
@@ -1347,6 +1352,8 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        t0_request = time.monotonic()
+
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (
@@ -1542,6 +1549,23 @@ class AgentLoop:
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
+        # --- Request audit line ---
+        duration_ms = (time.monotonic() - t0_request) * 1000
+        bind_trace().info(
+            "request_complete | {ch}:{cid} | {dur:.0f}ms | model={mdl} | tools={tc} | len={rlen}",
+            ch=msg.channel,
+            cid=msg.chat_id,
+            dur=duration_ms,
+            mdl=self.model,
+            tc=len(tools_used),
+            rlen=len(final_content),
+        )
+        if self._routing_metrics:
+            self._routing_metrics.record_request(
+                duration_ms=duration_ms,
+                tool_calls=len(tools_used),
+            )
+
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
 
@@ -1580,10 +1604,6 @@ class AgentLoop:
             enable_contradiction_check=self.memory_enable_contradiction_check,
             archive_all=archive_all,
         )
-
-    def _fallback_archive_snapshot(self, snapshot: list[dict]) -> bool:
-        """Fallback archival — delegates to ConsolidationOrchestrator."""
-        return self._consolidator.fallback_archive_snapshot(snapshot)
 
     async def process_direct(
         self,
