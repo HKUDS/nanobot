@@ -81,6 +81,75 @@ class TestReadFileTool:
 
 
 # ---------------------------------------------------------------------------
+# WriteFileTool
+# ---------------------------------------------------------------------------
+
+class TestWriteFileTool:
+
+    @pytest.fixture()
+    def tool(self, tmp_path):
+        return WriteFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_basic_write(self, tool, tmp_path):
+        f = tmp_path / "test.txt"
+        result = await tool.execute(path=str(f), content="hello world")
+        assert "Successfully wrote" in result
+        assert f.read_text() == "hello world"
+
+    @pytest.mark.asyncio
+    async def test_creates_parent_directories(self, tool, tmp_path):
+        f = tmp_path / "subdir" / "nested" / "file.txt"
+        result = await tool.execute(path=str(f), content="nested content")
+        assert "Successfully wrote" in result
+        assert f.read_text() == "nested content"
+
+    @pytest.mark.asyncio
+    async def test_overwrites_existing_file(self, tool, tmp_path):
+        f = tmp_path / "overwrite.txt"
+        f.write_text("original content")
+        result = await tool.execute(path=str(f), content="new content")
+        assert "Successfully wrote" in result
+        assert f.read_text() == "new content"
+
+    @pytest.mark.asyncio
+    async def test_empty_content(self, tool, tmp_path):
+        f = tmp_path / "empty.txt"
+        result = await tool.execute(path=str(f), content="")
+        assert "Successfully wrote" in result
+        assert f.read_text() == ""
+
+    @pytest.mark.asyncio
+    async def test_write_with_multiline_content(self, tool, tmp_path):
+        f = tmp_path / "multiline.txt"
+        content = "line 1\nline 2\nline 3"
+        result = await tool.execute(path=str(f), content=content)
+        assert "Successfully wrote" in result
+        assert f.read_text() == content
+
+    @pytest.mark.asyncio
+    async def test_write_with_multiple_allowed_dirs(self, tmp_path):
+        """Test WriteFileTool with multiple allowed directories."""
+        with tempfile.TemporaryDirectory() as dir1, tempfile.TemporaryDirectory() as dir2:
+            path1 = Path(dir1).resolve()
+            path2 = Path(dir2).resolve()
+
+            tool = WriteFileTool(workspace=path1, allowed_dirs=[path1, path2])
+
+            # Write to workspace
+            file1 = path1 / "test1.txt"
+            result = await tool.execute(str(file1), content="content from dir1")
+            assert "Successfully wrote" in result
+            assert file1.read_text() == "content from dir1"
+
+            # Write to additional allowed dir
+            file2 = path2 / "test2.txt"
+            result = await tool.execute(str(file2), content="content from dir2")
+            assert "Successfully wrote" in result
+            assert file2.read_text() == "content from dir2"
+
+
+# ---------------------------------------------------------------------------
 # _find_match  (unit tests for the helper)
 # ---------------------------------------------------------------------------
 

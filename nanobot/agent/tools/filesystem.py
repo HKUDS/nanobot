@@ -93,7 +93,7 @@ class ReadFileTool(_FsTool):
 
     async def execute(self, path: str, offset: int = 1, limit: int | None = None, **kwargs: Any) -> str:
         try:
-            file_path = self._resolve(path, self._workspace, self._allowed_dirs)
+            file_path = self._resolve(path)
             if not file_path.exists():
                 return f"Error: File not found: {path}"
             if not file_path.is_file():
@@ -163,7 +163,7 @@ class WriteFileTool(_FsTool):
 
     async def execute(self, path: str, content: str, **kwargs: Any) -> str:
         try:
-            file_path = self._resolve(path, self._workspace, self._allowed_dirs)
+            file_path = self._resolve(path)
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
             return f"Successfully wrote {len(content)} bytes to {file_path}"
@@ -239,7 +239,7 @@ class EditFileTool(_FsTool):
         replace_all: bool = False, **kwargs: Any,
     ) -> str:
         try:
-            file_path = self._resolve(path, self._workspace, self._allowed_dirs)
+            file_path = self._resolve(path)
             if not file_path.exists():
                 return f"Error: File not found: {path}"
 
@@ -341,7 +341,7 @@ class ListDirTool(_FsTool):
         max_entries: int | None = None, **kwargs: Any,
     ) -> str:
         try:
-            dir_path = self._resolve(path, self._workspace, self._allowed_dirs)
+            dir_path = self._resolve(path)
             if not dir_path.exists():
                 return f"Error: Directory not found: {path}"
             if not dir_path.is_dir():
