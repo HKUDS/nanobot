@@ -30,6 +30,16 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+# On Windows the default console encoding (cp1252) cannot render many Unicode
+# characters the LLM emits (↳, →, — etc.).  Reconfigure stdout to UTF-8 so
+# Rich can write them without a UnicodeEncodeError.
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # crash-barrier: non-standard stdout (e.g. pytest capture)
+        pass
+
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 

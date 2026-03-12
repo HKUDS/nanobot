@@ -50,7 +50,13 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tool_executor import ToolExecutor
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool
-from nanobot.agent.tools.excel import ExcelFindTool, ExcelGetRowsTool, ReadExcelTool
+from nanobot.agent.tools.excel import (
+    DescribeDataTool,
+    ExcelFindTool,
+    ExcelGetRowsTool,
+    QueryDataTool,
+    ReadSpreadsheetTool,
+)
 from nanobot.agent.tools.feedback import FeedbackTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -329,9 +335,13 @@ class AgentLoop:
             if _should_register(tool.name):
                 self.tools.register(tool)
 
-        excel_tool = ReadExcelTool(workspace=self.workspace, allowed_dir=allowed_dir)
-        if _should_register(excel_tool.name):
-            self.tools.register(excel_tool)
+        spreadsheet_tool = ReadSpreadsheetTool(
+            workspace=self.workspace,
+            allowed_dir=allowed_dir,
+            cache=self.result_cache,
+        )
+        if _should_register(spreadsheet_tool.name):
+            self.tools.register(spreadsheet_tool)
 
         exec_tool = ExecTool(
             working_dir=str(self.workspace),
@@ -392,6 +402,14 @@ class AgentLoop:
         excel_find = ExcelFindTool(cache=self.result_cache)
         if _should_register(excel_find.name):
             self.tools.register(excel_find)
+
+        query_tool = QueryDataTool(cache=self.result_cache)
+        if _should_register(query_tool.name):
+            self.tools.register(query_tool)
+
+        describe_tool = DescribeDataTool(cache=self.result_cache)
+        if _should_register(describe_tool.name):
+            self.tools.register(describe_tool)
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
