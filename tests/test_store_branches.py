@@ -155,22 +155,34 @@ class TestConsolidationHelpers:
         store = _store(tmp_path)
 
         session = SimpleNamespace(messages=[], last_consolidated=0)
-        assert store._select_messages_for_consolidation(session, archive_all=False, memory_window=10) is None
+        assert (
+            store._select_messages_for_consolidation(session, archive_all=False, memory_window=10)
+            is None
+        )
 
         session = SimpleNamespace(
             messages=[{"role": "user", "content": f"m{i}"} for i in range(12)],
             last_consolidated=11,
         )
-        assert store._select_messages_for_consolidation(session, archive_all=False, memory_window=10) is None
+        assert (
+            store._select_messages_for_consolidation(session, archive_all=False, memory_window=10)
+            is None
+        )
 
         session = SimpleNamespace(
-            messages=[{"role": "user", "content": f"m{i}", "timestamp": "2026-01-01"} for i in range(12)],
+            messages=[
+                {"role": "user", "content": f"m{i}", "timestamp": "2026-01-01"} for i in range(12)
+            ],
             last_consolidated=0,
         )
-        selected = store._select_messages_for_consolidation(session, archive_all=False, memory_window=10)
+        selected = store._select_messages_for_consolidation(
+            session, archive_all=False, memory_window=10
+        )
         assert selected is not None
 
-        selected_all = store._select_messages_for_consolidation(session, archive_all=True, memory_window=10)
+        selected_all = store._select_messages_for_consolidation(
+            session, archive_all=True, memory_window=10
+        )
         assert selected_all is not None
 
     def test_format_prompt_and_save_tool_result(self, tmp_path: Path) -> None:
@@ -190,7 +202,9 @@ class TestConsolidationHelpers:
         prompt = store._build_consolidation_prompt("# Memory", lines)
         assert "Current Long-term Memory" in prompt
 
-        store._apply_save_memory_tool_result(args={"history_entry": {"x": 1}, "memory_update": {"y": 2}}, current_memory="")
+        store._apply_save_memory_tool_result(
+            args={"history_entry": {"x": 1}, "memory_update": {"y": 2}}, current_memory=""
+        )
         assert store.history_file.exists()
         assert store.memory_file.exists()
 
@@ -199,7 +213,9 @@ class TestConsolidationHelpers:
         store = _store(tmp_path)
         session = SimpleNamespace(
             key="k1",
-            messages=[{"role": "user", "content": "hello", "timestamp": "2026-01-01"} for _ in range(20)],
+            messages=[
+                {"role": "user", "content": "hello", "timestamp": "2026-01-01"} for _ in range(20)
+            ],
             last_consolidated=0,
         )
         provider = AsyncMock()
@@ -213,7 +229,9 @@ class TestConsolidationHelpers:
         store = _store(tmp_path)
         session = SimpleNamespace(
             key="k2",
-            messages=[{"role": "user", "content": "hello", "timestamp": "2026-01-01"} for _ in range(20)],
+            messages=[
+                {"role": "user", "content": "hello", "timestamp": "2026-01-01"} for _ in range(20)
+            ],
             last_consolidated=0,
         )
 
@@ -221,7 +239,9 @@ class TestConsolidationHelpers:
         provider.chat = AsyncMock(
             return_value=LLMResponse(
                 content=None,
-                tool_calls=[ToolCallRequest(id="x", name="save_memory", arguments={"bad": object()})],
+                tool_calls=[
+                    ToolCallRequest(id="x", name="save_memory", arguments={"bad": object()})
+                ],
             )
         )
         store.extractor.parse_tool_args = MagicMock(return_value=None)
@@ -234,7 +254,9 @@ class TestConsolidationHelpers:
         store = _store(tmp_path)
         session = SimpleNamespace(
             key="k3",
-            messages=[{"role": "user", "content": "hello", "timestamp": "2026-01-01"} for _ in range(20)],
+            messages=[
+                {"role": "user", "content": "hello", "timestamp": "2026-01-01"} for _ in range(20)
+            ],
             last_consolidated=0,
         )
         provider = AsyncMock()
@@ -448,9 +470,7 @@ class TestStoreCoreBranchHelpers:
                 {
                     "id": "e1",
                     "timestamp": "2026-03-01T00:00:00+00:00",
-                    "triples": [
-                        {"subject": "Alice", "predicate": "WORKS_ON", "object": "Nanobot"}
-                    ],
+                    "triples": [{"subject": "Alice", "predicate": "WORKS_ON", "object": "Nanobot"}],
                 }
             ]
         )

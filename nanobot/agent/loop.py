@@ -608,9 +608,7 @@ class AgentLoop:
 
             if response.finish_reason == "content_filter":
                 consecutive_errors += 1
-                logger.warning(
-                    "Content filter triggered (attempt {})", consecutive_errors
-                )
+                logger.warning("Content filter triggered (attempt {})", consecutive_errors)
                 if consecutive_errors >= 2:
                     final_content = (
                         "The AI provider's content filter blocked my response. "
@@ -645,9 +643,7 @@ class AgentLoop:
                 # Delegation calls (delegate/delegate_parallel) are exempt
                 # because delegation itself is a form of planning.
                 _delegation_names = {"delegate", "delegate_parallel"}
-                is_delegation = all(
-                    tc.name in _delegation_names for tc in response.tool_calls
-                )
+                is_delegation = all(tc.name in _delegation_names for tc in response.tool_calls)
                 if (
                     has_plan
                     and not plan_enforced
@@ -670,8 +666,7 @@ class AgentLoop:
 
                 # Filter out malformed tool calls (empty name or empty arguments)
                 valid_calls = [
-                    tc for tc in response.tool_calls
-                    if tc.name and tc.name.strip() and tc.arguments
+                    tc for tc in response.tool_calls if tc.name and tc.name.strip() and tc.arguments
                 ]
                 skipped = len(response.tool_calls) - len(valid_calls)
                 if skipped:
@@ -716,7 +711,8 @@ class AgentLoop:
                     if clean:
                         await on_progress(clean)
                     await on_progress(
-                        ToolExecutor.format_hint(response.tool_calls), tool_hint=True,
+                        ToolExecutor.format_hint(response.tool_calls),
+                        tool_hint=True,
                     )
 
                 tool_call_dicts = [
@@ -752,7 +748,10 @@ class AgentLoop:
                     status = "OK" if result.success else "FAIL"
                     bind_trace().info(
                         "tool_exec | {} | {}({}) | {:.0f}ms batch",
-                        status, tool_call.name, args_str[:200], tools_elapsed_ms,
+                        status,
+                        tool_call.name,
+                        args_str[:200],
+                        tools_elapsed_ms,
                     )
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result.to_llm_string()
@@ -763,9 +762,7 @@ class AgentLoop:
                 # --- REFLECT: after tool execution, evaluate progress ------
                 # Check if delegation budget is exhausted
                 _del_names = {"delegate", "delegate_parallel"}
-                had_delegations = any(
-                    tc.name in _del_names for tc in response.tool_calls
-                )
+                had_delegations = any(tc.name in _del_names for tc in response.tool_calls)
                 if had_delegations and self._delegation_count >= self._max_delegations:
                     messages.append(
                         {
@@ -823,10 +820,7 @@ class AgentLoop:
                     )
                 elif (
                     had_delegations
-                    and not any(
-                        tc.name == "delegate_parallel"
-                        for tc in response.tool_calls
-                    )
+                    and not any(tc.name == "delegate_parallel" for tc in response.tool_calls)
                     and self._has_parallel_structure(user_text)
                 ):
                     # Sequential-to-parallel correction: agent used sequential
@@ -907,8 +901,6 @@ class AgentLoop:
     # Self-critique / verification (Step 2)
     # ------------------------------------------------------------------
 
-
-
     async def _verify_answer(
         self,
         user_text: str,
@@ -986,9 +978,7 @@ class AgentLoop:
                     role_applied = False
                     if self._coordinator and msg.channel != "system":
                         t0_classify = time.monotonic()
-                        role_name, confidence = await self._coordinator.classify(
-                            msg.content
-                        )
+                        role_name, confidence = await self._coordinator.classify(msg.content)
                         classify_latency_ms = (time.monotonic() - t0_classify) * 1000
                         # Confidence-aware: fall back to default on low confidence
                         threshold = (
@@ -1011,9 +1001,7 @@ class AgentLoop:
                         role = (
                             self._coordinator.route_direct(role_name)
                             or self._coordinator.registry.get_default()
-                            or AgentRoleConfig(
-                                name=role_name, description="General assistant"
-                            )
+                            or AgentRoleConfig(name=role_name, description="General assistant")
                         )
                         self._record_route_trace(
                             "route",
@@ -1128,9 +1116,7 @@ class AgentLoop:
         """Return a copy of the routing trace."""
         return self._dispatcher.get_routing_trace()
 
-    def _gather_recent_tool_results(
-        self, max_results: int = 15, max_chars: int = 8000
-    ) -> str:
+    def _gather_recent_tool_results(self, max_results: int = 15, max_chars: int = 8000) -> str:
         return self._dispatcher.gather_recent_tool_results(max_results, max_chars)
 
     async def _dispatch_delegation(
@@ -1158,12 +1144,19 @@ class AgentLoop:
         return self._dispatcher.build_parallel_work_summary(role)
 
     def _build_delegation_contract(
-        self, role: str, task: str, context: str | None, task_type: str,
+        self,
+        role: str,
+        task: str,
+        context: str | None,
+        task_type: str,
     ) -> tuple[str, str]:
         return self._dispatcher.build_delegation_contract(role, task, context, task_type)
 
     async def _execute_delegated_agent(
-        self, role: AgentRoleConfig, task: str, context: str | None,
+        self,
+        role: AgentRoleConfig,
+        task: str,
+        context: str | None,
     ) -> tuple[str, list[str]]:
         return await self._dispatcher.execute_delegated_agent(role, task, context)
 
@@ -1384,7 +1377,9 @@ class AgentLoop:
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         bind_trace().info(
             "Processing message from {}:{}: {}",
-            msg.channel, msg.sender_id, preview,
+            msg.channel,
+            msg.sender_id,
+            preview,
         )
 
         key = session_key or msg.session_key
@@ -1527,16 +1522,12 @@ class AgentLoop:
 
         final_content, tools_used, all_msgs = await self._run_agent_loop(
             initial_messages,
-            on_progress=(on_progress or _bus_progress)
-            if self.config.streaming_enabled
-            else None,
+            on_progress=(on_progress or _bus_progress) if self.config.streaming_enabled else None,
         )
 
         # Track per-role tool calls
         if self._routing_metrics and tools_used and self.role_name:
-            self._routing_metrics.record(
-                role_tool_calls_key(self.role_name), len(tools_used)
-            )
+            self._routing_metrics.record(role_tool_calls_key(self.role_name), len(tools_used))
 
         if final_content is None:
             final_content = await self._attempt_recovery(msg, all_msgs)

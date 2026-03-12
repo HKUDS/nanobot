@@ -27,14 +27,18 @@ def test_get_bridge_dir_source_not_found(monkeypatch: pytest.MonkeyPatch, tmp_pa
     src_bridge = commands_file.parent.parent.parent / "bridge"
 
     if (pkg_bridge / "package.json").exists() or (src_bridge / "package.json").exists():
-        pytest.skip("Bridge source exists in this environment; source-not-found path not reachable.")
+        pytest.skip(
+            "Bridge source exists in this environment; source-not-found path not reachable."
+        )
 
     out = runner.invoke(app, ["channels", "login"])
     assert out.exit_code == 1
     assert "Bridge source not found" in out.stdout
 
 
-def test_channels_login_success_and_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_channels_login_success_and_failures(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     cfg = Config()
     cfg.agents.defaults.workspace = str(tmp_path)
     cfg.channels.whatsapp.bridge_token = "bridge-token"

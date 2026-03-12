@@ -82,7 +82,9 @@ async def test_socket_request_filters_and_dispatch() -> None:
     req_other = SimpleNamespace(type="hello", envelope_id="e1", payload={})
     await ch._on_socket_request(client, req_other)
 
-    req_no_event = SimpleNamespace(type="events_api", envelope_id="e2", payload={"event": {"type": "member_joined_channel"}})
+    req_no_event = SimpleNamespace(
+        type="events_api", envelope_id="e2", payload={"event": {"type": "member_joined_channel"}}
+    )
     await ch._on_socket_request(client, req_no_event)
 
     mention_event = {

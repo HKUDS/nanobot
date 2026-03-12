@@ -189,7 +189,7 @@ async def test_whatsapp_send_paths() -> None:
     ch._ws = _WS()
     ch._connected = True
     await ch.send(OutboundMessage(channel="whatsapp", chat_id="1", content="hi"))
-    assert sent and "\"to\": \"1\"" in sent[0]
+    assert sent and '"to": "1"' in sent[0]
     await ch.stop()
 
 

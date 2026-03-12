@@ -76,9 +76,7 @@ def _make_loop(tmp_path: Path, provider: LLMProvider | None = None):
     loop = AgentLoop(bus, prov, _make_agent_config(tmp_path))
 
     registry = build_default_registry("general")
-    loop._coordinator = Coordinator(
-        provider=prov, registry=registry, default_role="general"
-    )
+    loop._coordinator = Coordinator(provider=prov, registry=registry, default_role="general")
     loop._dispatcher.coordinator = loop._coordinator
     loop._wire_delegate_tools()
 

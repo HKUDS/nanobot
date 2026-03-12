@@ -47,11 +47,13 @@ class ScriptedProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.7,
     ) -> LLMResponse:
-        self.call_log.append({
-            "messages": [dict(m) for m in messages],
-            "tools": tools,
-            "model": model,
-        })
+        self.call_log.append(
+            {
+                "messages": [dict(m) for m in messages],
+                "tools": tools,
+                "model": model,
+            }
+        )
         if self._index >= len(self._responses):
             return LLMResponse(content="(no more scripted responses)")
         resp = self._responses[self._index]
@@ -72,9 +74,7 @@ def _make_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
     return AgentConfig(**defaults)
 
 
-def _make_loop(
-    tmp_path: Path, provider: LLMProvider, **config_overrides: Any
-) -> AgentLoop:
+def _make_loop(tmp_path: Path, provider: LLMProvider, **config_overrides: Any) -> AgentLoop:
     bus = MessageBus()
     config = _make_config(tmp_path, **config_overrides)
     return AgentLoop(bus, provider, config)
@@ -105,21 +105,23 @@ class TestWorkflowFullPipeline:
         (tmp_path / "README.md").write_text("# My Project")
         (tmp_path / "main.py").write_text("print('hello')")
 
-        provider = ScriptedProvider([
-            # LLM decides to list directory
-            LLMResponse(
-                content=None,
-                tool_calls=[
-                    ToolCallRequest(
-                        id="tc1",
-                        name="list_dir",
-                        arguments={"path": str(tmp_path)},
-                    )
-                ],
-            ),
-            # LLM produces final answer
-            LLMResponse(content="The workspace contains README.md and main.py."),
-        ])
+        provider = ScriptedProvider(
+            [
+                # LLM decides to list directory
+                LLMResponse(
+                    content=None,
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="tc1",
+                            name="list_dir",
+                            arguments={"path": str(tmp_path)},
+                        )
+                    ],
+                ),
+                # LLM produces final answer
+                LLMResponse(content="The workspace contains README.md and main.py."),
+            ]
+        )
         loop = _make_loop(tmp_path, provider)
         result = await loop._process_message(_make_inbound("What files are here?"))
 
@@ -131,32 +133,34 @@ class TestWorkflowFullPipeline:
     async def test_write_then_read_pipeline(self, tmp_path: Path):
         """Agent writes a file then reads it back to confirm."""
         target = tmp_path / "output.txt"
-        provider = ScriptedProvider([
-            # Step 1: write
-            LLMResponse(
-                content=None,
-                tool_calls=[
-                    ToolCallRequest(
-                        id="tc1",
-                        name="write_file",
-                        arguments={"path": str(target), "content": "hello world"},
-                    )
-                ],
-            ),
-            # Step 2: read back
-            LLMResponse(
-                content=None,
-                tool_calls=[
-                    ToolCallRequest(
-                        id="tc2",
-                        name="read_file",
-                        arguments={"path": str(target)},
-                    )
-                ],
-            ),
-            # Step 3: confirm
-            LLMResponse(content="File written and verified."),
-        ])
+        provider = ScriptedProvider(
+            [
+                # Step 1: write
+                LLMResponse(
+                    content=None,
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="tc1",
+                            name="write_file",
+                            arguments={"path": str(target), "content": "hello world"},
+                        )
+                    ],
+                ),
+                # Step 2: read back
+                LLMResponse(
+                    content=None,
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="tc2",
+                            name="read_file",
+                            arguments={"path": str(target)},
+                        )
+                    ],
+                ),
+                # Step 3: confirm
+                LLMResponse(content="File written and verified."),
+            ]
+        )
         loop = _make_loop(tmp_path, provider)
         result = await loop._process_message(_make_inbound("Create and verify output.txt"))
 
@@ -240,8 +244,9 @@ class TestWorkflowErrorHandling:
             def get_default_model(self) -> str:
                 return "test-model"
 
-            async def chat(self, messages, tools=None, model=None,
-                           max_tokens=4096, temperature=0.7) -> LLMResponse:
+            async def chat(
+                self, messages, tools=None, model=None, max_tokens=4096, temperature=0.7
+            ) -> LLMResponse:
                 raise RuntimeError("rate_limit: 429 too many requests")
 
         loop = _make_loop(tmp_path, FailingProvider())
@@ -263,13 +268,15 @@ class TestWorkflowMemoryRoundtrip:
         store = MemoryStore(tmp_path, embedding_provider="hash")
 
         # Store an event
-        events = [{
-            "id": "evt-workflow-1",
-            "type": "preference",
-            "summary": "User prefers vim keybindings.",
-            "timestamp": "2026-03-01T12:00:00+00:00",
-            "source": "test",
-        }]
+        events = [
+            {
+                "id": "evt-workflow-1",
+                "type": "preference",
+                "summary": "User prefers vim keybindings.",
+                "timestamp": "2026-03-01T12:00:00+00:00",
+                "source": "test",
+            }
+        ]
         store.append_events(events)
 
         # Retrieve it
@@ -288,10 +295,12 @@ class TestWorkflowMultiTurn:
 
     @pytest.mark.asyncio
     async def test_second_message_has_history(self, tmp_path: Path):
-        provider = ScriptedProvider([
-            LLMResponse(content="Paris is the capital of France."),
-            LLMResponse(content="Its population is about 2 million."),
-        ])
+        provider = ScriptedProvider(
+            [
+                LLMResponse(content="Paris is the capital of France."),
+                LLMResponse(content="Its population is about 2 million."),
+            ]
+        )
         loop = _make_loop(tmp_path, provider)
 
         # First message

@@ -276,7 +276,5 @@ class TestWriteLock:
         else:
             # y might have run first; check the reverse
             y_end = execution_log.index(("y", "end")) if ("y", "end") in execution_log else 99
-            x_start = (
-                execution_log.index(("x", "start")) if ("x", "start") in execution_log else -1
-            )
+            x_start = execution_log.index(("x", "start")) if ("x", "start") in execution_log else -1
             assert y_end < x_start  # y finished before x started

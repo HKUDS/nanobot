@@ -49,8 +49,11 @@ class GroqTranscriptionProvider:
                     }
 
                     response = await client.post(
-                    self.api_url, headers=headers, files=files, timeout=60.0  # type: ignore[arg-type]
-                )
+                        self.api_url,
+                        headers=headers,
+                        files=files,
+                        timeout=60.0,  # type: ignore[arg-type]
+                    )
 
                 response.raise_for_status()
                 data = response.json()

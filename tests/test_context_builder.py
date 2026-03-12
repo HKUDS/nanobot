@@ -70,7 +70,9 @@ def test_add_assistant_and_tool_messages(tmp_path: Path) -> None:
     assert messages[-1]["name"] == "read_file"
 
 
-def test_build_system_prompt_memory_failure_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_system_prompt_memory_failure_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ws = _workspace(tmp_path)
     builder = ContextBuilder(ws)
 

@@ -49,7 +49,9 @@ async def test_execute_job_success_and_error_paths(tmp_path) -> None:
         return "done"
 
     service = CronService(path, on_job=_ok)
-    job = service.add_job(name="j1", schedule=CronSchedule(kind="every", every_ms=1000), message="hello")
+    job = service.add_job(
+        name="j1", schedule=CronSchedule(kind="every", every_ms=1000), message="hello"
+    )
 
     assert await service.run_job(job.id) is True
     assert called["ok"] == 1
@@ -67,7 +69,9 @@ async def test_execute_job_success_and_error_paths(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_run_job_force_disabled_and_not_found(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
-    job = service.add_job(name="j2", schedule=CronSchedule(kind="every", every_ms=1000), message="hello")
+    job = service.add_job(
+        name="j2", schedule=CronSchedule(kind="every", every_ms=1000), message="hello"
+    )
     service.enable_job(job.id, enabled=False)
 
     assert await service.run_job(job.id, force=False) is False
@@ -77,7 +81,9 @@ async def test_run_job_force_disabled_and_not_found(tmp_path) -> None:
 
 def test_remove_and_enable_job_paths(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
-    job = service.add_job(name="j3", schedule=CronSchedule(kind="every", every_ms=1000), message="x")
+    job = service.add_job(
+        name="j3", schedule=CronSchedule(kind="every", every_ms=1000), message="x"
+    )
     assert service.enable_job(job.id, enabled=False) is not None
     assert service.enable_job("missing", enabled=True) is None
     assert service.remove_job("missing") is False

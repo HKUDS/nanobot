@@ -107,7 +107,6 @@ class _TypeErrorSearchClient:
         return {"results": [{"id": "s1", "memory": "oauth2 rollout", "score": 0.7, "metadata": {}}]}
 
 
-
 def _adapter() -> _Mem0Adapter:
     adapter = object.__new__(_Mem0Adapter)
     adapter.workspace = Path(".")
@@ -153,7 +152,9 @@ def test_load_fallback_config_and_parse_dotenv_line() -> None:
     assert adapter._parse_dotenv_line("#comment") is None
 
 
-def test_load_api_keys_from_config_sets_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_load_api_keys_from_config_sets_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     adapter = _adapter()
     home = tmp_path / "home"
     cfg_dir = home / ".nanobot"

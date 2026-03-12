@@ -146,9 +146,7 @@ class DelegateParallelTool(Tool):
             return ToolResult.fail("Delegation not available", error_type="config")
 
         if len(subtasks) > 5:
-            return ToolResult.fail(
-                "Maximum 5 parallel subtasks allowed", error_type="validation"
-            )
+            return ToolResult.fail("Maximum 5 parallel subtasks allowed", error_type="validation")
         if not subtasks:
             return ToolResult.fail("At least one subtask required", error_type="validation")
 

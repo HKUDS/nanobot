@@ -142,9 +142,11 @@ async def _read_interactive_input_async() -> str:
         raise RuntimeError("Call _init_prompt_session() first")
     try:
         with patch_stdout():
-            return str(await _PROMPT_SESSION.prompt_async(
-                HTML("<b fg='ansiblue'>You:</b> "),
-            ))
+            return str(
+                await _PROMPT_SESSION.prompt_async(
+                    HTML("<b fg='ansiblue'>You:</b> "),
+                )
+            )
     except EOFError as exc:
         raise KeyboardInterrupt from exc
 
@@ -610,7 +612,9 @@ def agent(
         # Animated spinner is safe to use with prompt_toolkit input handling
         return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
 
-    async def _cli_progress(content: str, *, tool_hint: bool = False, streaming: bool = False) -> None:
+    async def _cli_progress(
+        content: str, *, tool_hint: bool = False, streaming: bool = False
+    ) -> None:
         ch = agent_loop.channels_config
         if ch and tool_hint and not ch.send_tool_hints:
             return
@@ -1244,9 +1248,7 @@ def routing_metrics_cmd():
 
     table.add_row("classify_latency_avg_ms", f"{cls_sum / cls_count:.0f}" if cls_count else "—")
     table.add_row("classify_latency_max_ms", f"{cls_max:.0f}" if cls_max else "—")
-    table.add_row(
-        "delegation_latency_avg_ms", f"{del_sum / del_count:.0f}" if del_count else "—"
-    )
+    table.add_row("delegation_latency_avg_ms", f"{del_sum / del_count:.0f}" if del_count else "—")
     table.add_row("delegation_latency_max_ms", f"{del_max:.0f}" if del_max else "—")
 
     console.print(table)

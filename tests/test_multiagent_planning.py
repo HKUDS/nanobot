@@ -262,9 +262,7 @@ class TestParallelDelegationE2E:
         )
 
         loop = _loop(tmp_path, provider)
-        msg = _inbound(
-            "Research CSV parsing best practices and then write a parser for data.csv"
-        )
+        msg = _inbound("Research CSV parsing best practices and then write a parser for data.csv")
         result = await loop._process_message(msg)
 
         # Verify final answer was synthesised
@@ -353,9 +351,7 @@ class TestSequentialDelegationChain:
 
         # Trace shows delegate → delegate_complete for research
         trace = loop.get_routing_trace()
-        assert any(
-            e["event"] == "delegate" and e["role"] == "research" for e in trace
-        )
+        assert any(e["event"] == "delegate" and e["role"] == "research" for e in trace)
         assert any(
             e["event"] == "delegate_complete" and e["role"] == "research" and e["success"]
             for e in trace
@@ -432,9 +428,7 @@ class TestPlanningPromptInjection:
     async def test_planning_prompt_added(self, tmp_path: Path) -> None:
         """Complex task triggers planning; simple task does not."""
 
-        provider = ScriptedProvider(
-            [LLMResponse(content="Here's my plan and answer.")]
-        )
+        provider = ScriptedProvider([LLMResponse(content="Here's my plan and answer.")])
 
         loop = _loop(tmp_path, provider, planning_enabled=True)
         msg = _inbound("Research market trends and then create a comprehensive report document")
@@ -450,9 +444,7 @@ class TestPlanningPromptInjection:
     async def test_simple_message_no_planning(self, tmp_path: Path) -> None:
         """Short message doesn't trigger planning."""
 
-        provider = ScriptedProvider(
-            [LLMResponse(content="Hello!")]
-        )
+        provider = ScriptedProvider([LLMResponse(content="Hello!")])
 
         loop = _loop(tmp_path, provider, planning_enabled=True)
         msg = _inbound("Hi")
@@ -560,9 +552,7 @@ class TestMultiAgentRoutingTrace:
     async def test_trace_captures_latency(self, tmp_path: Path) -> None:
         """Delegation trace entries include latency_ms > 0."""
 
-        provider = ScriptedProvider(
-            [LLMResponse(content="Done with research")]
-        )
+        provider = ScriptedProvider([LLMResponse(content="Done with research")])
 
         loop = _loop(tmp_path, provider, planning_enabled=False)
         await loop._dispatch_delegation("research", "quick task", None)

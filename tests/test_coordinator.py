@@ -161,9 +161,7 @@ class TestClassify:
                 return LLMResponse(content='{"role": "general"}')
 
         provider = SpyProvider('{"role": "general"}')
-        coordinator = Coordinator(
-            provider, _make_registry(), classifier_model="gpt-4o-mini"
-        )
+        coordinator = Coordinator(provider, _make_registry(), classifier_model="gpt-4o-mini")
         await coordinator.classify("Hi")
         assert calls[0]["model"] == "gpt-4o-mini"
 
@@ -219,9 +217,7 @@ class TestRoute:
 class TestParseResponse:
     def test_json_object(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence, needs_orch, relevant = coordinator._parse_response(
-            '{"role": "code"}'
-        )
+        role, confidence, needs_orch, relevant = coordinator._parse_response('{"role": "code"}')
         assert role == "code"
         assert confidence == 1.0
         assert needs_orch is False
@@ -229,9 +225,7 @@ class TestParseResponse:
 
     def test_json_with_confidence_field(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence, _, _ = coordinator._parse_response(
-            '{"role": "code", "confidence": 0.75}'
-        )
+        role, confidence, _, _ = coordinator._parse_response('{"role": "code", "confidence": 0.75}')
         assert role == "code"
         assert confidence == 0.75
 
@@ -252,9 +246,7 @@ class TestParseResponse:
 
     def test_no_match_returns_default(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        role, confidence, needs_orch, relevant = coordinator._parse_response(
-            "something random"
-        )
+        role, confidence, needs_orch, relevant = coordinator._parse_response("something random")
         assert role == "general"
         assert confidence == 0.0
         assert needs_orch is False
@@ -262,13 +254,9 @@ class TestParseResponse:
 
     def test_confidence_clamped(self) -> None:
         coordinator = Coordinator(FakeProvider(""), _make_registry())
-        _, conf, _, _ = coordinator._parse_response(
-            '{"role": "code", "confidence": 1.5}'
-        )
+        _, conf, _, _ = coordinator._parse_response('{"role": "code", "confidence": 1.5}')
         assert conf == 1.0
-        _, conf2, _, _ = coordinator._parse_response(
-            '{"role": "code", "confidence": -0.5}'
-        )
+        _, conf2, _, _ = coordinator._parse_response('{"role": "code", "confidence": -0.5}')
         assert conf2 == 0.0
 
     def test_needs_orchestration_parsed(self) -> None:
@@ -328,9 +316,7 @@ class TestOrchestrationOverride:
 
     async def test_classify_no_override_when_already_pm(self) -> None:
         """When classifier already returns 'pm', no override needed."""
-        provider = FakeProvider(
-            '{"role": "pm", "confidence": 0.9, "needs_orchestration": true}'
-        )
+        provider = FakeProvider('{"role": "pm", "confidence": 0.9, "needs_orchestration": true}')
         registry = build_default_registry("general")
         coordinator = Coordinator(provider, registry, default_role="general")
         role, _conf = await coordinator.classify(
@@ -414,14 +400,18 @@ class TestIntegrationRoutedFlow:
         from nanobot.bus.queue import MessageBus
 
         # First call is the classifier (returns "code"), second is the agent response
-        provider = ScriptedProvider([
-            LLMResponse(content='{"role": "code"}'),
-            LLMResponse(content="Here is your function: def foo(): pass"),
-        ])
+        provider = ScriptedProvider(
+            [
+                LLMResponse(content='{"role": "code"}'),
+                LLMResponse(content="Here is your function: def foo(): pass"),
+            ]
+        )
         routing = RoutingConfig(enabled=True, default_role="general")
         bus = MessageBus()
         loop = AgentLoop(
-            bus, provider, _make_agent_config(tmp_path),
+            bus,
+            provider,
+            _make_agent_config(tmp_path),
             routing_config=routing,
         )
 
@@ -441,7 +431,8 @@ class TestIntegrationRoutedFlow:
         # Manually init coordinator the same way run() does
         registry = build_default_registry(routing.default_role)
         loop._coordinator = Coordinator(
-            provider=provider, registry=registry,
+            provider=provider,
+            registry=registry,
             classifier_model=routing.classifier_model,
             default_role=routing.default_role,
         )
@@ -527,9 +518,7 @@ class TestBackwardCompatibility:
         assert loop._coordinator is None
         assert loop._routing_config is None
 
-        msg = InboundMessage(
-            channel="cli", chat_id="test", sender_id="user", content="Hi"
-        )
+        msg = InboundMessage(channel="cli", chat_id="test", sender_id="user", content="Hi")
         response = await loop._process_message(msg)
         assert response is not None
         assert response.content == "Hello!"
@@ -543,7 +532,9 @@ class TestBackwardCompatibility:
         provider = ScriptedProvider([LLMResponse(content="Hi!")])
         bus = MessageBus()
         loop = AgentLoop(
-            bus, provider, _make_agent_config(tmp_path),
+            bus,
+            provider,
+            _make_agent_config(tmp_path),
             routing_config=routing,
         )
 

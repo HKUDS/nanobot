@@ -55,7 +55,9 @@ async def test_init_channels_and_start_all(monkeypatch: pytest.MonkeyPatch, tmp_
 
     # Dead-letter auto-replay path
     dead = tmp_path / "outbound_failed.jsonl"
-    dead.write_text(json.dumps({"channel": "telegram", "chat_id": "1", "content": "x"}) + "\n", encoding="utf-8")
+    dead.write_text(
+        json.dumps({"channel": "telegram", "chat_id": "1", "content": "x"}) + "\n", encoding="utf-8"
+    )
     mgr._dead_letter_file = dead
     mgr.replay_dead_letters = AsyncMock(return_value=(1, 1, 0))  # type: ignore[method-assign]
 

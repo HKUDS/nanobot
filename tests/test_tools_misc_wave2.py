@@ -39,9 +39,7 @@ def test_cron_tool_invalid_and_remove_paths() -> None:
     assert not bad_msg.success
 
     tool.set_context("telegram", "123")
-    bad_tz = tool._add_job(
-        message="hello", every_seconds=None, cron_expr=None, tz="UTC", at=None
-    )
+    bad_tz = tool._add_job(message="hello", every_seconds=None, cron_expr=None, tz="UTC", at=None)
     assert not bad_tz.success
 
     missing_schedule = tool._add_job(
@@ -218,7 +216,9 @@ async def test_web_fetch_json_and_raw(monkeypatch: pytest.MonkeyPatch) -> None:
         _Resp("application/json", "", {"ok": True}),
         _Resp("text/plain", "hello raw"),
     ]
-    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _Client(responses))
+    monkeypatch.setattr(
+        "nanobot.agent.tools.web.httpx.AsyncClient", lambda **kwargs: _Client(responses)
+    )
 
     tool = WebFetchTool(max_chars=1000)
     json_out = await tool.execute(url="https://example.com/a")

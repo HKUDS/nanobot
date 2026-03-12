@@ -29,7 +29,18 @@ def test_routing_trace_branches(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     assert "Trace file is empty" in empty.stdout
 
     trace_path.write_text(
-        "not-json\n" + json.dumps({"timestamp": "2026-03-11T00:00:00", "event": "classify", "role": "general", "confidence": 0.9, "success": True, "message": "hi"}) + "\n",
+        "not-json\n"
+        + json.dumps(
+            {
+                "timestamp": "2026-03-11T00:00:00",
+                "event": "classify",
+                "role": "general",
+                "confidence": 0.9,
+                "success": True,
+                "message": "hi",
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     ok = runner.invoke(app, ["routing", "trace", "--last", "5"])

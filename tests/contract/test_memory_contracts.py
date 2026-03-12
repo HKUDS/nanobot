@@ -179,26 +179,34 @@ class TestRoundtripConsistency:
 
     def test_preference_roundtrip(self, tmp_path: Path):
         store = _make_store(tmp_path)
-        store.append_events([{
-            "id": "evt-pref-1",
-            "type": "preference",
-            "summary": "User always wants TypeScript over JavaScript.",
-            "timestamp": "2026-03-01T12:00:00+00:00",
-            "source": "test",
-        }])
+        store.append_events(
+            [
+                {
+                    "id": "evt-pref-1",
+                    "type": "preference",
+                    "summary": "User always wants TypeScript over JavaScript.",
+                    "timestamp": "2026-03-01T12:00:00+00:00",
+                    "source": "test",
+                }
+            ]
+        )
         results = store.retrieve("TypeScript preference", top_k=5)
         summaries = " ".join(r.get("summary", "") for r in results).lower()
         assert "typescript" in summaries
 
     def test_fact_roundtrip(self, tmp_path: Path):
         store = _make_store(tmp_path)
-        store.append_events([{
-            "id": "evt-fact-1",
-            "type": "fact",
-            "summary": "User works at Acme Corp since 2024.",
-            "timestamp": "2026-03-01T12:00:00+00:00",
-            "source": "test",
-        }])
+        store.append_events(
+            [
+                {
+                    "id": "evt-fact-1",
+                    "type": "fact",
+                    "summary": "User works at Acme Corp since 2024.",
+                    "timestamp": "2026-03-01T12:00:00+00:00",
+                    "source": "test",
+                }
+            ]
+        )
         results = store.retrieve("where does user work", top_k=5)
         summaries = " ".join(r.get("summary", "") for r in results).lower()
         assert "acme" in summaries

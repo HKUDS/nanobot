@@ -126,7 +126,11 @@ class WebFetchTool(Tool):
         self.max_chars = max_chars
 
     async def execute(  # type: ignore[override]
-        self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any  # noqa: N803
+        self,
+        url: str,
+        extractMode: str = "markdown",
+        maxChars: int | None = None,
+        **kwargs: Any,  # noqa: N803
     ) -> ToolResult:
         from readability import Document
 

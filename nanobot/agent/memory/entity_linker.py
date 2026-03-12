@@ -16,17 +16,25 @@ from __future__ import annotations
 
 _ALIAS_MAP: dict[str, str] = {
     # Databases
-    "pg": "postgresql", "postgres": "postgresql",
-    "mongo": "mongodb", "es": "elasticsearch",
+    "pg": "postgresql",
+    "postgres": "postgresql",
+    "mongo": "mongodb",
+    "es": "elasticsearch",
     # Technologies
-    "k8s": "kubernetes", "kube": "kubernetes",
+    "k8s": "kubernetes",
+    "kube": "kubernetes",
     "tf": "terraform",
-    "js": "javascript", "ts": "typescript",
-    "py": "python", "python3": "python",
-    "gh": "github", "gh actions": "github actions",
+    "js": "javascript",
+    "ts": "typescript",
+    "py": "python",
+    "python3": "python",
+    "gh": "github",
+    "gh actions": "github actions",
     # Environments
-    "prod": "production", "dev": "development",
-    "preprod": "pre-production", "pre-prod": "pre-production",
+    "prod": "production",
+    "dev": "development",
+    "preprod": "pre-production",
+    "pre-prod": "pre-production",
 }
 
 

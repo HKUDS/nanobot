@@ -130,9 +130,17 @@ async def test_init_verify_and_close_branches(monkeypatch: pytest.MonkeyPatch) -
 @pytest.mark.asyncio
 async def test_write_and_read_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     responses = [
-        _AsyncResult(single={"e": {"name": "Carlos", "entity_type": "person", "aliases_text": "C"}}),
-        _AsyncResult(data=[{"node": {"name": "Carlos", "entity_type": "person", "aliases_text": "C"}}]),
-        _AsyncResult(data=[{"source": "Carlos", "relation": "WORKS_WITH", "target": "Team", "confidence": 0.9}]),
+        _AsyncResult(
+            single={"e": {"name": "Carlos", "entity_type": "person", "aliases_text": "C"}}
+        ),
+        _AsyncResult(
+            data=[{"node": {"name": "Carlos", "entity_type": "person", "aliases_text": "C"}}]
+        ),
+        _AsyncResult(
+            data=[
+                {"source": "Carlos", "relation": "WORKS_WITH", "target": "Team", "confidence": 0.9}
+            ]
+        ),
         _AsyncResult(data=[{"nodes": ["Carlos", "Team"], "relations": ["WORKS_WITH"]}]),
     ]
     driver = _AsyncDriver(responses=responses)
@@ -200,7 +208,9 @@ async def test_ingest_event_triples_and_resolve_entity(monkeypatch: pytest.Monke
         lambda predicate, s, o: _Validation(valid=False, reason="domain mismatch"),
     )
 
-    triples = [Triple(subject="Carlos", predicate=RelationType.WORKS_WITH, object="Team", confidence=0.8)]
+    triples = [
+        Triple(subject="Carlos", predicate=RelationType.WORKS_WITH, object="Team", confidence=0.8)
+    ]
     await g.ingest_event_triples("e1", triples, timestamp="2026-01-01")
 
     assert len(upserts) == 2
@@ -221,7 +231,9 @@ def test_sync_helpers_paths_and_error_handling() -> None:
     assert "team_alpha" in names
     assert "team alpha" in names
 
-    g._sync_driver = _SyncDriver(rows=[{"source": "Carlos", "relation": "WORKS_WITH", "target": "Team"}])
+    g._sync_driver = _SyncDriver(
+        rows=[{"source": "Carlos", "relation": "WORKS_WITH", "target": "Team"}]
+    )
     triples = g.get_triples_for_entities_sync({"Carlos"})
     assert triples == [("Carlos", "WORKS_WITH", "Team")]
 

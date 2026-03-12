@@ -190,9 +190,7 @@ def _local_retrieve(
     if include_superseded:
         active_events = list(events)
     else:
-        active_events = [
-            e for e in events if str(e.get("status", "")).lower() != "superseded"
-        ]
+        active_events = [e for e in events if str(e.get("status", "")).lower() != "superseded"]
     if not active_events:
         return []
 

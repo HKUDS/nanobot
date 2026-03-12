@@ -334,6 +334,7 @@ class MochatChannel(BaseChannel):
         is_panel = (target.is_panel or target.id in self._panel_set) and not target.id.startswith(
             "session_"
         )
+
         async def _do_send() -> None:
             if is_panel:
                 await self._api_send(

@@ -23,9 +23,9 @@ from nanobot.providers.base import LLMResponse, ToolCallRequest
 def _make_extractor() -> extractor_mod.MemoryExtractor:
     return extractor_mod.MemoryExtractor(
         to_str_list=lambda x: [str(i) for i in (x or [])],
-        coerce_event=lambda item, source_span: {**item, "source_span": source_span}
-        if isinstance(item, dict)
-        else None,
+        coerce_event=lambda item, source_span: (
+            {**item, "source_span": source_span} if isinstance(item, dict) else None
+        ),
         utc_now_iso=lambda: "2026-03-11T00:00:00+00:00",
     )
 

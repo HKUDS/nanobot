@@ -61,7 +61,9 @@ async def test_process_inbound_event_delay_and_mention_flush(tmp_path: Path) -> 
         "authorInfo": {"nickname": "u"},
         "meta": {},
     }
-    await ch._process_inbound_event("panel-1", {"payload": payload, "timestamp": "2026-01-01T00:00:00Z"}, "panel")
+    await ch._process_inbound_event(
+        "panel-1", {"payload": payload, "timestamp": "2026-01-01T00:00:00Z"}, "panel"
+    )
     assert ch._flush_delayed_entries.await_count == 1
 
     payload2 = dict(payload)
@@ -104,7 +106,9 @@ async def test_notify_handlers_and_inbox_append(tmp_path: Path) -> None:
     ch = _channel(tmp_path)
     ch._process_inbound_event = AsyncMock()  # type: ignore[method-assign]
 
-    await ch._handle_notify_chat_message({"groupId": "g1", "converseId": "p1", "content": "x", "author": "u", "meta": {}})
+    await ch._handle_notify_chat_message(
+        {"groupId": "g1", "converseId": "p1", "content": "x", "author": "u", "meta": {}}
+    )
     assert ch._process_inbound_event.await_count == 1
 
     await ch._handle_notify_chat_message({"groupId": "", "converseId": "p1"})

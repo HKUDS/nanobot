@@ -112,8 +112,7 @@ TASK_TYPES: dict[str, dict[str, Any]] = {
         "avoid_first": ["exec", "web_search"],
         "evidence": "references to source findings from other agents",
         "completion": (
-            "Stop after producing the requested document. "
-            "Base all content on prior agent findings."
+            "Stop after producing the requested document. Base all content on prior agent findings."
         ),
         "anti_hallucination": (
             "Use ONLY data from prior agent findings (scratchpad). "
@@ -139,9 +138,7 @@ TASK_TYPES: dict[str, dict[str, Any]] = {
         "avoid_first": [],
         "evidence": "tool output excerpts",
         "completion": "Stop when the task objective is met.",
-        "anti_hallucination": (
-            "Ground all claims in tool output. Say 'unknown' when unsure."
-        ),
+        "anti_hallucination": ("Ground all claims in tool output. Say 'unknown' when unsure."),
     },
 }
 
@@ -268,9 +265,7 @@ class DelegationDispatcher:
     # Context helpers
     # ------------------------------------------------------------------
 
-    def gather_recent_tool_results(
-        self, max_results: int = 15, max_chars: int = 8000
-    ) -> str:
+    def gather_recent_tool_results(self, max_results: int = 15, max_chars: int = 8000) -> str:
         """Extract recent tool results from the active message list."""
         if not self.active_messages:
             return ""
@@ -375,21 +370,53 @@ class DelegationDispatcher:
         if role == "writing":
             return "report_writing"
         code_signals = (
-            "code", "module", "file", "function", "class", "test",
-            "import", "line", "bug", "error", "refactor", "implement",
-            "source", "python", ".py", "coverage", "lint", "scan",
+            "code",
+            "module",
+            "file",
+            "function",
+            "class",
+            "test",
+            "import",
+            "line",
+            "bug",
+            "error",
+            "refactor",
+            "implement",
+            "source",
+            "python",
+            ".py",
+            "coverage",
+            "lint",
+            "scan",
         )
         bug_signals = ("bug", "error", "crash", "fail", "exception", "broken", "fix")
         web_signals = (
-            "latest", "current", "news", "trend", "benchmark",
-            "compare with", "industry", "best practice", "state of the art",
+            "latest",
+            "current",
+            "news",
+            "trend",
+            "benchmark",
+            "compare with",
+            "industry",
+            "best practice",
+            "state of the art",
         )
         arch_signals = (
-            "architecture", "subsystem", "design", "structure", "pattern",
-            "how does", "relationship", "dependency",
+            "architecture",
+            "subsystem",
+            "design",
+            "structure",
+            "pattern",
+            "how does",
+            "relationship",
+            "dependency",
         )
         project_signals = (
-            "our", "this project", "nanobot", "workspace", "codebase",
+            "our",
+            "this project",
+            "nanobot",
+            "workspace",
+            "codebase",
         )
         if role == "code" and any(s in task_lower for s in bug_signals):
             return "bug_investigation"
@@ -419,9 +446,7 @@ class DelegationDispatcher:
         )
         if count_words:
             return True
-        enum_pattern = re.search(
-            r"(?:[^,]+,\s*){2,}(?:and|&)\s+[^,.]+", text_lower
-        )
+        enum_pattern = re.search(r"(?:[^,]+,\s*){2,}(?:and|&)\s+[^,.]+", text_lower)
         if enum_pattern:
             return True
         colon_list = re.search(r":\s*[^,]+(?:,\s*[^,]+){2,}", text_lower)
@@ -430,9 +455,7 @@ class DelegationDispatcher:
         numbered = re.findall(r"(?:^|\s)(?:\d+[.)\]]|[a-z][.)\]])\s", text_lower)
         if len(numbered) >= 3:
             return True
-        across_pattern = re.search(
-            r"\bacross\b.+,.+(?:,|and)\s+", text_lower
-        )
+        across_pattern = re.search(r"\bacross\b.+,.+(?:,|and)\s+", text_lower)
         if across_pattern:
             return True
         return False
@@ -470,9 +493,7 @@ class DelegationDispatcher:
             non_goals.append(f"Do not start with: {', '.join(avoid)}")
         parallel = self.build_parallel_work_summary(role)
         if parallel:
-            sections.append(
-                f"## Other Agents' Work (do not duplicate)\n{parallel}"
-            )
+            sections.append(f"## Other Agents' Work (do not duplicate)\n{parallel}")
             non_goals.append("Do not duplicate work already done by other agents.")
         if non_goals:
             sections.append("## Non-Goals\n" + "\n".join(f"- {g}" for g in non_goals))
@@ -483,8 +504,7 @@ class DelegationDispatcher:
             tool_lines.append(f"Preferred tools: {', '.join(prefer)}")
         if avoid:
             tool_lines.append(
-                f"Avoid using first (use only if preferred tools insufficient): "
-                f"{', '.join(avoid)}"
+                f"Avoid using first (use only if preferred tools insufficient): {', '.join(avoid)}"
             )
         if tool_lines:
             sections.append("## Tool Guidance\n" + "\n".join(tool_lines))
@@ -653,9 +673,7 @@ class DelegationDispatcher:
         if role.name in ("pm", "writing", "general") and self.scratchpad:
             scratchpad_content = self.scratchpad.read()
             if scratchpad_content and scratchpad_content != "Scratchpad is empty.":
-                user_content += (
-                    f"\n\n## Prior Agent Findings (Scratchpad)\n{scratchpad_content}"
-                )
+                user_content += f"\n\n## Prior Agent Findings (Scratchpad)\n{scratchpad_content}"
 
         # Build system prompt
         avail_tools = ", ".join(tools.tool_names)

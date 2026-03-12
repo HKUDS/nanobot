@@ -135,7 +135,9 @@ def test_setup_env_paths(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 async def test_chat_success_and_exception(monkeypatch: pytest.MonkeyPatch) -> None:
-    provider = LiteLLMProvider(api_key="k", api_base="https://api.example", default_model="openai/gpt-4.1")
+    provider = LiteLLMProvider(
+        api_key="k", api_base="https://api.example", default_model="openai/gpt-4.1"
+    )
 
     tc = SimpleNamespace(id="id-1", function=SimpleNamespace(name="tool", arguments='{"x":1}'))
     msg = SimpleNamespace(content="hello", tool_calls=[tc], reasoning_content=None)
@@ -147,7 +149,9 @@ async def test_chat_success_and_exception(monkeypatch: pytest.MonkeyPatch) -> No
         return fake_response
 
     monkeypatch.setattr("nanobot.providers.litellm_provider.acompletion", _ok_completion)
-    out = await provider.chat(messages=[{"role": "user", "content": "hi"}], tools=None, max_tokens=0)
+    out = await provider.chat(
+        messages=[{"role": "user", "content": "hi"}], tools=None, max_tokens=0
+    )
     assert out.content == "hello"
     assert out.tool_calls and out.tool_calls[0].name == "tool"
 
@@ -183,12 +187,16 @@ async def test_stream_chat_success_and_error(monkeypatch: pytest.MonkeyPatch) ->
     choice1 = SimpleNamespace(delta=delta1, finish_reason=None)
     chunk1 = SimpleNamespace(choices=[choice1], usage=None)
 
-    tc_delta = SimpleNamespace(index=0, id="abc", function=SimpleNamespace(name="read", arguments='{"a":'))
+    tc_delta = SimpleNamespace(
+        index=0, id="abc", function=SimpleNamespace(name="read", arguments='{"a":')
+    )
     delta2 = SimpleNamespace(content="lo", reasoning_content=None, tool_calls=[tc_delta])
     choice2 = SimpleNamespace(delta=delta2, finish_reason=None)
     chunk2 = SimpleNamespace(choices=[choice2], usage=None)
 
-    tc_delta_final = SimpleNamespace(index=0, id="", function=SimpleNamespace(name="", arguments='1}'))
+    tc_delta_final = SimpleNamespace(
+        index=0, id="", function=SimpleNamespace(name="", arguments="1}")
+    )
     delta3 = SimpleNamespace(content=None, reasoning_content=None, tool_calls=[tc_delta_final])
     usage3 = SimpleNamespace(prompt_tokens=1, completion_tokens=2, total_tokens=3)
     choice3 = SimpleNamespace(delta=delta3, finish_reason="stop")

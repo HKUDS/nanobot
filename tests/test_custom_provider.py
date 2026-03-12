@@ -15,7 +15,11 @@ def _fake_response(content: str = "ok", with_usage: bool = True, args: str = "{}
     )
     msg = SimpleNamespace(content=content, tool_calls=[tc], reasoning_content="think")
     choice = SimpleNamespace(message=msg, finish_reason="stop")
-    usage = SimpleNamespace(prompt_tokens=1, completion_tokens=2, total_tokens=3) if with_usage else None
+    usage = (
+        SimpleNamespace(prompt_tokens=1, completion_tokens=2, total_tokens=3)
+        if with_usage
+        else None
+    )
     return SimpleNamespace(choices=[choice], usage=usage)
 
 
@@ -23,10 +27,14 @@ def _fake_response(content: str = "ok", with_usage: bool = True, args: str = "{}
 async def test_custom_provider_chat_success() -> None:
     provider = CustomProvider(api_key="k", api_base="http://localhost:8000/v1", default_model="m")
     provider._client = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=_fake_response())))
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=AsyncMock(return_value=_fake_response()))
+        )
     )
 
-    out = await provider.chat(messages=[{"role": "user", "content": "hello"}], tools=[{"type": "function"}])
+    out = await provider.chat(
+        messages=[{"role": "user", "content": "hello"}], tools=[{"type": "function"}]
+    )
     assert out.content == "ok"
     assert out.finish_reason == "stop"
     assert out.tool_calls and out.tool_calls[0].name == "read_file"

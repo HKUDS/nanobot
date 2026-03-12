@@ -60,9 +60,7 @@ def test_convert_tools_and_messages() -> None:
         {
             "role": "assistant",
             "content": "done",
-            "tool_calls": [
-                {"id": "c1|i1", "function": {"name": "read_file", "arguments": "{}"}}
-            ],
+            "tool_calls": [{"id": "c1|i1", "function": {"name": "read_file", "arguments": "{}"}}],
         },
         {"role": "tool", "tool_call_id": "c1|i1", "content": {"ok": True}},
     ]

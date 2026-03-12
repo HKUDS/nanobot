@@ -64,7 +64,9 @@ def _base_adapter(tmp_path: Path) -> _Mem0Adapter:
     return a
 
 
-def test_load_env_candidates_reads_dotenv_and_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_load_env_candidates_reads_dotenv_and_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     adapter = _base_adapter(tmp_path)
     env_file = tmp_path / ".env"
     env_file.write_text("OPENAI_API_KEY=dotenv-key\nINVALID LINE\n", encoding="utf-8")
@@ -85,7 +87,9 @@ def test_load_env_candidates_reads_dotenv_and_config(monkeypatch: pytest.MonkeyP
     assert __import__("os").environ["ANTHROPIC_API_KEY"] == "cfg-anth"
 
 
-def test_activate_local_fallback_and_reopen(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_activate_local_fallback_and_reopen(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     adapter = _base_adapter(tmp_path)
     monkeypatch.setattr("nanobot.agent.memory.mem0_adapter.Mem0Memory", _FakeMem0)
 
@@ -104,7 +108,9 @@ def test_activate_local_fallback_and_reopen(monkeypatch: pytest.MonkeyPatch, tmp
     assert called["n"] == 1
 
 
-def test_activate_local_fallback_respects_guards(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_activate_local_fallback_respects_guards(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     adapter = _base_adapter(tmp_path)
     adapter._local_fallback_attempted = True
     monkeypatch.setattr("nanobot.agent.memory.mem0_adapter.Mem0Memory", _FakeMem0)
@@ -119,7 +125,9 @@ def test_activate_local_fallback_respects_guards(monkeypatch: pytest.MonkeyPatch
     assert adapter3._activate_local_fallback(reason="x") is False
 
 
-def test_init_client_real_hosted_and_oss_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_init_client_real_hosted_and_oss_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     # Stop the global conftest no-op patch so we can execute real _init_client.
     import conftest as conftest_mod
 

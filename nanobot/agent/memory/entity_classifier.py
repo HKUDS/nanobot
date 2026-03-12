@@ -34,11 +34,14 @@ from .ontology_types import EntityType, RelationType, TypeScore
 
 _REGEX_PATTERNS: list[tuple[EntityType, re.Pattern[str]]] = [
     # Cloud region codes: us-east-1, eu-west-2, ap-southeast-1, …
-    (EntityType.REGION, re.compile(
-        r"\b[a-z]{2}-"
-        r"(east|west|north|south|central|northeast|southeast|northwest|southwest)"
-        r"-\d+\b"
-    )),
+    (
+        EntityType.REGION,
+        re.compile(
+            r"\b[a-z]{2}-"
+            r"(east|west|north|south|central|northeast|southeast|northwest|southwest)"
+            r"-\d+\b"
+        ),
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -49,73 +52,282 @@ _REGEX_PATTERNS: list[tuple[EntityType, re.Pattern[str]]] = [
 # ---------------------------------------------------------------------------
 
 _KEYWORD_SETS: list[tuple[EntityType, frozenset[str]]] = [
-    (EntityType.REGION, frozenset({
-        "region", "zone", "datacenter",
-        "eu-west", "eu-central", "us-east", "us-west",
-        "ap-south", "ap-northeast", "ap-southeast",
-        "me-south", "af-south", "ca-central", "sa-east",
-    })),
-    (EntityType.ENVIRONMENT, frozenset({
-        "production", "staging", "development", "local",
-        "canary", "sandbox", "ci",
-    })),
-    (EntityType.DATABASE, frozenset({
-        "postgresql", "postgres", "mysql", "mariadb", "redis", "memcached",
-        "mongodb", "mongo", "sqlite", "qdrant", "neo4j", "elasticsearch",
-        "opensearch", "dynamodb", "cassandra", "cockroachdb", "clickhouse",
-        "influxdb", "supabase", "pinecone", "weaviate", "milvus", "chromadb",
-    })),
-    (EntityType.API, frozenset({
-        "api", "endpoint", "graphql", "grpc", "webhook", "openapi", "swagger",
-    })),
-    (EntityType.SERVICE, frozenset({
-        "gateway", "proxy", "broker", "queue", "worker", "scheduler",
-        "daemon", "sidecar", "ingress",
-    })),
-    (EntityType.FRAMEWORK, frozenset({
-        "django", "flask", "fastapi", "express", "nestjs", "spring", "rails",
-        "laravel", "react", "vue", "angular", "svelte", "nextjs", "nuxt",
-        "pydantic", "sqlalchemy", "celery", "airflow", "langchain",
-    })),
-    (EntityType.TECHNOLOGY, frozenset({
-        "python", "javascript", "typescript", "golang", "rust", "java",
-        "docker", "kubernetes", "terraform", "ansible", "helm", "pulumi",
-        "oauth", "oauth2", "saml", "jwt",
-        "kafka", "rabbitmq", "nats",
-        "nginx", "caddy", "traefik", "envoy",
-        "prometheus", "grafana", "datadog", "sentry",
-        "git", "github", "gitlab",
-    })),
-    (EntityType.PATTERN, frozenset({
-        "pattern", "strategy", "singleton", "observer", "decorator", "factory",
-        "circuit-breaker", "saga", "cqrs",
-    })),
-    (EntityType.PROJECT, frozenset({
-        "project", "sprint", "epic", "milestone", "roadmap", "rollout",
-    })),
-    (EntityType.ORGANIZATION, frozenset({
-        "company", "department", "division", "org", "organisation", "organization",
-    })),
+    (
+        EntityType.REGION,
+        frozenset(
+            {
+                "region",
+                "zone",
+                "datacenter",
+                "eu-west",
+                "eu-central",
+                "us-east",
+                "us-west",
+                "ap-south",
+                "ap-northeast",
+                "ap-southeast",
+                "me-south",
+                "af-south",
+                "ca-central",
+                "sa-east",
+            }
+        ),
+    ),
+    (
+        EntityType.ENVIRONMENT,
+        frozenset(
+            {
+                "production",
+                "staging",
+                "development",
+                "local",
+                "canary",
+                "sandbox",
+                "ci",
+            }
+        ),
+    ),
+    (
+        EntityType.DATABASE,
+        frozenset(
+            {
+                "postgresql",
+                "postgres",
+                "mysql",
+                "mariadb",
+                "redis",
+                "memcached",
+                "mongodb",
+                "mongo",
+                "sqlite",
+                "qdrant",
+                "neo4j",
+                "elasticsearch",
+                "opensearch",
+                "dynamodb",
+                "cassandra",
+                "cockroachdb",
+                "clickhouse",
+                "influxdb",
+                "supabase",
+                "pinecone",
+                "weaviate",
+                "milvus",
+                "chromadb",
+            }
+        ),
+    ),
+    (
+        EntityType.API,
+        frozenset(
+            {
+                "api",
+                "endpoint",
+                "graphql",
+                "grpc",
+                "webhook",
+                "openapi",
+                "swagger",
+            }
+        ),
+    ),
+    (
+        EntityType.SERVICE,
+        frozenset(
+            {
+                "gateway",
+                "proxy",
+                "broker",
+                "queue",
+                "worker",
+                "scheduler",
+                "daemon",
+                "sidecar",
+                "ingress",
+            }
+        ),
+    ),
+    (
+        EntityType.FRAMEWORK,
+        frozenset(
+            {
+                "django",
+                "flask",
+                "fastapi",
+                "express",
+                "nestjs",
+                "spring",
+                "rails",
+                "laravel",
+                "react",
+                "vue",
+                "angular",
+                "svelte",
+                "nextjs",
+                "nuxt",
+                "pydantic",
+                "sqlalchemy",
+                "celery",
+                "airflow",
+                "langchain",
+            }
+        ),
+    ),
+    (
+        EntityType.TECHNOLOGY,
+        frozenset(
+            {
+                "python",
+                "javascript",
+                "typescript",
+                "golang",
+                "rust",
+                "java",
+                "docker",
+                "kubernetes",
+                "terraform",
+                "ansible",
+                "helm",
+                "pulumi",
+                "oauth",
+                "oauth2",
+                "saml",
+                "jwt",
+                "kafka",
+                "rabbitmq",
+                "nats",
+                "nginx",
+                "caddy",
+                "traefik",
+                "envoy",
+                "prometheus",
+                "grafana",
+                "datadog",
+                "sentry",
+                "git",
+                "github",
+                "gitlab",
+            }
+        ),
+    ),
+    (
+        EntityType.PATTERN,
+        frozenset(
+            {
+                "pattern",
+                "strategy",
+                "singleton",
+                "observer",
+                "decorator",
+                "factory",
+                "circuit-breaker",
+                "saga",
+                "cqrs",
+            }
+        ),
+    ),
+    (
+        EntityType.PROJECT,
+        frozenset(
+            {
+                "project",
+                "sprint",
+                "epic",
+                "milestone",
+                "roadmap",
+                "rollout",
+            }
+        ),
+    ),
+    (
+        EntityType.ORGANIZATION,
+        frozenset(
+            {
+                "company",
+                "department",
+                "division",
+                "org",
+                "organisation",
+                "organization",
+            }
+        ),
+    ),
     # Agent-native keywords
-    (EntityType.AGENT, frozenset({
-        "agent", "bot", "assistant", "copilot", "nanobot",
-    })),
-    (EntityType.TOOL, frozenset({
-        "tool", "plugin", "extension", "integration",
-    })),
-    (EntityType.MODEL, frozenset({
-        "gpt", "llm", "claude", "gemini", "llama", "mistral",
-        "gpt-4", "gpt-4o", "gpt-4o-mini",
-    })),
-    (EntityType.DOCUMENT, frozenset({
-        "document", "readme", "changelog", "specification", "runbook", "playbook",
-    })),
-    (EntityType.TASK, frozenset({
-        "task", "ticket", "issue", "bug", "feature-request",
-    })),
-    (EntityType.SESSION, frozenset({
-        "session", "conversation", "thread", "chat",
-    })),
+    (
+        EntityType.AGENT,
+        frozenset(
+            {
+                "agent",
+                "bot",
+                "assistant",
+                "copilot",
+                "nanobot",
+            }
+        ),
+    ),
+    (
+        EntityType.TOOL,
+        frozenset(
+            {
+                "tool",
+                "plugin",
+                "extension",
+                "integration",
+            }
+        ),
+    ),
+    (
+        EntityType.MODEL,
+        frozenset(
+            {
+                "gpt",
+                "llm",
+                "claude",
+                "gemini",
+                "llama",
+                "mistral",
+                "gpt-4",
+                "gpt-4o",
+                "gpt-4o-mini",
+            }
+        ),
+    ),
+    (
+        EntityType.DOCUMENT,
+        frozenset(
+            {
+                "document",
+                "readme",
+                "changelog",
+                "specification",
+                "runbook",
+                "playbook",
+            }
+        ),
+    ),
+    (
+        EntityType.TASK,
+        frozenset(
+            {
+                "task",
+                "ticket",
+                "issue",
+                "bug",
+                "feature-request",
+            }
+        ),
+    ),
+    (
+        EntityType.SESSION,
+        frozenset(
+            {
+                "session",
+                "conversation",
+                "thread",
+                "chat",
+            }
+        ),
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -143,30 +355,104 @@ _SUFFIX_PATTERNS: list[tuple[EntityType, tuple[str, ...]]] = [
 # Signal 5: Person detection
 # ---------------------------------------------------------------------------
 
-_PERSON_ROLE_KEYWORDS: frozenset[str] = frozenset({
-    "user", "manager", "lead", "engineer", "developer", "architect",
-    "admin", "analyst", "scientist", "designer", "director",
-    "coordinator", "specialist", "consultant", "maintainer",
-    "contributor", "reviewer", "owner",
-})
+_PERSON_ROLE_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "user",
+        "manager",
+        "lead",
+        "engineer",
+        "developer",
+        "architect",
+        "admin",
+        "analyst",
+        "scientist",
+        "designer",
+        "director",
+        "coordinator",
+        "specialist",
+        "consultant",
+        "maintainer",
+        "contributor",
+        "reviewer",
+        "owner",
+    }
+)
 
 # Words never treated as person names by the capitalisation heuristic.
-_CAPITALIZATION_STOPWORDS: frozenset[str] = frozenset({
-    "the", "a", "an", "and", "or", "but", "for", "in", "on", "to",
-    "of", "at", "by", "is", "it", "as", "if", "no", "not", "so",
-    "up", "out", "off", "all", "new", "old", "big", "top", "low",
-    "set", "get", "run", "add", "use", "try", "may", "can", "let",
-    "any", "our", "how", "why", "who", "what", "when", "where", "which",
-    "this", "that", "with", "from", "into", "over", "just", "only",
-    "each", "both", "such", "very", "also", "here", "there",
-    "true", "false", "none", "null",
-})
+_CAPITALIZATION_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "but",
+        "for",
+        "in",
+        "on",
+        "to",
+        "of",
+        "at",
+        "by",
+        "is",
+        "it",
+        "as",
+        "if",
+        "no",
+        "not",
+        "so",
+        "up",
+        "out",
+        "off",
+        "all",
+        "new",
+        "old",
+        "big",
+        "top",
+        "low",
+        "set",
+        "get",
+        "run",
+        "add",
+        "use",
+        "try",
+        "may",
+        "can",
+        "let",
+        "any",
+        "our",
+        "how",
+        "why",
+        "who",
+        "what",
+        "when",
+        "where",
+        "which",
+        "this",
+        "that",
+        "with",
+        "from",
+        "into",
+        "over",
+        "just",
+        "only",
+        "each",
+        "both",
+        "such",
+        "very",
+        "also",
+        "here",
+        "there",
+        "true",
+        "false",
+        "none",
+        "null",
+    }
+)
 
 # Collect all non-person keywords so the capitalisation heuristic can
 # avoid misclassifying known system terms as people.
-_NON_PERSON_KEYWORDS: frozenset[str] = frozenset().union(
-    *(kws for _, kws in _KEYWORD_SETS)
-)
+_NON_PERSON_KEYWORDS: frozenset[str] = frozenset().union(*(kws for _, kws in _KEYWORD_SETS))
 
 # ---------------------------------------------------------------------------
 # Confidence tiers per signal
@@ -230,8 +516,7 @@ def classify_entity_type_scored(name: str) -> list[TypeScore]:
     name_words = [w for w in raw.split() if len(w) >= 2]
     if name_words:
         significant = [
-            w for w in name_words
-            if w[0].isupper() and w.lower() not in _CAPITALIZATION_STOPWORDS
+            w for w in name_words if w[0].isupper() and w.lower() not in _CAPITALIZATION_STOPWORDS
         ]
         if significant and not (words & _NON_PERSON_KEYWORDS):
             candidates.append(

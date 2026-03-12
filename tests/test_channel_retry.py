@@ -199,9 +199,7 @@ async def test_retry_send_retries_transient_errors() -> None:
         if calls < 3:
             raise ConnectionError("reset")
 
-    await retry_send(
-        _fail_then_ok, channel_name="test", health=h, max_attempts=3, base_delay=0.01
-    )
+    await retry_send(_fail_then_ok, channel_name="test", health=h, max_attempts=3, base_delay=0.01)
     assert calls == 3
     assert h.healthy is True
 

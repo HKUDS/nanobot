@@ -84,7 +84,8 @@ class ToolRegistry:
                 validation_err = ToolValidationError(name, errors)
                 bind_trace().debug(
                     "Tool {} validation_error duration_ms={:.0f}",
-                    name, (time.monotonic() - t0) * 1000,
+                    name,
+                    (time.monotonic() - t0) * 1000,
                 )
                 return ToolResult.fail(str(validation_err) + self._HINT, error_type="validation")
 
@@ -110,7 +111,9 @@ class ToolRegistry:
             duration_ms = (time.monotonic() - t0) * 1000
             bind_trace().debug(
                 "Tool {} success={} duration_ms={:.0f}",
-                name, result.success, duration_ms,
+                name,
+                result.success,
+                duration_ms,
             )
             return result
 
@@ -118,14 +121,17 @@ class ToolRegistry:
             duration_ms = (time.monotonic() - t0) * 1000
             bind_trace().debug(
                 "Tool {} error={} duration_ms={:.0f}",
-                name, e.error_type, duration_ms,
+                name,
+                e.error_type,
+                duration_ms,
             )
             return ToolResult.fail(str(e) + self._HINT, error_type=e.error_type)
         except Exception as e:  # crash-barrier: user-provided tool execution
             duration_ms = (time.monotonic() - t0) * 1000
             bind_trace().debug(
                 "Tool {} error=unknown duration_ms={:.0f}",
-                name, duration_ms,
+                name,
+                duration_ms,
             )
             return ToolResult.fail(
                 f"Error executing {name}: {str(e)}" + self._HINT, error_type="unknown"

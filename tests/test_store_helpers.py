@@ -204,18 +204,14 @@ class TestMemoryStoreExtraProfileAndConflicts:
         store = _store(tmp_path)
         profile = store.read_profile()
         profile["preferences"] = ["a", "b"]
-        profile["conflicts"] = [
-            {"field": "preferences", "old": "a", "new": "b", "status": "open"}
-        ]
+        profile["conflicts"] = [{"field": "preferences", "old": "a", "new": "b", "status": "open"}]
         store.write_profile(profile)
 
         keep_new = store.resolve_conflict_details(0, "keep_new")
         assert isinstance(keep_new, dict)
 
         profile = store.read_profile()
-        profile["conflicts"] = [
-            {"field": "preferences", "old": "a", "new": "b", "status": "open"}
-        ]
+        profile["conflicts"] = [{"field": "preferences", "old": "a", "new": "b", "status": "open"}]
         store.write_profile(profile)
         keep_old = store.resolve_conflict_details(0, "keep_old")
         assert isinstance(keep_old, dict)
@@ -281,7 +277,9 @@ class TestMemoryStoreExtraRetrievalAndContext:
         store = _store(tmp_path, memory_shadow_mode=True, memory_shadow_sample_rate=1.0)
         store.mem0.enabled = True
 
-        def _fake_search(*args: object, **kwargs: object) -> tuple[list[dict[str, object]], dict[str, int]]:
+        def _fake_search(
+            *args: object, **kwargs: object
+        ) -> tuple[list[dict[str, object]], dict[str, int]]:
             return (
                 [
                     {
@@ -396,7 +394,5 @@ class TestMemoryStoreExtraCorpusAndEvaluation:
         assert isinstance(gate, dict)
 
         out_file = tmp_path / "memory_eval.json"
-        saved = store.save_evaluation_report(
-            eval_report, observability, output_file=str(out_file)
-        )
+        saved = store.save_evaluation_report(eval_report, observability, output_file=str(out_file))
         assert saved.exists()

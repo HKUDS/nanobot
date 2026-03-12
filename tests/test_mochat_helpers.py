@@ -22,7 +22,10 @@ from nanobot.channels.retry import ChannelHealth
 def _cfg() -> SimpleNamespace:
     return SimpleNamespace(
         agent_user_id="agent-1",
-        groups={"g1": SimpleNamespace(require_mention=True), "*": SimpleNamespace(require_mention=False)},
+        groups={
+            "g1": SimpleNamespace(require_mention=True),
+            "*": SimpleNamespace(require_mention=False),
+        },
         mention=SimpleNamespace(require_in_groups=True),
         reply_delay_mode="none",
         watch_limit=50,
@@ -120,7 +123,11 @@ async def test_handle_watch_payload_cold_session_and_dispatch() -> None:
     ch._cold_sessions = {"s1"}
 
     await ch._handle_watch_payload(
-        {"sessionId": "s1", "cursor": 10, "events": [{"type": "message.add", "seq": 11, "payload": {}}]},
+        {
+            "sessionId": "s1",
+            "cursor": 10,
+            "events": [{"type": "message.add", "seq": 11, "payload": {}}],
+        },
         "session",
     )
     assert ch._process_inbound_event.await_count == 0
@@ -129,7 +136,9 @@ async def test_handle_watch_payload_cold_session_and_dispatch() -> None:
         {
             "sessionId": "s1",
             "cursor": 12,
-            "events": [{"type": "message.add", "seq": 13, "payload": {"author": "u1", "messageId": "m1"}}],
+            "events": [
+                {"type": "message.add", "seq": 13, "payload": {"author": "u1", "messageId": "m1"}}
+            ],
         },
         "session",
     )
@@ -151,6 +160,8 @@ async def test_send_routes_to_panel_or_session_and_skips_empty() -> None:
     await ch.send(msg_panel)
     assert ch._api_send.await_count == 1
 
-    msg_session = SimpleNamespace(content=" ", media=[], chat_id="session_1", reply_to=None, metadata={})
+    msg_session = SimpleNamespace(
+        content=" ", media=[], chat_id="session_1", reply_to=None, metadata={}
+    )
     await ch.send(msg_session)
     assert ch._api_send.await_count == 1

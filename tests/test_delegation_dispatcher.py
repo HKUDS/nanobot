@@ -137,8 +137,7 @@ class TestGatherRecentToolResults:
     def test_respects_max_results(self, tmp_path: Path):
         d = _make_dispatcher(tmp_path)
         d.active_messages = [
-            {"role": "tool", "name": f"t{i}", "content": f"result {i}"}
-            for i in range(20)
+            {"role": "tool", "name": f"t{i}", "content": f"result {i}"} for i in range(20)
         ]
         result = d.gather_recent_tool_results(max_results=3)
         assert result.count("**t") == 3
@@ -193,8 +192,12 @@ class TestClassifyTaskType:
     def test_task_types_dict_complete(self):
         """All expected task types exist in TASK_TYPES."""
         expected = {
-            "local_code_analysis", "repo_architecture", "web_research",
-            "report_writing", "bug_investigation", "general",
+            "local_code_analysis",
+            "repo_architecture",
+            "web_research",
+            "report_writing",
+            "bug_investigation",
+            "general",
         }
         assert set(TASK_TYPES.keys()) == expected
 
@@ -220,9 +223,7 @@ class TestHasParallelStructure:
         )
 
     def test_no_parallel(self):
-        assert not DelegationDispatcher.has_parallel_structure(
-            "Review the code for bugs"
-        )
+        assert not DelegationDispatcher.has_parallel_structure("Review the code for bugs")
 
 
 # ---------------------------------------------------------------------------
@@ -293,9 +294,7 @@ class TestBuildDelegationContract:
     def test_contract_includes_context(self, tmp_path: Path):
         d = _make_dispatcher(tmp_path)
         d.active_messages = []
-        content, _ = d.build_delegation_contract(
-            "code", "task", "extra context here", "general"
-        )
+        content, _ = d.build_delegation_contract("code", "task", "extra context here", "general")
         assert "extra context here" in content
 
     def test_contract_includes_tool_guidance(self, tmp_path: Path):

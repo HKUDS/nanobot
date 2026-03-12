@@ -181,7 +181,9 @@ async def test_run_with_routing_low_confidence_and_none_response(tmp_path: Path)
 
     role_calls = {"applied": 0, "reset": 0}
     loop._record_route_trace = lambda *a, **k: None  # type: ignore[method-assign]
-    loop._apply_role_for_turn = lambda _r: role_calls.__setitem__("applied", role_calls["applied"] + 1)  # type: ignore[method-assign]
+    loop._apply_role_for_turn = lambda _r: role_calls.__setitem__(
+        "applied", role_calls["applied"] + 1
+    )  # type: ignore[method-assign]
     loop._reset_role_after_turn = lambda: role_calls.__setitem__("reset", role_calls["reset"] + 1)  # type: ignore[method-assign]
 
     async def _none_response(_msg):

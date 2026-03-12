@@ -225,10 +225,14 @@ class KnowledgeGraph:
             sub_type = classify_entity_type(triple.subject)
             obj_type = classify_entity_type(triple.object)
             sub_type = refine_type_from_predicate(
-                sub_type, triple.predicate, is_subject=True,
+                sub_type,
+                triple.predicate,
+                is_subject=True,
             )
             obj_type = refine_type_from_predicate(
-                obj_type, triple.predicate, is_subject=False,
+                obj_type,
+                triple.predicate,
+                is_subject=False,
             )
 
             # Validate domain/range constraints — demote confidence on violation
@@ -304,10 +308,7 @@ class KnowledgeGraph:
         if not self.enabled or self._driver is None:
             return []
         # Use full-text index for fuzzy matching
-        cypher = (
-            "CALL db.index.fulltext.queryNodes('entity_search', $query) "
-            "YIELD node, score "
-        )
+        cypher = "CALL db.index.fulltext.queryNodes('entity_search', $query) YIELD node, score "
         if entity_type:
             cypher += "WHERE node.entity_type = $etype "
         cypher += "RETURN node ORDER BY score DESC LIMIT $limit"
@@ -391,11 +392,13 @@ class KnowledgeGraph:
                     nodes = rec["nodes"]
                     relations = rec["relations"]
                     for i, rel in enumerate(relations):
-                        path_steps.append({
-                            "source": nodes[i],
-                            "relation": rel,
-                            "target": nodes[i + 1],
-                        })
+                        path_steps.append(
+                            {
+                                "source": nodes[i],
+                                "relation": rel,
+                                "target": nodes[i + 1],
+                            }
+                        )
                     paths.append(path_steps)
                 return paths
         except Exception as exc:  # noqa: BLE001

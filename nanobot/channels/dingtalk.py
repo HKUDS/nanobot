@@ -142,9 +142,7 @@ class DingTalkChannel(BaseChannel):
             async def _connect() -> None:
                 await self._client.start()
 
-            await connection_loop(
-                "DingTalk", _connect, running_flag=lambda: self._running
-            )
+            await connection_loop("DingTalk", _connect, running_flag=lambda: self._running)
 
         except Exception as e:  # crash-barrier: DingTalk API
             logger.exception("Failed to start DingTalk channel: {}", e)

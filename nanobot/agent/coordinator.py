@@ -116,7 +116,6 @@ def build_default_registry(default_role: str = "general") -> AgentRegistry:
 # ------------------------------------------------------------------
 
 
-
 class Coordinator:
     """LLM-based message router that classifies intent and selects an agent role."""
 
@@ -144,7 +143,7 @@ class Coordinator:
         return (
             f"Available agents:\n{role_lines}\n\n"
             f"User message:\n{message}\n\n"
-            f"Which agent should handle this? Reply with {{\"role\": \"<name>\"}}."
+            f'Which agent should handle this? Reply with {{"role": "<name>"}}.'
         )
 
     async def classify(self, message: str) -> tuple[str, float]:
@@ -171,9 +170,7 @@ class Coordinator:
                 max_tokens=128,
             )
             raw = (response.content or "").strip()
-            parsed_role, confidence, needs_orchestration, relevant_roles = (
-                self._parse_response(raw)
-            )
+            parsed_role, confidence, needs_orchestration, relevant_roles = self._parse_response(raw)
             role_name = parsed_role if parsed_role in self._registry else self._default_role
 
             # Orchestration override: route to "pm" when the classifier
@@ -184,8 +181,7 @@ class Coordinator:
                 and (needs_orchestration or len(relevant_roles) >= 2)
             ):
                 logger.info(
-                    "Orchestration override: {} → pm "
-                    "(needs_orchestration={}, relevant_roles={})",
+                    "Orchestration override: {} → pm (needs_orchestration={}, relevant_roles={})",
                     role_name,
                     needs_orchestration,
                     relevant_roles,

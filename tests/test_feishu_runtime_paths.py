@@ -13,7 +13,9 @@ from nanobot.channels.retry import ChannelHealth
 
 def _channel() -> FeishuChannel:
     ch = object.__new__(FeishuChannel)
-    ch.config = SimpleNamespace(app_id="app", app_secret="secret", encrypt_key="", verification_token="")
+    ch.config = SimpleNamespace(
+        app_id="app", app_secret="secret", encrypt_key="", verification_token=""
+    )
     ch._client = None
     ch._ws_client = None
     ch._ws_thread = None
@@ -120,9 +122,21 @@ async def test_add_reaction_and_on_message_sync(monkeypatch: pytest.MonkeyPatch)
         def build(self):
             return object()
 
-    monkeypatch.setattr(fs_mod, "CreateMessageReactionRequest", SimpleNamespace(builder=lambda: _ReqB()))
-    monkeypatch.setattr(fs_mod, "CreateMessageReactionRequestBody", SimpleNamespace(builder=lambda: _ReqBodyB()))
-    monkeypatch.setattr(fs_mod, "Emoji", SimpleNamespace(builder=lambda: SimpleNamespace(emoji_type=lambda _e: SimpleNamespace(build=lambda: object()))))
+    monkeypatch.setattr(
+        fs_mod, "CreateMessageReactionRequest", SimpleNamespace(builder=lambda: _ReqB())
+    )
+    monkeypatch.setattr(
+        fs_mod, "CreateMessageReactionRequestBody", SimpleNamespace(builder=lambda: _ReqBodyB())
+    )
+    monkeypatch.setattr(
+        fs_mod,
+        "Emoji",
+        SimpleNamespace(
+            builder=lambda: SimpleNamespace(
+                emoji_type=lambda _e: SimpleNamespace(build=lambda: object())
+            )
+        ),
+    )
 
     ch._add_reaction_sync("m1", "THUMBSUP")
     await ch._add_reaction("m1")

@@ -91,10 +91,14 @@ class TestJsonConfig:
     def test_json_values_used(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """Config values from JSON file populate the model."""
         cfg_file = tmp_path / "config.json"
-        cfg_file.write_text(json.dumps({
-            "agents": {"defaults": {"model": "json-model"}},
-            "llm": {"timeout_s": 90},
-        }))
+        cfg_file.write_text(
+            json.dumps(
+                {
+                    "agents": {"defaults": {"model": "json-model"}},
+                    "llm": {"timeout_s": 90},
+                }
+            )
+        )
         # Use Config with direct initialization (simulates loading)
         data = json.loads(cfg_file.read_text())
         cfg = Config(**data)

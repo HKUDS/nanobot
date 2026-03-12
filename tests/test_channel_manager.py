@@ -139,7 +139,9 @@ async def test_replay_dead_letters_dry_run_and_rewrite(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_dispatch_outbound_filters_and_retries(tmp_path: Path) -> None:
     mgr = _manager_with_dead_file(tmp_path / "outbound_failed.jsonl")
-    mgr.config = SimpleNamespace(channels=SimpleNamespace(send_tool_hints=False, send_progress=False))
+    mgr.config = SimpleNamespace(
+        channels=SimpleNamespace(send_tool_hints=False, send_progress=False)
+    )
 
     sent = {"count": 0}
 

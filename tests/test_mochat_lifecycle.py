@@ -73,7 +73,9 @@ def test_normalize_id_list_handles_star_and_dedup() -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_socket_client_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_start_socket_client_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ch = _channel(tmp_path)
     monkeypatch.setattr(mochat_mod, "SOCKETIO_AVAILABLE", False)
     assert await ch._start_socket_client() is False

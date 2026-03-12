@@ -90,7 +90,9 @@ def test_record_request(tmp_path: Path) -> None:
     collector = MetricsCollector(path)
 
     collector.record_request(duration_ms=150.5, llm_calls=2, tool_calls=3, failed=False)
-    collector.record_request(duration_ms=80.0, tokens_prompt=500, tokens_completion=200, failed=True)
+    collector.record_request(
+        duration_ms=80.0, tokens_prompt=500, tokens_completion=200, failed=True
+    )
 
     snap = collector.snapshot()
     assert snap[REQUESTS_TOTAL] == 2

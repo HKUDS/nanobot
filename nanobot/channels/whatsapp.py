@@ -42,9 +42,7 @@ class WhatsAppChannel(BaseChannel):
             async with websockets.connect(bridge_url) as ws:
                 self._ws = ws
                 if self.config.bridge_token:
-                    await ws.send(
-                        json.dumps({"type": "auth", "token": self.config.bridge_token})
-                    )
+                    await ws.send(json.dumps({"type": "auth", "token": self.config.bridge_token}))
                 self._connected = True
                 logger.info("Connected to WhatsApp bridge")
 

@@ -49,7 +49,9 @@ def _make_adapter(tmp_path: Path) -> _Mem0Adapter:
 
 
 @pytest.mark.asyncio
-async def test_loop_process_message_system_help_new_and_conflict_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_loop_process_message_system_help_new_and_conflict_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     provider = ScriptedProvider([LLMResponse(content="done")])
     loop = _make_loop(tmp_path, provider)
 
@@ -96,7 +98,9 @@ async def test_loop_process_message_system_help_new_and_conflict_paths(tmp_path:
 
 
 @pytest.mark.asyncio
-async def test_loop_new_exception_and_fallback_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_loop_new_exception_and_fallback_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     provider = ScriptedProvider([LLMResponse(content="ok")])
     loop = _make_loop(tmp_path, provider)
 
@@ -117,7 +121,9 @@ async def test_loop_new_exception_and_fallback_archive(tmp_path: Path, monkeypat
     assert "failed" in out.content.lower()
 
 
-def test_store_retrieve_core_router_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_store_retrieve_core_router_branches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = _store(
         tmp_path,
         memory_router_enabled=True,
@@ -169,11 +175,16 @@ def test_store_retrieve_core_router_branches(tmp_path: Path, monkeypatch: pytest
 
     store.mem0.enabled = True
     store.mem0.search = MagicMock(
-        return_value=(rows, {"source_vector": 2, "source_get_all": 1, "source_history": 1, "rejected_blob_like": 0})
+        return_value=(
+            rows,
+            {"source_vector": 2, "source_get_all": 1, "source_history": 1, "rejected_blob_like": 0},
+        )
     )
     store.graph.enabled = True
     store.graph.get_related_entity_names_sync = MagicMock(return_value={"oauth2"})
-    store.read_events = MagicMock(return_value=[{"id": "extra", "summary": "oauth2 rollout", "entities": []}])
+    store.read_events = MagicMock(
+        return_value=[{"id": "extra", "summary": "oauth2 rollout", "entities": []}]
+    )
     monkeypatch.setattr("nanobot.agent.memory.store._local_retrieve", lambda *args, **kwargs: [])
 
     class _Reranker:
@@ -210,7 +221,9 @@ def test_store_retrieve_core_router_branches(tmp_path: Path, monkeypatch: pytest
     assert any(str(it.get("memory_type")) == "reflection" for it in final_reflect)
 
 
-def test_mem0_activate_local_fallback_and_search_fallback_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mem0_activate_local_fallback_and_search_fallback_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     adapter = _make_adapter(tmp_path)
 
     # Guard branches.
@@ -276,14 +289,16 @@ def test_graph_entity_helpers_and_disabled_paths() -> None:
 async def test_extractor_correction_helpers_and_provider_failure() -> None:
     extractor = MemoryExtractor(
         to_str_list=lambda v: [str(x) for x in (v or [])],
-        coerce_event=lambda item, source_span: {**item, "source_span": source_span}
-        if isinstance(item, dict)
-        else None,
+        coerce_event=lambda item, source_span: (
+            {**item, "source_span": source_span} if isinstance(item, dict) else None
+        ),
         utc_now_iso=lambda: "2026-03-11T00:00:00+00:00",
     )
 
     prefs = extractor.extract_explicit_preference_corrections("I prefer Python but not JavaScript")
-    facts = extractor.extract_explicit_fact_corrections("Actually project status is green, not red.")
+    facts = extractor.extract_explicit_fact_corrections(
+        "Actually project status is green, not red."
+    )
     assert prefs and facts
 
     class _FailProvider:
@@ -323,7 +338,9 @@ def test_persistence_invalid_json_and_jsonl_skip(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_loop_connect_mcp_and_tool_parallel_error_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_loop_connect_mcp_and_tool_parallel_error_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     provider = ScriptedProvider([LLMResponse(content="ok")])
     loop = _make_loop(tmp_path, provider)
 
@@ -381,7 +398,12 @@ def test_store_retrieve_core_router_off_and_rollout_status(tmp_path: Path) -> No
     assert meta["counts"]["retrieval_returned"] == 0
 
     # Router-enabled rollout path creates a synthetic item.
-    store.mem0.search = MagicMock(return_value=([], {"source_vector": 0, "source_get_all": 0, "source_history": 0, "rejected_blob_like": 0}))
+    store.mem0.search = MagicMock(
+        return_value=(
+            [],
+            {"source_vector": 0, "source_get_all": 0, "source_history": 0, "rejected_blob_like": 0},
+        )
+    )
     rows2, meta2 = store._retrieve_core(
         query="rollout status",
         top_k=1,
@@ -404,7 +426,10 @@ async def test_graph_query_subgraph_dedupe_and_get_entity_none() -> None:
     async def _neighbors(name: str, depth: int = 1):
         if name == "a":
             return [{"source": "A", "relation": "REL", "target": "B"}]
-        return [{"source": "A", "relation": "REL", "target": "B"}, {"source": "B", "relation": "REL2", "target": "C"}]
+        return [
+            {"source": "A", "relation": "REL", "target": "B"},
+            {"source": "B", "relation": "REL2", "target": "C"},
+        ]
 
     g.get_neighbors = _neighbors  # type: ignore[method-assign]
     sub = await g.query_subgraph(["a", "b"], depth=1)
@@ -459,9 +484,9 @@ async def test_loop_run_agent_loop_malformed_then_final_nudge(tmp_path: Path) ->
     loop._call_llm = AsyncMock(side_effect=responses)  # type: ignore[method-assign]
     loop.tools.execute_batch = AsyncMock(return_value=[ToolResult.ok("ok")])  # type: ignore[method-assign]
 
-    final, _tools, messages = await loop._run_agent_loop([
-        {"role": "user", "content": "Please do this task."}
-    ])
+    final, _tools, messages = await loop._run_agent_loop(
+        [{"role": "user", "content": "Please do this task."}]
+    )
     assert final == "final answer"
     assert any(m.get("role") == "tool" for m in messages)
 
@@ -486,11 +511,13 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(tmp_p
 
     loop._call_llm = AsyncMock(side_effect=responses)  # type: ignore[method-assign]
     loop.tools.execute_batch = _exec  # type: ignore[method-assign]
-    final, _tools, msgs = await loop._run_agent_loop([
-        {"role": "user", "content": "Do A then B."}
-    ])
+    final, _tools, msgs = await loop._run_agent_loop([{"role": "user", "content": "Do A then B."}])
     assert final == "done"
-    assert any("Delegation budget exhausted" in str(m.get("content", "")) for m in msgs if m.get("role") == "system")
+    assert any(
+        "Delegation budget exhausted" in str(m.get("content", ""))
+        for m in msgs
+        if m.get("role") == "system"
+    )
 
     responses2 = [
         LLMResponse(
@@ -502,14 +529,18 @@ async def test_loop_run_agent_loop_delegation_and_failure_reflection_paths(tmp_p
     ]
     loop._call_llm = AsyncMock(side_effect=responses2)  # type: ignore[method-assign]
     loop.tools.execute_batch = AsyncMock(return_value=[ToolResult.fail("boom")])  # type: ignore[method-assign]
-    final2, _tools2, msgs2 = await loop._run_agent_loop([
-        {"role": "user", "content": "Read file."}
-    ])
+    final2, _tools2, msgs2 = await loop._run_agent_loop([{"role": "user", "content": "Read file."}])
     assert final2 == "done2"
-    assert any("propose an alternative approach" in str(m.get("content", "")).lower() for m in msgs2 if m.get("role") == "system")
+    assert any(
+        "propose an alternative approach" in str(m.get("content", "")).lower()
+        for m in msgs2
+        if m.get("role") == "system"
+    )
 
 
-def test_store_load_rollout_config_env_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_store_load_rollout_config_env_overrides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify rollout overrides flow through _apply_rollout_overrides correctly.
 
     Legacy NANOBOT_* env vars no longer read directly by _load_rollout_config;
@@ -542,7 +573,9 @@ def test_store_load_rollout_config_env_overrides(tmp_path: Path, monkeypatch: py
     assert store.rollout["rollout_gates"]["min_precision_at_k"] == pytest.approx(0.6)
 
 
-def test_store_retrieve_core_reranker_enabled_and_type_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_store_retrieve_core_reranker_enabled_and_type_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = _store(tmp_path, reranker_mode="enabled", memory_reflection_enabled=True)
     store.mem0.enabled = True
     store.mem0.search = MagicMock(
@@ -582,10 +615,14 @@ def test_store_retrieve_core_reranker_enabled_and_type_counts(tmp_path: Path, mo
     )
     store.graph.enabled = True
     store.graph.get_related_entity_names_sync = MagicMock(return_value={"oauth2"})
-    store.read_events = MagicMock(return_value=[{"id": "z1", "summary": "oauth2 semantic", "entities": []}])
+    store.read_events = MagicMock(
+        return_value=[{"id": "z1", "summary": "oauth2 semantic", "entities": []}]
+    )
     monkeypatch.setattr(
         "nanobot.agent.memory.store._local_retrieve",
-        lambda *_args, **_kwargs: [{"id": "graph-new", "summary": "g", "retrieval_reason": "bad", "score": 0.9}],
+        lambda *_args, **_kwargs: [
+            {"id": "graph-new", "summary": "g", "retrieval_reason": "bad", "score": 0.9}
+        ],
     )
 
     class _EnabledReranker:
@@ -609,7 +646,9 @@ def test_store_retrieve_core_reranker_enabled_and_type_counts(tmp_path: Path, mo
     assert meta["counts"]["retrieval_returned"] >= 1
 
 
-def test_mem0_load_env_and_api_key_guard_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mem0_load_env_and_api_key_guard_branches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     adapter = _make_adapter(tmp_path)
 
     # _load_fallback_config guard paths
@@ -653,7 +692,9 @@ def test_mem0_load_env_and_api_key_guard_branches(tmp_path: Path, monkeypatch: p
     adapter._load_env_candidates()
 
 
-def test_mem0_add_text_and_history_fallback_rejections(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mem0_add_text_and_history_fallback_rejections(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     adapter = _make_adapter(tmp_path)
     adapter.enabled = True
 
@@ -697,7 +738,9 @@ def test_mem0_add_text_and_history_fallback_rejections(tmp_path: Path, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_loop_run_agent_nudge_and_reaction_and_close_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_loop_run_agent_nudge_and_reaction_and_close_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     provider = ScriptedProvider(
         [
             LLMResponse(
@@ -725,9 +768,7 @@ async def test_loop_run_agent_nudge_and_reaction_and_close_paths(tmp_path: Path,
     await loop.handle_reaction(
         ReactionEvent(channel="cli", sender_id="u", chat_id="c", emoji="zzz")
     )
-    await loop.handle_reaction(
-        ReactionEvent(channel="cli", sender_id="u", chat_id="c", emoji="+1")
-    )
+    await loop.handle_reaction(ReactionEvent(channel="cli", sender_id="u", chat_id="c", emoji="+1"))
 
     # close_mcp handles RuntimeError from stack cleanup + provider cleanup exception
     class _Stack:
@@ -872,7 +913,9 @@ def test_store_retrieve_core_profile_adjustment_paths(tmp_path: Path) -> None:
     assert any("profile_adjustment" in it.get("retrieval_reason", {}) for it in final)
 
 
-def test_mem0_search_update_delete_and_init_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mem0_search_update_delete_and_init_branches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     adapter = _make_adapter(tmp_path)
 
     # _load_fallback_config: non-dict provider item + invalid dims coercion
@@ -1054,7 +1097,12 @@ def test_store_routing_hint_and_reflection_filters(tmp_path: Path) -> None:
         }
     ]
     store.mem0.enabled = True
-    store.mem0.search = MagicMock(return_value=(rows, {"source_vector": 1, "source_get_all": 0, "source_history": 0, "rejected_blob_like": 0}))
+    store.mem0.search = MagicMock(
+        return_value=(
+            rows,
+            {"source_vector": 1, "source_get_all": 0, "source_history": 0, "rejected_blob_like": 0},
+        )
+    )
     store.read_events = MagicMock(return_value=[])
     store.read_profile = MagicMock(return_value={"conflicts": [], "meta": {}})
     store._query_routing_hints = MagicMock(
@@ -1114,24 +1162,33 @@ def test_store_query_hint_status_and_recency_helpers(tmp_path: Path) -> None:
     assert hints["requires_open"] is False
     assert hints["requires_resolved"] is False
 
-    assert store._status_matches_query_hint(
-        status="closed",
-        summary="done",
-        requires_open=True,
-        requires_resolved=False,
-    ) is False
-    assert store._status_matches_query_hint(
-        status="",
-        summary="still in progress",
-        requires_open=True,
-        requires_resolved=False,
-    ) is True
-    assert store._status_matches_query_hint(
-        status="open",
-        summary="todo",
-        requires_open=False,
-        requires_resolved=True,
-    ) is False
+    assert (
+        store._status_matches_query_hint(
+            status="closed",
+            summary="done",
+            requires_open=True,
+            requires_resolved=False,
+        )
+        is False
+    )
+    assert (
+        store._status_matches_query_hint(
+            status="",
+            summary="still in progress",
+            requires_open=True,
+            requires_resolved=False,
+        )
+        is True
+    )
+    assert (
+        store._status_matches_query_hint(
+            status="open",
+            summary="todo",
+            requires_open=False,
+            requires_resolved=True,
+        )
+        is False
+    )
 
     assert store._recency_signal("", half_life_days=10.0) == 0.0
     assert store._recency_signal("2026-01-01T00:00:00", half_life_days=0.0) == 0.0
@@ -1159,5 +1216,7 @@ def test_mem0_remaining_helper_branches(tmp_path: Path, monkeypatch: pytest.Monk
     (adapter._local_mem0_dir / "history.db").write_text("x", encoding="utf-8")
     import sqlite3
 
-    monkeypatch.setattr(sqlite3, "connect", lambda *_a, **_k: (_ for _ in ()).throw(sqlite3.OperationalError("db")))
+    monkeypatch.setattr(
+        sqlite3, "connect", lambda *_a, **_k: (_ for _ in ()).throw(sqlite3.OperationalError("db"))
+    )
     assert adapter._fallback_search_via_history_db("q", top_k=1) == ([], 0)

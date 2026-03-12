@@ -77,7 +77,12 @@ async def test_run_tool_loop_exhaustion_summary_fallback_to_tool_snippets() -> N
             return self._responses.pop(0)
 
     provider = _NoSummaryProvider(
-        [LLMResponse(content="", tool_calls=[ToolCallRequest(id="tc1", name="echo", arguments={"text": "A"})])]
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[ToolCallRequest(id="tc1", name="echo", arguments={"text": "A"})],
+            )
+        ]
     )
     registry = ToolRegistry()
     registry.register(_EchoTool())
@@ -104,7 +109,9 @@ async def test_subagent_spawn_and_announce() -> None:
     )
 
     manager._run_subagent = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    msg = await manager.spawn("index files", label="index", origin_channel="cli", origin_chat_id="chat")
+    msg = await manager.spawn(
+        "index files", label="index", origin_channel="cli", origin_chat_id="chat"
+    )
     assert "started" in msg
     await asyncio.sleep(0)
 

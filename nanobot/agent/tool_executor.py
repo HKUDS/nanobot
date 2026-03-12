@@ -109,7 +109,9 @@ class ToolExecutor:
         failed = sum(1 for r in results if not r.success)
         bind_trace().info(
             "tool_batch_complete | count={} | failed={} | {:.0f}ms",
-            len(tool_calls), failed, (time.monotonic() - t0_batch) * 1000,
+            len(tool_calls),
+            failed,
+            (time.monotonic() - t0_batch) * 1000,
         )
         return results
 

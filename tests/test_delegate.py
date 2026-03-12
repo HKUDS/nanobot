@@ -136,9 +136,7 @@ class TestDelegateParallelTool:
             return "ok"
 
         tool.set_dispatch(noop)
-        result = await tool.execute(
-            subtasks=[{"task": f"t{i}"} for i in range(6)]
-        )
+        result = await tool.execute(subtasks=[{"task": f"t{i}"} for i in range(6)])
         assert not result.success
         assert "5" in result.output
 

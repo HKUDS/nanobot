@@ -84,7 +84,9 @@ async def test_start_validation_and_stop(monkeypatch: pytest.MonkeyPatch) -> Non
         def build(self):
             return _App()
 
-    monkeypatch.setattr("nanobot.channels.telegram.Application", SimpleNamespace(builder=lambda: _Builder()))
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.Application", SimpleNamespace(builder=lambda: _Builder())
+    )
     monkeypatch.setattr("nanobot.channels.telegram.HTTPXRequest", lambda **kwargs: object())
 
     original_sleep = asyncio.sleep
@@ -151,7 +153,9 @@ async def test_send_and_streaming_and_helpers(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_message_and_command_handlers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+async def test_message_and_command_handlers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     ch = _channel()
 
     class _File:
@@ -179,7 +183,9 @@ async def test_message_and_command_handlers(monkeypatch: pytest.MonkeyPatch, tmp
 
     await ch._on_start(upd, None)
     await ch._on_help(upd, None)
-    await ch._forward_command(SimpleNamespace(message=SimpleNamespace(chat_id=42, text="/new"), effective_user=user), None)
+    await ch._forward_command(
+        SimpleNamespace(message=SimpleNamespace(chat_id=42, text="/new"), effective_user=user), None
+    )
     await ch._on_message(upd, None)
 
     assert ch._handle_message.await_count >= 2

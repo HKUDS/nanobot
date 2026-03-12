@@ -214,9 +214,7 @@ class TestHeuristicTripleExtraction:
         from nanobot.agent.memory.extractor import MemoryExtractor
 
         # Build a long text with many pattern matches
-        text = ". ".join(
-            f"Person{i} works on Project{i}" for i in range(20)
-        )
+        text = ". ".join(f"Person{i} works on Project{i}" for i in range(20))
         triples = MemoryExtractor._extract_triples_heuristic(
             text,
             entities=[],
@@ -285,9 +283,7 @@ class TestGraphContextBuilder:
                 "summary": "Unrelated fact",
                 "entities": ["Unrelated"],
                 "timestamp": "2024-01-01T00:00:00Z",
-                "triples": [
-                    {"subject": "Foo", "predicate": "USES", "object": "Bar"}
-                ],
+                "triples": [{"subject": "Foo", "predicate": "USES", "object": "Bar"}],
                 "salience": 0.5,
                 "confidence": 0.5,
             }

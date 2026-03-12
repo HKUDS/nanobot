@@ -190,7 +190,10 @@ async def summarize_and_compress(
         if m.get("role") == "tool":
             content = m.get("content", "")
             if isinstance(content, str) and estimate_tokens(content) > tool_token_threshold:
-                middle[i] = {**m, "content": content[:tool_token_threshold] + f"\n{truncation_note}"}
+                middle[i] = {
+                    **m,
+                    "content": content[:tool_token_threshold] + f"\n{truncation_note}",
+                }
 
     trial = system + middle + tail
     if estimate_messages_tokens(trial) <= max_tokens:
@@ -348,8 +351,7 @@ class ContextBuilder:
             parts.append(
                 "# Memory\n\n"
                 "**Answer from these facts first.** Use the exact names, regions, "
-                "and terms below — do not substitute general knowledge.\n\n"
-                + memory
+                "and terms below — do not substitute general knowledge.\n\n" + memory
             )
 
         # Feedback summary — surface correction stats so the agent adapts
@@ -518,7 +520,9 @@ entity relationships, and past events. Follow these rules when answering:
 
         bind_trace().debug(
             "context_built | history={} | skills={} | total_msgs={}",
-            len(history), len(skill_names or []), len(messages),
+            len(history),
+            len(skill_names or []),
+            len(messages),
         )
         return messages
 

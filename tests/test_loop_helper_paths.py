@@ -46,9 +46,15 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
 def test_classify_task_type_paths() -> None:
     assert AgentLoop._classify_task_type("writing", "write a summary") == "report_writing"
     assert AgentLoop._classify_task_type("code", "fix this bug") == "bug_investigation"
-    assert AgentLoop._classify_task_type("research", "architecture dependency map") == "repo_architecture"
+    assert (
+        AgentLoop._classify_task_type("research", "architecture dependency map")
+        == "repo_architecture"
+    )
     assert AgentLoop._classify_task_type("research", "current industry trends") == "web_research"
-    assert AgentLoop._classify_task_type("research", "nanobot architecture overview") == "repo_architecture"
+    assert (
+        AgentLoop._classify_task_type("research", "nanobot architecture overview")
+        == "repo_architecture"
+    )
     assert AgentLoop._classify_task_type("general", "hello world") == "general"
 
 
@@ -148,4 +154,3 @@ async def test_attempt_recovery_missing_or_error_paths(tmp_path: Path) -> None:
     loop.provider = SimpleNamespace(chat=_raise_chat)
     msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
     assert await loop._attempt_recovery(SimpleNamespace(channel="c", chat_id="id"), msgs) is None
-

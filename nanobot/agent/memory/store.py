@@ -128,15 +128,9 @@ class MemoryStore:
         # neo4j package is not installed.
         graph_enabled = self.rollout.get("graph_enabled", False)
         if graph_enabled:
-            graph_uri = str(
-                self.rollout.get("graph_neo4j_uri", "bolt://localhost:7687")
-            )
-            graph_auth = str(
-                self.rollout.get("graph_neo4j_auth", "neo4j/nanobot_graph")
-            )
-            graph_db = str(
-                self.rollout.get("graph_neo4j_database", "neo4j")
-            )
+            graph_uri = str(self.rollout.get("graph_neo4j_uri", "bolt://localhost:7687"))
+            graph_auth = str(self.rollout.get("graph_neo4j_auth", "neo4j/nanobot_graph"))
+            graph_db = str(self.rollout.get("graph_neo4j_database", "neo4j"))
             self.graph = KnowledgeGraph(uri=graph_uri, auth=graph_auth, database=graph_db)
         else:
             self.graph = KnowledgeGraph()  # disabled — all methods return empty
@@ -162,18 +156,103 @@ class MemoryStore:
         return {t for t in re.findall(r"[a-zA-Z0-9_\-]+", value.lower()) if len(t) > 1}
 
     # Stopwords excluded when extracting query keywords for graph lookups.
-    _GRAPH_QUERY_STOPWORDS = frozenset({
-        "the", "this", "that", "then", "than", "they", "them", "there", "these", "those",
-        "what", "when", "where", "which", "while", "who", "whom", "whose", "why", "how",
-        "also", "and", "but", "for", "from", "into", "just", "like", "not", "only",
-        "some", "such", "very", "will", "with", "would", "could", "should", "about",
-        "after", "before", "been", "being", "have", "here", "more", "most", "much",
-        "over", "same", "still", "each", "even", "every", "other", "are", "was",
-        "were", "had", "has", "does", "did", "any", "its", "can", "may",
-        "is", "it", "an", "or", "no", "do", "so", "if", "my", "me",
-        "his", "her", "our", "your", "their", "a", "of", "in", "on", "to", "at", "by",
-        "currently", "involved", "caused", "resolved", "apply",
-    })
+    _GRAPH_QUERY_STOPWORDS = frozenset(
+        {
+            "the",
+            "this",
+            "that",
+            "then",
+            "than",
+            "they",
+            "them",
+            "there",
+            "these",
+            "those",
+            "what",
+            "when",
+            "where",
+            "which",
+            "while",
+            "who",
+            "whom",
+            "whose",
+            "why",
+            "how",
+            "also",
+            "and",
+            "but",
+            "for",
+            "from",
+            "into",
+            "just",
+            "like",
+            "not",
+            "only",
+            "some",
+            "such",
+            "very",
+            "will",
+            "with",
+            "would",
+            "could",
+            "should",
+            "about",
+            "after",
+            "before",
+            "been",
+            "being",
+            "have",
+            "here",
+            "more",
+            "most",
+            "much",
+            "over",
+            "same",
+            "still",
+            "each",
+            "even",
+            "every",
+            "other",
+            "are",
+            "was",
+            "were",
+            "had",
+            "has",
+            "does",
+            "did",
+            "any",
+            "its",
+            "can",
+            "may",
+            "is",
+            "it",
+            "an",
+            "or",
+            "no",
+            "do",
+            "so",
+            "if",
+            "my",
+            "me",
+            "his",
+            "her",
+            "our",
+            "your",
+            "their",
+            "a",
+            "of",
+            "in",
+            "on",
+            "to",
+            "at",
+            "by",
+            "currently",
+            "involved",
+            "caused",
+            "resolved",
+            "apply",
+        }
+    )
 
     @classmethod
     def _extract_query_keywords(cls, query: str) -> set[str]:
@@ -398,8 +477,13 @@ class MemoryStore:
             "outage",
         )
         reflection_markers = (
-            "reflect", "reflection", "lesson", "learned", "retrospective",
-            "insight", "insights",
+            "reflect",
+            "reflection",
+            "lesson",
+            "learned",
+            "retrospective",
+            "insight",
+            "insights",
         )
         planning_markers = (
             "plan",
@@ -455,7 +539,10 @@ class MemoryStore:
                 "half_life_days": 120.0,
                 "type_boost": {"semantic": 0.18, "episodic": -0.05, "reflection": -0.12},
                 "fallback_topics": [
-                    "knowledge", "user_preference", "relationship", "profile_update",
+                    "knowledge",
+                    "user_preference",
+                    "relationship",
+                    "profile_update",
                 ],
                 "fallback_types": ["semantic"],
             },
@@ -2141,7 +2228,10 @@ class MemoryStore:
                 self._record_metrics(write_totals)
         bind_trace().debug(
             "memory_append | written={} | merged={} | superseded={} | {:.0f}ms",
-            written, merged, superseded, (time.monotonic() - t0_append) * 1000,
+            written,
+            merged,
+            superseded,
+            (time.monotonic() - t0_append) * 1000,
         )
         return written
 
@@ -2693,14 +2783,16 @@ class MemoryStore:
         if isinstance(raw_triples, list):
             for t in raw_triples:
                 if isinstance(t, dict) and t.get("subject") and t.get("object"):
-                    triples.append({
-                        "subject": str(t["subject"]).strip(),
-                        "predicate": str(t.get("predicate", "RELATED_TO")).strip(),
-                        "object": str(t["object"]).strip(),
-                        "confidence": min(
-                            max(self._safe_float(t.get("confidence"), confidence), 0.0), 1.0
-                        ),
-                    })
+                    triples.append(
+                        {
+                            "subject": str(t["subject"]).strip(),
+                            "predicate": str(t.get("predicate", "RELATED_TO")).strip(),
+                            "object": str(t["object"]).strip(),
+                            "confidence": min(
+                                max(self._safe_float(t.get("confidence"), confidence), 0.0), 1.0
+                            ),
+                        }
+                    )
 
         return {
             "id": event_id,
@@ -2753,13 +2845,16 @@ class MemoryStore:
                 query_keywords = self._extract_query_keywords(query)
                 if query_keywords:
                     neo4j_related = self.graph.get_related_entity_names_sync(
-                        query_keywords, depth=2,
+                        query_keywords,
+                        depth=2,
                     )
                     # Append related entity names to the query for BM25 matching.
                     extra_terms = neo4j_related - query_keywords
                     if extra_terms:
-                        augmented_query = query + " " + " ".join(
-                            t.replace("-", " ").replace("_", " ") for t in extra_terms
+                        augmented_query = (
+                            query
+                            + " "
+                            + " ".join(t.replace("-", " ").replace("_", " ") for t in extra_terms)
                         )
 
             candidates = _local_retrieve(
@@ -2803,7 +2898,8 @@ class MemoryStore:
                             graph_entity_names.add(subj)
                 # Augment with Neo4j graph neighbors when available.
                 neo4j_related = self.graph.get_related_entity_names_sync(
-                    query_entities, depth=2,
+                    query_entities,
+                    depth=2,
                 )
                 graph_entity_names |= neo4j_related
 
@@ -2941,7 +3037,8 @@ class MemoryStore:
             query_keywords = self._extract_query_keywords(query)
             if query_keywords:
                 neo4j_related = self.graph.get_related_entity_names_sync(
-                    query_keywords, depth=2,
+                    query_keywords,
+                    depth=2,
                 )
                 graph_extra_terms = neo4j_related - query_keywords
 
@@ -3001,8 +3098,10 @@ class MemoryStore:
         # that mem0 vector search may have missed.
         if graph_extra_terms and retrieved is not None:
             retrieved_ids = {str(r.get("id", "")) for r in retrieved}
-            graph_query = query + " " + " ".join(
-                t.replace("-", " ").replace("_", " ") for t in graph_extra_terms
+            graph_query = (
+                query
+                + " "
+                + " ".join(t.replace("-", " ").replace("_", " ") for t in graph_extra_terms)
             )
             events = self.read_events()
             bm25_supplement = _local_retrieve(
@@ -3313,7 +3412,9 @@ class MemoryStore:
         return index
 
     def _extract_query_entities(
-        self, query: str, entity_index: set[str],
+        self,
+        query: str,
+        entity_index: set[str],
     ) -> set[str]:
         """Extract entities from a query by matching tokens against known entities.
 
@@ -3363,9 +3464,7 @@ class MemoryStore:
         rel_triples: list[tuple[str, str, str]] = []
 
         if self.graph.enabled:
-            rel_triples.extend(
-                self.graph.get_triples_for_entities_sync(query_entities)
-            )
+            rel_triples.extend(self.graph.get_triples_for_entities_sync(query_entities))
 
         # Supplement with local event triples (may add context Neo4j lacks).
         for evt in events:
@@ -3814,7 +3913,9 @@ class MemoryStore:
         raw_graph: list[str] = []
         if query:
             raw_graph = self._build_graph_context_lines(
-                query, retrieved, max_tokens=budget,
+                query,
+                retrieved,
+                max_tokens=budget,
             )
 
         unresolved = self._recent_unresolved(self.read_events(limit=60), max_items=6)
@@ -3850,22 +3951,28 @@ class MemoryStore:
             )
 
         semantic_lines = self._fit_lines_to_token_cap(
-            raw_semantic, token_cap=alloc["semantic"],
+            raw_semantic,
+            token_cap=alloc["semantic"],
         )
         episodic_lines = self._fit_lines_to_token_cap(
-            raw_episodic, token_cap=alloc["episodic"],
+            raw_episodic,
+            token_cap=alloc["episodic"],
         )
         reflection_lines = self._fit_lines_to_token_cap(
-            raw_reflection, token_cap=alloc["reflection"],
+            raw_reflection,
+            token_cap=alloc["reflection"],
         )
         graph_lines = self._fit_lines_to_token_cap(
-            raw_graph, token_cap=alloc["graph"],
+            raw_graph,
+            token_cap=alloc["graph"],
         )
         unresolved_lines = self._fit_lines_to_token_cap(
-            raw_unresolved, token_cap=alloc["unresolved"],
+            raw_unresolved,
+            token_cap=alloc["unresolved"],
         )
         fitted_profile_lines = self._fit_lines_to_token_cap(
-            profile_lines, token_cap=alloc["profile"],
+            profile_lines,
+            token_cap=alloc["profile"],
         )
 
         # ── Phase 4: assemble in logical presentation order ──

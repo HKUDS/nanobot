@@ -315,15 +315,15 @@ class TestGoldenMultiStepHistory:
 
         # The second call should contain a tool-result with actual dir listing
         second_tool_results = _tool_result_messages(provider.call_log[1]["messages"])
-        assert any(
-            "data.csv" in tr["content"] for tr in second_tool_results
-        ), "list_dir result must contain actual directory contents"
+        assert any("data.csv" in tr["content"] for tr in second_tool_results), (
+            "list_dir result must contain actual directory contents"
+        )
 
         # The third call should contain a tool-result with actual file content
         third_tool_results = _tool_result_messages(provider.call_log[2]["messages"])
-        assert any(
-            "a,b,c" in tr["content"] for tr in third_tool_results
-        ), "read_file result must contain actual file content"
+        assert any("a,b,c" in tr["content"] for tr in third_tool_results), (
+            "read_file result must contain actual file content"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -372,9 +372,9 @@ class TestGoldenNudgeForFinalAnswer:
 
         # A nudge system message should appear in the third call's context
         third_systems = _system_messages(provider.call_log[2]["messages"])
-        assert any(
-            "final answer" in s.lower() for s in third_systems
-        ), "Agent must inject a nudge asking for final answer"
+        assert any("final answer" in s.lower() for s in third_systems), (
+            "Agent must inject a nudge asking for final answer"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -539,10 +539,9 @@ class TestGoldenToolFailureRecovery:
 
         # The third call must include the successful tool result
         third_tool_results = _tool_result_messages(provider.call_log[2]["messages"])
-        assert any(
-            "recovered data" in tr["content"]
-            for tr in third_tool_results
-        ), "Successful retry result must appear in context"
+        assert any("recovered data" in tr["content"] for tr in third_tool_results), (
+            "Successful retry result must appear in context"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -557,9 +556,11 @@ class TestGoldenPlanningInjection:
 
     @pytest.mark.asyncio
     async def test_planning_prompt_present_for_complex_task(self, tmp_path: Path):
-        provider = ScriptedProvider([
-            LLMResponse(content="1. Read the file\n2. Analyze\n3. Report\n\nDone."),
-        ])
+        provider = ScriptedProvider(
+            [
+                LLMResponse(content="1. Read the file\n2. Analyze\n3. Report\n\nDone."),
+            ]
+        )
         loop = _make_loop(tmp_path, provider, planning_enabled=True)
         await loop._process_message(
             _make_inbound(

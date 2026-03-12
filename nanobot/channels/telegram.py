@@ -351,7 +351,7 @@ class TelegramChannel(BaseChannel):
         if not html.strip():
             return
         if len(html.encode("utf-8")) > 4096:
-            html = html[: 4000]  # truncate rather than error on streaming preview
+            html = html[:4000]  # truncate rather than error on streaming preview
 
         existing_msg_id = self._streaming_msg_ids.get(msg.chat_id)
 
@@ -465,7 +465,9 @@ class TelegramChannel(BaseChannel):
         if media_file and self._app:
             try:
                 file = await self._app.bot.get_file(media_file.file_id)
-                ext = self._get_extension(media_type or "file", getattr(media_file, "mime_type", None))
+                ext = self._get_extension(
+                    media_type or "file", getattr(media_file, "mime_type", None)
+                )
 
                 # Save to workspace/media/
                 from pathlib import Path

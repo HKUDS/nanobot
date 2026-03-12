@@ -61,7 +61,9 @@ def test_extract_helpers_cover_multiple_tags() -> None:
 
     assert _extract_interactive_content('{"title": "X"}') == ["title: X"]
     assert _extract_interactive_content("") == []
-    assert _extract_element_content({"tag": "note", "elements": [{"tag": "plain_text", "content": "n"}]}) == ["n"]
+    assert _extract_element_content(
+        {"tag": "note", "elements": [{"tag": "plain_text", "content": "n"}]}
+    ) == ["n"]
 
 
 def test_extract_post_content_variants() -> None:
@@ -101,7 +103,9 @@ def test_markdown_card_helpers() -> None:
 
 
 @pytest.mark.asyncio
-async def test_download_and_save_media_and_send_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_download_and_save_media_and_send_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ch = _channel()
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
@@ -159,7 +163,9 @@ async def test_on_message_paths() -> None:
             content=json.dumps(
                 {
                     "title": "T",
-                    "content": [[{"tag": "img", "image_key": "k1"}, {"tag": "text", "text": "body"}]],
+                    "content": [
+                        [{"tag": "img", "image_key": "k1"}, {"tag": "text", "text": "body"}]
+                    ],
                 }
             ),
         ),

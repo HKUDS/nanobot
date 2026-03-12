@@ -110,7 +110,9 @@ class _SessionManager:
         return list(self._items)
 
 
-def test_gateway_runs_cron_and_heartbeat_callbacks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_gateway_runs_cron_and_heartbeat_callbacks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     cfg = Config()
     cfg.agents.defaults.workspace = str(tmp_path)
     cfg.gateway.heartbeat.enabled = True
@@ -135,7 +137,9 @@ def test_gateway_runs_cron_and_heartbeat_callbacks(monkeypatch: pytest.MonkeyPat
     assert len(bus.outbound) >= 1
 
 
-def test_agent_single_message_and_interactive_exit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_agent_single_message_and_interactive_exit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     cfg = Config()
     cfg.agents.defaults.workspace = str(tmp_path)
 

@@ -72,9 +72,7 @@ class ConsolidationOrchestrator:
                 content = m.get("content")
                 if not content:
                     continue
-                tools = (
-                    f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
-                )
+                tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
                 timestamp = str(m.get("timestamp", "?"))[:16]
                 role = str(m.get("role", "unknown")).upper()
                 lines.append(f"[{timestamp}] {role}{tools}: {content}")

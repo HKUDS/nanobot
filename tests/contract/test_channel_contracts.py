@@ -20,6 +20,7 @@ from nanobot.channels.base import BaseChannel
 # Discover all channel adapter classes
 # ---------------------------------------------------------------------------
 
+
 def _get_channel_classes() -> list[tuple[str, type]]:
     """Import and return all concrete BaseChannel subclasses."""
     channels: list[tuple[str, type]] = []

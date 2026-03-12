@@ -25,7 +25,10 @@ def test_replay_deadletters_empty_file_and_invalid_json_dry_run(
     assert empty.exit_code == 0
     assert "Dead-letter file is empty" in empty.stdout
 
-    dead.write_text("not-json\n" + json.dumps({"channel": "telegram", "chat_id": "1", "content": "hi"}) + "\n", encoding="utf-8")
+    dead.write_text(
+        "not-json\n" + json.dumps({"channel": "telegram", "chat_id": "1", "content": "hi"}) + "\n",
+        encoding="utf-8",
+    )
     dry = runner.invoke(app, ["replay-deadletters", "--dry-run"])
     assert dry.exit_code == 0
     assert "invalid JSON line" in dry.stdout
@@ -37,7 +40,10 @@ def test_replay_deadletters_success_path(monkeypatch: pytest.MonkeyPatch, tmp_pa
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda: cfg)
 
     dead = tmp_path / "outbound_failed.jsonl"
-    dead.write_text(json.dumps({"channel": "telegram", "chat_id": "1", "content": "hi"}) + "\n", encoding="utf-8")
+    dead.write_text(
+        json.dumps({"channel": "telegram", "chat_id": "1", "content": "hi"}) + "\n",
+        encoding="utf-8",
+    )
 
     class _Mgr:
         def __init__(self, config: Config, bus: object):

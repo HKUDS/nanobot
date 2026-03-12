@@ -80,18 +80,16 @@ class TestToolSchemaContract:
         """Every tool must have name, description, and parameters properties."""
         for tool in _make_tool_instances(tmp_path):
             assert isinstance(tool.name, str) and len(tool.name) > 0, f"{tool}: missing name"
-            assert (
-                isinstance(tool.description, str) and len(tool.description) > 0
-            ), f"{tool.name}: missing description"
+            assert isinstance(tool.description, str) and len(tool.description) > 0, (
+                f"{tool.name}: missing description"
+            )
             assert isinstance(tool.parameters, dict), f"{tool.name}: parameters must be a dict"
 
     def test_parameters_are_valid_json_schema(self, tmp_path: Path):
         """Tool parameters must follow JSON Schema object structure."""
         for tool in _make_tool_instances(tmp_path):
             params = tool.parameters
-            assert params.get("type") == "object", (
-                f"{tool.name}: parameters.type must be 'object'"
-            )
+            assert params.get("type") == "object", f"{tool.name}: parameters.type must be 'object'"
             props = params.get("properties", {})
             assert isinstance(props, dict), f"{tool.name}: properties must be a dict"
 

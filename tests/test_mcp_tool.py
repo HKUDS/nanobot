@@ -115,7 +115,9 @@ async def test_connect_mcp_servers_command_url_skip_and_error(
 
     mcp_servers = {
         "cmd": _Cfg(command="srv", args=["--x"], env={}, url=None, headers=None, tool_timeout=5),
-        "http": _Cfg(command=None, args=None, env=None, url="https://x", headers={}, tool_timeout=7),
+        "http": _Cfg(
+            command=None, args=None, env=None, url="https://x", headers={}, tool_timeout=7
+        ),
         "skip": _Cfg(command=None, args=None, env=None, url=None, headers=None, tool_timeout=3),
     }
 

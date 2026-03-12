@@ -49,7 +49,9 @@ class _FakeStore:
     def read_profile(self) -> dict[str, object]:
         return {"preferences": ["a"], "stable_facts": ["b"]}
 
-    def verify_memory(self, stale_days: int = 90, update_profile: bool = False) -> dict[str, object]:
+    def verify_memory(
+        self, stale_days: int = 90, update_profile: bool = False
+    ) -> dict[str, object]:
         return {
             "events": 2,
             "profile_items": 3,
@@ -105,7 +107,9 @@ class _FakeStore:
             "reindex": {"written": 1, "failed": 0, "vector_points_after": 1},
         }
 
-    def evaluate_retrieval_cases(self, raw_cases: list[dict[str, object]], default_top_k: int = 6) -> dict[str, object]:
+    def evaluate_retrieval_cases(
+        self, raw_cases: list[dict[str, object]], default_top_k: int = 6
+    ) -> dict[str, object]:
         return {
             "cases": len(raw_cases),
             "summary": {"recall_at_k": 1.0, "precision_at_k": 1.0},
@@ -122,10 +126,14 @@ class _FakeStore:
             ],
         }
 
-    def evaluate_rollout_gates(self, evaluation: dict[str, object], obs: dict[str, object]) -> dict[str, object]:
+    def evaluate_rollout_gates(
+        self, evaluation: dict[str, object], obs: dict[str, object]
+    ) -> dict[str, object]:
         return {
             "passed": True,
-            "checks": [{"name": "recall", "actual": 1.0, "op": ">=", "threshold": 0.5, "passed": True}],
+            "checks": [
+                {"name": "recall", "actual": 1.0, "op": ">=", "threshold": 0.5, "passed": True}
+            ],
         }
 
     def save_evaluation_report(
@@ -135,7 +143,11 @@ class _FakeStore:
         rollout: dict[str, object],
         output_file: str | None = None,
     ) -> Path:
-        out = Path(output_file) if output_file else self.workspace / "memory" / "reports" / "eval.json"
+        out = (
+            Path(output_file)
+            if output_file
+            else self.workspace / "memory" / "reports" / "eval.json"
+        )
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("{}", encoding="utf-8")
         return out
@@ -203,7 +215,9 @@ def test_memory_metrics_write_and_delta_errors(_patched: Config, tmp_path: Path)
     assert parse_fail.exit_code == 1
     assert "Failed to parse baseline" in parse_fail.stdout
 
-    missing = runner.invoke(app, ["memory", "metrics", "--delta", "--baseline-file", str(tmp_path / "missing.json")])
+    missing = runner.invoke(
+        app, ["memory", "metrics", "--delta", "--baseline-file", str(tmp_path / "missing.json")]
+    )
     assert missing.exit_code == 1
     assert "Baseline file not found" in missing.stdout
 
@@ -298,7 +312,9 @@ def test_memory_eval_branches(_patched: Config, tmp_path: Path) -> None:
     assert seed_pair.exit_code == 1
 
     good_cases = tmp_path / "cases.json"
-    good_cases.write_text(json.dumps({"cases": [{"query": "q", "expected_any": ["x"]}]}), encoding="utf-8")
+    good_cases.write_text(
+        json.dumps({"cases": [{"query": "q", "expected_any": ["x"]}]}), encoding="utf-8"
+    )
 
     _FakeStore.seeded_ok = False
     p = tmp_path / "p.json"
@@ -356,14 +372,20 @@ def test_memory_resolve_pin_unpin_outdated(_patched: Config) -> None:
     outdated_bad = runner.invoke(app, ["memory", "outdated", "--field", "bad", "--text", "x"])
     assert outdated_bad.exit_code == 1
     _FakeStore.outdated_ok = False
-    outdated_miss = runner.invoke(app, ["memory", "outdated", "--field", "preferences", "--text", "x"])
+    outdated_miss = runner.invoke(
+        app, ["memory", "outdated", "--field", "preferences", "--text", "x"]
+    )
     assert outdated_miss.exit_code == 1
     _FakeStore.outdated_ok = True
-    outdated_ok = runner.invoke(app, ["memory", "outdated", "--field", "preferences", "--text", "x"])
+    outdated_ok = runner.invoke(
+        app, ["memory", "outdated", "--field", "preferences", "--text", "x"]
+    )
     assert outdated_ok.exit_code == 0
 
 
-def test_replay_deadletters_dry_run_and_no_channels(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_replay_deadletters_dry_run_and_no_channels(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     cfg = Config()
     cfg.agents.defaults.workspace = str(tmp_path)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda: cfg)
@@ -373,7 +395,10 @@ def test_replay_deadletters_dry_run_and_no_channels(monkeypatch: pytest.MonkeyPa
     assert "No dead-letter file found" in none.stdout
 
     dead = tmp_path / "outbound_failed.jsonl"
-    dead.write_text(json.dumps({"channel": "telegram", "chat_id": "1", "content": "hi"}) + "\n", encoding="utf-8")
+    dead.write_text(
+        json.dumps({"channel": "telegram", "chat_id": "1", "content": "hi"}) + "\n",
+        encoding="utf-8",
+    )
     dry = runner.invoke(app, ["replay-deadletters", "--dry-run"])
     assert dry.exit_code == 0
     assert "Dry run" in dry.stdout
@@ -388,7 +413,9 @@ def test_replay_deadletters_dry_run_and_no_channels(monkeypatch: pytest.MonkeyPa
     assert "No channels available" in no_channel.stdout
 
 
-def test_status_and_provider_login_branches(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_status_and_provider_login_branches(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     cfg = Config()
     cfg.agents.defaults.workspace = str(tmp_path)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda: cfg)
@@ -427,7 +454,9 @@ def test_login_handlers_error_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     assert codex.exit_code == 1
 
     # github-copilot exception path
-    monkeypatch.setattr("litellm.acompletion", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(
+        "litellm.acompletion", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
     gh = runner.invoke(app, ["provider", "login", "github-copilot"])
     assert gh.exit_code == 1
 

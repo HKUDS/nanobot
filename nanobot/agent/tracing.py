@@ -33,15 +33,9 @@ from loguru import logger
 # Context variables — one per coroutine, inherited by child tasks
 # ---------------------------------------------------------------------------
 
-_request_id: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "_request_id", default=""
-)
-_session_id: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "_session_id", default=""
-)
-_agent_id: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "_agent_id", default=""
-)
+_request_id: contextvars.ContextVar[str] = contextvars.ContextVar("_request_id", default="")
+_session_id: contextvars.ContextVar[str] = contextvars.ContextVar("_session_id", default="")
+_agent_id: contextvars.ContextVar[str] = contextvars.ContextVar("_agent_id", default="")
 
 
 # ---------------------------------------------------------------------------
