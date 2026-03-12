@@ -75,13 +75,6 @@ build-backend = "hatchling.build"
 [tool.hatch.metadata]
 allow-direct-references = true
 
-[tool.hatch.build.targets.wheel]
-packages = ["nanobot"]
-
-[tool.hatch.build.targets.wheel.sources]
-"nanobot" = "nanobot"
-
-# Include non-Python files in skills and templates
 [tool.hatch.build]
 include = [
     "nanobot/**/*.py",
@@ -90,6 +83,15 @@ include = [
     "nanobot/skills/**/*.sh",
 ]
 
+[tool.hatch.build.targets.wheel]
+packages = ["nanobot"]
+
+[tool.hatch.build.targets.wheel.sources]
+"nanobot" = "nanobot"
+
+[tool.hatch.build.targets.wheel.force-include]
+"bridge" = "nanobot/bridge"
+
 [tool.hatch.build.targets.sdist]
 include = [
     "nanobot/",
@@ -97,9 +99,6 @@ include = [
     "README.md",
     "LICENSE",
 ]
-
-[tool.hatch.build.targets.wheel.force-include]
-"bridge" = "nanobot/bridge"
 
 [tool.ruff]
 line-length = 100
