@@ -643,6 +643,31 @@ header {
   font-style: italic;
 }
 
+/* ── Inline images in bot responses ────────────────────────────────────── */
+.rendered-content img,
+.streaming-content img {
+  max-width: min(480px, 100%);
+  max-height: 420px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: block;
+  margin: 6px 0;
+  object-fit: contain;
+  cursor: zoom-in;
+}
+
+/* Image rendered inside a tool output block */
+.tool-result-image {
+  max-width: min(480px, 100%);
+  max-height: 420px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  display: block;
+  margin: 6px 8px 8px;
+  object-fit: contain;
+  cursor: zoom-in;
+}
+
 /* ── Attach button ──────────────────────────────────────────────────────── */
 #btn-attach {
   display: flex;

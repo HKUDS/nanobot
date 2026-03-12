@@ -240,6 +240,53 @@ const sessionListEl  = document.getElementById('session-list');
 
 marked.setOptions({ breaks: true, gfm: true });
 
+/* ── Base64 image rendering ───────────────────────────────────────────── */
+
+// Magic-byte prefixes after base64 encoding
+const _IMG_PREFIXES = [
+  { p: 'iVBORw0', mime: 'image/png'  },
+  { p: '/9j/',    mime: 'image/jpeg' },
+  { p: 'R0lGOD',  mime: 'image/gif'  },
+  { p: 'UklGR',   mime: 'image/webp' },
+];
+
+/** Detect whether a string is a raw base64-encoded image. */
+function isBase64Image(str) {
+  const s = str.trim();
+  return s.length > 80 && _IMG_PREFIXES.some(({ p }) => s.startsWith(p));
+}
+
+/** Return the data-URI MIME type for a raw base64 image string. */
+function base64ImageMime(str) {
+  return _IMG_PREFIXES.find(({ p }) => str.trim().startsWith(p))?.mime ?? 'image/png';
+}
+
+/**
+ * Pre-process text before markdown rendering:
+ *   1. Bare data: URIs not already in markdown image syntax → wrap them
+ *   2. Raw base64 image strings (e.g. from tool results) → wrap them
+ */
+function unwrapBase64Images(text) {
+  // 1. Bare data: URIs that aren't already inside ](...)
+  text = text.replace(
+    /(?<!\]\()(data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+)/g,
+    '![image]($1)'
+  );
+  // 2. Raw base64 image strings (no data: prefix)
+  for (const { p, mime } of _IMG_PREFIXES) {
+    text = text.replace(
+      new RegExp(`(?<![A-Za-z0-9+/=])(${p}[A-Za-z0-9+/\\r\\n=]{80,})(?![A-Za-z0-9+/=])`, 'g'),
+      (_, b64) => `\n![image](data:${mime};base64,${b64.replace(/[\r\n]/g, '')})\n`
+    );
+  }
+  return text;
+}
+
+/** Render markdown with base64 image detection. */
+function renderMarkdown(text) {
+  return marked.parse(unwrapBase64Images(text));
+}
+
 /* ── Sidebar toggle (mobile) ──────────────────────────────────────────── */
 
 function openSidebar() {
@@ -549,7 +596,7 @@ async function replayHistory(id) {
       }
       const rendered = document.createElement('div');
       rendered.className = 'rendered-content';
-      rendered.innerHTML = marked.parse(msg.content);
+      rendered.innerHTML = renderMarkdown(msg.content);
       bubble.appendChild(rendered);
       if (msg.pinned) wrapper.classList.add('pinned');
       addMessageActions(wrapper, i);
@@ -621,7 +668,7 @@ async function sendMessage(text) {
     if (tokenBuffer.trim()) {
       const rendered = document.createElement('div');
       rendered.className = 'rendered-content';
-      rendered.innerHTML = marked.parse(tokenBuffer);
+      rendered.innerHTML = renderMarkdown(tokenBuffer);
       if (currentStreamEl.parentNode === bubble) {
         bubble.replaceChild(rendered, currentStreamEl);
       } else {
@@ -708,12 +755,20 @@ async function sendMessage(text) {
             if (spinner) spinner.textContent = '$';
             const outputEl = lastToolBlock.querySelector('.tool-output');
             if (outputEl && data.output) {
-              outputEl.textContent = data.output;
-              if (data.truncated) {
-                const notice = document.createElement('div');
-                notice.className = 'tool-truncated';
-                notice.textContent = '… output truncated';
-                lastToolBlock.appendChild(notice);
+              if (isBase64Image(data.output)) {
+                const img = document.createElement('img');
+                img.src = `data:${base64ImageMime(data.output)};base64,${data.output.trim()}`;
+                img.className = 'tool-result-image';
+                img.alt = 'tool output image';
+                outputEl.appendChild(img);
+              } else {
+                outputEl.textContent = data.output;
+                if (data.truncated) {
+                  const notice = document.createElement('div');
+                  notice.className = 'tool-truncated';
+                  notice.textContent = '… output truncated';
+                  lastToolBlock.appendChild(notice);
+                }
               }
             }
           }
@@ -729,7 +784,7 @@ async function sendMessage(text) {
           if (finalText.trim()) {
             const rendered = document.createElement('div');
             rendered.className = 'rendered-content';
-            rendered.innerHTML = marked.parse(finalText);
+            rendered.innerHTML = renderMarkdown(finalText);
             if (currentStreamEl.parentNode === bubble) {
               bubble.replaceChild(rendered, currentStreamEl);
             } else {
@@ -765,7 +820,7 @@ async function sendMessage(text) {
     if (tokenBuffer) {
       const rendered = document.createElement('div');
       rendered.className = 'rendered-content';
-      rendered.innerHTML = marked.parse(tokenBuffer);
+      rendered.innerHTML = renderMarkdown(tokenBuffer);
       if (currentStreamEl.parentNode === bubble) {
         bubble.replaceChild(rendered, currentStreamEl);
       } else {
@@ -781,7 +836,7 @@ async function sendMessage(text) {
       if (tokenBuffer.trim()) {
         const rendered = document.createElement('div');
         rendered.className = 'rendered-content';
-        rendered.innerHTML = marked.parse(tokenBuffer);
+        rendered.innerHTML = renderMarkdown(tokenBuffer);
         bubble.appendChild(rendered);
       }
     } else {
