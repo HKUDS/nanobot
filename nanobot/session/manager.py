@@ -61,41 +61,7 @@ class Session:
                 if k in m:
                     entry[k] = m[k]
             out.append(entry)
-        return self._prune_older_tool_results(out)
-
-    @staticmethod
-    def _prune_older_tool_results(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Compact older large tool outputs while keeping the newest details intact."""
-        tool_indexes = [
-            idx
-            for idx, message in enumerate(history)
-            if message.get("role") == "tool" and isinstance(message.get("content"), str)
-        ]
-        if len(tool_indexes) <= 1:
-            return history
-
-        keep_recent_tool_messages = 1
-        max_preview_chars = 240
-        min_prune_chars = 800
-        min_prune_lines = 40
-
-        for idx in tool_indexes[:-keep_recent_tool_messages]:
-            content = history[idx].get("content")
-            if not isinstance(content, str):
-                continue
-            if len(content) < min_prune_chars and content.count("\n") < min_prune_lines:
-                continue
-
-            preview = content[:max_preview_chars].strip()
-            if len(preview) < len(content):
-                preview = preview.rstrip() + "..."
-            name = history[idx].get("name") or "tool"
-            history[idx] = {
-                **history[idx],
-                "content": f"[older tool result pruned: {name}]\n{preview}",
-            }
-
-        return history
+        return out
 
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""

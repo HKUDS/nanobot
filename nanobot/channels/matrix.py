@@ -162,7 +162,7 @@ class MatrixChannel(BaseChannel):
         self._sync_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._restrict_to_workspace = restrict_to_workspace
-        self._workspace = workspace.resolve(strict=False) if workspace else None
+        self._workspace = workspace
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
 

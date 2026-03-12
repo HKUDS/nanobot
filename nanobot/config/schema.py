@@ -229,16 +229,6 @@ class ChannelsConfig(Base):
     wecom: WecomConfig = Field(default_factory=WecomConfig)
 
 
-class ContextEditingConfig(Base):
-    """Configuration for pre-send prompt budgeting and context editing."""
-
-    enabled: bool = True
-    max_prompt_tokens: int = 12_000
-    keep_recent_messages: int = 12
-    keep_recent_tool_messages: int = 2
-    max_tool_chars: int = 240
-
-
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -251,9 +241,8 @@ class AgentDefaults(Base):
     context_window_tokens: int = 65_536
     temperature: float = 0.1
     max_tool_iterations: int = 40
-    context_editing: ContextEditingConfig = Field(default_factory=ContextEditingConfig)
     # Deprecated compatibility field: accepted from old configs but ignored at runtime.
-    memory_window: int | None = Field(default=100, exclude=True)
+    memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
 
     @property
@@ -262,19 +251,10 @@ class AgentDefaults(Base):
         return self.memory_window is not None and "context_window_tokens" not in self.model_fields_set
 
 
-class AccountEntry(Base):
-    """A named AI account entry stored in config.json."""
-
-    model: str
-    api_key: str = ""
-    api_base: str | None = None
-
-
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
-    accounts: dict[str, AccountEntry] = Field(default_factory=dict)
 
 
 class ProviderConfig(Base):
@@ -467,6 +447,3 @@ class Config(BaseSettings):
         return None
 
     model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
-
-
-Config.model_rebuild()

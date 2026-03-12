@@ -14,11 +14,11 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 
 import { Boom } from '@hapi/boom';
-import { randomBytes } from 'crypto';
-import { mkdir, writeFile } from 'fs/promises';
-import { join } from 'path';
 import qrcode from 'qrcode-terminal';
 import pino from 'pino';
+import { writeFile, mkdir } from 'fs/promises';
+import { join } from 'path';
+import { randomBytes } from 'crypto';
 
 const VERSION = '0.1.0';
 
@@ -43,16 +43,12 @@ export class WhatsAppClient {
   private sock: any = null;
   private options: WhatsAppClientOptions;
   private reconnecting = false;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: WhatsAppClientOptions) {
     this.options = options;
   }
 
   async connect(): Promise<void> {
-    this.clearReconnectTimer();
-    this.disposeSocket();
-
     const logger = pino({ level: 'silent' });
     const { state, saveCreds } = await useMultiFileAuthState(this.options.authDir);
     const { version } = await fetchLatestBaileysVersion();
@@ -60,7 +56,7 @@ export class WhatsAppClient {
     console.log(`Using Baileys version: ${version.join('.')}`);
 
     // Create socket following OpenClaw's pattern
-    const sock = makeWASocket({
+    this.sock = makeWASocket({
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -72,19 +68,16 @@ export class WhatsAppClient {
       syncFullHistory: false,
       markOnlineOnConnect: false,
     });
-    this.sock = sock;
 
     // Handle WebSocket errors
-    if (sock.ws && typeof sock.ws.on === 'function') {
-      sock.ws.on('error', (err: Error) => {
+    if (this.sock.ws && typeof this.sock.ws.on === 'function') {
+      this.sock.ws.on('error', (err: Error) => {
         console.error('WebSocket error:', err.message);
       });
     }
 
     // Handle connection updates
-    sock.ev.on('connection.update', async (update: any) => {
-      if (this.sock !== sock) return;
-
+    this.sock.ev.on('connection.update', async (update: any) => {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
@@ -100,30 +93,30 @@ export class WhatsAppClient {
 
         console.log(`Connection closed. Status: ${statusCode}, Will reconnect: ${shouldReconnect}`);
         this.options.onStatus('disconnected');
-        this.disposeSocket(sock);
 
-        if (shouldReconnect) {
-          this.scheduleReconnect();
+        if (shouldReconnect && !this.reconnecting) {
+          this.reconnecting = true;
+          console.log('Reconnecting in 5 seconds...');
+          setTimeout(() => {
+            this.reconnecting = false;
+            this.connect();
+          }, 5000);
         }
       } else if (connection === 'open') {
         console.log('✅ Connected to WhatsApp');
-        this.reconnecting = false;
         this.options.onStatus('connected');
       }
     });
 
     // Save credentials on update
-    sock.ev.on('creds.update', saveCreds);
+    this.sock.ev.on('creds.update', saveCreds);
 
     // Handle incoming messages
-    sock.ev.on('messages.upsert', async ({ messages, type }: { messages: any[]; type: string }) => {
-      if (this.sock !== sock || type !== 'notify') return;
+    this.sock.ev.on('messages.upsert', async ({ messages, type }: { messages: any[]; type: string }) => {
+      if (type !== 'notify') return;
 
       for (const msg of messages) {
-        // Skip own messages
         if (msg.key.fromMe) continue;
-
-        // Skip status updates
         if (msg.key.remoteJid === 'status@broadcast') continue;
 
         const unwrapped = baileysExtractMessageContent(msg.message);
@@ -139,11 +132,8 @@ export class WhatsAppClient {
           if (path) mediaPaths.push(path);
         } else if (unwrapped.documentMessage) {
           fallbackContent = '[Document]';
-          const path = await this.downloadMedia(
-            msg,
-            unwrapped.documentMessage.mimetype ?? undefined,
-            unwrapped.documentMessage.fileName ?? undefined,
-          );
+          const path = await this.downloadMedia(msg, unwrapped.documentMessage.mimetype ?? undefined,
+            unwrapped.documentMessage.fileName ?? undefined);
           if (path) mediaPaths.push(path);
         } else if (unwrapped.videoMessage) {
           fallbackContent = '[Video]';
@@ -169,47 +159,6 @@ export class WhatsAppClient {
     });
   }
 
-  private clearReconnectTimer(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-  }
-
-  private scheduleReconnect(): void {
-    if (this.reconnecting) return;
-    this.reconnecting = true;
-    this.clearReconnectTimer();
-    console.log('Reconnecting in 5 seconds...');
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnecting = false;
-      void this.connect().catch((error) => {
-        console.error('Reconnect failed:', error);
-        this.scheduleReconnect();
-      });
-    }, 5000);
-  }
-
-  private disposeSocket(sock = this.sock): void {
-    if (!sock) return;
-
-    if (this.sock === sock) {
-      this.sock = null;
-    }
-
-    try {
-      sock.ev.removeAllListeners('connection.update');
-      sock.ev.removeAllListeners('creds.update');
-      sock.ev.removeAllListeners('messages.upsert');
-      if (sock.ws && typeof sock.ws.removeAllListeners === 'function') {
-        sock.ws.removeAllListeners();
-      }
-      sock.end(undefined);
-    } catch (error) {
-      console.error('Error disposing socket:', error);
-    }
-  }
-
   private async downloadMedia(msg: any, mimetype?: string, fileName?: string): Promise<string | null> {
     try {
       const mediaDir = join(this.options.authDir, '..', 'media');
@@ -219,48 +168,55 @@ export class WhatsAppClient {
 
       let outFilename: string;
       if (fileName) {
+        // Documents have a filename — use it with a unique prefix to avoid collisions
         const prefix = `wa_${Date.now()}_${randomBytes(4).toString('hex')}_`;
         outFilename = prefix + fileName;
       } else {
         const mime = mimetype || 'application/octet-stream';
+        // Derive extension from mimetype subtype (e.g. "image/png" → ".png", "application/pdf" → ".pdf")
         const ext = '.' + (mime.split('/').pop()?.split(';')[0] || 'bin');
         outFilename = `wa_${Date.now()}_${randomBytes(4).toString('hex')}${ext}`;
       }
 
       const filepath = join(mediaDir, outFilename);
       await writeFile(filepath, buffer);
+
       return filepath;
-    } catch (error) {
-      console.error('Failed to download media:', error);
+    } catch (err) {
+      console.error('Failed to download media:', err);
       return null;
     }
   }
 
   private getTextContent(message: any): string | null {
-    if (!message) return null;
-
+    // Text message
     if (message.conversation) {
       return message.conversation;
     }
 
+    // Extended text (reply, link preview)
     if (message.extendedTextMessage?.text) {
       return message.extendedTextMessage.text;
     }
 
+    // Image with optional caption
     if (message.imageMessage) {
       return message.imageMessage.caption || '';
     }
 
+    // Video with optional caption
     if (message.videoMessage) {
       return message.videoMessage.caption || '';
     }
 
+    // Document with optional caption
     if (message.documentMessage) {
       return message.documentMessage.caption || '';
     }
 
+    // Voice/Audio message
     if (message.audioMessage) {
-      return '[Voice Message]';
+      return `[Voice Message]`;
     }
 
     return null;
@@ -275,8 +231,9 @@ export class WhatsAppClient {
   }
 
   async disconnect(): Promise<void> {
-    this.reconnecting = false;
-    this.clearReconnectTimer();
-    this.disposeSocket();
+    if (this.sock) {
+      this.sock.end(undefined);
+      this.sock = null;
+    }
   }
 }

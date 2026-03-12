@@ -4,12 +4,9 @@ import asyncio
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from loguru import logger
-
-
-TextDeltaHandler = Callable[[str], Awaitable[None]]
 
 
 @dataclass
@@ -47,7 +44,6 @@ class LLMResponse:
     usage: dict[str, int] = field(default_factory=dict)
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1 etc.
     thinking_blocks: list[dict] | None = None  # Anthropic extended thinking
-    streamed_output: bool = False
     
     @property
     def has_tool_calls(self) -> bool:
@@ -170,7 +166,6 @@ class LLMProvider(ABC):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
-        on_text_delta: TextDeltaHandler | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         """
@@ -202,7 +197,6 @@ class LLMProvider(ABC):
         max_tokens: object = _SENTINEL,
         temperature: object = _SENTINEL,
         reasoning_effort: object = _SENTINEL,
-        on_text_delta: TextDeltaHandler | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
@@ -227,7 +221,6 @@ class LLMProvider(ABC):
                     max_tokens=max_tokens,
                     temperature=temperature,
                     reasoning_effort=reasoning_effort,
-                    on_text_delta=on_text_delta,
                     tool_choice=tool_choice,
                 )
             except asyncio.CancelledError:
@@ -261,7 +254,6 @@ class LLMProvider(ABC):
                 max_tokens=max_tokens,
                 temperature=temperature,
                 reasoning_effort=reasoning_effort,
-                on_text_delta=on_text_delta,
                 tool_choice=tool_choice,
             )
         except asyncio.CancelledError:

@@ -32,10 +32,6 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
 
-        long_workflow = self._load_long_workflow_context()
-        if long_workflow:
-            parts.append(long_workflow)
-
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
@@ -121,24 +117,6 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 parts.append(f"## {filename}\n\n{content}")
 
         return "\n\n".join(parts) if parts else ""
-
-    def _load_long_workflow_context(self) -> str:
-        """Load pinned context and current workflow notes from the workspace."""
-        parts = []
-
-        pinned_path = self.workspace / "memory" / "PINNED.md"
-        if pinned_path.exists():
-            pinned = pinned_path.read_text(encoding="utf-8").strip()
-            if pinned:
-                parts.append(f"# Pinned Context\n\n{pinned}")
-
-        workflow_path = self.workspace / "WORKFLOW.md"
-        if workflow_path.exists():
-            workflow = workflow_path.read_text(encoding="utf-8").strip()
-            if workflow:
-                parts.append(f"# Current Workflow\n\n{workflow}")
-
-        return "\n\n".join(parts)
 
     def build_messages(
         self,

@@ -193,9 +193,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         if item.name.endswith(".md") and not item.name.startswith("."):
             _write(item, workspace / item.name)
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
-    _write(None, workspace / "memory" / "PINNED.md")
     _write(None, workspace / "memory" / "HISTORY.md")
-    _write(None, workspace / "WORKFLOW.md")
     (workspace / "skills").mkdir(exist_ok=True)
 
     if added and not silent:
@@ -203,10 +201,3 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         for name in added:
             Console().print(f"  [dim]Created {name}[/dim]")
     return added
-
-
-def get_workspace_path(workspace: str | None = None) -> Path:
-    """Backward-compatible workspace path helper."""
-    from nanobot.config.paths import get_workspace_path as _get_workspace_path
-
-    return _get_workspace_path(workspace)

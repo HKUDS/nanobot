@@ -1,0 +1,3 @@
+[submodule "Asset-Management"]
+	path = Asset-Management
+	url = https://github.com/zcxixixi/Asset-Management.git
