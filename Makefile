@@ -20,6 +20,7 @@ test-cov:
 
 lint:
 	ruff check nanobot/ tests/
+	ruff format --check nanobot/ tests/
 
 format:
 	ruff format nanobot/ tests/
