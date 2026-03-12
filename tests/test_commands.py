@@ -116,13 +116,13 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
 
 def test_config_matches_vertex_ai_with_hyphen_prefix():
     config = Config()
-    config.agents.defaults.model = "vertex_ai/gemini-1.5-pro"
+    config.agents.defaults.model = "vertex_ai/gemini-2.5-flash-lite"
 
     assert config.get_provider_name() == "vertex_ai"
 
 def test_config_matches_vertex_ai_with_dash_prefix():
     config = Config()
-    config.agents.defaults.model = "vertex-ai/gemini-pro"
+    config.agents.defaults.model = "vertex-ai/gemini-2.5-flash-lite"
 
     assert config.get_provider_name() == "vertex_ai"
 
