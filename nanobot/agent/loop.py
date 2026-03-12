@@ -183,29 +183,29 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
-        messages = initial_messages
-        iteration = 0
-        final_content = None
-        tools_used: list[str] = []
+        messages = initial_messages # 接过 ContextBuilder 组装好的所有信息
+        iteration = 0   # 初始化迭代计数器
+        final_content = None    # 准备存放最终给用户的回复
+        tools_used: list[str] = []  # 记录这一轮干活都用了哪些工具
 
-        while iteration < self.max_iterations:
+        while iteration < self.max_iterations:  # 只要没超过最大次数（默认40次）就继续
             iteration += 1
 
             response = await self.provider.chat(
                 messages=messages,
-                tools=self.tools.get_definitions(),
+                tools=self.tools.get_definitions(), # 把所有注册工具的说明书发给 LLM
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
             )
 
-            if response.has_tool_calls:
+            if response.has_tool_calls: # 分支 A：AI 决定调用工具 (Action)
                 if on_progress:
                     thought = self._strip_think(response.content)
-                    if thought:
-                        await on_progress(thought)
-                    await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
+                    if thought: 
+                        await on_progress(thought)  # 发送思考内容
+                    await on_progress(self._tool_hint(response.tool_calls), tool_hint=True) # 发送工具预告
 
                 tool_call_dicts = [
                     {
@@ -216,7 +216,7 @@ class AgentLoop:
                             "arguments": json.dumps(tc.arguments, ensure_ascii=False)
                         }
                     }
-                    for tc in response.tool_calls
+                    for tc in response.tool_calls  
                 ]
                 messages = self.context.add_assistant_message(
                     messages, response.content, tool_call_dicts,
@@ -224,23 +224,23 @@ class AgentLoop:
                     thinking_blocks=response.thinking_blocks,
                 )
 
-                for tool_call in response.tool_calls:
+                for tool_call in response.tool_calls: # 遍历 AI 想调用的每一个工具
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
-                    messages = self.context.add_tool_result(
+                    messages = self.context.add_tool_result(    # 反馈结果：把工具干活的结果塞回对话历史，准备下一轮喂给 AI
                         messages, tool_call.id, tool_call.name, result
                     )
-            else:
-                clean = self._strip_think(response.content)
+            else: # 分支 B：AI 决定直接回复用户
+                clean = self._strip_think(response.content) # 剥离思考标签
                 # Don't persist error responses to session history — they can
                 # poison the context and cause permanent 400 loops (#1303).
                 if response.finish_reason == "error":
                     logger.error("LLM returned error: {}", (clean or "")[:200])
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
-                messages = self.context.add_assistant_message(
+                messages = self.context.add_assistant_message(  # 把这一轮最终的谈话内容记入历史
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
@@ -258,20 +258,20 @@ class AgentLoop:
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
-        self._running = True
-        await self._connect_mcp()
+        self._running = True    # 标记：开始跑了
+        await self._connect_mcp()   # 连接外部工具服务器（如果有的话）
         logger.info("Agent loop started")
 
         while self._running:
             try:
-                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
-            except asyncio.TimeoutError:
+                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)   # 从消息总线（Bus）里拿一条消息
+            except asyncio.TimeoutError:    # 如果 1 秒内还没有消息，就继续循环
                 continue
 
             if msg.content.strip().lower() == "/stop":
-                await self._handle_stop(msg)
+                await self._handle_stop(msg)    # 立即掐断当前会话的所有任务
             else:
-                task = asyncio.create_task(self._dispatch(msg))
+                task = asyncio.create_task(self._dispatch(msg)) # 创建一个异步任务，不阻塞主循环
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
                 task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
 
@@ -293,10 +293,10 @@ class AgentLoop:
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message under the global lock."""
-        async with self._processing_lock:
+        async with self._processing_lock:   # 加锁
             try:
-                response = await self._process_message(msg)
-                if response is not None:
+                response = await self._process_message(msg) # 调用了处理逻辑
+                if response is not None:    # # 处理完后，通过消息总线发出去
                     await self.bus.publish_outbound(response)
                 elif msg.channel == "cli":
                     await self.bus.publish_outbound(OutboundMessage(
