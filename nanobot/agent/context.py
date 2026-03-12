@@ -89,6 +89,7 @@ Your workspace is at: {workspace_path}
 - After writing or editing a file, re-read it if accuracy matters.
 - If a tool call fails, analyze the error before retrying with a different approach.
 - Ask for clarification when the request is ambiguous.
+- If a tool result indicates the action is **pending user confirmation**, you MUST NOT claim the action was completed. Do not say "I sent the email", "Done", or produce output that implies the action was performed. Instead, clearly tell the user the action is awaiting their approval.
 
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
 

@@ -405,8 +405,8 @@ class AgentLoop:
                             arguments=tool_call.arguments,
                         ))
                         result = (
-                            "This action requires user confirmation before it can be executed. "
-                            "It has been queued for the user's review. "
+                            "IMPORTANT: This action was NOT executed. It requires user confirmation before it will be carried out. "
+                            "Do NOT tell the user this action was completed or produce output implying it was performed. "
                             "Inform the user that this action is pending their approval."
                         )
                         logger.info("Tool {} requires confirmation, queued as pending action", tool_call.name)
