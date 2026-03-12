@@ -280,6 +280,7 @@ class ProvidersConfig(Base):
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    vertex_ai: ProviderConfig = Field(default_factory=ProviderConfig)  # Google Vertex AI
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
