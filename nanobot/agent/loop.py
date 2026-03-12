@@ -475,6 +475,8 @@ class AgentLoop:
                     if not filtered:
                         continue
                     entry["content"] = filtered
+            entry.pop("reasoning_content", None)
+            entry.pop("thinking_blocks", None)
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
         session.updated_at = datetime.now()
