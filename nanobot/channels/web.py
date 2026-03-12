@@ -23,6 +23,21 @@ if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
 
 
+# MIME types / extensions treated as readable text (injected into message)
+_TEXT_MIMES = frozenset({
+    "text/plain", "text/markdown", "text/csv", "text/html", "text/css",
+    "text/javascript", "text/x-python", "text/x-sh", "text/x-shellscript",
+    "application/json", "application/xml", "application/javascript",
+    "application/x-yaml", "application/x-sh",
+})
+_TEXT_EXTENSIONS = frozenset({
+    ".txt", ".md", ".py", ".js", ".ts", ".json", ".csv",
+    ".yaml", ".yml", ".xml", ".html", ".css", ".sh", ".sql",
+    ".rs", ".go", ".java", ".c", ".cpp", ".h", ".rb", ".php",
+    ".toml", ".ini", ".conf", ".log",
+})
+
+
 class WebChannel(BaseChannel):
     """HTTP channel with Server-Sent Events for token-level streaming.
 
@@ -39,6 +54,7 @@ class WebChannel(BaseChannel):
 
     name = "web"
     _TOOL_OUTPUT_MAX = 4_000   # chars forwarded to browser per tool result
+    _TEXT_FILE_MAX   = 50_000  # chars read from text files injected into message
 
     def __init__(self, config: WebConfig, bus: MessageBus, agent_loop: "AgentLoop | None" = None):
         super().__init__(config, bus)
@@ -84,6 +100,10 @@ class WebChannel(BaseChannel):
         self._app.router.add_post("/api/stop", self._handle_stop)
         self._app.router.add_get("/api/health", self._handle_health)
 
+        # Upload API
+        self._app.router.add_post("/api/upload", self._handle_upload)
+        self._app.router.add_get("/api/uploads/{path:.+}", self._handle_get_upload)
+
         # Session API
         self._app.router.add_get("/api/sessions", self._handle_get_sessions)
         self._app.router.add_post("/api/sessions", self._handle_create_session)
@@ -101,7 +121,6 @@ class WebChannel(BaseChannel):
         await site.start()
         logger.info("Web channel listening on {}:{}", self.config.host, self.config.port)
 
-        # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
 
@@ -125,8 +144,12 @@ class WebChannel(BaseChannel):
     def _sessions_dir(self) -> Path:
         return Path.home() / ".nanobot" / "web-sessions"
 
+    @property
+    def _uploads_dir(self) -> Path:
+        return Path.home() / ".nanobot" / "web-uploads"
+
     def _parse_session_md(self, content: str, session_id: str) -> dict:
-        """Parse a session .md file into a dict with metadata and history."""
+        """Parse a session .md file → dict with metadata and history."""
         meta: dict[str, Any] = {
             "id": session_id,
             "name": "Chat",
@@ -156,7 +179,17 @@ class WebChannel(BaseChannel):
                             meta["pinned"] = v.lower() == "true"
                 body = content[end + 5:]
 
-        # Parse ### human / ### assistant sections
+        # Prefer the embedded JSON history block (lossless round-trip)
+        json_match = re.search(r"<!--JSON\n(\{.*?\})\n-->", body, re.DOTALL)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group(1))
+                meta["history"] = parsed.get("history", [])
+                return meta
+            except Exception:
+                pass
+
+        # Fallback: parse ### human / ### assistant markdown sections
         history: list[dict] = []
         parts = re.split(r"^### (human|assistant)\s*$", body, flags=re.MULTILINE)
         i = 1
@@ -174,7 +207,7 @@ class WebChannel(BaseChannel):
         return meta
 
     def _write_session_file(self, data: dict) -> None:
-        """Write a session dict to its .md file."""
+        """Write session dict to .md — embeds full JSON for lossless reload."""
         self._sessions_dir.mkdir(parents=True, exist_ok=True)
         path = self._sessions_dir / f"{data['id']}.md"
         lines: list[str] = ["---\n"]
@@ -185,10 +218,23 @@ class WebChannel(BaseChannel):
         lines.append(f"updated: {int(data.get('updated', 0))}\n")
         lines.append(f"pinned: {'true' if data.get('pinned') else 'false'}\n")
         lines.append("---\n")
-        for msg in data.get("history", []):
+
+        # Embed full JSON history so all fields (hints, attachments, pinned) survive reload
+        history = data.get("history", [])
+        lines.append("\n<!--JSON\n")
+        lines.append(json.dumps({"history": history}) + "\n")
+        lines.append("-->\n")
+
+        # Human-readable sections for reviewing in a text editor
+        for msg in history:
             role = "human" if msg.get("role") == "user" else "assistant"
             lines.append(f"\n### {role}\n\n")
+            atts = msg.get("attachments") or []
+            if atts:
+                att_names = ", ".join(a.get("name", "?") for a in atts)
+                lines.append(f"[attachments: {att_names}]\n\n")
             lines.append(msg.get("content", "") + "\n")
+
         path.write_text("".join(lines), encoding="utf-8")
 
     def _read_session_file(self, session_id: str) -> dict | None:
@@ -199,6 +245,73 @@ class WebChannel(BaseChannel):
             return self._parse_session_md(path.read_text(encoding="utf-8"), session_id)
         except Exception:
             return None
+
+    def _find_upload(self, uid: str) -> Path | None:
+        """Find an uploaded file by its UUID prefix."""
+        matches = list(self._uploads_dir.glob(f"{uid}*"))
+        return matches[0] if matches else None
+
+    # ------------------------------------------------------------------
+    # Upload handlers
+    # ------------------------------------------------------------------
+
+    async def _handle_upload(self, request: web.Request) -> web.Response:
+        """Accept a multipart file upload, save it, return {id, name, mime, url}."""
+        try:
+            reader = await request.multipart()
+        except Exception:
+            raise web.HTTPBadRequest(reason="Expected multipart/form-data")
+
+        field = await reader.next()
+        if field is None or field.name != "file":
+            raise web.HTTPBadRequest(reason="Expected field named 'file'")
+
+        filename = field.filename or "upload"
+        content = await field.read(decode=True)
+
+        uid = str(uuid.uuid4())
+        suffix = Path(filename).suffix.lower()
+        # Sanitize suffix — only allow safe alphanumeric extensions
+        if not re.match(r"^\.[a-z0-9]+$", suffix):
+            suffix = ""
+
+        self._uploads_dir.mkdir(parents=True, exist_ok=True)
+        save_path = self._uploads_dir / f"{uid}{suffix}"
+        save_path.write_bytes(content)
+
+        mime, _ = mimetypes.guess_type(filename)
+        mime = mime or "application/octet-stream"
+
+        return web.Response(
+            text=json.dumps({
+                "id": uid,
+                "name": filename,
+                "mime": mime,
+                "url": f"/api/uploads/{uid}{suffix}",
+            }),
+            content_type="application/json",
+            status=201,
+        )
+
+    async def _handle_get_upload(self, request: web.Request) -> web.Response:
+        """Serve an uploaded file by its UUID path."""
+        path_info = request.match_info.get("path", "")
+        # Validate: must be UUID (optionally + .ext), no path traversal
+        uid = path_info.split(".")[0]
+        try:
+            uuid.UUID(uid)
+        except ValueError:
+            raise web.HTTPBadRequest()
+
+        upload_path = self._find_upload(uid)
+        if not upload_path:
+            raise web.HTTPNotFound()
+
+        mime, _ = mimetypes.guess_type(str(upload_path))
+        return web.Response(
+            body=upload_path.read_bytes(),
+            content_type=mime or "application/octet-stream",
+        )
 
     # ------------------------------------------------------------------
     # Session API handlers
@@ -227,7 +340,7 @@ class WebChannel(BaseChannel):
         return web.Response(text=json.dumps(data), content_type="application/json")
 
     async def _handle_create_session(self, request: web.Request) -> web.Response:
-        """Create a new session, optionally pre-populated (used for migration)."""
+        """Create a new session (optionally pre-populated for migration)."""
         try:
             body = await request.json()
         except Exception:
@@ -254,12 +367,8 @@ class WebChannel(BaseChannel):
             raise web.HTTPBadRequest(reason="Expected JSON body")
         now = int(time.time() * 1000)
         data = self._read_session_file(sid) or {
-            "id": sid,
-            "name": "Chat",
-            "created": now,
-            "updated": now,
-            "pinned": False,
-            "history": [],
+            "id": sid, "name": "Chat",
+            "created": now, "updated": now, "pinned": False, "history": [],
         }
         if "name" in body:
             data["name"] = body["name"]
@@ -308,16 +417,8 @@ class WebChannel(BaseChannel):
     # ------------------------------------------------------------------
 
     def _static_dir(self) -> Path:
-        """Resolve the frontend static directory.
-
-        Resolution order:
-        1. Explicit config.static_dir (absolute or relative to CWD)
-        2. web/ next to the nanobot package root (repo layout or installed wheel)
-        3. web/ relative to CWD as a last resort
-        """
         if self.config.static_dir:
             return Path(self.config.static_dir).expanduser().resolve()
-        # nanobot/channels/web.py → ../../.. = repo/package root
         pkg_root = Path(__file__).parent.parent.parent
         candidate = pkg_root / "web"
         if candidate.is_dir():
@@ -340,7 +441,6 @@ class WebChannel(BaseChannel):
     async def _serve_file(self, request: web.Request, filename: str) -> web.Response:
         static = self._static_dir()
         path = (static / filename).resolve()
-        # Safety: don't escape the static directory
         if not str(path).startswith(str(static)):
             raise web.HTTPForbidden()
         if not path.exists() or not path.is_file():
@@ -349,7 +449,6 @@ class WebChannel(BaseChannel):
         return web.Response(body=path.read_bytes(), content_type=mime or "application/octet-stream")
 
     async def _handle_stop(self, request: web.Request) -> web.Response:
-        """Cancel the active agent task for a session."""
         try:
             data = await request.json()
         except Exception:
@@ -358,16 +457,10 @@ class WebChannel(BaseChannel):
         task = self._agent_tasks.get(session_id)
         if task and not task.done():
             task.cancel()
-        return web.Response(
-            text=json.dumps({"ok": True}),
-            content_type="application/json",
-        )
+        return web.Response(text=json.dumps({"ok": True}), content_type="application/json")
 
     async def _handle_health(self, request: web.Request) -> web.Response:
-        return web.Response(
-            text=json.dumps({"status": "ok"}),
-            content_type="application/json",
-        )
+        return web.Response(text=json.dumps({"status": "ok"}), content_type="application/json")
 
     async def _handle_chat(self, request: web.Request) -> web.StreamResponse:
         """Handle a chat POST and return an SSE stream."""
@@ -378,18 +471,49 @@ class WebChannel(BaseChannel):
 
         message: str = data.get("message", "").strip()
         session_id: str = data.get("session_id", "default")
+        attachments: list[dict] = data.get("attachments", [])
 
-        if not message:
-            raise web.HTTPBadRequest(reason="message field is required")
+        if not message and not attachments:
+            raise web.HTTPBadRequest(reason="message or attachments required")
 
         if not self.is_allowed(session_id):
             raise web.HTTPForbidden()
+
+        # Process attachments: images → multimodal media, text files → injected blocks
+        media_paths: list[str] = []
+        file_blocks: list[str] = []
+
+        for att in attachments:
+            uid = att.get("id", "")
+            try:
+                uuid.UUID(uid)
+            except ValueError:
+                continue
+            upload_path = self._find_upload(uid)
+            if not upload_path:
+                continue
+            mime = att.get("mime", "") or mimetypes.guess_type(str(upload_path))[0] or ""
+            if mime.startswith("image/"):
+                media_paths.append(str(upload_path))
+            elif mime in _TEXT_MIMES or upload_path.suffix.lower() in _TEXT_EXTENSIONS:
+                try:
+                    text_content = upload_path.read_text(encoding="utf-8", errors="replace")
+                    if len(text_content) > self._TEXT_FILE_MAX:
+                        text_content = text_content[:self._TEXT_FILE_MAX] + "\n… (truncated)"
+                    name = att.get("name", upload_path.name)
+                    file_blocks.append(f'<file name="{name}">\n{text_content}\n</file>')
+                except Exception:
+                    pass
+
+        # Prepend file content blocks to the message text
+        if file_blocks:
+            prefix = "\n\n".join(file_blocks)
+            message = prefix + ("\n\n" + message if message else "")
 
         # Per-request SSE queue (tokens + bus messages)
         q: asyncio.Queue[Any] = asyncio.Queue()
         self._queues[session_id] = q
 
-        # SSE callbacks
         async def on_token(text: str) -> None:
             await q.put(("token", text))
 
@@ -403,7 +527,6 @@ class WebChannel(BaseChannel):
             truncated = len(output) > self._TOOL_OUTPUT_MAX
             await q.put(("tool_result", tool_name, output[:self._TOOL_OUTPUT_MAX], truncated))
 
-        # Launch agent as background task; result/errors go into the queue
         session_key = f"web:{session_id}"
 
         async def run_agent() -> None:
@@ -415,6 +538,7 @@ class WebChannel(BaseChannel):
                     session_key=session_key,
                     channel=self.name,
                     chat_id=session_id,
+                    media=media_paths or None,
                     on_progress=on_progress,
                     on_token=on_token,
                     on_tool_call=on_tool_call,
@@ -431,11 +555,10 @@ class WebChannel(BaseChannel):
         agent_task = asyncio.create_task(run_agent())
         self._agent_tasks[session_id] = agent_task
 
-        # Prepare SSE response
         response = web.StreamResponse(headers={
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",  # disable nginx buffering
+            "X-Accel-Buffering": "no",
         })
         response.enable_chunked_encoding()
         await response.prepare(request)
@@ -448,12 +571,10 @@ class WebChannel(BaseChannel):
                 try:
                     item = await asyncio.wait_for(q.get(), timeout=120)
                 except asyncio.TimeoutError:
-                    # Keep-alive ping
                     await response.write(b": ping\n\n")
                     continue
 
                 if isinstance(item, OutboundMessage):
-                    # Proactive message from MessageTool (goes through bus)
                     if item.metadata.get("_progress"):
                         await response.write(_sse("progress", {
                             "text": item.content,
@@ -468,21 +589,14 @@ class WebChannel(BaseChannel):
                 if kind == "token":
                     await response.write(_sse("token", {"text": item[1]}))
                 elif kind == "progress":
-                    await response.write(_sse("progress", {
-                        "text": item[1],
-                        "tool_hint": item[2],
-                    }))
+                    await response.write(_sse("progress", {"text": item[1], "tool_hint": item[2]}))
                 elif kind == "tool_call":
                     await response.write(_sse("tool_call", {
-                        "tool": item[1],
-                        "call_str": item[2],
-                        "args": item[3],
+                        "tool": item[1], "call_str": item[2], "args": item[3],
                     }))
                 elif kind == "tool_result":
                     await response.write(_sse("tool_result", {
-                        "tool": item[1],
-                        "output": item[2],
-                        "truncated": item[3],
+                        "tool": item[1], "output": item[2], "truncated": item[3],
                     }))
                 elif kind == "done":
                     await response.write(_sse("done", {"text": item[1]}))

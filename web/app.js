@@ -122,6 +122,101 @@ async function migrateLegacyData() {
   localStorage.removeItem('nanobot_sessions');
 }
 
+/* ── Attachment state ─────────────────────────────────────────────────── */
+
+let pendingAttachments = [];
+// Each entry: {id, name, mime, url, previewUrl?, pending: bool}
+
+async function uploadFile(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch('/api/upload', { method: 'POST', body: fd });
+  if (!res.ok) throw new Error('Upload failed');
+  return res.json(); // {id, name, mime, url}
+}
+
+async function addFiles(fileList) {
+  for (const file of fileList) {
+    const tempId = 'tmp_' + Math.random().toString(36).slice(2);
+    const entry = { id: tempId, name: file.name, mime: file.type, url: null, pending: true };
+    if (file.type.startsWith('image/')) {
+      entry.previewUrl = URL.createObjectURL(file);
+    }
+    pendingAttachments.push(entry);
+    renderUploadPreview();
+
+    uploadFile(file)
+      .then(result => {
+        const idx = pendingAttachments.findIndex(a => a.id === tempId);
+        if (idx >= 0) {
+          pendingAttachments[idx] = {
+            ...result,
+            previewUrl: entry.previewUrl,
+            pending: false,
+          };
+          renderUploadPreview();
+        }
+      })
+      .catch(() => {
+        pendingAttachments = pendingAttachments.filter(a => a.id !== tempId);
+        renderUploadPreview();
+      });
+  }
+}
+
+function removeAttachment(id) {
+  const att = pendingAttachments.find(a => a.id === id);
+  if (att && att.previewUrl) URL.revokeObjectURL(att.previewUrl);
+  pendingAttachments = pendingAttachments.filter(a => a.id !== id);
+  renderUploadPreview();
+}
+
+function renderUploadPreview() {
+  const bar = document.getElementById('upload-preview');
+  if (pendingAttachments.length === 0) {
+    bar.classList.add('hidden');
+    bar.innerHTML = '';
+    return;
+  }
+  bar.classList.remove('hidden');
+  bar.innerHTML = '';
+  for (const att of pendingAttachments) {
+    const item = document.createElement('div');
+    item.className = 'upload-item' + (att.pending ? ' pending' : '');
+
+    const thumb = document.createElement('div');
+    thumb.className = 'upload-thumb';
+    if (att.previewUrl) {
+      const img = document.createElement('img');
+      img.src = att.previewUrl;
+      img.alt = att.name;
+      thumb.appendChild(img);
+    } else {
+      thumb.textContent = '📄';
+      thumb.className += ' upload-thumb-icon';
+    }
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'upload-name';
+    nameEl.textContent = att.name;
+    nameEl.title = att.name;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'upload-remove';
+    removeBtn.title = 'Remove';
+    removeBtn.textContent = '✕';
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeAttachment(att.id);
+    });
+
+    item.appendChild(thumb);
+    item.appendChild(nameEl);
+    item.appendChild(removeBtn);
+    bar.appendChild(item);
+  }
+}
+
 /* ── State ────────────────────────────────────────────────────────────── */
 
 let isStreaming = false;
@@ -135,6 +230,8 @@ const input          = document.getElementById('input');
 const btnSend        = document.getElementById('btn-send');
 const btnNew         = document.getElementById('btn-new');
 const btnMenu        = document.getElementById('btn-menu');
+const btnAttach      = document.getElementById('btn-attach');
+const fileInput      = document.getElementById('file-input');
 const sidebar        = document.getElementById('sidebar');
 const sidebarOverlay = document.getElementById('sidebar-overlay');
 const sessionListEl  = document.getElementById('session-list');
@@ -281,13 +378,27 @@ async function switchSession(id) {
 
 /* ── Message builders ─────────────────────────────────────────────────── */
 
-function appendUserMessage(text) {
+function appendUserMessage(text, attachments = []) {
   clearEmptyState();
   const div = document.createElement('div');
   div.className = 'message user';
+
+  let attachHtml = '';
+  if (attachments.length > 0) {
+    attachHtml = '<div class="msg-attachments">';
+    for (const att of attachments) {
+      if (att.mime && att.mime.startsWith('image/') && att.url) {
+        attachHtml += `<img src="${att.url}" class="msg-image" loading="lazy" alt="${escapeHtml(att.name)}">`;
+      } else {
+        attachHtml += `<span class="msg-file">📄 ${escapeHtml(att.name)}</span>`;
+      }
+    }
+    attachHtml += '</div>';
+  }
+
   div.innerHTML = `
     <div class="avatar">👤</div>
-    <div class="bubble">${escapeHtml(text)}</div>
+    <div class="bubble">${attachHtml}${text ? escapeHtml(text) : ''}</div>
   `;
   messagesEl.appendChild(div);
   scrollToBottom();
@@ -421,7 +532,7 @@ async function replayHistory(id) {
   for (let i = 0; i < history.length; i++) {
     const msg = history[i];
     if (msg.role === 'user') {
-      const div = appendUserMessage(msg.content);
+      const div = appendUserMessage(msg.content, msg.attachments || []);
       if (msg.pinned) div.classList.add('pinned');
       addMessageActions(div, i);
     } else {
@@ -471,20 +582,27 @@ function parseSSEChunk(buffer) {
 /* ── Core send ────────────────────────────────────────────────────────── */
 
 async function sendMessage(text) {
-  if (!text.trim() || isStreaming) return;
+  const readyAttachments = pendingAttachments.filter(a => !a.pending);
+  if (!text.trim() && readyAttachments.length === 0) return;
+  if (isStreaming) return;
+
+  // Capture and clear pending attachments before async work
+  pendingAttachments = [];
+  renderUploadPreview();
 
   // Persist user turn first so we know the index before rendering
   const history = getHistory(sessionId);
-  if (history.length === 0) {
+  const attachmentsMeta = readyAttachments.map(a => ({ id: a.id, name: a.name, mime: a.mime, url: a.url }));
+  if (history.length === 0 && text.trim()) {
     renameSession(sessionId, text.length > 35 ? text.slice(0, 32) + '…' : text);
     renderSidebar();
   }
-  history.push({ role: 'user', content: text });
+  history.push({ role: 'user', content: text, attachments: attachmentsMeta });
   saveHistory(sessionId, history);
   const userMsgIdx = history.length - 1;
 
   setStreaming(true);
-  const userDiv = appendUserMessage(text);
+  const userDiv = appendUserMessage(text, attachmentsMeta);
   addMessageActions(userDiv, userMsgIdx);
   const { wrapper, bubble } = appendBotSkeleton();
 
@@ -523,7 +641,11 @@ async function sendMessage(text) {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, session_id: sessionId }),
+      body: JSON.stringify({
+        message: text,
+        session_id: sessionId,
+        attachments: attachmentsMeta,
+      }),
       signal: abortController.signal,
     });
 
@@ -718,6 +840,36 @@ input.addEventListener('keydown', (e) => {
 input.addEventListener('input', resizeInput);
 
 btnNew.addEventListener('click', newConversation);
+
+/* ── File attach & drag-drop ──────────────────────────────────────────── */
+
+fileInput.addEventListener('change', async () => {
+  if (fileInput.files.length > 0) {
+    await addFiles([...fileInput.files]);
+    fileInput.value = '';
+  }
+});
+
+const mainEl = document.getElementById('main');
+
+mainEl.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  mainEl.classList.add('dragover');
+});
+mainEl.addEventListener('dragleave', (e) => {
+  if (!mainEl.contains(e.relatedTarget)) {
+    mainEl.classList.remove('dragover');
+  }
+});
+mainEl.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  mainEl.classList.remove('dragover');
+  const files = [...(e.dataTransfer.files || [])];
+  if (files.length > 0) {
+    await addFiles(files);
+    input.focus();
+  }
+});
 
 /* ── Init ─────────────────────────────────────────────────────────────── */
 

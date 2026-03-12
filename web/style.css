@@ -643,6 +643,135 @@ header {
   font-style: italic;
 }
 
+/* ── Attach button ──────────────────────────────────────────────────────── */
+#btn-attach {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-hint);
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+#btn-attach:hover { color: var(--text); background: var(--bg-hover); }
+#btn-attach input { display: none; }
+
+/* ── Upload preview bar ─────────────────────────────────────────────────── */
+#upload-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+}
+#upload-preview.hidden { display: none; }
+
+.upload-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 6px 4px 4px;
+  max-width: 180px;
+  min-width: 80px;
+  position: relative;
+}
+.upload-item.pending { opacity: 0.55; }
+
+.upload-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 5px;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-surface);
+}
+.upload-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.upload-thumb-icon { font-size: 20px; }
+
+.upload-name {
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.upload-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-hint);
+  font-size: 11px;
+  padding: 2px 3px;
+  line-height: 1;
+  flex-shrink: 0;
+  border-radius: 3px;
+}
+.upload-remove:hover { color: var(--text); background: var(--bg-surface); }
+
+/* ── Attachment display in messages ─────────────────────────────────────── */
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.msg-image {
+  max-width: min(320px, 100%);
+  max-height: 280px;
+  border-radius: 8px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  cursor: zoom-in;
+  display: block;
+}
+.msg-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* ── Drag-and-drop overlay ──────────────────────────────────────────────── */
+#main { position: relative; }
+
+.drag-overlay {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: rgba(124, 106, 247, 0.10);
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--accent);
+  pointer-events: none;
+  z-index: 50;
+  letter-spacing: 0.01em;
+}
+#main.dragover .drag-overlay { display: flex; }
+
 /* ── Error bubble ───────────────────────────────────────────────────────── */
 .error-bubble {
   color: #f87171;

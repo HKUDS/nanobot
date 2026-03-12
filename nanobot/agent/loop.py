@@ -512,6 +512,7 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        media: list[str] | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_token: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call: Callable[[str, str, dict], Awaitable[None]] | None = None,
@@ -519,7 +520,7 @@ class AgentLoop:
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content, media=media or [])
         response = await self._process_message(
             msg, session_key=session_key, on_progress=on_progress, on_token=on_token,
             on_tool_call=on_tool_call, on_tool_result=on_tool_result,
