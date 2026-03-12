@@ -404,69 +404,72 @@ def gateway(
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
     
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
-    
+
+    if not api_key:
+        console.print("[red]✗ NANOBOT_API_KEY is required but not set. Gateway cannot start without authentication.[/red]")
+        raise SystemExit(1)
+
     runner = None
 
     async def run():
         nonlocal runner
 
-        if api_key:
-            from aiohttp import web
+        from aiohttp import web
 
-            @web.middleware
-            async def auth_middleware(request, handler):
-                if request.headers.get("Authorization") != f"Bearer {api_key}":
-                    raise web.HTTPUnauthorized()
-                return await handler(request)
+        @web.middleware
+        async def auth_middleware(request, handler):
+            if request.headers.get("Authorization") != f"Bearer {api_key}":
+                raise web.HTTPUnauthorized()
+            return await handler(request)
 
-            async def handle_agent_run(request):
-                body = await request.json()
-                result = await agent.process_direct(
-                    body["message"],
-                    session_key=body.get("session_key", "http:direct"),
-                    channel=body.get("channel", "http"),
-                    chat_id=body.get("chat_id", "direct"),
-                    confirmation_supported=body.get("confirmation_supported", False),
+        async def handle_agent_run(request):
+            body = await request.json()
+            result = await agent.process_direct(
+                body["message"],
+                session_key=body.get("session_key", "http:direct"),
+                channel=body.get("channel", "http"),
+                chat_id=body.get("chat_id", "direct"),
+                confirmation_supported=body.get("confirmation_supported", False),
+            )
+            return web.json_response({
+                "response": result.content,
+                "pending_actions": [
+                    {
+                        "action_id": pa.action_id,
+                        "tool_call_id": pa.tool_call_id,
+                        "tool_name": pa.tool_name,
+                        "arguments": pa.arguments,
+                    }
+                    for pa in result.pending_actions
+                ],
+            })
+
+        async def handle_execute_tool(request):
+            body = await request.json()
+            tool_name = body.get("tool_name")
+            arguments = body.get("arguments", {})
+            tool = agent.tools.get(tool_name)
+            if not tool:
+                return web.json_response(
+                    {"success": False, "error": f"Tool '{tool_name}' not found"},
+                    status=404,
                 )
-                return web.json_response({
-                    "response": result.content,
-                    "pending_actions": [
-                        {
-                            "action_id": pa.action_id,
-                            "tool_call_id": pa.tool_call_id,
-                            "tool_name": pa.tool_name,
-                            "arguments": pa.arguments,
-                        }
-                        for pa in result.pending_actions
-                    ],
-                })
+            try:
+                result = await tool.execute(**arguments)
+                return web.json_response({"success": True, "result": result})
+            except Exception as e:
+                return web.json_response(
+                    {"success": False, "error": str(e)},
+                    status=500,
+                )
 
-            async def handle_execute_tool(request):
-                body = await request.json()
-                tool_name = body.get("tool_name")
-                arguments = body.get("arguments", {})
-                tool = agent.tools.get(tool_name)
-                if not tool:
-                    return web.json_response(
-                        {"success": False, "error": f"Tool '{tool_name}' not found"},
-                        status=404,
-                    )
-                try:
-                    result = await tool.execute(**arguments)
-                    return web.json_response({"success": True, "result": result})
-                except Exception as e:
-                    return web.json_response(
-                        {"success": False, "error": str(e)},
-                        status=500,
-                    )
-
-            web_app = web.Application(middlewares=[auth_middleware])
-            web_app.router.add_post("/agent/run", handle_agent_run)
-            web_app.router.add_post("/agent/execute-tool", handle_execute_tool)
-            runner = web.AppRunner(web_app)
-            await runner.setup()
-            await web.TCPSite(runner, "0.0.0.0", port).start()
-            logger.info("Gateway HTTP API listening on port {}", port)
+        web_app = web.Application(middlewares=[auth_middleware])
+        web_app.router.add_post("/agent/run", handle_agent_run)
+        web_app.router.add_post("/agent/execute-tool", handle_execute_tool)
+        runner = web.AppRunner(web_app)
+        await runner.setup()
+        await web.TCPSite(runner, "0.0.0.0", port).start()
+        logger.info("Gateway HTTP API listening on port {}", port)
 
         try:
             await cron.start()

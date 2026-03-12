@@ -9,6 +9,7 @@ import os
 from typing import Any
 
 import httpx
+from loguru import logger
 
 
 def auth_headers() -> dict[str, str]:
@@ -18,6 +19,8 @@ def auth_headers() -> dict[str, str]:
     is baked in, or pass the result as `headers=` to individual requests.
     """
     api_key = os.environ.get("NANOBOT_API_KEY", "")
+    if not api_key:
+        logger.warning("NANOBOT_API_KEY is not set — coordinator requests will be sent without authentication and will be rejected with 403")
     return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
 
