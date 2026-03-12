@@ -128,13 +128,15 @@ class WebFetchTool(Tool):
     async def execute(  # type: ignore[override]
         self,
         url: str,
-        extractMode: str = "markdown",
-        maxChars: int | None = None,
-        **kwargs: Any,  # noqa: N803
+        extract_mode: str = "markdown",  # noqa: N803
+        max_chars: int | None = None,
+        **kwargs: Any,
     ) -> ToolResult:
         from readability import Document
 
-        max_chars = maxChars or self.max_chars
+        # Accept camelCase from LLM tool calls
+        extract_mode = kwargs.pop("extractMode", extract_mode)  # type: ignore[assignment]
+        max_chars = kwargs.pop("maxChars", max_chars) or self.max_chars  # type: ignore[assignment]
 
         # Validate URL before fetching
         is_valid, error_msg = _validate_url(url)
@@ -162,7 +164,7 @@ class WebFetchTool(Tool):
                 doc = Document(r.text)
                 content = (
                     self._to_markdown(doc.summary())
-                    if extractMode == "markdown"
+                    if extract_mode == "markdown"
                     else _strip_tags(doc.summary())
                 )
                 text = f"# {doc.title()}\n\n{content}" if doc.title() else content

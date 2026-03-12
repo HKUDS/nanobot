@@ -40,8 +40,8 @@ class GroqTranscriptionProvider:
         try:
             async with httpx.AsyncClient() as client:
                 with open(path, "rb") as f:
-                    files = {
-                        "file": (path.name, f),
+                    files: dict[str, tuple[str | None, bytes | str]] = {
+                        "file": (path.name, f.read()),
                         "model": (None, "whisper-large-v3"),
                     }
                     headers = {
