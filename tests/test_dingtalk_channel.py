@@ -1,9 +1,11 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.dingtalk import DingTalkChannel
+import nanobot.channels.dingtalk as dingtalk_module
+from nanobot.channels.dingtalk import DingTalkChannel, NanobotDingTalkHandler
 from nanobot.config.schema import DingTalkConfig
 
 
@@ -64,3 +66,46 @@ async def test_group_send_uses_group_messages_api() -> None:
     assert call["url"] == "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
     assert call["json"]["openConversationId"] == "conv123"
     assert call["json"]["msgKey"] == "sampleMarkdown"
+
+
+@pytest.mark.asyncio
+async def test_handler_uses_voice_recognition_text_when_text_is_empty(monkeypatch) -> None:
+    bus = MessageBus()
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
+        bus,
+    )
+    handler = NanobotDingTalkHandler(channel)
+
+    class _FakeChatbotMessage:
+        text = None
+        extensions = {"content": {"recognition": "voice transcript"}}
+        sender_staff_id = "user1"
+        sender_id = "fallback-user"
+        sender_nick = "Alice"
+        message_type = "audio"
+
+        @staticmethod
+        def from_dict(_data):
+            return _FakeChatbotMessage()
+
+    monkeypatch.setattr(dingtalk_module, "ChatbotMessage", _FakeChatbotMessage)
+    monkeypatch.setattr(dingtalk_module, "AckMessage", SimpleNamespace(STATUS_OK="OK"))
+
+    status, body = await handler.process(
+        SimpleNamespace(
+            data={
+                "conversationType": "2",
+                "conversationId": "conv123",
+                "text": {"content": ""},
+            }
+        )
+    )
+
+    await asyncio.gather(*list(channel._background_tasks))
+    msg = await bus.consume_inbound()
+
+    assert (status, body) == ("OK", "OK")
+    assert msg.content == "voice transcript"
+    assert msg.sender_id == "user1"
+    assert msg.chat_id == "group:conv123"

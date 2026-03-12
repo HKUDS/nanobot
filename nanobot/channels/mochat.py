@@ -216,6 +216,7 @@ class MochatChannel(BaseChannel):
     """Mochat channel using socket.io with fallback polling workers."""
 
     name = "mochat"
+    display_name = "Mochat"
 
     def __init__(self, config: MochatConfig, bus: MessageBus):
         super().__init__(config, bus)

@@ -22,6 +22,7 @@ class WhatsAppChannel(BaseChannel):
     """
 
     name = "whatsapp"
+    display_name = "WhatsApp"
 
     def __init__(self, config: WhatsAppConfig, bus: MessageBus):
         super().__init__(config, bus)
