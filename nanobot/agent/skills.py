@@ -51,10 +51,11 @@ class SkillsLoader:
                     if skill_file.exists() and not any(s["name"] == skill_dir.name for s in skills):
                         skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "builtin"})
 
-        # Filter by requirements
+        # Filter by enabled status and requirements
         if filter_unavailable:
-            return [s for s in skills if self._check_requirements(self._get_skill_meta(s["name"]))]
-        return skills
+            return [s for s in skills if self._is_enabled(s["name"]) and self._check_requirements(self._get_skill_meta(s["name"]))]
+        # Even when not filtering by requirements, still filter by enabled status
+        return [s for s in skills if self._is_enabled(s["name"])]
 
     def load_skill(self, name: str) -> str | None:
         """
@@ -184,6 +185,20 @@ class SkillsLoader:
             if not os.environ.get(env):
                 return False
         return True
+
+    def _is_enabled(self, name: str) -> bool:
+        """Check if skill is enabled (defaults to True for backward compatibility)."""
+        meta = self.get_skill_metadata(name)
+        if not meta:
+            return True
+        # Check both direct 'enabled' field and nanobot metadata
+        if "enabled" in meta:
+            enabled_str = meta["enabled"].lower()
+            return enabled_str not in ("false", "no", "0")
+        skill_meta = self._parse_nanobot_metadata(meta.get("metadata", ""))
+        if "enabled" in skill_meta:
+            return bool(skill_meta["enabled"])
+        return True  # Default to enabled
 
     def _get_skill_meta(self, name: str) -> dict:
         """Get nanobot metadata for a skill (cached in frontmatter)."""
