@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
+import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -43,7 +45,7 @@ class AgentLoop:
     5. Sends responses back
     """
 
-    _TOOL_RESULT_MAX_CHARS = 500
+    _TOOL_RESULT_MAX_CHARS = 16_000
 
     def __init__(
         self,
@@ -256,8 +258,11 @@ class AgentLoop:
             except asyncio.TimeoutError:
                 continue
 
-            if msg.content.strip().lower() == "/stop":
+            cmd = msg.content.strip().lower()
+            if cmd == "/stop":
                 await self._handle_stop(msg)
+            elif cmd == "/restart":
+                await self._handle_restart(msg)
             else:
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
@@ -274,10 +279,22 @@ class AgentLoop:
                 pass
         sub_cancelled = await self.subagents.cancel_by_session(msg.session_key)
         total = cancelled + sub_cancelled
-        content = f"⏹ Stopped {total} task(s)." if total else "No active task to stop."
+        content = f"Stopped {total} task(s)." if total else "No active task to stop."
         await self.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
+
+    async def _handle_restart(self, msg: InboundMessage) -> None:
+        """Restart the process in-place via os.execv."""
+        await self.bus.publish_outbound(OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id, content="Restarting...",
+        ))
+
+        async def _do_restart():
+            await asyncio.sleep(1)
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+
+        asyncio.create_task(_do_restart())
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message under the global lock."""
@@ -373,9 +390,16 @@ class AgentLoop:
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
         if cmd == "/help":
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
-
+            lines = [
+                "🐈 nanobot commands:",
+                "/new — Start a new conversation",
+                "/stop — Stop the current task",
+                "/restart — Restart the bot",
+                "/help — Show available commands",
+            ]
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
+            )
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))

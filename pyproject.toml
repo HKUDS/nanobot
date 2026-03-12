@@ -49,7 +49,7 @@ dependencies = [
 
 [project.optional-dependencies]
 wecom = [
-    "wecom-aibot-sdk-python @ git+https://github.com/chengyongru/wecom_aibot_sdk.git@v0.1.2",
+    "wecom-aibot-sdk-python>=0.1.2",
 ]
 matrix = [
     "matrix-nio[e2e]>=0.25.2",
