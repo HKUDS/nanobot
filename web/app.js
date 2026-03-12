@@ -926,6 +926,46 @@ mainEl.addEventListener('drop', async (e) => {
   }
 });
 
+/* ── Lightbox ─────────────────────────────────────────────────────────── */
+
+const lightbox      = document.getElementById('lightbox');
+const lightboxImg   = document.getElementById('lightbox-img');
+const lightboxClose = document.getElementById('lightbox-close');
+
+function openLightbox(src, alt) {
+  lightboxImg.src = src;
+  lightboxImg.alt = alt || '';
+  lightbox.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeLightbox() {
+  lightbox.classList.add('hidden');
+  lightboxImg.src = '';
+  document.body.style.overflow = '';
+}
+
+lightboxClose.addEventListener('click', closeLightbox);
+
+lightbox.addEventListener('click', (e) => {
+  if (e.target === lightbox) closeLightbox();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !lightbox.classList.contains('hidden')) closeLightbox();
+});
+
+// Event delegation — catches all images added dynamically to the messages area
+messagesEl.addEventListener('click', (e) => {
+  const img = e.target.closest(
+    'img.msg-image, .rendered-content img, .streaming-content img, img.tool-result-image'
+  );
+  if (img) {
+    e.stopPropagation();
+    openLightbox(img.src, img.alt);
+  }
+});
+
 /* ── Init ─────────────────────────────────────────────────────────────── */
 
 document.addEventListener('click', () => {

@@ -797,6 +797,61 @@ header {
 }
 #main.dragover .drag-overlay { display: flex; }
 
+/* ── Lightbox ───────────────────────────────────────────────────────────── */
+#lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+  cursor: zoom-out;
+  animation: lb-fadein 0.15s ease;
+}
+#lightbox.hidden { display: none; }
+
+@keyframes lb-fadein {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+#lightbox-img {
+  max-width:  calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  border-radius: 8px;
+  object-fit: contain;
+  box-shadow: 0 12px 60px rgba(0, 0, 0, 0.6);
+  cursor: default;
+  animation: lb-scalein 0.15s ease;
+}
+
+@keyframes lb-scalein {
+  from { transform: scale(0.94); }
+  to   { transform: scale(1); }
+}
+
+#lightbox-close {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  backdrop-filter: blur(4px);
+}
+#lightbox-close:hover { background: rgba(255, 255, 255, 0.28); }
+
 /* ── Error bubble ───────────────────────────────────────────────────────── */
 .error-bubble {
   color: #f87171;
