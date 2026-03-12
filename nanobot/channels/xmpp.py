@@ -21,8 +21,10 @@ except ImportError as e:
 
 try:
     import httpx
+    http_client_provider = httpx.AsyncClient
 except ImportError:
     httpx = None
+    http_client_provider = lambda *args, **kwargs: None
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.base import BaseChannel
@@ -39,16 +41,16 @@ class XmppClient(ClientXMPP):
         self,
         jid: str,
         password: str,
-        channel: "XmppChannel",
         nickname: str = "nanobot",
         rooms: list[str] | None = None,
+        file_transfer_enabled = True
     ):
         super().__init__(jid, password)
-        self._channel = channel
         self._nickname = nickname
         self._rooms = set(rooms or [])
         self._joined_rooms: set[str] = set()
         self._running = False
+        self._file_transfer_enabled = file_transfer_enabled
 
         # Register plugins
         self.register_plugin("xep_0030")  # Service Discovery
@@ -56,7 +58,6 @@ class XmppClient(ClientXMPP):
         self.register_plugin("xep_0085")  # Chat State Notifications (typing)
 
         # File transfer plugins (if enabled in config)
-        self._file_transfer_enabled = getattr(channel.config, "file_transfer_enabled", True)
         if self._file_transfer_enabled:
             self.register_plugin("xep_0065")  # SOCKS5 Bytestreams (direct file transfer)
             self.register_plugin("xep_0363")  # HTTP File Upload (server-mediated)
@@ -323,40 +324,49 @@ class XmppChannel(BaseChannel):
     name = "xmpp"
     MAX_HTTP_DOWNLOAD_BYTES = 20 * 1024 * 1024  # 20MB limit for HTTP downloads
 
-    def __init__(self, config: Any, bus: Any):
+    def __init__(self, config: Any, bus: Any, client_provider=XmppClient, http_client_provider=http_client_provider, clock=asyncio):
         super().__init__(config, bus)
-        self.client: XmppClient | None = None
+        self._client_provider = client_provider
+        self.client = None
         self._task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
+        self._http_client_provider = http_client_provider
         self._http: Any = None
+        self._clock = clock
+
 
     async def start(self) -> None:
         """Start XMPP client and connect to server."""
         self._running = True
 
         # Initialize HTTP client for downloading HTTP File Upload URLs
-        if httpx:
-            self._http = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+        self._http = self._http_client_provider(timeout=30.0, follow_redirects=True)
 
+        self.client = self._get_client(self.config)
+
+        self._task = asyncio.create_task(self._run_client())
+        logger.info("XMPP channel started for {}", self.config.jid)
+
+    def _get_client(self, config):
         # Build room list from config
-        rooms = list(getattr(self.config, "rooms", []) or [])
+        rooms = list(getattr(config, "rooms", []) or [])
 
-        self.client = XmppClient(
-            jid=self.config.jid,
-            password=self.config.password,
-            channel=self,
-            nickname=getattr(self.config, "nickname", "nanobot"),
+        client = self._client_provider(
+            jid=config.jid,
+            password=config.password,
+            nickname=getattr(config, "nickname", "nanobot"),
             rooms=rooms,
+            file_transfer_enabled=getattr(config, "file_transfer_enabled", True)
         )
 
         # Configure TLS
-        self.client.use_ssl = getattr(self.config, "use_tls", True)
-        if hasattr(self.config, "server") and self.config.server:
-            self.client.connect_address = (self.config.server, self.config.port)
+        client.use_ssl = getattr(config, "use_tls", True)
+        if hasattr(config, "server") and config.server:
+            client.connect_address = (config.server, config.port)
 
-        self.client._running = True
-        self._task = asyncio.create_task(self._run_client())
-        logger.info("XMPP channel started for {}", self.config.jid)
+        client._running = True
+
+        return client
 
     async def _run_client(self) -> None:
         """Run the XMPP client with reconnection logic."""
@@ -365,11 +375,11 @@ class XmppChannel(BaseChannel):
                 await self.client.connect()
                 # Keep the task alive until disconnected
                 while self.client.is_connected() and self._running:
-                    await asyncio.sleep(1)
+                    await self._clock.sleep(1)
             except Exception as e:
                 logger.warning("XMPP connection error: {}", e)
             if self._running:
-                await asyncio.sleep(5)  # Reconnect delay
+                await self._clock.sleep(5)  # Reconnect delay
 
     async def stop(self) -> None:
         """Stop the XMPP channel."""
@@ -631,12 +641,7 @@ class XmppChannel(BaseChannel):
             await self._stop_typing(sender_jid)
             raise
 
-    async def _handle_dm(self, sender_jid: str, body: str) -> None:
-        """Handle direct message."""
-        if not body.strip():
-            return
-
-        # Detect and download HTTP File Upload URLs
+    async def _extract_message_content(self, sender_jid, body):
         content_parts = [body]
         media_paths: list[str] = []
         urls = _URL_RE.findall(body)
@@ -649,19 +654,54 @@ class XmppChannel(BaseChannel):
                 # Replace URL with marker in content
                 content_parts[0] = content_parts[0].replace(url, marker)
 
+        return {
+            "content": content_parts[0],
+            "media": media_paths
+        }
+        
+
+    async def _dm_to_message(self, sender_jid: str, body: str) -> dict:
+        # Detect and download HTTP File Upload URLs
+        content = await self._extract_message_content(sender_jid, body)
+
+        return {
+            **content,
+            "sender_id": sender_jid,
+            "chat_id": sender_jid,
+            "metadata": {"type": "direct", "jid": sender_jid},
+        }
+
+    async def _muc_to_message(
+        self, room_jid: str, sender_nick: str, sender_jid: str, body: str
+    ):
+        content = await self._extract_message_content(sender_jid, body)
+
+        return {
+            **content,
+            "sender_id": f"{room_jid}/{sender_nick}",
+            "chat_id": room_jid,
+            "metadata": {
+                "type": "muc",
+                "room": room_jid,
+                "sender_nick": sender_nick,
+                "sender_jid": sender_jid,
+            },
+        }       
+
+    async def _handle_dm(self, sender_jid: str, body: str) -> None:
+        """Handle direct message."""
+        if not body.strip():
+            return
+
+        msg = await self._dm_to_message(sender_jid, body)
+
         # Start typing indicator
-        await self._start_typing(sender_jid)
+        await self._start_typing(msg['chat_id'])
 
         try:
-            await self._handle_message(
-                sender_id=sender_jid,
-                chat_id=sender_jid,
-                content=content_parts[0],
-                media=media_paths,
-                metadata={"type": "direct", "jid": sender_jid},
-            )
+            await self._handle_message(**msg)
         except Exception:
-            await self._stop_typing(sender_jid)
+            await self._stop_typing(msg['chat_id'])
             raise
 
     async def _handle_muc_message(
@@ -679,37 +719,14 @@ class XmppChannel(BaseChannel):
         if not self._should_process_muc_message(room_jid, body):
             return
 
-        # Detect and download HTTP File Upload URLs
-        content_parts = [body]
-        media_paths: list[str] = []
-        urls = _URL_RE.findall(body)
+        msg = await self._muc_to_message(room_jid, sender_nick, sender_jid, body)
 
-        for url in urls:
-            if self._is_http_file_url(url):
-                file_path, marker = await self._download_http_file(url, sender_jid)
-                if file_path:
-                    media_paths.append(file_path)
-                # Replace URL with marker in content
-                content_parts[0] = content_parts[0].replace(url, marker)
-
-        # Start typing indicator
-        await self._start_typing(room_jid)
+        await self._start_typing(msg['chat_id'])
 
         try:
-            await self._handle_message(
-                sender_id=f"{room_jid}/{sender_nick}",
-                chat_id=room_jid,
-                content=content_parts[0],
-                media=media_paths,
-                metadata={
-                    "type": "muc",
-                    "room": room_jid,
-                    "sender_nick": sender_nick,
-                    "sender_jid": sender_jid,
-                },
-            )
+            await self._handle_message( **msg)
         except Exception:
-            await self._stop_typing(room_jid)
+            await self._stop_typing(msg['chat_id'])
             raise
 
     def _should_process_muc_message(self, room_jid: str, body: str) -> bool:
@@ -746,7 +763,7 @@ class XmppChannel(BaseChannel):
         async def keepalive():
             try:
                 while self._running:
-                    await asyncio.sleep(25)  # Refresh typing every 25s
+                    await self._clock.sleep(25)  # Refresh typing every 25s
                     if self.client and self.client.is_connected():
                         try:
                             self.client.send_typing(jid, typing=True)
@@ -772,7 +789,7 @@ class XmppChannel(BaseChannel):
                 # Send "paused" to indicate stopped typing
                 self.client.send_typing(jid, typing=False)
                 # After a brief delay, send "active" to clear the indicator entirely
-                await asyncio.sleep(0.5)
+                await self._clock.sleep(0.5)
                 if self.client and self.client.is_connected():
                     msg = self.client.make_message(mto=jid, mtype="chat")
                     msg["chat_state"] = "active"
