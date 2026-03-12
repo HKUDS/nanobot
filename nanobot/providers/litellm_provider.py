@@ -187,6 +187,7 @@ class LiteLLMProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         on_text_delta=None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -249,7 +250,7 @@ class LiteLLMProvider(LLMProvider):
         
         if tools:
             kwargs["tools"] = tools
-            kwargs["tool_choice"] = "auto"
+            kwargs["tool_choice"] = tool_choice or "auto"
         
         try:
             if on_text_delta:
@@ -300,9 +301,11 @@ class LiteLLMProvider(LLMProvider):
                     args = json_repair.loads(args)
                 
                 tool_calls.append(ToolCallRequest(
-                    id=_short_tool_id(),
+                    id=getattr(tc, "id", None) or _short_tool_id(),
                     name=tc.function.name,
                     arguments=args,
+                    provider_specific_fields=getattr(tc, "provider_specific_fields", None),
+                    function_provider_specific_fields=getattr(tc.function, "provider_specific_fields", None),
                 ))
         
         usage = {}

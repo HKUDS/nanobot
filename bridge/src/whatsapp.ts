@@ -9,9 +9,14 @@ import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  downloadMediaMessage,
+  extractMessageContent as baileysExtractMessageContent,
 } from '@whiskeysockets/baileys';
 
 import { Boom } from '@hapi/boom';
+import { randomBytes } from 'crypto';
+import { mkdir, writeFile } from 'fs/promises';
+import { join } from 'path';
 import qrcode from 'qrcode-terminal';
 import pino from 'pino';
 
@@ -24,6 +29,7 @@ export interface InboundMessage {
   content: string;
   timestamp: number;
   isGroup: boolean;
+  media?: string[];
 }
 
 export interface WhatsAppClientOptions {
@@ -120,8 +126,33 @@ export class WhatsAppClient {
         // Skip status updates
         if (msg.key.remoteJid === 'status@broadcast') continue;
 
-        const content = this.extractMessageContent(msg);
-        if (!content) continue;
+        const unwrapped = baileysExtractMessageContent(msg.message);
+        if (!unwrapped) continue;
+
+        const content = this.getTextContent(unwrapped);
+        let fallbackContent: string | null = null;
+        const mediaPaths: string[] = [];
+
+        if (unwrapped.imageMessage) {
+          fallbackContent = '[Image]';
+          const path = await this.downloadMedia(msg, unwrapped.imageMessage.mimetype ?? undefined);
+          if (path) mediaPaths.push(path);
+        } else if (unwrapped.documentMessage) {
+          fallbackContent = '[Document]';
+          const path = await this.downloadMedia(
+            msg,
+            unwrapped.documentMessage.mimetype ?? undefined,
+            unwrapped.documentMessage.fileName ?? undefined,
+          );
+          if (path) mediaPaths.push(path);
+        } else if (unwrapped.videoMessage) {
+          fallbackContent = '[Video]';
+          const path = await this.downloadMedia(msg, unwrapped.videoMessage.mimetype ?? undefined);
+          if (path) mediaPaths.push(path);
+        }
+
+        const finalContent = content || (mediaPaths.length === 0 ? fallbackContent : '') || '';
+        if (!finalContent && mediaPaths.length === 0) continue;
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
 
@@ -129,9 +160,10 @@ export class WhatsAppClient {
           id: msg.key.id || '',
           sender: msg.key.remoteJid || '',
           pn: msg.key.remoteJidAlt || '',
-          content,
+          content: finalContent,
           timestamp: msg.messageTimestamp as number,
           isGroup,
+          ...(mediaPaths.length > 0 ? { media: mediaPaths } : {}),
         });
       }
     });
@@ -178,38 +210,57 @@ export class WhatsAppClient {
     }
   }
 
-  private extractMessageContent(msg: any): string | null {
-    const message = msg.message;
+  private async downloadMedia(msg: any, mimetype?: string, fileName?: string): Promise<string | null> {
+    try {
+      const mediaDir = join(this.options.authDir, '..', 'media');
+      await mkdir(mediaDir, { recursive: true });
+
+      const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer;
+
+      let outFilename: string;
+      if (fileName) {
+        const prefix = `wa_${Date.now()}_${randomBytes(4).toString('hex')}_`;
+        outFilename = prefix + fileName;
+      } else {
+        const mime = mimetype || 'application/octet-stream';
+        const ext = '.' + (mime.split('/').pop()?.split(';')[0] || 'bin');
+        outFilename = `wa_${Date.now()}_${randomBytes(4).toString('hex')}${ext}`;
+      }
+
+      const filepath = join(mediaDir, outFilename);
+      await writeFile(filepath, buffer);
+      return filepath;
+    } catch (error) {
+      console.error('Failed to download media:', error);
+      return null;
+    }
+  }
+
+  private getTextContent(message: any): string | null {
     if (!message) return null;
 
-    // Text message
     if (message.conversation) {
       return message.conversation;
     }
 
-    // Extended text (reply, link preview)
     if (message.extendedTextMessage?.text) {
       return message.extendedTextMessage.text;
     }
 
-    // Image with caption
-    if (message.imageMessage?.caption) {
-      return `[Image] ${message.imageMessage.caption}`;
+    if (message.imageMessage) {
+      return message.imageMessage.caption || '';
     }
 
-    // Video with caption
-    if (message.videoMessage?.caption) {
-      return `[Video] ${message.videoMessage.caption}`;
+    if (message.videoMessage) {
+      return message.videoMessage.caption || '';
     }
 
-    // Document with caption
-    if (message.documentMessage?.caption) {
-      return `[Document] ${message.documentMessage.caption}`;
+    if (message.documentMessage) {
+      return message.documentMessage.caption || '';
     }
 
-    // Voice/Audio message
     if (message.audioMessage) {
-      return `[Voice Message]`;
+      return '[Voice Message]';
     }
 
     return null;

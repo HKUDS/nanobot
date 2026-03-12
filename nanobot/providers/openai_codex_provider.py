@@ -33,6 +33,7 @@ class OpenAICodexProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
         on_text_delta=None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         model = model or self.default_model
         system_prompt, input_items = _convert_messages(messages)
@@ -49,9 +50,12 @@ class OpenAICodexProvider(LLMProvider):
             "text": {"verbosity": "medium"},
             "include": ["reasoning.encrypted_content"],
             "prompt_cache_key": _prompt_cache_key(messages),
-            "tool_choice": "auto",
+            "tool_choice": tool_choice or "auto",
             "parallel_tool_calls": True,
         }
+
+        if reasoning_effort:
+            body["reasoning"] = {"effort": reasoning_effort}
 
         if tools:
             body["tools"] = _convert_tools(tools)

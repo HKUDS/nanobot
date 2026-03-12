@@ -35,6 +35,7 @@ class EmailChannel(BaseChannel):
     """
 
     name = "email"
+    display_name = "Email"
     _IMAP_MONTHS = (
         "Jan",
         "Feb",

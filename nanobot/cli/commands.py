@@ -148,6 +148,13 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 
+def get_workspace_path(workspace: str | None = None) -> Path:
+    """Resolve the workspace path via the shared helper at call time."""
+    from nanobot.utils.helpers import get_workspace_path as _get_workspace_path
+
+    return _get_workspace_path(workspace)
+
+
 @app.callback()
 def main(
     version: bool = typer.Option(
@@ -168,7 +175,6 @@ def onboard():
     """Initialize nanobot configuration and workspace."""
     from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
-    from nanobot.utils.helpers import get_workspace_path
     
     config_path = get_config_path()
     
@@ -182,8 +188,13 @@ def onboard():
             console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
         else:
             config = load_config()
+            migrated_legacy_memory_window = (
+                config.agents.defaults.should_warn_deprecated_memory_window
+            )
             save_config(config)
             console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
+            if migrated_legacy_memory_window:
+                console.print("  [dim]Migrated legacy memoryWindow to contextWindowTokens[/dim]")
     else:
         save_config(Config())
         console.print(f"[green]✓[/green] Created config at {config_path}")
@@ -210,8 +221,10 @@ def onboard():
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
+    from nanobot.providers.base import GenerationSettings
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+    from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
     from nanobot.providers.custom_provider import CustomProvider
 
     model = config.agents.defaults.model
@@ -225,26 +238,45 @@ def _make_provider(config: Config):
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     if provider_name == "custom":
         upstream_model = model.split("/", 1)[1] if model.startswith("custom/") else model
-        return CustomProvider(
+        provider = CustomProvider(
             api_key=p.api_key if p else "no-key",
             api_base=config.get_api_base(model) or "http://localhost:8000/v1",
             default_model=upstream_model,
         )
+    elif provider_name == "azure_openai":
+        if not p or not p.api_key or not p.api_base:
+            console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
+            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
+            console.print("Use the model field to specify the deployment name.")
+            raise typer.Exit(1)
+        provider = AzureOpenAIProvider(
+            api_key=p.api_key,
+            api_base=p.api_base,
+            default_model=model,
+        )
+    else:
+        from nanobot.providers.registry import find_by_name
+        spec = find_by_name(provider_name)
+        if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and (spec.is_oauth or spec.is_local)):
+            console.print("[red]Error: No API key configured.[/red]")
+            console.print("Set one in ~/.nanobot/config.json under providers section")
+            raise typer.Exit(1)
 
-    from nanobot.providers.registry import find_by_name
-    spec = find_by_name(provider_name)
-    if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
-        console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers section")
-        raise typer.Exit(1)
+        provider = LiteLLMProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            provider_name=provider_name,
+        )
 
-    return LiteLLMProvider(
-        api_key=p.api_key if p else None,
-        api_base=config.get_api_base(model),
-        default_model=model,
-        extra_headers=p.extra_headers if p else None,
-        provider_name=provider_name,
+    defaults = config.agents.defaults
+    provider.generation = GenerationSettings(
+        temperature=defaults.temperature,
+        max_tokens=defaults.max_tokens,
+        reasoning_effort=defaults.reasoning_effort,
     )
+    return provider
 
 
 def _bridge_socket_target(bridge_url: str) -> tuple[str, int] | None:
@@ -413,7 +445,9 @@ def gateway(
         memory_window=config.agents.defaults.memory_window,
         context_editing=config.agents.defaults.context_editing,
         reasoning_effort=config.agents.defaults.reasoning_effort,
+        context_window_tokens=config.agents.defaults.context_window_tokens,
         brave_api_key=config.tools.web.search.api_key or None,
+        web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -627,7 +661,9 @@ def agent(
         memory_window=config.agents.defaults.memory_window,
         context_editing=config.agents.defaults.context_editing,
         reasoning_effort=config.agents.defaults.reasoning_effort,
+        context_window_tokens=config.agents.defaults.context_window_tokens,
         brave_api_key=config.tools.web.search.api_key or None,
+        web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -1179,7 +1215,9 @@ def cron_run(
         memory_window=config.agents.defaults.memory_window,
         context_editing=config.agents.defaults.context_editing,
         reasoning_effort=config.agents.defaults.reasoning_effort,
+        context_window_tokens=config.agents.defaults.context_window_tokens,
         brave_api_key=config.tools.web.search.api_key or None,
+        web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,

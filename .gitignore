@@ -1,3 +1,4 @@
+.worktrees/
 .assets
 .env
 *.pyc
@@ -19,4 +20,5 @@ __pycache__/
 poetry.lock
 .pytest_cache/
 botpy.log
-tests/
+nano.*.save
+

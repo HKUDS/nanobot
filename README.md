@@ -412,6 +412,9 @@ nanobot gateway
 
 When `channels.whatsapp.bridgeUrl` points to `localhost` (default), `nanobot gateway` now auto-starts the bundled WhatsApp bridge for you. Run `nanobot channels login` only when you need to scan a fresh QR code or relink the device.
 
+> If you manually upgrade an existing installation and want a clean bridge reinstall, run:
+> `rm -rf ~/.nanobot/bridge && nanobot channels login`
+
 </details>
 
 <details>

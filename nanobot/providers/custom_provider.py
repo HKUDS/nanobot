@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any
 
 import httpx
@@ -17,11 +18,16 @@ class CustomProvider(LLMProvider):
     def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1", default_model: str = "default"):
         super().__init__(api_key, api_base)
         self.default_model = default_model
-        self._client = AsyncOpenAI(api_key=api_key, base_url=api_base)
+        self._client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=api_base,
+            default_headers={"x-session-affinity": uuid.uuid4().hex},
+        )
 
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
                    model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
-                   reasoning_effort: str | None = None, on_text_delta=None) -> LLMResponse:
+                   reasoning_effort: str | None = None, on_text_delta=None,
+                   tool_choice: str | dict[str, Any] | None = None) -> LLMResponse:
         upstream_model = model or self.default_model
         if isinstance(upstream_model, str) and upstream_model.startswith("custom/"):
             upstream_model = upstream_model.split("/", 1)[1]
@@ -34,7 +40,7 @@ class CustomProvider(LLMProvider):
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
         if tools:
-            kwargs.update(tools=tools, tool_choice="auto")
+            kwargs.update(tools=tools, tool_choice=tool_choice or "auto")
         try:
             if on_text_delta:
                 return await self._stream_via_sdk(kwargs, on_text_delta)
