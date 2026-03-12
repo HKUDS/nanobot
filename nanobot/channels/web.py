@@ -52,14 +52,38 @@ class WebChannel(BaseChannel):
     # BaseChannel interface
     # ------------------------------------------------------------------
 
+    @staticmethod
+    @web.middleware
+    async def _cors_middleware(request: web.Request, handler) -> web.StreamResponse:
+        """Add permissive CORS headers to every response."""
+        if request.method == "OPTIONS":
+            return web.Response(headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            })
+        response = await handler(request)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        return response
+
     async def start(self) -> None:
         self._running = True
-        self._app = web.Application()
+        self._app = web.Application(middlewares=[self._cors_middleware])
         self._app.router.add_get("/", self._handle_index)
         self._app.router.add_get("/{filename}", self._handle_static)
         self._app.router.add_post("/api/chat", self._handle_chat)
         self._app.router.add_post("/api/stop", self._handle_stop)
         self._app.router.add_get("/api/health", self._handle_health)
+        self._app.router.add_route("OPTIONS", "/{path_info:.*}", self._handle_options)
+
+    async def _handle_options(self, request: web.Request) -> web.Response:
+        return web.Response(headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        })
 
         self._runner = web.AppRunner(self._app, access_log=None)
         await self._runner.setup()

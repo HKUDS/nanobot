@@ -684,4 +684,9 @@ input.focus();
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
+  navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data && e.data.type === 'AUTH_REDIRECT') {
+      window.location.reload();
+    }
+  });
 }
