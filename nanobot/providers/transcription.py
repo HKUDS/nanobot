@@ -40,8 +40,8 @@ class GroqTranscriptionProvider:
         try:
             async with httpx.AsyncClient() as client:
                 with open(path, "rb") as f:
-                    files = {
-                        "file": (path.name, f),
+                    files: dict[str, tuple[str | None, bytes | str]] = {
+                        "file": (path.name, f.read()),
                         "model": (None, "whisper-large-v3"),
                     }
                     headers = {
@@ -49,12 +49,15 @@ class GroqTranscriptionProvider:
                     }
 
                     response = await client.post(
-                    self.api_url, headers=headers, files=files, timeout=60.0  # type: ignore[arg-type]
-                )
+                        self.api_url,
+                        headers=headers,
+                        files=files,
+                        timeout=60.0,  # type: ignore[arg-type]
+                    )
 
                 response.raise_for_status()
                 data = response.json()
                 return str(data.get("text", ""))
-        except Exception as e:
+        except Exception as e:  # crash-barrier: third-party HTTP transcription
             logger.error("Groq transcription error: {}", e)
             return ""

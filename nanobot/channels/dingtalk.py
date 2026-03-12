@@ -11,6 +11,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.retry import connection_loop, retry_send
 from nanobot.config.schema import DingTalkConfig
 
 try:
@@ -78,7 +79,7 @@ class NanobotDingTalkHandler(CallbackHandler):
 
             return AckMessage.STATUS_OK, "OK"
 
-        except Exception as e:
+        except Exception as e:  # crash-barrier: DingTalk API
             logger.error("Error processing DingTalk message: {}", e)
             # Return OK to avoid retry loop from DingTalk server
             return AckMessage.STATUS_OK, "Error"
@@ -138,16 +139,12 @@ class DingTalkChannel(BaseChannel):
             logger.info("DingTalk bot started with Stream Mode")
 
             # Reconnect loop: restart stream if SDK exits or crashes
-            while self._running:
-                try:
-                    await self._client.start()
-                except Exception as e:
-                    logger.warning("DingTalk stream error: {}", e)
-                if self._running:
-                    logger.info("Reconnecting DingTalk stream in 5 seconds...")
-                    await asyncio.sleep(5)
+            async def _connect() -> None:
+                await self._client.start()
 
-        except Exception as e:
+            await connection_loop("DingTalk", _connect, running_flag=lambda: self._running)
+
+        except Exception as e:  # crash-barrier: DingTalk API
             logger.exception("Failed to start DingTalk channel: {}", e)
 
     async def stop(self) -> None:
@@ -185,7 +182,7 @@ class DingTalkChannel(BaseChannel):
             # Expire 60s early to be safe
             self._token_expiry = time.time() + int(res_data.get("expireIn", 7200)) - 60
             return self._access_token
-        except Exception as e:
+        except Exception as e:  # crash-barrier: DingTalk API
             logger.error("Failed to get DingTalk access token: {}", e)
             return None
 
@@ -218,14 +215,13 @@ class DingTalkChannel(BaseChannel):
             logger.warning("DingTalk HTTP client not initialized, cannot send")
             return
 
-        try:
-            resp = await self._http.post(url, json=data, headers=headers)
+        async def _do_send() -> None:
+            resp = await self._http.post(url, json=data, headers=headers)  # type: ignore[union-attr]
             if resp.status_code != 200:
-                logger.error("DingTalk send failed: {}", resp.text)
-            else:
-                logger.debug("DingTalk message sent to {}", msg.chat_id)
-        except Exception as e:
-            logger.error("Error sending DingTalk message: {}", e)
+                raise RuntimeError(f"DingTalk send failed: {resp.text}")
+            logger.debug("DingTalk message sent to {}", msg.chat_id)
+
+        await retry_send(_do_send, channel_name=self.name, health=self._health)
 
     async def _on_message(self, content: str, sender_id: str, sender_name: str) -> None:
         """Handle incoming message (called by NanobotDingTalkHandler).
@@ -244,5 +240,5 @@ class DingTalkChannel(BaseChannel):
                     "platform": "dingtalk",
                 },
             )
-        except Exception as e:
+        except Exception as e:  # crash-barrier: DingTalk API
             logger.error("Error publishing DingTalk message: {}", e)

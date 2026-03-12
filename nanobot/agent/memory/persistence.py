@@ -41,7 +41,7 @@ class MemoryPersistence:
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, (dict, list)):
                 return data
-        except Exception:
+        except Exception:  # crash-barrier: varied file I/O + encoding
             return None
         return None
 

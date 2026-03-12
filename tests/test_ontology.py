@@ -43,8 +43,19 @@ class TestEntityType:
         assert EntityType.parent_type(EntityType.SESSION) == EntityType.SESSION
 
     def test_agent_native_types_exist(self) -> None:
-        for name in ("AGENT", "USER", "TASK", "ACTION", "OBSERVATION",
-                     "MEMORY", "SESSION", "MESSAGE", "DOCUMENT", "TOOL", "MODEL"):
+        for name in (
+            "AGENT",
+            "USER",
+            "TASK",
+            "ACTION",
+            "OBSERVATION",
+            "MEMORY",
+            "SESSION",
+            "MESSAGE",
+            "DOCUMENT",
+            "TOOL",
+            "MODEL",
+        ):
             assert hasattr(EntityType, name)
             assert EntityType(name.lower()) is getattr(EntityType, name)
 
@@ -74,9 +85,19 @@ class TestRelationType:
             assert member.value == member.value.upper()
 
     def test_agent_operational_relations_exist(self) -> None:
-        for name in ("PERFORMS", "EXECUTES", "CALLS", "PRODUCES",
-                     "OBSERVES", "STORES", "RECALLS", "REFERENCES",
-                     "DERIVED_FROM", "SAME_AS", "PART_OF"):
+        for name in (
+            "PERFORMS",
+            "EXECUTES",
+            "CALLS",
+            "PRODUCES",
+            "OBSERVES",
+            "STORES",
+            "RECALLS",
+            "REFERENCES",
+            "DERIVED_FROM",
+            "SAME_AS",
+            "PART_OF",
+        ):
             assert hasattr(RelationType, name)
 
     def test_agent_relation_types_constant(self) -> None:
@@ -319,36 +340,66 @@ class TestResolveAlias:
 class TestRefineTypeFromPredicate:
     def test_refines_unknown_subject(self) -> None:
         # WORKS_ON subject → PERSON
-        assert refine_type_from_predicate(
-            EntityType.UNKNOWN, RelationType.WORKS_ON, is_subject=True,
-        ) == EntityType.PERSON
+        assert (
+            refine_type_from_predicate(
+                EntityType.UNKNOWN,
+                RelationType.WORKS_ON,
+                is_subject=True,
+            )
+            == EntityType.PERSON
+        )
 
     def test_refines_unknown_object(self) -> None:
         # LOCATED_IN object → LOCATION
-        assert refine_type_from_predicate(
-            EntityType.UNKNOWN, RelationType.LOCATED_IN, is_subject=False,
-        ) == EntityType.LOCATION
+        assert (
+            refine_type_from_predicate(
+                EntityType.UNKNOWN,
+                RelationType.LOCATED_IN,
+                is_subject=False,
+            )
+            == EntityType.LOCATION
+        )
 
     def test_preserves_known_type(self) -> None:
         # Already classified — should not overwrite
-        assert refine_type_from_predicate(
-            EntityType.DATABASE, RelationType.WORKS_ON, is_subject=True,
-        ) == EntityType.DATABASE
+        assert (
+            refine_type_from_predicate(
+                EntityType.DATABASE,
+                RelationType.WORKS_ON,
+                is_subject=True,
+            )
+            == EntityType.DATABASE
+        )
 
     def test_no_hint_stays_unknown(self) -> None:
-        assert refine_type_from_predicate(
-            EntityType.UNKNOWN, RelationType.RELATED_TO, is_subject=True,
-        ) == EntityType.UNKNOWN
+        assert (
+            refine_type_from_predicate(
+                EntityType.UNKNOWN,
+                RelationType.RELATED_TO,
+                is_subject=True,
+            )
+            == EntityType.UNKNOWN
+        )
 
     def test_agent_predicate_hints(self) -> None:
         # PERFORMS subject → AGENT
-        assert refine_type_from_predicate(
-            EntityType.UNKNOWN, RelationType.PERFORMS, is_subject=True,
-        ) == EntityType.AGENT
+        assert (
+            refine_type_from_predicate(
+                EntityType.UNKNOWN,
+                RelationType.PERFORMS,
+                is_subject=True,
+            )
+            == EntityType.AGENT
+        )
         # STORES object → MEMORY
-        assert refine_type_from_predicate(
-            EntityType.UNKNOWN, RelationType.STORES, is_subject=False,
-        ) == EntityType.MEMORY
+        assert (
+            refine_type_from_predicate(
+                EntityType.UNKNOWN,
+                RelationType.STORES,
+                is_subject=False,
+            )
+            == EntityType.MEMORY
+        )
 
 
 class TestValidateTripleTypes:
@@ -356,14 +407,18 @@ class TestValidateTripleTypes:
 
     def test_valid_works_on(self) -> None:
         result = validate_triple_types(
-            RelationType.WORKS_ON, EntityType.PERSON, EntityType.PROJECT,
+            RelationType.WORKS_ON,
+            EntityType.PERSON,
+            EntityType.PROJECT,
         )
         assert result.valid is True
 
     def test_invalid_works_on_subject(self) -> None:
         # DATABASE cannot be subject of WORKS_ON
         result = validate_triple_types(
-            RelationType.WORKS_ON, EntityType.DATABASE, EntityType.PROJECT,
+            RelationType.WORKS_ON,
+            EntityType.DATABASE,
+            EntityType.PROJECT,
         )
         assert result.valid is False
         assert "subject" in result.reason
@@ -371,7 +426,9 @@ class TestValidateTripleTypes:
     def test_invalid_works_on_object(self) -> None:
         # PERSON cannot be object of WORKS_ON
         result = validate_triple_types(
-            RelationType.WORKS_ON, EntityType.PERSON, EntityType.PERSON,
+            RelationType.WORKS_ON,
+            EntityType.PERSON,
+            EntityType.PERSON,
         )
         assert result.valid is False
         assert "object" in result.reason
@@ -379,32 +436,42 @@ class TestValidateTripleTypes:
     def test_unconstrained_predicate(self) -> None:
         # RELATED_TO has no constraints — always valid
         result = validate_triple_types(
-            RelationType.RELATED_TO, EntityType.DATABASE, EntityType.PERSON,
+            RelationType.RELATED_TO,
+            EntityType.DATABASE,
+            EntityType.PERSON,
         )
         assert result.valid is True
 
     def test_agent_relation_valid(self) -> None:
         result = validate_triple_types(
-            RelationType.PERFORMS, EntityType.AGENT, EntityType.TASK,
+            RelationType.PERFORMS,
+            EntityType.AGENT,
+            EntityType.TASK,
         )
         assert result.valid is True
 
     def test_agent_relation_invalid(self) -> None:
         result = validate_triple_types(
-            RelationType.PERFORMS, EntityType.DATABASE, EntityType.TASK,
+            RelationType.PERFORMS,
+            EntityType.DATABASE,
+            EntityType.TASK,
         )
         assert result.valid is False
 
     def test_same_as_always_valid(self) -> None:
         # SAME_AS is symmetric and unconstrained by entity type
         result = validate_triple_types(
-            RelationType.SAME_AS, EntityType.DATABASE, EntityType.TECHNOLOGY,
+            RelationType.SAME_AS,
+            EntityType.DATABASE,
+            EntityType.TECHNOLOGY,
         )
         assert result.valid is True
 
     def test_validation_result_fields(self) -> None:
         result = validate_triple_types(
-            RelationType.USES, EntityType.AGENT, EntityType.TOOL,
+            RelationType.USES,
+            EntityType.AGENT,
+            EntityType.TOOL,
         )
         assert isinstance(result, TripleValidation)
         assert result.predicate == RelationType.USES
@@ -414,7 +481,9 @@ class TestValidateTripleTypes:
     def test_unknown_type_passes_when_in_allowed_set(self) -> None:
         # UNKNOWN is explicitly allowed in some subject/object sets
         result = validate_triple_types(
-            RelationType.WORKS_ON, EntityType.PERSON, EntityType.UNKNOWN,
+            RelationType.WORKS_ON,
+            EntityType.PERSON,
+            EntityType.UNKNOWN,
         )
         assert result.valid is True
 

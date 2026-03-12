@@ -33,9 +33,9 @@ make check                     # Full: lint + typecheck + test
 
 ```
 nanobot/
-├── agent/               # Core: loop.py (main loop), context.py (prompts), tools/, memory/
+├── agent/               # Core: loop.py, streaming.py, verifier.py, consolidation.py, tools/, memory/
 ├── config/              # Pydantic config models + loader
-├── channels/            # Chat platforms (Telegram, Discord, Slack, WhatsApp, ...)
+├── channels/            # Chat platforms (base.py, retry.py, manager.py + 9 adapters)
 ├── providers/           # LLM providers (litellm → 100+ models, OpenAI Codex, custom)
 ├── bus/                 # Async message bus (channel↔agent decoupling)
 ├── session/             # Conversation session management
@@ -53,6 +53,7 @@ nanobot/
 - `__all__` in every `__init__.py`
 - Tool results: `ToolResult.ok(...)` / `ToolResult.fail(...)` — never bare strings
 - Errors: typed exceptions from `nanobot/errors.py` — never bare `Exception`
+- `except Exception`: narrow to specific types or annotate with `# crash-barrier: <reason>`
 - Imports: stdlib → third-party → local (ruff `I` rules)
 
 ## Testing
@@ -89,3 +90,13 @@ nanobot/
 - Shell commands: `_guard_command()` deny patterns in `nanobot/agent/tools/shell.py`
 - Filesystem: path traversal protection against workspace root
 - Network: localhost-only bindings for internal services
+
+## Architecture & Refactoring
+
+- Architecture decisions: `docs/adr/` (ADR-001 through ADR-005)
+- Module ownership and import rules: `docs/architecture.md`
+- Refactoring guidelines: `docs/refactoring-principles.md`
+- Reusable prompt files: `.github/prompts/`
+- Key rule: **refactor by seams, not by folders** — extract sub-services before moving directories
+- Key rule: **one PR, one change** — never combine unrelated refactors
+- Always run `make lint && make typecheck` after every edit

@@ -51,7 +51,7 @@ class ChannelManager:
             }
             with open(path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-        except Exception as e:
+        except OSError as e:
             logger.error("Failed writing outbound dead letter: {}", e)
 
     def _init_channels(self) -> None:
@@ -158,7 +158,7 @@ class ChannelManager:
         """Start a channel and log any exceptions."""
         try:
             await channel.start()
-        except Exception as e:
+        except Exception as e:  # crash-barrier: channel startup varies
             logger.error("Failed to start channel {}: {}", name, e)
 
     async def start_all(self) -> None:
@@ -175,7 +175,7 @@ class ChannelManager:
                     logger.info(
                         "Dead-letter replay: {} sent, {} still failed (of {})", ok, fail, total
                     )
-            except Exception:
+            except Exception:  # crash-barrier: replay may hit varied channel errors
                 logger.exception("Dead-letter auto-replay failed")
 
         # Start outbound dispatcher
@@ -207,7 +207,7 @@ class ChannelManager:
             try:
                 await channel.stop()
                 logger.info("Stopped {} channel", name)
-            except Exception as e:
+            except Exception as e:  # crash-barrier: channel stop varies
                 logger.error("Error stopping {}: {}", name, e)
 
     async def _dispatch_outbound(self) -> None:
@@ -236,9 +236,9 @@ class ChannelManager:
                             await channel.send(msg)
                             sent = True
                             break
-                        except Exception as e:
+                        except Exception as e:  # crash-barrier: channel send varies
                             last_error = e
-                            logger.error(
+                            logger.exception(
                                 "Error sending to {} (attempt {}/3): {}", msg.channel, attempt, e
                             )
                             if attempt < 3:
@@ -256,7 +256,7 @@ class ChannelManager:
                 continue
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except Exception as e:  # crash-barrier: keep dispatcher alive
                 # Keep dispatcher alive even on unexpected errors.
                 logger.exception("Outbound dispatcher error: {}", e)
                 continue
@@ -336,7 +336,7 @@ class ChannelManager:
                 await channel.send(msg)
                 succeeded += 1
                 logger.info("Replayed message to {}:{}", channel_name, msg.chat_id)
-            except Exception as exc:
+            except Exception as exc:  # crash-barrier: channel send varies
                 logger.error("Replay failed for {}:{}: {}", channel_name, msg.chat_id, exc)
                 failed_entries.append(entry)
 

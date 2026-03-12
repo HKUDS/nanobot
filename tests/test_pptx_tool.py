@@ -310,14 +310,28 @@ class TestAnalyzePptxExecute:
         out_json = tmp_path / "out.json"
 
         mock_slides = [
-            {"slide_number": 1, "title": "Intro", "text_blocks": ["Hello"],
-             "tables": [], "notes": "", "shape_types": []},
-            {"slide_number": 2, "title": "Budget", "text_blocks": ["$1M"],
-             "tables": [], "notes": "CFO approved", "shape_types": []},
+            {
+                "slide_number": 1,
+                "title": "Intro",
+                "text_blocks": ["Hello"],
+                "tables": [],
+                "notes": "",
+                "shape_types": [],
+            },
+            {
+                "slide_number": 2,
+                "title": "Budget",
+                "text_blocks": ["$1M"],
+                "tables": [],
+                "notes": "CFO approved",
+                "shape_types": [],
+            },
         ]
         mock_slide_analysis = {
-            "title": "Intro", "summary": "Introduction slide",
-            "key_points": ["Overview"], "risks": [],
+            "title": "Intro",
+            "summary": "Introduction slide",
+            "key_points": ["Overview"],
+            "risks": [],
         }
         mock_synthesis = {
             "executive_summary": "A 2-slide deck about budget.",
@@ -333,17 +347,19 @@ class TestAnalyzePptxExecute:
             patch.object(pptx_mod, "_extract_slides_data", return_value=mock_slides),
             patch.object(pptx_mod, "_render_slides", new_callable=AsyncMock, return_value=None),
             patch.object(
-                pptx_mod, "_analyze_slide", new_callable=AsyncMock,
+                pptx_mod,
+                "_analyze_slide",
+                new_callable=AsyncMock,
                 return_value=mock_slide_analysis,
             ),
             patch.object(
-                pptx_mod, "_synthesize_deck", new_callable=AsyncMock,
+                pptx_mod,
+                "_synthesize_deck",
+                new_callable=AsyncMock,
                 return_value=mock_synthesis,
             ),
         ):
-            result = await analyze_tool.execute(
-                path=str(f), output_path=str(out_json)
-            )
+            result = await analyze_tool.execute(path=str(f), output_path=str(out_json))
 
         assert result.success
         assert "text-only" in result.output
@@ -370,35 +386,56 @@ class TestAnalyzePptxExecute:
             imgs.append(img)
 
         mock_slides = [
-            {"slide_number": 1, "title": "Chart", "text_blocks": [],
-             "tables": [], "notes": "", "shape_types": []},
-            {"slide_number": 2, "title": "Summary", "text_blocks": [],
-             "tables": [], "notes": "", "shape_types": []},
+            {
+                "slide_number": 1,
+                "title": "Chart",
+                "text_blocks": [],
+                "tables": [],
+                "notes": "",
+                "shape_types": [],
+            },
+            {
+                "slide_number": 2,
+                "title": "Summary",
+                "text_blocks": [],
+                "tables": [],
+                "notes": "",
+                "shape_types": [],
+            },
         ]
         mock_analysis = {"title": "Chart", "summary": "A chart slide"}
         mock_synthesis = {
-            "executive_summary": "Visual deck.", "risks": [], "decisions": [],
-            "action_items": [], "deadlines": [], "unanswered_questions": [],
+            "executive_summary": "Visual deck.",
+            "risks": [],
+            "decisions": [],
+            "action_items": [],
+            "deadlines": [],
+            "unanswered_questions": [],
             "themes": [],
         }
 
         with (
             patch.object(pptx_mod, "_extract_slides_data", return_value=mock_slides),
             patch.object(
-                pptx_mod, "_render_slides", new_callable=AsyncMock, return_value=imgs,
+                pptx_mod,
+                "_render_slides",
+                new_callable=AsyncMock,
+                return_value=imgs,
             ),
             patch.object(
-                pptx_mod, "_analyze_slide", new_callable=AsyncMock,
+                pptx_mod,
+                "_analyze_slide",
+                new_callable=AsyncMock,
                 return_value=mock_analysis,
             ),
             patch.object(
-                pptx_mod, "_synthesize_deck", new_callable=AsyncMock,
+                pptx_mod,
+                "_synthesize_deck",
+                new_callable=AsyncMock,
                 return_value=mock_synthesis,
             ),
         ):
-            result = await analyze_tool.execute(
-                path=str(f), output_path=str(out_json)
-            )
+            result = await analyze_tool.execute(path=str(f), output_path=str(out_json))
 
         assert result.success
         assert "vision" in result.output.lower()
@@ -411,15 +448,23 @@ class TestAnalyzePptxExecute:
         f.write_bytes(b"PK\x03\x04")
 
         mock_slides = [
-            {"slide_number": 1, "title": "X", "text_blocks": ["Y"],
-             "tables": [], "notes": "", "shape_types": []},
+            {
+                "slide_number": 1,
+                "title": "X",
+                "text_blocks": ["Y"],
+                "tables": [],
+                "notes": "",
+                "shape_types": [],
+            },
         ]
 
         with (
             patch.object(pptx_mod, "_extract_slides_data", return_value=mock_slides),
             patch.object(pptx_mod, "_render_slides", new_callable=AsyncMock, return_value=None),
             patch.object(
-                pptx_mod, "_analyze_slide", new_callable=AsyncMock,
+                pptx_mod,
+                "_analyze_slide",
+                new_callable=AsyncMock,
                 side_effect=Exception("API key invalid"),
             ),
         ):

@@ -81,7 +81,7 @@ class DelegateTool(Tool):
             return ToolResult.ok(result)
         except _CycleError as exc:
             return ToolResult.fail(str(exc), error_type="cycle")
-        except Exception as exc:
+        except Exception as exc:  # crash-barrier: delegation dispatch callback
             return ToolResult.fail(f"Delegation failed: {exc}", error_type="delegation")
 
 
@@ -146,9 +146,7 @@ class DelegateParallelTool(Tool):
             return ToolResult.fail("Delegation not available", error_type="config")
 
         if len(subtasks) > 5:
-            return ToolResult.fail(
-                "Maximum 5 parallel subtasks allowed", error_type="validation"
-            )
+            return ToolResult.fail("Maximum 5 parallel subtasks allowed", error_type="validation")
         if not subtasks:
             return ToolResult.fail("At least one subtask required", error_type="validation")
 

@@ -13,6 +13,7 @@ from slackify_markdown import slackify_markdown
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.retry import connection_loop, retry_send
 from nanobot.config.schema import SlackConfig
 
 
@@ -31,11 +32,9 @@ class SlackChannel(BaseChannel):
     async def start(self) -> None:
         """Start the Slack Socket Mode client."""
         if not self.config.bot_token or not self.config.app_token:
-            logger.error("Slack bot/app token not configured")
-            return
+            raise ValueError("Slack bot_token and app_token must be configured")
         if self.config.mode != "socket":
-            logger.error("Unsupported Slack mode: {}", self.config.mode)
-            return
+            raise ValueError(f"Unsupported Slack mode: {self.config.mode}")
 
         self._running = True
 
@@ -52,14 +51,16 @@ class SlackChannel(BaseChannel):
             auth = await self._web_client.auth_test()
             self._bot_user_id = auth.get("user_id")
             logger.info("Slack bot connected as {}", self._bot_user_id)
-        except Exception as e:
+        except Exception as e:  # crash-barrier: Slack API
             logger.warning("Slack auth_test failed: {}", e)
 
-        logger.info("Starting Slack Socket Mode client...")
-        await self._socket_client.connect()
+        async def _connect() -> None:
+            logger.info("Starting Slack Socket Mode client...")
+            await self._socket_client.connect()  # type: ignore[union-attr]
+            while self._running:
+                await asyncio.sleep(1)
 
-        while self._running:
-            await asyncio.sleep(1)
+        await connection_loop("Slack", _connect, running_flag=lambda: self._running)
 
     async def stop(self) -> None:
         """Stop the Slack client."""
@@ -67,7 +68,7 @@ class SlackChannel(BaseChannel):
         if self._socket_client:
             try:
                 await self._socket_client.close()
-            except Exception as e:
+            except Exception as e:  # crash-barrier: Slack API
                 logger.warning("Slack socket close failed: {}", e)
             self._socket_client = None
 
@@ -76,7 +77,8 @@ class SlackChannel(BaseChannel):
         if not self._web_client:
             logger.warning("Slack client not running")
             return
-        try:
+
+        async def _do_send() -> None:
             slack_meta = msg.metadata.get("slack", {}) if msg.metadata else {}
             thread_ts = slack_meta.get("thread_ts")
             channel_type = slack_meta.get("channel_type")
@@ -85,7 +87,7 @@ class SlackChannel(BaseChannel):
             thread_ts_param = thread_ts if use_thread else None
 
             if msg.content:
-                await self._web_client.chat_postMessage(
+                await self._web_client.chat_postMessage(  # type: ignore[union-attr]
                     channel=msg.chat_id,
                     text=self._to_mrkdwn(msg.content),
                     thread_ts=thread_ts_param,
@@ -93,15 +95,15 @@ class SlackChannel(BaseChannel):
 
             for media_path in msg.media or []:
                 try:
-                    await self._web_client.files_upload_v2(
+                    await self._web_client.files_upload_v2(  # type: ignore[union-attr]
                         channel=msg.chat_id,
                         file=media_path,
                         thread_ts=thread_ts_param,
                     )
-                except Exception as e:
+                except Exception as e:  # crash-barrier: Slack API
                     logger.error("Failed to upload file {}: {}", media_path, e)
-        except Exception as e:
-            logger.error("Error sending Slack message: {}", e)
+
+        await retry_send(_do_send, channel_name=self.name, health=self._health)
 
     async def _on_socket_request(
         self,
@@ -172,7 +174,7 @@ class SlackChannel(BaseChannel):
                     name=self.config.react_emoji,
                     timestamp=event.get("ts") or "",
                 )
-        except Exception as e:
+        except Exception as e:  # crash-barrier: Slack API
             logger.debug("Slack reactions_add failed: {}", e)
 
         # Thread-scoped session key for channel/group messages
@@ -192,7 +194,7 @@ class SlackChannel(BaseChannel):
                 },
                 session_key=session_key,
             )
-        except Exception:
+        except Exception:  # crash-barrier: Slack API
             logger.exception("Error handling Slack message from {}", sender_id)
 
     def _is_allowed(self, sender_id: str, chat_id: str, channel_type: str) -> bool:

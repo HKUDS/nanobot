@@ -186,24 +186,21 @@ class TestRerankerRolloutGating:
         assert isinstance(store._reranker, CrossEncoderReranker)
 
     def test_env_override_reranker_mode(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setenv("NANOBOT_RERANKER_MODE", "shadow")
         from nanobot.agent.memory.store import MemoryStore
 
-        store = MemoryStore(tmp_path)
+        store = MemoryStore(tmp_path, rollout_overrides={"reranker_mode": "shadow"})
         assert store.rollout["reranker_mode"] == "shadow"
 
     def test_env_override_reranker_alpha(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setenv("NANOBOT_RERANKER_ALPHA", "0.8")
         from nanobot.agent.memory.store import MemoryStore
 
-        store = MemoryStore(tmp_path)
+        store = MemoryStore(tmp_path, rollout_overrides={"reranker_alpha": 0.8})
         assert store.rollout["reranker_alpha"] == 0.8
 
     def test_env_override_reranker_model(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setenv("NANOBOT_RERANKER_MODEL", "custom/model")
         from nanobot.agent.memory.store import MemoryStore
 
-        store = MemoryStore(tmp_path)
+        store = MemoryStore(tmp_path, rollout_overrides={"reranker_model": "custom/model"})
         assert store.rollout["reranker_model"] == "custom/model"
 
 

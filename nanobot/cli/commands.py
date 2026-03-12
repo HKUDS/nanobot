@@ -47,7 +47,7 @@ def _flush_pending_tty_input() -> None:
         fd = sys.stdin.fileno()
         if not os.isatty(fd):
             return
-    except Exception:
+    except Exception:  # crash-barrier: stdin may not be a tty
         return
 
     try:
@@ -55,7 +55,7 @@ def _flush_pending_tty_input() -> None:
 
         termios.tcflush(fd, termios.TCIFLUSH)
         return
-    except Exception:
+    except (OSError, ImportError, AttributeError):
         pass
 
     try:
@@ -65,7 +65,7 @@ def _flush_pending_tty_input() -> None:
                 break
             if not os.read(fd, 4096):
                 break
-    except Exception:
+    except OSError:
         return
 
 
@@ -77,7 +77,7 @@ def _restore_terminal() -> None:
         import termios
 
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
-    except Exception:
+    except (OSError, ImportError, AttributeError):
         pass
 
 
@@ -90,7 +90,7 @@ def _init_prompt_session() -> None:
         import termios
 
         _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
-    except Exception:
+    except (OSError, ImportError, AttributeError):
         pass
 
     history_file = Path.home() / ".nanobot" / "history" / "cli_history"
@@ -126,7 +126,7 @@ async def _drain_pending_tasks(timeout: float = 0.25) -> None:
         return
     try:
         await asyncio.wait(pending, timeout=timeout)
-    except Exception:
+    except Exception:  # crash-barrier: must not break shutdown
         return
 
 
@@ -142,9 +142,11 @@ async def _read_interactive_input_async() -> str:
         raise RuntimeError("Call _init_prompt_session() first")
     try:
         with patch_stdout():
-            return str(await _PROMPT_SESSION.prompt_async(
-                HTML("<b fg='ansiblue'>You:</b> "),
-            ))
+            return str(
+                await _PROMPT_SESSION.prompt_async(
+                    HTML("<b fg='ansiblue'>You:</b> "),
+                )
+            )
     except EOFError as exc:
         raise KeyboardInterrupt from exc
 
@@ -263,6 +265,43 @@ def _create_workspace_templates(workspace: Path):
     (workspace / "skills").mkdir(exist_ok=True)
 
 
+def _configure_log_sink(config: Config, log: Any) -> None:
+    """Apply structured logging settings from ``config.log``.
+
+    Adds a JSON file sink when ``config.log.json_file`` is set, and enables
+    loguru's ``serialize`` mode when ``config.log.json`` is ``True``.
+    """
+    from pathlib import Path
+
+    log_cfg = config.log
+    if log_cfg.json_file:
+        path = Path(log_cfg.json_file).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        log.add(
+            str(path),
+            level=log_cfg.level,
+            serialize=True,
+            rotation="10 MB",
+            retention="7 days",
+            enqueue=True,
+        )
+    if log_cfg.json_stdout:
+        # Replace default stderr sink with serialized (JSON) output
+        log.remove()
+        log.add(
+            _sys_stderr,
+            level=log_cfg.level,
+            serialize=True,
+        )
+
+
+def _sys_stderr(message: str) -> None:
+    """Write to stderr — needed as a callable sink for loguru."""
+    import sys
+
+    sys.stderr.write(message)
+
+
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.custom_provider import CustomProvider
@@ -300,17 +339,40 @@ def _make_provider(config: Config):
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=provider_name,
+        llm_timeout_s=config.llm.timeout_s,
+        llm_max_retries=config.llm.max_retries,
     )
 
 
 def _make_agent_config(config: Config) -> AgentConfig:
-    """Build an ``AgentConfig`` from the root ``Config``."""
+    """Build an ``AgentConfig`` from the root ``Config``.
+
+    Feature flags from ``config.features`` act as master kill-switches:
+    when a flag is ``False``, the corresponding ``AgentConfig`` field is
+    forced off regardless of the per-agent default.
+    """
     from nanobot.config.schema import AgentConfig
 
-    return AgentConfig.from_defaults(
-        config.agents.defaults,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-    )
+    overrides: dict[str, object] = {
+        "restrict_to_workspace": config.tools.restrict_to_workspace,
+    }
+
+    # Apply feature-flag overrides (only disable, never force-enable)
+    feat = config.features
+    if not feat.planning_enabled:
+        overrides["planning_enabled"] = False
+    if not feat.verification_enabled:
+        overrides["verification_mode"] = "off"
+    if not feat.delegation_enabled:
+        overrides["delegation_enabled"] = False
+    if not feat.memory_enabled:
+        overrides["memory_enabled"] = False
+    if not feat.skills_enabled:
+        overrides["skills_enabled"] = False
+    if not feat.streaming_enabled:
+        overrides["streaming_enabled"] = False
+
+    return AgentConfig.from_defaults(config.agents.defaults, **overrides)
 
 
 # ============================================================================
@@ -337,10 +399,19 @@ def gateway(
         import logging
 
         logging.basicConfig(level=logging.DEBUG)
+        from loguru import logger as _gw_logger
+
+        _gw_logger.enable("nanobot")
 
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
 
     config = load_config()
+
+    # Apply structured logging config
+    from loguru import logger as _gw_logger2
+
+    _configure_log_sink(config, _gw_logger2)
+
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
@@ -517,6 +588,9 @@ def agent(
     else:
         logger.disable("nanobot")
 
+    # Apply structured logging config from config.log
+    _configure_log_sink(config, logger)
+
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -538,7 +612,9 @@ def agent(
         # Animated spinner is safe to use with prompt_toolkit input handling
         return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
 
-    async def _cli_progress(content: str, *, tool_hint: bool = False, streaming: bool = False) -> None:
+    async def _cli_progress(
+        content: str, *, tool_hint: bool = False, streaming: bool = False
+    ) -> None:
         ch = agent_loop.channels_config
         if ch and tool_hint and not ch.send_tool_hints:
             return
@@ -904,7 +980,7 @@ def cron_list(
             try:
                 tz = ZoneInfo(job.schedule.tz) if job.schedule.tz else None
                 next_run = _dt.fromtimestamp(ts, tz).strftime("%Y-%m-%d %H:%M")
-            except Exception:
+            except (ValueError, OSError, TypeError):
                 next_run = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
 
         status = "[green]enabled[/green]" if job.enabled else "[dim]disabled[/dim]"
@@ -1146,7 +1222,7 @@ def routing_metrics_cmd():
 
     try:
         data = json.loads(metrics_path.read_text(encoding="utf-8"))
-    except Exception as exc:
+    except (json.JSONDecodeError, FileNotFoundError, UnicodeDecodeError) as exc:
         console.print(f"[red]Failed to read metrics:[/red] {exc}")
         raise typer.Exit(1)
 
@@ -1172,9 +1248,7 @@ def routing_metrics_cmd():
 
     table.add_row("classify_latency_avg_ms", f"{cls_sum / cls_count:.0f}" if cls_count else "—")
     table.add_row("classify_latency_max_ms", f"{cls_max:.0f}" if cls_max else "—")
-    table.add_row(
-        "delegation_latency_avg_ms", f"{del_sum / del_count:.0f}" if del_count else "—"
-    )
+    table.add_row("delegation_latency_avg_ms", f"{del_sum / del_count:.0f}" if del_count else "—")
     table.add_row("delegation_latency_max_ms", f"{del_max:.0f}" if del_max else "—")
 
     console.print(table)
@@ -1381,7 +1455,7 @@ def memory_metrics(
             raise typer.Exit(1)
         try:
             payload = json.loads(baseline_path.read_text(encoding="utf-8"))
-        except Exception as exc:
+        except (json.JSONDecodeError, FileNotFoundError, UnicodeDecodeError) as exc:
             console.print(f"[red]Failed to parse baseline file:[/red] {exc}")
             raise typer.Exit(1)
         baseline_metrics = payload.get("metrics", {}) if isinstance(payload, dict) else {}
@@ -1685,7 +1759,7 @@ def memory_eval(
 
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
+    except (json.JSONDecodeError, FileNotFoundError, UnicodeDecodeError) as exc:
         console.print(f"[red]Failed to parse benchmark file:[/red] {exc}")
         raise typer.Exit(1)
 
@@ -2090,7 +2164,7 @@ def _login_openai_codex() -> None:
         token = None
         try:
             token = get_token()
-        except Exception:
+        except Exception:  # crash-barrier: token errors must not prevent login flow
             pass
         if not (token and token.access):
             console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
@@ -2127,7 +2201,7 @@ def _login_github_copilot() -> None:
     try:
         asyncio.run(_trigger())
         console.print("[green]✓ Authenticated with GitHub Copilot[/green]")
-    except Exception as e:
+    except Exception as e:  # crash-barrier: catch all provider/auth errors
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
 

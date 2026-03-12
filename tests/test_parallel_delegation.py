@@ -159,6 +159,7 @@ class TestParallelDelegation:
         loop._coordinator = Coordinator(
             provider=provider, registry=registry, default_role="general"
         )
+        loop._dispatcher.coordinator = loop._coordinator
         loop._wire_delegate_tools()
 
         # Delegate to code and research in parallel — neither is in the stack
@@ -275,7 +276,5 @@ class TestWriteLock:
         else:
             # y might have run first; check the reverse
             y_end = execution_log.index(("y", "end")) if ("y", "end") in execution_log else 99
-            x_start = (
-                execution_log.index(("x", "start")) if ("x", "start") in execution_log else -1
-            )
+            x_start = execution_log.index(("x", "start")) if ("x", "start") in execution_log else -1
             assert y_end < x_start  # y finished before x started

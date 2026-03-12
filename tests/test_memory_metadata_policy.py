@@ -638,12 +638,12 @@ def test_allocate_section_budgets_caps_at_actual_size() -> None:
 def test_allocate_section_budgets_redistributes_surplus() -> None:
     """Surplus from small sections flows to sections that need more."""
     sizes = {
-        "long_term": 10,    # tiny
-        "profile": 10,      # tiny
-        "semantic": 500,    # large
+        "long_term": 10,  # tiny
+        "profile": 10,  # tiny
+        "semantic": 500,  # large
         "episodic": 0,
         "reflection": 0,
-        "graph": 500,       # large
+        "graph": 500,  # large
         "unresolved": 0,
     }
     alloc = MemoryStore._allocate_section_budgets(600, "fact_lookup", sizes)
@@ -658,11 +658,11 @@ def test_allocate_section_budgets_redistributes_surplus() -> None:
 
 
 def test_get_memory_context_graph_not_truncated_at_default_budget(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Entity graph section should appear even at the default 900 token budget."""
-    monkeypatch.setenv("NANOBOT_GRAPH_ENABLED", "true")
-    store = MemoryStore(tmp_path)
+    store = MemoryStore(tmp_path, rollout_overrides={"graph_enabled": True})
 
     # Simulate a large profile that previously consumed the whole budget.
     large_profile = {

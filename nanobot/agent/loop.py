@@ -24,37 +24,32 @@ channel for progressive display on platforms that support message editing.
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import json
-import re
 import time
 from contextlib import AsyncExitStack
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent.consolidation import ConsolidationOrchestrator
 from nanobot.agent.context import (
     ContextBuilder,
     summarize_and_compress,
 )
+from nanobot.agent.delegation import DelegationDispatcher
 from nanobot.agent.metrics import (
-    DELEGATION_LATENCY_MAX_MS,
-    DELEGATION_LATENCY_SUM_MS,
-    ROUTING_CLASSIFICATIONS,
-    ROUTING_CLASSIFY_LATENCY_MAX_MS,
-    ROUTING_CLASSIFY_LATENCY_SUM_MS,
-    ROUTING_CYCLES_BLOCKED,
-    ROUTING_DELEGATIONS,
     MetricsCollector,
-    role_invocations_key,
     role_tool_calls_key,
 )
+from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.scratchpad import Scratchpad
-from nanobot.agent.subagent import SubagentManager, run_tool_loop
-from nanobot.agent.tools.base import ToolResult
+from nanobot.agent.streaming import StreamingLLMCaller, strip_think
+from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.tool_executor import ToolExecutor
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool, _CycleError
+from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool
 from nanobot.agent.tools.feedback import FeedbackTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -63,6 +58,8 @@ from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTo
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.agent.tracing import TraceContext, bind_trace
+from nanobot.agent.verifier import AnswerVerifier
 from nanobot.bus.events import InboundMessage, OutboundMessage, ReactionEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentConfig, AgentRoleConfig
@@ -75,12 +72,9 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
 
 
-# Per-coroutine delegation ancestry — isolated across asyncio.gather branches.
-# Each parallel delegation branch inherits the parent's ancestry snapshot;
-# mutations in one branch never leak to siblings.
-_delegation_ancestry: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
-    "_delegation_ancestry", default=()
-)
+# Per-coroutine delegation ancestry — canonical definition in delegation.py,
+# re-exported here for backward compatibility with tests.
+from nanobot.agent.delegation import _delegation_ancestry  # noqa: F401
 
 
 def _user_friendly_error(exc: Exception) -> str:
@@ -177,6 +171,13 @@ class AgentLoop:
             "graph_neo4j_uri": config.graph_neo4j_uri,
             "graph_neo4j_auth": config.graph_neo4j_auth,
             "graph_neo4j_database": config.graph_neo4j_database,
+            "reranker_mode": config.reranker_mode,
+            "reranker_alpha": config.reranker_alpha,
+            "reranker_model": config.reranker_model,
+            "mem0_user_id": config.mem0_user_id,
+            "mem0_add_debug": config.mem0_add_debug,
+            "mem0_verify_write": config.mem0_verify_write,
+            "mem0_force_infer_true": config.mem0_force_infer_true,
         }
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
@@ -186,14 +187,14 @@ class AgentLoop:
 
         self.context = ContextBuilder(
             self.workspace,
-            memory_retrieval_k=self.memory_retrieval_k,
-            memory_token_budget=self.memory_token_budget,
-            memory_md_token_cap=config.memory_md_token_cap,
+            memory_retrieval_k=self.memory_retrieval_k if config.memory_enabled else 0,
+            memory_token_budget=self.memory_token_budget if config.memory_enabled else 0,
+            memory_md_token_cap=config.memory_md_token_cap if config.memory_enabled else 0,
             memory_rollout_overrides=self.memory_rollout_overrides,
             role_system_prompt=role_config.system_prompt if role_config else "",
         )
         self.sessions = session_manager or SessionManager(self.workspace)
-        self.tools = ToolRegistry()
+        self.tools = ToolExecutor(ToolRegistry())
         self.subagents = SubagentManager(
             provider=provider,
             workspace=self.workspace,
@@ -213,26 +214,94 @@ class AgentLoop:
         self._mcp_connecting = False
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
-        self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._register_default_tools()
 
         # Multi-agent coordinator (initialized lazily in run() if routing enabled)
         self._routing_config = routing_config
         self._coordinator: Coordinator | None = None
 
-        # Delegation tracking
+        # Delegation dispatcher (owns delegation state, tracing, contracts)
+        self._dispatcher = DelegationDispatcher(
+            provider=provider,
+            workspace=self.workspace,
+            model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            max_iterations=self.max_iterations,
+            restrict_to_workspace=self.restrict_to_workspace,
+            brave_api_key=brave_api_key,
+            exec_config=self.exec_config,
+            role_name=self.role_name,
+            trace_path=self.workspace / "memory" / "routing_trace.jsonl",
+        )
+        self._dispatcher.tools = self.tools
+
+        # Legacy aliases — kept for backward compat with tests
         self._delegation_stack: list[str] = []
-        self._routing_trace: list[dict[str, Any]] = []
         self._scratchpad: Scratchpad | None = None
-        self._delegation_count: int = 0
-        self._max_delegations: int = 8
 
         # Routing metrics (lazy: only created when routing is enabled)
         self._routing_metrics: MetricsCollector | None = None
-        self._trace_path = self.workspace / "memory" / "routing_trace.jsonl"
 
-        # Reference to the current loop's message list (for delegation context)
-        self._active_messages: list[dict[str, Any]] | None = None
+        # Extracted helpers (ADR-002)
+        self._llm_caller = StreamingLLMCaller(
+            provider=provider,
+            model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        self._verifier = AnswerVerifier(
+            provider=provider,
+            model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            verification_mode=config.verification_mode,
+            memory_uncertainty_threshold=self.memory_uncertainty_threshold,
+            memory_store=self.context.memory,
+        )
+        self._consolidator = ConsolidationOrchestrator(self.context.memory)
+
+    # --- Delegation state proxied to _dispatcher ---
+
+    @property
+    def _consolidation_locks(self) -> dict[str, asyncio.Lock]:
+        return self._consolidator._locks
+
+    @property
+    def _delegation_count(self) -> int:
+        return self._dispatcher.delegation_count
+
+    @_delegation_count.setter
+    def _delegation_count(self, value: int) -> None:
+        self._dispatcher.delegation_count = value
+
+    @property
+    def _max_delegations(self) -> int:
+        return self._dispatcher.max_delegations
+
+    @_max_delegations.setter
+    def _max_delegations(self, value: int) -> None:
+        self._dispatcher.max_delegations = value
+
+    @property
+    def _routing_trace(self) -> list[dict[str, Any]]:
+        return self._dispatcher.routing_trace
+
+    @property
+    def _active_messages(self) -> list[dict[str, Any]] | None:
+        return self._dispatcher.active_messages
+
+    @_active_messages.setter
+    def _active_messages(self, value: list[dict[str, Any]] | None) -> None:
+        self._dispatcher.active_messages = value
+
+    @property
+    def _trace_path(self) -> Path:
+        return self._dispatcher.trace_path
+
+    @_trace_path.setter
+    def _trace_path(self, value: Path) -> None:
+        self._dispatcher.trace_path = value
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools, filtered by role config."""
@@ -276,12 +345,13 @@ class AgentLoop:
                 self.tools.register(cron_tool)
 
         # Delegation tools
-        delegate_tool = DelegateTool()
-        if _should_register(delegate_tool.name):
-            self.tools.register(delegate_tool)
-        delegate_parallel_tool = DelegateParallelTool()
-        if _should_register(delegate_parallel_tool.name):
-            self.tools.register(delegate_parallel_tool)
+        if self.config.delegation_enabled:
+            delegate_tool = DelegateTool()
+            if _should_register(delegate_tool.name):
+                self.tools.register(delegate_tool)
+            delegate_parallel_tool = DelegateParallelTool()
+            if _should_register(delegate_parallel_tool.name):
+                self.tools.register(delegate_parallel_tool)
 
         # Scratchpad tools (scratchpad instance swapped per session in _ensure_scratchpad)
         placeholder_pad = Scratchpad(self.workspace / "sessions" / "_placeholder")
@@ -293,8 +363,9 @@ class AgentLoop:
                 self.tools.register(st)
 
         # Skill-provided custom tools (Step 14)
-        for skill_tool in self.context.skills.discover_tools():
-            self.tools.register(skill_tool)
+        if self.config.skills_enabled:
+            for skill_tool in self.context.skills.discover_tools():
+                self.tools.register(skill_tool)
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -306,14 +377,14 @@ class AgentLoop:
         try:
             self._mcp_stack = AsyncExitStack()
             await self._mcp_stack.__aenter__()
-            await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
+            await connect_mcp_servers(self._mcp_servers, self.tools._registry, self._mcp_stack)
             self._mcp_connected = True
-        except Exception as e:
+        except (RuntimeError, ConnectionError, OSError, TimeoutError, ImportError) as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
             if self._mcp_stack:
                 try:
                     await self._mcp_stack.aclose()
-                except Exception:
+                except (RuntimeError, OSError):
                     pass
                 self._mcp_stack = None
         finally:
@@ -349,6 +420,7 @@ class AgentLoop:
         session_dir = self.workspace / "sessions" / safe_key
         session_dir.mkdir(parents=True, exist_ok=True)
         self._scratchpad = Scratchpad(session_dir)
+        self._dispatcher.scratchpad = self._scratchpad
 
         # Update scratchpad tool references
         write_tool = self.tools.get("write_scratchpad")
@@ -360,91 +432,8 @@ class AgentLoop:
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
-        """Remove <think>…</think> blocks that some models embed in content."""
-        if not text:
-            return None
-        clean = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
-        if not clean:
-            logger.warning(
-                "_strip_think removed all content from non-empty response (first 100 chars): {}",
-                text[:100],
-            )
-            return None
-        # Strip common reasoning prefixes that sometimes leak into final answers.
-        # Remove leading lines like "analysis", "assistantanalysis", "analysisUser", etc.
-        while True:
-            stripped = re.sub(
-                r"^(assistant\s*)?analysis[^\n]*\n?", "", clean, flags=re.IGNORECASE
-            ).lstrip()
-            if stripped == clean:
-                break
-            clean = stripped
-        return clean or None
-
-    @staticmethod
-    def _tool_hint(tool_calls: list) -> str:
-        """Format tool calls as concise hint, e.g. 'web_search("query")'."""
-
-        def _fmt(tc):
-            val = next(iter(tc.arguments.values()), None) if tc.arguments else None
-            if not isinstance(val, str):
-                return tc.name
-            return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
-
-        return ", ".join(_fmt(tc) for tc in tool_calls)
-
-    # ------------------------------------------------------------------
-    # Parallel tool execution
-    # ------------------------------------------------------------------
-
-    async def _execute_tools_parallel(
-        self,
-        tool_calls: list,
-    ) -> list[ToolResult]:
-        """Execute tool calls, running read-only tools concurrently.
-
-        Write-capable tool calls are executed sequentially to preserve
-        ordering semantics.  Read-only tools that appear *between* writes
-        are batched and awaited together.
-        """
-        results: list[ToolResult] = [ToolResult.ok("")] * len(tool_calls)
-
-        # Partition into sequential groups: consecutive readonly calls
-        # form a parallel batch; everything else is sequential.
-        i = 0
-        while i < len(tool_calls):
-            tc = tool_calls[i]
-            tool_obj = self.tools.get(tc.name)
-            is_readonly = tool_obj.readonly if tool_obj else False
-
-            if is_readonly:
-                # Collect consecutive readonly calls
-                batch_start = i
-                while i < len(tool_calls):
-                    t = self.tools.get(tool_calls[i].name)
-                    if t and t.readonly:
-                        i += 1
-                    else:
-                        break
-                batch = tool_calls[batch_start:i]
-                coros = [self.tools.execute(t.name, t.arguments) for t in batch]
-                batch_results = await asyncio.gather(*coros, return_exceptions=True)
-                for j, br in enumerate(batch_results):
-                    if isinstance(br, BaseException):
-                        results[batch_start + j] = ToolResult.fail(f"Error: {br}")
-                    else:
-                        results[batch_start + j] = br
-            else:
-                results[i] = await self.tools.execute(tc.name, tc.arguments)
-                i += 1
-
-        return results
-
-    # ------------------------------------------------------------------
-    # LLM call with optional streaming (Step 15)
-    # ------------------------------------------------------------------
-
-    _STREAM_FLUSH_INTERVAL = 12  # flush partial content every N chunks
+        """Remove <think>…</think> blocks — delegates to streaming module."""
+        return strip_think(text)
 
     async def _call_llm(
         self,
@@ -452,74 +441,8 @@ class AgentLoop:
         tools: list[dict[str, Any]] | None,
         on_progress: Callable[..., Awaitable[None]] | None,
     ) -> LLMResponse:
-        """Call the LLM, streaming when *on_progress* is available.
-
-        When streaming, partial content is periodically forwarded to
-        *on_progress* so that channels supporting message editing can
-        show tokens incrementally.  The final :class:`LLMResponse` is
-        assembled from the accumulated chunks.
-        """
-        # Fall back to non-streaming when there's no progress callback
-        if on_progress is None:
-            return await self.provider.chat(
-                messages=messages,
-                tools=tools,
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-
-        content_parts: list[str] = []
-        reasoning_parts: list[str] = []
-        tool_calls = []
-        finish_reason = "stop"
-        usage: dict[str, int] = {}
-        chunk_count = 0
-        last_flushed = 0
-
-        async for chunk in self.provider.stream_chat(
-            messages=messages,
-            tools=tools,
-            model=self.model,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-        ):
-            if chunk.content_delta:
-                content_parts.append(chunk.content_delta)
-            if chunk.reasoning_delta:
-                reasoning_parts.append(chunk.reasoning_delta)
-            if chunk.finish_reason:
-                finish_reason = chunk.finish_reason
-            if chunk.usage:
-                usage = chunk.usage
-            if chunk.tool_calls:
-                tool_calls = chunk.tool_calls
-
-            chunk_count += 1
-
-            # Periodically flush accumulated content to the channel
-            chars_since = sum(len(p) for p in content_parts[last_flushed:])
-            if (
-                chars_since >= 80
-                and chunk_count % self._STREAM_FLUSH_INTERVAL == 0
-                and not chunk.done
-            ):
-                partial = "".join(content_parts)
-                clean = self._strip_think(partial)
-                if clean:
-                    await on_progress(clean, streaming=True)
-                last_flushed = len(content_parts)
-
-        full_content = "".join(content_parts) or None
-        full_reasoning = "".join(reasoning_parts) or None
-
-        return LLMResponse(
-            content=full_content,
-            tool_calls=tool_calls,
-            finish_reason=finish_reason,
-            usage=usage,
-            reasoning_content=full_reasoning,
-        )
+        """Call the LLM — delegates to StreamingLLMCaller."""
+        return await self._llm_caller.call(messages, tools, on_progress)
 
     # ------------------------------------------------------------------
     # Agent loop (Plan → Act → Observe → Reflect)
@@ -527,43 +450,8 @@ class AgentLoop:
     # Planning & Reflection prompts
     # ------------------------------------------------------------------
 
-    _PLAN_PROMPT = (
-        "Before taking action, briefly outline a numbered plan (3-7 steps) "
-        "for how you will accomplish the user's request using available tools. "
-        "Keep each step to one sentence. Then begin executing step 1.\n\n"
-        "DELEGATION: For tasks with multiple distinct work streams (e.g. code analysis "
-        "+ architecture review + report writing), use the `delegate_parallel` tool to "
-        "farm out sub-tasks to specialist agents (code, research, writing, pm) who work "
-        "concurrently. Then synthesise their results. Prefer delegation over doing "
-        "everything yourself when the request spans multiple domains.\n\n"
-        "TWO-PHASE RULE: Always separate data-gathering from synthesis.\n"
-        "  Phase 1 — Gather: use `delegate_parallel` for investigation tasks "
-        "(code analysis, research, architecture review). These agents write findings "
-        "to the scratchpad.\n"
-        "  Phase 2 — Synthesise: AFTER Phase 1 results return, compile/synthesise "
-        "yourself or delegate to a writing agent as a SEPARATE step.\n"
-        "  NEVER include synthesis/writing tasks in the same `delegate_parallel` call "
-        "as gathering tasks — the synthesis agent would run before data is available."
-    )
-
-    _PROGRESS_PROMPT = (
-        "Briefly reflect on progress: which steps of your plan are complete, "
-        "which remain? Did the tool results achieve the current step's goal? "
-        "If not, adjust your plan. If all steps are done, produce the final answer."
-    )
-
-    _FAILURE_STRATEGY_PROMPT = (
-        "The previous tool call failed. Before retrying:\n"
-        "1. Analyze what went wrong.\n"
-        "2. Propose an alternative approach.\n"
-        "3. Execute the alternative, or skip this step if it's non-essential."
-    )
-
-    _REFLECT_PROMPT = (
-        "Briefly reflect: did the tool results above achieve your goal? "
-        "If not, state what went wrong and what you will try next. "
-        "If yes, produce the final answer for the user."
-    )
+    # Prompts loaded from nanobot/templates/prompts/*.md via PromptLoader.
+    # Override by placing files in <workspace>/prompts/.
 
     @staticmethod
     def _needs_planning(text: str) -> bool:
@@ -610,44 +498,7 @@ class AgentLoop:
 
     @staticmethod
     def _has_parallel_structure(text: str) -> bool:
-        """Detect enumerated independent subtasks in the user message.
-
-        Looks for structural patterns (not domain-specific keywords) that
-        indicate the request lists multiple independent areas of work.
-        """
-        import re
-
-        text_lower = text.strip().lower()
-        # Pattern 1: explicit count words ("three areas", "four parts", etc.)
-        count_words = re.search(
-            r"\b(two|three|four|five|six|seven|eight|nine|ten|\d+)\s+"
-            r"(areas?|parts?|aspects?|sections?|components?|topics?|items?|tasks?"
-            r"|dimensions?|categories?|modules?|files?|layers?)",
-            text_lower,
-        )
-        if count_words:
-            return True
-        # Pattern 2: "X, Y, and Z" enumeration (3+ items separated by commas + 'and')
-        enum_pattern = re.search(
-            r"(?:[^,]+,\s*){2,}(?:and|&)\s+[^,.]+", text_lower
-        )
-        if enum_pattern:
-            return True
-        # Pattern 3: colon-introduced list with 3+ comma-separated items
-        colon_list = re.search(r":\s*[^,]+(?:,\s*[^,]+){2,}", text_lower)
-        if colon_list:
-            return True
-        # Pattern 4: numbered inline list ("1) X 2) Y 3) Z" or "(a) X (b) Y (c) Z")
-        numbered = re.findall(r"(?:^|\s)(?:\d+[.)\]]|[a-z][.)\]])\s", text_lower)
-        if len(numbered) >= 3:
-            return True
-        # Pattern 5: "across ... , ... , and ..." spanning pattern
-        across_pattern = re.search(
-            r"\bacross\b.+,.+(?:,|and)\s+", text_lower
-        )
-        if across_pattern:
-            return True
-        return False
+        return DelegationDispatcher.has_parallel_structure(text)
 
     async def _run_agent_loop(
         self,
@@ -694,7 +545,7 @@ class AgentLoop:
                 messages.append(
                     {
                         "role": "system",
-                        "content": self._PLAN_PROMPT,
+                        "content": prompts.get("plan"),
                     }
                 )
                 has_plan = True
@@ -757,9 +608,7 @@ class AgentLoop:
 
             if response.finish_reason == "content_filter":
                 consecutive_errors += 1
-                logger.warning(
-                    "Content filter triggered (attempt {})", consecutive_errors
-                )
+                logger.warning("Content filter triggered (attempt {})", consecutive_errors)
                 if consecutive_errors >= 2:
                     final_content = (
                         "The AI provider's content filter blocked my response. "
@@ -794,9 +643,7 @@ class AgentLoop:
                 # Delegation calls (delegate/delegate_parallel) are exempt
                 # because delegation itself is a form of planning.
                 _delegation_names = {"delegate", "delegate_parallel"}
-                is_delegation = all(
-                    tc.name in _delegation_names for tc in response.tool_calls
-                )
+                is_delegation = all(tc.name in _delegation_names for tc in response.tool_calls)
                 if (
                     has_plan
                     and not plan_enforced
@@ -819,8 +666,7 @@ class AgentLoop:
 
                 # Filter out malformed tool calls (empty name or empty arguments)
                 valid_calls = [
-                    tc for tc in response.tool_calls
-                    if tc.name and tc.name.strip() and tc.arguments
+                    tc for tc in response.tool_calls if tc.name and tc.name.strip() and tc.arguments
                 ]
                 skipped = len(response.tool_calls) - len(valid_calls)
                 if skipped:
@@ -864,7 +710,10 @@ class AgentLoop:
                     clean = self._strip_think(response.content)
                     if clean:
                         await on_progress(clean)
-                    await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
+                    await on_progress(
+                        ToolExecutor.format_hint(response.tool_calls),
+                        tool_hint=True,
+                    )
 
                 tool_call_dicts = [
                     {
@@ -887,7 +736,9 @@ class AgentLoop:
                 )
 
                 # Execute tools (parallel for readonly, sequential for writes)
-                tool_results = await self._execute_tools_parallel(response.tool_calls)
+                t0_tools = time.monotonic()
+                tool_results = await self.tools.execute_batch(response.tool_calls)
+                tools_elapsed_ms = (time.monotonic() - t0_tools) * 1000
 
                 any_failed = False
                 for tool_call, result in zip(response.tool_calls, tool_results):
@@ -895,7 +746,13 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     status = "OK" if result.success else "FAIL"
-                    logger.info("Tool {}: {}({})", status, tool_call.name, args_str[:200])
+                    bind_trace().info(
+                        "tool_exec | {} | {}({}) | {:.0f}ms batch",
+                        status,
+                        tool_call.name,
+                        args_str[:200],
+                        tools_elapsed_ms,
+                    )
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result.to_llm_string()
                     )
@@ -905,9 +762,7 @@ class AgentLoop:
                 # --- REFLECT: after tool execution, evaluate progress ------
                 # Check if delegation budget is exhausted
                 _del_names = {"delegate", "delegate_parallel"}
-                had_delegations = any(
-                    tc.name in _del_names for tc in response.tool_calls
-                )
+                had_delegations = any(tc.name in _del_names for tc in response.tool_calls)
                 if had_delegations and self._delegation_count >= self._max_delegations:
                     messages.append(
                         {
@@ -925,7 +780,7 @@ class AgentLoop:
                     messages.append(
                         {
                             "role": "system",
-                            "content": self._FAILURE_STRATEGY_PROMPT,
+                            "content": prompts.get("failure_strategy"),
                         }
                     )
                 elif had_delegations:
@@ -965,10 +820,7 @@ class AgentLoop:
                     )
                 elif (
                     had_delegations
-                    and not any(
-                        tc.name == "delegate_parallel"
-                        for tc in response.tool_calls
-                    )
+                    and not any(tc.name == "delegate_parallel" for tc in response.tool_calls)
                     and self._has_parallel_structure(user_text)
                 ):
                     # Sequential-to-parallel correction: agent used sequential
@@ -989,7 +841,7 @@ class AgentLoop:
                     messages.append(
                         {
                             "role": "system",
-                            "content": self._PROGRESS_PROMPT,
+                            "content": prompts.get("progress"),
                         }
                     )
                 elif len(response.tool_calls) >= 3:
@@ -997,7 +849,7 @@ class AgentLoop:
                     messages.append(
                         {
                             "role": "system",
-                            "content": self._REFLECT_PROMPT,
+                            "content": prompts.get("reflect"),
                         }
                     )
 
@@ -1049,104 +901,14 @@ class AgentLoop:
     # Self-critique / verification (Step 2)
     # ------------------------------------------------------------------
 
-    _CRITIQUE_SYSTEM_PROMPT = (
-        "You are a fact-checker reviewing an AI assistant's answer. "
-        "Given the user's question and the assistant's candidate answer, respond with ONLY "
-        "a JSON object (no markdown fencing): "
-        '{"confidence": <1-5>, "issues": ["issue1", ...]}. '
-        "confidence 5 = fully supported, 1 = likely wrong. "
-        "List any unsupported claims, factual errors, or missing caveats in issues. "
-        "If the answer is solid, return an empty issues list."
-    )
-
     async def _verify_answer(
         self,
         user_text: str,
         candidate: str,
         messages: list[dict],
     ) -> tuple[str, list[dict]]:
-        """Run a verification pass on the candidate answer.
-
-        Returns (possibly_revised_content, updated_messages).
-        If verification passes or is disabled, returns the candidate as-is.
-        """
-        mode = self.config.verification_mode
-        if mode == "off":
-            return candidate, messages
-
-        # "on_uncertainty" — only verify questions with low memory grounding
-        if mode == "on_uncertainty" and not self._should_force_verification(user_text):
-            return candidate, messages
-
-        logger.debug("Running verification pass (mode={})", mode)
-
-        critique_messages = [
-            {"role": "system", "content": self._CRITIQUE_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (f"User's question: {user_text}\n\nAssistant's answer: {candidate}"),
-            },
-        ]
-
-        try:
-            critique_response = await self.provider.chat(
-                messages=critique_messages,
-                tools=None,
-                model=self.model,
-                temperature=0.0,
-                max_tokens=512,
-            )
-            raw = (critique_response.content or "").strip()
-            # Parse the JSON critique
-            parsed = json.loads(raw)
-            confidence = int(parsed.get("confidence", 5))
-            issues = parsed.get("issues", [])
-
-            if confidence >= 3 and not issues:
-                logger.debug("Verification passed (confidence={})", confidence)
-                return candidate, messages
-
-            # Low confidence or issues found — retry with critique injected
-            logger.info(
-                "Verification flagged issues (confidence={}): {}",
-                confidence,
-                issues,
-            )
-            issue_text = "\n".join(f"- {i}" for i in issues) if issues else "Low confidence"
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        f"Self-check found potential issues with your answer:\n{issue_text}\n\n"
-                        "Please revise your answer addressing these concerns. "
-                        "If you're uncertain about a claim, say so explicitly."
-                    ),
-                }
-            )
-
-            # One retry pass (no tools, just revision)
-            revision = await self.provider.chat(
-                messages=messages,
-                tools=None,
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-            revised = self._strip_think(revision.content) or candidate
-            # Replace the last assistant message with the revised one
-            for i in range(len(messages) - 1, -1, -1):
-                if messages[i].get("role") == "assistant":
-                    messages[i]["content"] = revised
-                    break
-            logger.info("Answer revised after verification")
-            return revised, messages
-
-        except (json.JSONDecodeError, KeyError, ValueError):
-            logger.debug("Verification response not parseable, skipping")
-            return candidate, messages
-        except Exception:
-            logger.debug("Verification call failed, returning original answer")
-            return candidate, messages
+        """Run a verification pass — delegates to AnswerVerifier."""
+        return await self._verifier.verify(user_text, candidate, messages)
 
     # ------------------------------------------------------------------
     # Reaction handling (Step 8 — Feedback loop)
@@ -1206,14 +968,17 @@ class AgentLoop:
             try:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
                 role_applied = False
+                # Set correlation IDs for this request
+                TraceContext.new_request(
+                    session_id=msg.session_key,
+                    agent_id=self.role_name,
+                )
                 try:
                     # Route through coordinator if enabled (skip system messages)
                     role_applied = False
                     if self._coordinator and msg.channel != "system":
                         t0_classify = time.monotonic()
-                        role_name, confidence = await self._coordinator.classify(
-                            msg.content
-                        )
+                        role_name, confidence = await self._coordinator.classify(msg.content)
                         classify_latency_ms = (time.monotonic() - t0_classify) * 1000
                         # Confidence-aware: fall back to default on low confidence
                         threshold = (
@@ -1236,9 +1001,7 @@ class AgentLoop:
                         role = (
                             self._coordinator.route_direct(role_name)
                             or self._coordinator.registry.get_default()
-                            or AgentRoleConfig(
-                                name=role_name, description="General assistant"
-                            )
+                            or AgentRoleConfig(name=role_name, description="General assistant")
                         )
                         self._record_route_trace(
                             "route",
@@ -1292,7 +1055,7 @@ class AgentLoop:
                             ),
                         )
                     )
-                except Exception as e:
+                except Exception as e:  # crash-barrier: message processing
                     logger.error("Error processing message: {}", e)
                     if role_applied:
                         self._reset_role_after_turn()
@@ -1328,12 +1091,14 @@ class AgentLoop:
             classifier_model=self._routing_config.classifier_model,
             default_role=self._routing_config.default_role,
         )
+        self._dispatcher.coordinator = self._coordinator
         self._wire_delegate_tools()
         self._routing_metrics = MetricsCollector(
             self.workspace / "memory" / "routing_metrics.json",
             flush_interval_s=30.0,
         )
         self._routing_metrics.start()
+        self._dispatcher.routing_metrics = self._routing_metrics
         logger.info(
             "Multi-agent routing enabled with {} roles",
             len(registry),
@@ -1341,102 +1106,18 @@ class AgentLoop:
 
     def _wire_delegate_tools(self) -> None:
         """Set the dispatch callback on all registered delegate tools."""
-        for name in ("delegate", "delegate_parallel"):
-            tool = self.tools.get(name)
-            if isinstance(tool, (DelegateTool, DelegateParallelTool)):
-                tool.set_dispatch(self._dispatch_delegation)
+        self._dispatcher.wire_delegate_tools()
 
-    def _record_route_trace(
-        self,
-        event: str,
-        *,
-        role: str = "",
-        confidence: float = 0.0,
-        latency_ms: float = 0.0,
-        from_role: str = "",
-        depth: int = 0,
-        success: bool = True,
-        message_excerpt: str = "",
-        tools_used: list[str] | None = None,
-    ) -> None:
-        """Append an entry to the in-memory routing trace and record metrics."""
-        import json as _json
-
-        entry: dict[str, Any] = {
-            "event": event,
-            "role": role,
-            "confidence": confidence,
-            "latency_ms": round(latency_ms, 3),
-            "from_role": from_role,
-            "depth": depth,
-            "success": success,
-            "message": message_excerpt[:80],
-            "timestamp": datetime.now().isoformat(),
-        }
-        if tools_used is not None:
-            entry["tools_used"] = tools_used
-            entry["tools_used_count"] = len(tools_used)
-        self._routing_trace.append(entry)
-
-        # Persist to JSONL trace file
-        try:
-            self._trace_path.parent.mkdir(parents=True, exist_ok=True)
-            with self._trace_path.open("a", encoding="utf-8") as f:
-                f.write(_json.dumps(entry, default=str) + "\n")
-        except Exception:
-            pass  # best-effort: don't break routing on I/O failure
-
-        # Record counters
-        m = self._routing_metrics
-        if m is None:
-            return
-
-        if event == "route":
-            m.record(ROUTING_CLASSIFICATIONS)
-            m.record(ROUTING_CLASSIFY_LATENCY_SUM_MS, int(latency_ms))
-            m.set_max(ROUTING_CLASSIFY_LATENCY_MAX_MS, latency_ms)
-            m.record(role_invocations_key(role))
-        elif event == "delegate":
-            m.record(ROUTING_DELEGATIONS)
-        elif event == "delegate_cycle_blocked":
-            m.record(ROUTING_CYCLES_BLOCKED)
-        elif event == "delegate_complete":
-            m.record(DELEGATION_LATENCY_SUM_MS, int(latency_ms))
-            m.set_max(DELEGATION_LATENCY_MAX_MS, latency_ms)
+    def _record_route_trace(self, event: str, **kwargs: Any) -> None:
+        """Forward to dispatcher."""
+        self._dispatcher.record_route_trace(event, **kwargs)
 
     def get_routing_trace(self) -> list[dict[str, Any]]:
         """Return a copy of the routing trace."""
-        return list(self._routing_trace)
+        return self._dispatcher.get_routing_trace()
 
-    def _gather_recent_tool_results(
-        self, max_results: int = 15, max_chars: int = 8000
-    ) -> str:
-        """Extract recent tool results from the active message list for delegation context."""
-        if not self._active_messages:
-            return ""
-
-        tool_results: list[str] = []
-        total_chars = 0
-        # Walk backwards to get the most recent results first
-        for m in reversed(self._active_messages):
-            if m.get("role") != "tool":
-                continue
-            name = m.get("name", "unknown")
-            content = m.get("content", "")
-            if not isinstance(content, str) or not content.strip():
-                continue
-            entry = f"**{name}**: {content}"
-            if total_chars + len(entry) > max_chars:
-                break
-            tool_results.append(entry)
-            total_chars += len(entry)
-            if len(tool_results) >= max_results:
-                break
-
-        if not tool_results:
-            return ""
-        tool_results.reverse()  # restore chronological order
-        return "\n\n".join(tool_results)
+    def _gather_recent_tool_results(self, max_results: int = 15, max_chars: int = 8000) -> str:
+        return self._dispatcher.gather_recent_tool_results(max_results, max_chars)
 
     async def _dispatch_delegation(
         self,
@@ -1444,298 +1125,23 @@ class AgentLoop:
         task: str,
         context: str | None,
     ) -> str:
-        """Route a delegated sub-task through the coordinator and execute it.
-
-        The delegation stack prevents cycles (A→B→A), while still allowing
-        arbitrarily deep chains (A→B→C→…).  The delegated agent runs a
-        bounded ``run_tool_loop`` from ``subagent.py``.
-        """
-        if not self._coordinator:
-            raise RuntimeError("Coordinator not available for delegation")
-
-        # Resolve role
-        role: AgentRoleConfig | None = None
-        if target_role:
-            role = self._coordinator.route_direct(target_role)
-        if role is None:
-            role = await self._coordinator.route(task)
-
-        # Cycle guard using per-coroutine ContextVar ancestry.
-        # Each asyncio.gather branch inherits the parent's ancestry snapshot;
-        # parallel siblings never see each other's mutations, so fanning out
-        # the same role in parallel is safe while re-entrant chains (A→B→A)
-        # are correctly blocked.
-        ancestry = _delegation_ancestry.get()
-        depth = len(ancestry)
-        if role.name in ancestry:
-            chain = " → ".join((*ancestry, role.name))
-            self._record_route_trace(
-                "delegate_cycle_blocked",
-                role=role.name,
-                from_role=ancestry[-1] if ancestry else "",
-                depth=depth,
-                success=False,
-                message_excerpt=task,
-            )
-            raise _CycleError(f"Delegation cycle detected: {chain}")
-
-        from_role = ancestry[-1] if ancestry else self.role_name
-        self._record_route_trace(
-            "delegate",
-            role=role.name,
-            from_role=from_role,
-            depth=depth,
-            message_excerpt=task,
-        )
-
-        t0 = time.monotonic()
-        self._delegation_count += 1
-        token = _delegation_ancestry.set((*ancestry, role.name))
-        try:
-            result, used_tools = await self._execute_delegated_agent(role, task, context)
-            latency_ms = (time.monotonic() - t0) * 1000
-            self._record_route_trace(
-                "delegate_complete",
-                role=role.name,
-                latency_ms=latency_ms,
-                depth=depth,
-                success=True,
-                message_excerpt=task,
-                tools_used=used_tools,
-            )
-            return result
-        except Exception:
-            latency_ms = (time.monotonic() - t0) * 1000
-            self._record_route_trace(
-                "delegate_complete",
-                role=role.name,
-                latency_ms=latency_ms,
-                depth=depth,
-                success=False,
-                message_excerpt=task,
-            )
-            raise
-        finally:
-            _delegation_ancestry.reset(token)
-
-    # ------------------------------------------------------------------
-    # Delegation contract construction
-    # ------------------------------------------------------------------
-
-    # Task type taxonomy: each type defines tool routing, evidence
-    # expectations, completion criteria, and anti-hallucination rules.
-    _TASK_TYPES: dict[str, dict[str, Any]] = {
-        "local_code_analysis": {
-            "prefer": ["read_file", "list_dir", "exec"],
-            "avoid_first": ["web_search", "web_fetch"],
-            "evidence": "file paths + code excerpts with line numbers",
-            "completion": (
-                "Stop when you have inspected the relevant files and can answer "
-                "the question with evidence. Do not exhaustively scan every file "
-                "unless the task explicitly asks for it."
-            ),
-            "anti_hallucination": (
-                "Do not infer architecture from naming alone. "
-                "Distinguish inspected evidence vs assumption. "
-                "Say 'not found' when absent. Cite inspected file paths."
-            ),
-        },
-        "repo_architecture": {
-            "prefer": ["read_file", "list_dir", "exec"],
-            "avoid_first": ["web_search"],
-            "evidence": "file paths, module relationships, code excerpts",
-            "completion": (
-                "Stop when you have mapped the relevant module structure "
-                "and key interfaces. Focus on structure, not every detail."
-            ),
-            "anti_hallucination": (
-                "Only describe architecture you have verified by reading files. "
-                "Do not infer from file names alone. Cite every claim."
-            ),
-        },
-        "web_research": {
-            "prefer": ["web_search", "web_fetch"],
-            "avoid_first": ["exec", "write_file"],
-            "evidence": "URLs, quoted excerpts, publication dates",
-            "completion": (
-                "Stop after finding 3-5 high-quality sources that answer "
-                "the question. Cross-reference when possible."
-            ),
-            "anti_hallucination": (
-                "Cite URLs for every claim. Distinguish search results from "
-                "your own analysis. Say 'no results found' when searches fail."
-            ),
-        },
-        "report_writing": {
-            "prefer": ["write_file", "read_file"],
-            "avoid_first": ["exec", "web_search"],
-            "evidence": "references to source findings from other agents",
-            "completion": (
-                "Stop after producing the requested document. "
-                "Base all content on prior agent findings."
-            ),
-            "anti_hallucination": (
-                "Use ONLY data from prior agent findings (scratchpad). "
-                "Do not invent statistics, metrics, or file paths. "
-                "If data is missing, note it as a gap."
-            ),
-        },
-        "bug_investigation": {
-            "prefer": ["read_file", "exec", "list_dir"],
-            "avoid_first": ["web_search", "write_file"],
-            "evidence": "error messages, stack traces, file paths + line numbers",
-            "completion": (
-                "Stop when you have identified the root cause with evidence, "
-                "or when you have exhausted reasonable investigation paths."
-            ),
-            "anti_hallucination": (
-                "Report only errors and behavior you have observed via tools. "
-                "Do not guess root causes without evidence."
-            ),
-        },
-        "general": {
-            "prefer": [],
-            "avoid_first": [],
-            "evidence": "tool output excerpts",
-            "completion": "Stop when the task objective is met.",
-            "anti_hallucination": (
-                "Ground all claims in tool output. Say 'unknown' when unsure."
-            ),
-        },
-    }
+        return await self._dispatcher.dispatch(target_role, task, context)
 
     @staticmethod
     def _classify_task_type(role: str, task: str) -> str:
-        """Classify a delegation task into a task type from the taxonomy."""
-        task_lower = task.lower()
-
-        # Role-based fast paths
-        if role == "writing":
-            return "report_writing"
-
-        code_signals = (
-            "code", "module", "file", "function", "class", "test",
-            "import", "line", "bug", "error", "refactor", "implement",
-            "source", "python", ".py", "coverage", "lint", "scan",
-        )
-        bug_signals = ("bug", "error", "crash", "fail", "exception", "broken", "fix")
-        web_signals = (
-            "latest", "current", "news", "trend", "benchmark",
-            "compare with", "industry", "best practice", "state of the art",
-        )
-        arch_signals = (
-            "architecture", "subsystem", "design", "structure", "pattern",
-            "how does", "relationship", "dependency",
-        )
-        project_signals = (
-            "our", "this project", "nanobot", "workspace", "codebase",
-        )
-
-        # Bug investigation (check before general code)
-        if role == "code" and any(s in task_lower for s in bug_signals):
-            return "bug_investigation"
-
-        # Architecture analysis
-        if any(s in task_lower for s in arch_signals):
-            return "repo_architecture"
-
-        # Local code analysis
-        if any(s in task_lower for s in code_signals) or role == "code":
-            return "local_code_analysis"
-
-        # Web research (only if no project-specific signals)
-        if any(s in task_lower for s in web_signals):
-            if not any(s in task_lower for s in project_signals):
-                return "web_research"
-            return "repo_architecture"  # project-specific → inspect locally
-
-        # Research role defaults to repo if project-specific, web otherwise
-        if role == "research":
-            if any(s in task_lower for s in project_signals):
-                return "repo_architecture"
-            return "web_research"
-
-        return "general"
+        return DelegationDispatcher.classify_task_type(role, task)
 
     def _extract_plan_text(self) -> str:
-        """Pull the plan from _active_messages if planning was triggered."""
-        if not self._active_messages:
-            return ""
-        found_plan_prompt = False
-        for m in self._active_messages:
-            if found_plan_prompt and m.get("role") == "assistant":
-                content = m.get("content", "")
-                if isinstance(content, str) and content.strip():
-                    return content.strip()
-                return ""
-            if (
-                m.get("role") == "system"
-                and isinstance(m.get("content"), str)
-                and "outline a numbered plan" in m["content"]
-            ):
-                found_plan_prompt = True
-        return ""
+        return self._dispatcher.extract_plan_text()
 
     def _extract_user_request(self) -> str:
-        """Pull the original user message from _active_messages."""
-        if not self._active_messages:
-            return ""
-        for m in self._active_messages:
-            if m.get("role") == "user":
-                content = m.get("content", "")
-                if isinstance(content, str):
-                    return content.strip()
-        return ""
+        return self._dispatcher.extract_user_request()
 
     def _build_execution_context(self, task_type: str) -> str:
-        """Assemble project knowledge with tier-based stratification.
-
-        Tier A (always): workspace root + directory layout.
-        Tier C (conditional): key file excerpts — only for investigative types.
-        """
-        parts: list[str] = [f"Workspace: {self.workspace}"]
-
-        # Directory tree (top-level, max 50 entries) — Tier A
-        try:
-            entries = sorted(self.workspace.iterdir())
-            tree_lines = []
-            for entry in entries[:50]:
-                suffix = "/" if entry.is_dir() else ""
-                tree_lines.append(f"  {entry.name}{suffix}")
-            if tree_lines:
-                parts.append("Directory layout:\n" + "\n".join(tree_lines))
-        except OSError:
-            pass
-
-        # Tier C: key file excerpts — only for investigative task types
-        if task_type in ("local_code_analysis", "repo_architecture", "bug_investigation"):
-            for name in ("AGENTS.md", "README.md", "SOUL.md"):
-                path = self.workspace / name
-                try:
-                    if path.is_file():
-                        text = path.read_text(encoding="utf-8", errors="replace")[:1500]
-                        if text.strip():
-                            parts.append(f"--- {name} (excerpt) ---\n{text.strip()}")
-                except OSError:
-                    pass
-
-        return "\n\n".join(parts)
+        return self._dispatcher.build_execution_context(task_type)
 
     def _build_parallel_work_summary(self, role: str) -> str:
-        """Build a brief summary of what other agents are doing (non_goals)."""
-        if not self._scratchpad:
-            return ""
-        entries = self._scratchpad.list_entries()
-        if not entries:
-            return ""
-        lines: list[str] = []
-        for e in entries:
-            if e.get("role") == role:
-                continue  # skip own prior entries
-            lines.append(
-                f"- [{e.get('role', '?')}] {e.get('label', '')[:60]}"
-            )
-        return "\n".join(lines) if lines else ""
+        return self._dispatcher.build_parallel_work_summary(role)
 
     def _build_delegation_contract(
         self,
@@ -1744,91 +1150,7 @@ class AgentLoop:
         context: str | None,
         task_type: str,
     ) -> tuple[str, str]:
-        """Build a typed delegation contract.
-
-        Returns ``(user_content, output_schema_instruction)`` where
-        output_schema_instruction is injected into the system prompt.
-        """
-        tt = self._TASK_TYPES.get(task_type, self._TASK_TYPES["general"])
-        sections: list[str] = []
-
-        # --- Tier A: always present ---
-        # Mission
-        user_request = self._extract_user_request()
-        if user_request:
-            sections.append(f"## Original User Request\n{user_request}")
-
-        sections.append(f"## Your Mission\n{task}")
-        if context:
-            sections.append(f"### Additional Context\n{context}")
-
-        # Project root — always prominently placed so agents know where to look
-        sections.append(f"## Project Root\n`{self.workspace}`")
-
-        # Scope & non-goals
-        non_goals: list[str] = []
-        avoid = tt.get("avoid_first", [])
-        if avoid:
-            non_goals.append(f"Do not start with: {', '.join(avoid)}")
-        parallel = self._build_parallel_work_summary(role)
-        if parallel:
-            sections.append(
-                f"## Other Agents' Work (do not duplicate)\n{parallel}"
-            )
-            non_goals.append("Do not duplicate work already done by other agents.")
-        if non_goals:
-            sections.append("## Non-Goals\n" + "\n".join(f"- {g}" for g in non_goals))
-
-        # Tool guidance
-        prefer = tt.get("prefer", [])
-        tool_lines: list[str] = []
-        if prefer:
-            tool_lines.append(f"Preferred tools: {', '.join(prefer)}")
-        if avoid:
-            tool_lines.append(
-                f"Avoid using first (use only if preferred tools insufficient): "
-                f"{', '.join(avoid)}"
-            )
-        if tool_lines:
-            sections.append("## Tool Guidance\n" + "\n".join(tool_lines))
-
-        # Completion criteria
-        completion = tt.get("completion", "")
-        if completion:
-            sections.append(f"## Completion Criteria\n{completion}")
-
-        # Anti-hallucination constraints
-        anti_h = tt.get("anti_hallucination", "")
-        if anti_h:
-            sections.append(f"## Evidence Rules\n{anti_h}")
-
-        # --- Tier B: when available ---
-        plan_text = self._extract_plan_text()
-        if plan_text:
-            sections.append(f"## Overall Plan (for context)\n{plan_text}")
-
-        # Project context (Tier A workspace + Tier C conditional files)
-        execution_ctx = self._build_execution_context(task_type)
-        if execution_ctx:
-            sections.append(f"## Project Context\n{execution_ctx}")
-
-        # Tier B: parent findings (relevant prior results)
-        parent_findings = self._gather_recent_tool_results()
-        if parent_findings:
-            sections.append(f"## Prior Results\n{parent_findings}")
-
-        # Build the output schema instruction (goes in system prompt)
-        evidence_type = tt.get("evidence", "tool output excerpts")
-        output_schema = (
-            "\n\nYour response MUST use this structure:\n"
-            "## Findings\n<your key findings>\n\n"
-            "## Evidence\n<supporting evidence: " + evidence_type + ">\n\n"
-            "## Open Questions\n<anything unresolved or needing further investigation>\n\n"
-            "## Confidence\n<high/medium/low with brief justification>\n\n"
-            "## Files Inspected\n<list of files/sources you actually examined>"
-        )
-
-        return "\n\n".join(sections), output_schema
+        return self._dispatcher.build_delegation_contract(role, task, context, task_type)
 
     async def _execute_delegated_agent(
         self,
@@ -1836,143 +1158,7 @@ class AgentLoop:
         task: str,
         context: str | None,
     ) -> tuple[str, list[str]]:
-        """Set up and run a delegated agent for a single sub-task.
-
-        Returns ``(summary, tools_used)``.
-        """
-
-        # Classify task type for contract construction
-        task_type = self._classify_task_type(role.name, task)
-        logger.debug("Delegation task type: {} (role={})", task_type, role.name)
-
-        # Build isolated tool set (same tools as subagent, plus delegate for chaining)
-        tools = ToolRegistry()
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
-        for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        tools.register(
-            ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-            )
-        )
-        tools.register(WebSearchTool(api_key=self.brave_api_key))
-        tools.register(WebFetchTool())
-
-        # Allow further delegation (with the shared stack for cycle detection)
-        child_delegate = DelegateTool()
-        child_delegate.set_dispatch(self._dispatch_delegation)
-        tools.register(child_delegate)
-
-        # Apply role-specific tool filters
-        if role.denied_tools:
-            for denied in role.denied_tools:
-                tools.unregister(denied)
-        if role.allowed_tools is not None:
-            allowed = set(role.allowed_tools)
-            for tname in list(tools._tools):
-                if tname not in allowed:
-                    tools.unregister(tname)
-
-        # Build delegation contract
-        user_content, output_schema = self._build_delegation_contract(
-            role=role.name,
-            task=task,
-            context=context,
-            task_type=task_type,
-        )
-
-        # For synthesizing roles, inject scratchpad as primary input (Tier B)
-        if role.name in ("pm", "writing", "general") and self._scratchpad:
-            scratchpad_content = self._scratchpad.read()
-            if scratchpad_content and scratchpad_content != "Scratchpad is empty.":
-                user_content += (
-                    f"\n\n## Prior Agent Findings (Scratchpad)\n{scratchpad_content}"
-                )
-
-        # Build system prompt with contract-driven structure
-        avail_tools = ", ".join(tools.tool_names)
-        system_prompt = (
-            f"You are the **{role.name}** specialist agent.\n\n"
-            f"{role.system_prompt or ''}\n\n"
-            f"You MUST use your available tools to complete this task. "
-            f"Do NOT fabricate information — always verify with tools first."
-        )
-        if avail_tools:
-            system_prompt += f"\nAvailable tools: {avail_tools}"
-        system_prompt += output_schema
-
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ]
-
-        # Bound iterations: investigative tasks get 12, synthesis tasks get 8
-        if task_type in ("report_writing", "general"):
-            iter_cap = 8
-        else:
-            iter_cap = 12
-        max_iter = min(self.max_iterations, iter_cap)
-        model = role.model or self.model
-        temperature = role.temperature if role.temperature is not None else self.temperature
-
-        result, tools_used, messages = await run_tool_loop(
-            provider=self.provider,
-            tools=tools,
-            messages=messages,
-            model=model,
-            temperature=temperature,
-            max_tokens=self.max_tokens,
-            max_iterations=max_iter,
-        )
-
-        # Retry if agent didn't use any tools on an investigation-type task
-        if not tools_used and task_type not in ("report_writing",) and max_iter > 2:
-            logger.warning(
-                "Delegated {} agent used no tools — retrying with tool-use reminder",
-                role.name,
-            )
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "You have not used any tools yet. You MUST use the available "
-                        "tools to gather real data before producing your answer. "
-                        "Start by using list_dir or read_file to inspect the workspace."
-                    ),
-                }
-            )
-            retry_result, retry_tools, _ = await run_tool_loop(
-                provider=self.provider,
-                tools=tools,
-                messages=messages,
-                model=model,
-                temperature=temperature,
-                max_tokens=self.max_tokens,
-                max_iterations=min(max_iter, 6),
-            )
-            if retry_tools:
-                result = retry_result
-                tools_used = tools_used + retry_tools
-
-        summary = result or "No result produced."
-
-        # Strip model artifacts: some models prefix the final response with "final"
-        if summary.lower().startswith("final\n"):
-            summary = summary[6:].lstrip()
-        elif summary.lower().startswith("final:"):
-            summary = summary[6:].lstrip()
-
-        # Write to scratchpad if available (but return clean summary to caller)
-        if self._scratchpad:
-            await self._scratchpad.write(
-                role=role.name,
-                label=task[:80],
-                content=summary,
-            )
-
-        return summary, tools_used
+        return await self._dispatcher.execute_delegated_agent(role, task, context)
 
     # ------------------------------------------------------------------
     # Per-turn role switching (multi-agent routing)
@@ -2024,7 +1210,7 @@ class AgentLoop:
             self.tools._tools = self._saved_tools
 
     async def close_mcp(self) -> None:
-        """Close MCP connections."""
+        """Close MCP connections and other async resources."""
         if self._mcp_stack:
             try:
                 await self._mcp_stack.aclose()
@@ -2033,8 +1219,13 @@ class AgentLoop:
             self._mcp_stack = None
         try:
             await self.provider.aclose()
-        except Exception as e:
+        except (RuntimeError, OSError, AttributeError) as e:
             logger.debug("Provider cleanup failed: {}", e)
+        if hasattr(self, "memory_store") and self.memory_store.graph:
+            try:
+                await self.memory_store.graph.close()
+            except (RuntimeError, OSError) as e:
+                logger.debug("Graph driver cleanup failed: {}", e)
 
     def stop(self) -> None:
         """Stop the agent loop."""
@@ -2042,67 +1233,14 @@ class AgentLoop:
         logger.info("Agent loop stopping")
 
     def _get_consolidation_lock(self, session_key: str) -> asyncio.Lock:
-        lock = self._consolidation_locks.get(session_key)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._consolidation_locks[session_key] = lock
-        return lock
+        return self._consolidator.get_lock(session_key)
 
     def _prune_consolidation_lock(self, session_key: str, lock: asyncio.Lock) -> None:
         """Drop lock entry if no longer in use."""
-        if not lock.locked():
-            self._consolidation_locks.pop(session_key, None)
-
-    @staticmethod
-    def _looks_like_question(text: str) -> bool:
-        content = (text or "").strip().lower()
-        if not content:
-            return False
-        if "?" in content:
-            return True
-        starters = (
-            "what ",
-            "which ",
-            "who ",
-            "when ",
-            "where ",
-            "why ",
-            "how ",
-            "is ",
-            "are ",
-            "do ",
-            "does ",
-            "did ",
-            "can ",
-            "could ",
-            "should ",
-            "would ",
-            "will ",
-        )
-        return content.startswith(starters)
-
-    def _estimate_grounding_confidence(self, query: str) -> float:
-        try:
-            items = self.context.memory.retrieve(
-                query,
-                top_k=1,
-            )
-        except Exception:
-            return 0.0
-        if not items:
-            return 0.0
-        top = items[0]
-        try:
-            score = float(top.get("score", 0.0))
-        except (TypeError, ValueError):
-            score = 0.0
-        return max(0.0, min(1.0, score))
+        self._consolidator.prune_lock(session_key, lock)
 
     def _should_force_verification(self, text: str) -> bool:
-        if not self._looks_like_question(text):
-            return False
-        confidence = self._estimate_grounding_confidence(text)
-        return confidence < self.memory_uncertainty_threshold
+        return self._verifier.should_force_verification(text)
 
     async def _attempt_recovery(
         self,
@@ -2148,7 +1286,7 @@ class AgentLoop:
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
-        except Exception:
+        except Exception:  # crash-barrier: recovery LLM call
             logger.warning("Recovery LLM call failed with exception")
             return None
 
@@ -2207,6 +1345,8 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        t0_request = time.monotonic()
+
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (
@@ -2235,7 +1375,12 @@ class AgentLoop:
             )
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
+        bind_trace().info(
+            "Processing message from {}:{}: {}",
+            msg.channel,
+            msg.sender_id,
+            preview,
+        )
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
@@ -2258,7 +1403,7 @@ class AgentLoop:
                                 chat_id=msg.chat_id,
                                 content="Memory archival failed, session not cleared. Please try again.",
                             )
-            except Exception:
+            except (RuntimeError, asyncio.TimeoutError):
                 logger.exception("/new archival failed for {}", session.key)
                 return OutboundMessage(
                     channel=msg.channel,
@@ -2305,7 +1450,7 @@ class AgentLoop:
                     chat_id=msg.chat_id,
                     content=str(correction_result.get("question", "")),
                 )
-        except Exception:
+        except (RuntimeError, KeyError, TypeError):
             logger.exception("Live correction capture failed")
 
         # Proactively ask for unresolved conflicts discovered during prior consolidation turns.
@@ -2318,7 +1463,11 @@ class AgentLoop:
             )
 
         unconsolidated = len(session.messages) - session.last_consolidated
-        if unconsolidated >= self.memory_window and session.key not in self._consolidating:
+        if (
+            self.config.memory_enabled
+            and unconsolidated >= self.memory_window
+            and session.key not in self._consolidating
+        ):
             self._consolidating.add(session.key)
             lock = self._get_consolidation_lock(session.key)
 
@@ -2373,14 +1522,12 @@ class AgentLoop:
 
         final_content, tools_used, all_msgs = await self._run_agent_loop(
             initial_messages,
-            on_progress=on_progress or _bus_progress,
+            on_progress=(on_progress or _bus_progress) if self.config.streaming_enabled else None,
         )
 
         # Track per-role tool calls
         if self._routing_metrics and tools_used and self.role_name:
-            self._routing_metrics.record(
-                role_tool_calls_key(self.role_name), len(tools_used)
-            )
+            self._routing_metrics.record(role_tool_calls_key(self.role_name), len(tools_used))
 
         if final_content is None:
             final_content = await self._attempt_recovery(msg, all_msgs)
@@ -2392,6 +1539,23 @@ class AgentLoop:
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+
+        # --- Request audit line ---
+        duration_ms = (time.monotonic() - t0_request) * 1000
+        bind_trace().info(
+            "request_complete | {ch}:{cid} | {dur:.0f}ms | model={mdl} | tools={tc} | len={rlen}",
+            ch=msg.channel,
+            cid=msg.chat_id,
+            dur=duration_ms,
+            mdl=self.model,
+            tc=len(tools_used),
+            rlen=len(final_content),
+        )
+        if self._routing_metrics:
+            self._routing_metrics.record_request(
+                duration_ms=duration_ms,
+                tool_calls=len(tools_used),
+            )
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
@@ -2409,7 +1573,6 @@ class AgentLoop:
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
-        from datetime import datetime
 
         max_chars = self.config.tool_result_max_chars
         for m in messages[skip:]:
@@ -2423,43 +1586,15 @@ class AgentLoop:
         session.updated_at = datetime.now()
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
-        """Delegate to MemoryStore.consolidate(). Returns True on success."""
-        return await self.context.memory.consolidate(
+        """Delegate to ConsolidationOrchestrator."""
+        return await self._consolidator.consolidate(
             session,
             self.provider,
             self.model,
-            archive_all=archive_all,
             memory_window=self.memory_window,
             enable_contradiction_check=self.memory_enable_contradiction_check,
+            archive_all=archive_all,
         )
-
-    def _fallback_archive_snapshot(self, snapshot: list[dict]) -> bool:
-        """Fallback archival used by /new when AI consolidation fails."""
-        try:
-            lines: list[str] = []
-            for m in snapshot:
-                content = m.get("content")
-                if not content:
-                    continue
-                tools = f" [tools: {', '.join(m['tools_used'])}]" if m.get("tools_used") else ""
-                timestamp = str(m.get("timestamp", "?"))[:16]
-                role = str(m.get("role", "unknown")).upper()
-                lines.append(f"[{timestamp}] {role}{tools}: {content}")
-
-            if not lines:
-                return True
-
-            header = (
-                f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] "
-                f"Fallback archive from /new ({len(lines)} messages)"
-            )
-            entry = header + "\n" + "\n".join(lines)
-            self.context.memory.append_history(entry)
-            logger.warning("/new used fallback archival: {} messages", len(lines))
-            return True
-        except Exception:
-            logger.exception("Fallback archival failed")
-            return False
 
     async def process_direct(
         self,

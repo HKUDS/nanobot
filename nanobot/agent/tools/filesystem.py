@@ -60,7 +60,7 @@ class ReadFileTool(Tool):
             return ToolResult.ok(content)
         except PermissionError as e:
             return ToolResult.fail(f"Error: {e}")
-        except Exception as e:
+        except (OSError, UnicodeDecodeError) as e:
             return ToolResult.fail(f"Error reading file: {str(e)}")
 
 
@@ -100,7 +100,7 @@ class WriteFileTool(Tool):
             return ToolResult.ok(f"Successfully wrote {len(content)} bytes to {file_path}")
         except PermissionError as e:
             return ToolResult.fail(f"Error: {e}")
-        except Exception as e:
+        except OSError as e:
             return ToolResult.fail(f"Error writing file: {str(e)}")
 
 
@@ -157,7 +157,7 @@ class EditFileTool(Tool):
             return ToolResult.ok(f"Successfully edited {file_path}")
         except PermissionError as e:
             return ToolResult.fail(f"Error: {e}")
-        except Exception as e:
+        except (OSError, UnicodeDecodeError) as e:
             return ToolResult.fail(f"Error editing file: {str(e)}")
 
     @staticmethod
@@ -233,5 +233,5 @@ class ListDirTool(Tool):
             return ToolResult.ok("\n".join(items))
         except PermissionError as e:
             return ToolResult.fail(f"Error: {e}")
-        except Exception as e:
+        except OSError as e:
             return ToolResult.fail(f"Error listing directory: {str(e)}")

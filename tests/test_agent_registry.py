@@ -108,12 +108,14 @@ class TestMergeRegister:
 
     def test_merge_overrides_explicit_fields_only(self) -> None:
         reg = AgentRegistry()
-        reg.register(AgentRoleConfig(
-            name="research",
-            description="Original",
-            system_prompt="Original prompt",
-            denied_tools=["exec"],
-        ))
+        reg.register(
+            AgentRoleConfig(
+                name="research",
+                description="Original",
+                system_prompt="Original prompt",
+                denied_tools=["exec"],
+            )
+        )
         override = AgentRoleConfig(
             name="research",
             description="Updated description",

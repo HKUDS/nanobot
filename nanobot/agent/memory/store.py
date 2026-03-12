@@ -21,15 +21,16 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import re
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from nanobot.agent.tracing import bind_trace
 from nanobot.utils.helpers import ensure_dir
 
 from .constants import _SAVE_MEMORY_TOOL
@@ -92,10 +93,16 @@ class MemoryStore:
             coerce_event=self._coerce_event,
             utc_now_iso=self._utc_now_iso,
         )
-        self.mem0 = _Mem0Adapter(workspace=workspace)
         self.rollout = self._load_rollout_config()
         if isinstance(rollout_overrides, dict):
             self._apply_rollout_overrides(rollout_overrides)
+        self.mem0 = _Mem0Adapter(
+            workspace=workspace,
+            user_id=str(self.rollout.get("mem0_user_id", "nanobot")),
+            add_debug=bool(self.rollout.get("mem0_add_debug", False)),
+            verify_write=bool(self.rollout.get("mem0_verify_write", True)),
+            force_infer_true=bool(self.rollout.get("mem0_force_infer_true", False)),
+        )
 
         # In-memory metrics collector — must be initialised before
         # _ensure_vector_health() which records metrics.
@@ -120,22 +127,10 @@ class MemoryStore:
         # Knowledge graph (Neo4j) — graceful degradation when disabled or
         # neo4j package is not installed.
         graph_enabled = self.rollout.get("graph_enabled", False)
-        env_graph = os.environ.get("NANOBOT_GRAPH_ENABLED")
-        if env_graph is not None:
-            graph_enabled = env_graph.lower() in ("1", "true", "yes")
         if graph_enabled:
-            graph_uri = (
-                os.environ.get("NANOBOT_GRAPH_NEO4J_URI")
-                or str(self.rollout.get("graph_neo4j_uri", "bolt://localhost:7687"))
-            )
-            graph_auth = (
-                os.environ.get("NANOBOT_GRAPH_NEO4J_AUTH")
-                or str(self.rollout.get("graph_neo4j_auth", "neo4j/nanobot_graph"))
-            )
-            graph_db = (
-                os.environ.get("NANOBOT_GRAPH_NEO4J_DATABASE")
-                or str(self.rollout.get("graph_neo4j_database", "neo4j"))
-            )
+            graph_uri = str(self.rollout.get("graph_neo4j_uri", "bolt://localhost:7687"))
+            graph_auth = str(self.rollout.get("graph_neo4j_auth", "neo4j/nanobot_graph"))
+            graph_db = str(self.rollout.get("graph_neo4j_database", "neo4j"))
             self.graph = KnowledgeGraph(uri=graph_uri, auth=graph_auth, database=graph_db)
         else:
             self.graph = KnowledgeGraph()  # disabled — all methods return empty
@@ -161,18 +156,103 @@ class MemoryStore:
         return {t for t in re.findall(r"[a-zA-Z0-9_\-]+", value.lower()) if len(t) > 1}
 
     # Stopwords excluded when extracting query keywords for graph lookups.
-    _GRAPH_QUERY_STOPWORDS = frozenset({
-        "the", "this", "that", "then", "than", "they", "them", "there", "these", "those",
-        "what", "when", "where", "which", "while", "who", "whom", "whose", "why", "how",
-        "also", "and", "but", "for", "from", "into", "just", "like", "not", "only",
-        "some", "such", "very", "will", "with", "would", "could", "should", "about",
-        "after", "before", "been", "being", "have", "here", "more", "most", "much",
-        "over", "same", "still", "each", "even", "every", "other", "are", "was",
-        "were", "had", "has", "does", "did", "any", "its", "can", "may",
-        "is", "it", "an", "or", "no", "do", "so", "if", "my", "me",
-        "his", "her", "our", "your", "their", "a", "of", "in", "on", "to", "at", "by",
-        "currently", "involved", "caused", "resolved", "apply",
-    })
+    _GRAPH_QUERY_STOPWORDS = frozenset(
+        {
+            "the",
+            "this",
+            "that",
+            "then",
+            "than",
+            "they",
+            "them",
+            "there",
+            "these",
+            "those",
+            "what",
+            "when",
+            "where",
+            "which",
+            "while",
+            "who",
+            "whom",
+            "whose",
+            "why",
+            "how",
+            "also",
+            "and",
+            "but",
+            "for",
+            "from",
+            "into",
+            "just",
+            "like",
+            "not",
+            "only",
+            "some",
+            "such",
+            "very",
+            "will",
+            "with",
+            "would",
+            "could",
+            "should",
+            "about",
+            "after",
+            "before",
+            "been",
+            "being",
+            "have",
+            "here",
+            "more",
+            "most",
+            "much",
+            "over",
+            "same",
+            "still",
+            "each",
+            "even",
+            "every",
+            "other",
+            "are",
+            "was",
+            "were",
+            "had",
+            "has",
+            "does",
+            "did",
+            "any",
+            "its",
+            "can",
+            "may",
+            "is",
+            "it",
+            "an",
+            "or",
+            "no",
+            "do",
+            "so",
+            "if",
+            "my",
+            "me",
+            "his",
+            "her",
+            "our",
+            "your",
+            "their",
+            "a",
+            "of",
+            "in",
+            "on",
+            "to",
+            "at",
+            "by",
+            "currently",
+            "involved",
+            "caused",
+            "resolved",
+            "apply",
+        }
+    )
 
     @classmethod
     def _extract_query_keywords(cls, query: str) -> set[str]:
@@ -206,18 +286,6 @@ class MemoryStore:
             return 0
         return max(1, len(value) // 4)
 
-    @staticmethod
-    def _env_bool(name: str) -> bool | None:
-        raw = os.getenv(name)
-        if raw is None:
-            return None
-        normalized = str(raw).strip().lower()
-        if normalized in {"1", "true", "yes", "on"}:
-            return True
-        if normalized in {"0", "false", "no", "off"}:
-            return False
-        return None
-
     def _load_rollout_config(self) -> dict[str, Any]:
         defaults: dict[str, Any] = {
             "memory_rollout_mode": "enabled",
@@ -240,6 +308,10 @@ class MemoryStore:
             "reranker_mode": "disabled",
             "reranker_alpha": 0.5,
             "reranker_model": "",
+            "mem0_user_id": "nanobot",
+            "mem0_add_debug": False,
+            "mem0_verify_write": True,
+            "mem0_force_infer_true": False,
         }
         rollout = dict(defaults)
 
@@ -283,67 +355,6 @@ class MemoryStore:
             sample_rate = 0.2
         rollout["memory_shadow_sample_rate"] = min(max(sample_rate, 0.0), 1.0)
 
-        mode_env = os.getenv("NANOBOT_MEMORY_ROLLOUT_MODE")
-        if mode_env:
-            env_mode = mode_env.strip().lower()
-            if env_mode in self.ROLLOUT_MODES:
-                rollout["memory_rollout_mode"] = env_mode
-        env_overrides = {
-            "memory_type_separation_enabled": self._env_bool(
-                "NANOBOT_MEMORY_TYPE_SEPARATION_ENABLED"
-            ),
-            "memory_router_enabled": self._env_bool("NANOBOT_MEMORY_ROUTER_ENABLED"),
-            "memory_reflection_enabled": self._env_bool("NANOBOT_MEMORY_REFLECTION_ENABLED"),
-            "memory_shadow_mode": self._env_bool("NANOBOT_MEMORY_SHADOW_MODE"),
-            "memory_vector_health_enabled": self._env_bool("NANOBOT_MEMORY_VECTOR_HEALTH_ENABLED"),
-            "memory_auto_reindex_on_empty_vector": self._env_bool(
-                "NANOBOT_MEMORY_AUTO_REINDEX_ON_EMPTY_VECTOR"
-            ),
-            "memory_history_fallback_enabled": self._env_bool(
-                "NANOBOT_MEMORY_HISTORY_FALLBACK_ENABLED"
-            ),
-        }
-        for key, value in env_overrides.items():
-            if value is not None:
-                rollout[key] = value
-
-        # Reranker env overrides
-        reranker_mode_env = os.getenv("NANOBOT_RERANKER_MODE")
-        if reranker_mode_env:
-            rm = reranker_mode_env.strip().lower()
-            if rm in ("enabled", "shadow", "disabled"):
-                rollout["reranker_mode"] = rm
-        reranker_alpha_env = os.getenv("NANOBOT_RERANKER_ALPHA")
-        if reranker_alpha_env is not None:
-            try:
-                rollout["reranker_alpha"] = min(max(float(reranker_alpha_env), 0.0), 1.0)
-            except (TypeError, ValueError):
-                pass
-        reranker_model_env = os.getenv("NANOBOT_RERANKER_MODEL")
-        if reranker_model_env:
-            rollout["reranker_model"] = reranker_model_env.strip()
-
-        sample_env = os.getenv("NANOBOT_MEMORY_SHADOW_SAMPLE_RATE")
-        if sample_env is not None:
-            try:
-                rollout["memory_shadow_sample_rate"] = min(max(float(sample_env), 0.0), 1.0)
-            except (TypeError, ValueError):
-                pass
-        fallback_sources_env = os.getenv("NANOBOT_MEMORY_FALLBACK_ALLOWED_SOURCES")
-        if fallback_sources_env is not None:
-            parsed = [
-                item.strip().lower() for item in fallback_sources_env.split(",") if item.strip()
-            ]
-            if parsed:
-                rollout["memory_fallback_allowed_sources"] = parsed
-        fallback_len_env = os.getenv("NANOBOT_MEMORY_FALLBACK_MAX_SUMMARY_CHARS")
-        if fallback_len_env is not None:
-            try:
-                rollout["memory_fallback_max_summary_chars"] = max(
-                    80, min(int(fallback_len_env), 4000)
-                )
-            except (TypeError, ValueError):
-                pass
         return rollout
 
     def get_rollout_status(self) -> dict[str, Any]:
@@ -429,6 +440,12 @@ class MemoryStore:
                 pass
         if "reranker_model" in overrides:
             self.rollout["reranker_model"] = str(overrides["reranker_model"]).strip()
+        # mem0 overrides
+        if "mem0_user_id" in overrides:
+            self.rollout["mem0_user_id"] = str(overrides["mem0_user_id"]).strip() or "nanobot"
+        for bk in ("mem0_add_debug", "mem0_verify_write", "mem0_force_infer_true"):
+            if bk in overrides:
+                self.rollout[bk] = bool(overrides[bk])
 
     @staticmethod
     def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
@@ -460,8 +477,13 @@ class MemoryStore:
             "outage",
         )
         reflection_markers = (
-            "reflect", "reflection", "lesson", "learned", "retrospective",
-            "insight", "insights",
+            "reflect",
+            "reflection",
+            "lesson",
+            "learned",
+            "retrospective",
+            "insight",
+            "insights",
         )
         planning_markers = (
             "plan",
@@ -517,7 +539,10 @@ class MemoryStore:
                 "half_life_days": 120.0,
                 "type_boost": {"semantic": 0.18, "episodic": -0.05, "reflection": -0.12},
                 "fallback_topics": [
-                    "knowledge", "user_preference", "relationship", "profile_update",
+                    "knowledge",
+                    "user_preference",
+                    "relationship",
+                    "profile_update",
                 ],
                 "fallback_types": ["semantic"],
             },
@@ -1020,9 +1045,9 @@ class MemoryStore:
         except TypeError:
             try:
                 raw = self.mem0.client.get_all(self.mem0.user_id, max(1, limit))
-            except Exception:
+            except Exception:  # crash-barrier: mem0 SDK produces varied errors
                 return []
-        except Exception:
+        except Exception:  # crash-barrier: mem0 SDK produces varied errors
             return []
         return self.mem0._rows(raw)
 
@@ -1044,7 +1069,7 @@ class MemoryStore:
                 cur.execute("SELECT COUNT(*) FROM points")
                 total += int(cur.fetchone()[0])
                 conn.close()
-            except Exception:
+            except (sqlite3.Error, OSError):
                 continue
         return max(total, 0)
 
@@ -1067,7 +1092,7 @@ class MemoryStore:
             count = int(cur.fetchone()[0])
             conn.close()
             return max(count, 0)
-        except Exception:
+        except (sqlite3.Error, OSError):
             return 0
 
     def _event_compaction_key(self, event: dict[str, Any]) -> tuple[str, str, str, str]:
@@ -1290,7 +1315,7 @@ class MemoryStore:
             profile_payload = json.loads(profile_path.read_text(encoding="utf-8"))
             if not isinstance(profile_payload, dict):
                 raise ValueError("seed profile must be a JSON object")
-        except Exception as exc:
+        except (json.JSONDecodeError, OSError, ValueError) as exc:
             return {"ok": False, "reason": f"invalid_profile_seed:{exc}"}
 
         seeded_profile = self.read_profile()
@@ -1319,7 +1344,7 @@ class MemoryStore:
                 coerced = self._coerce_event(payload, source_span=[0, 0])
                 if coerced:
                     seeded_events.append(coerced)
-        except Exception as exc:
+        except (json.JSONDecodeError, OSError) as exc:
             return {"ok": False, "reason": f"invalid_events_seed:{exc}"}
 
         self.persistence.write_jsonl(self.events_file, seeded_events)
@@ -2095,6 +2120,7 @@ class MemoryStore:
     def append_events(self, events: list[dict[str, Any]]) -> int:
         if not events:
             return 0
+        t0_append = time.monotonic()
         existing_events = [self._ensure_event_provenance(event) for event in self.read_events()]
         existing_ids = {e.get("id") for e in existing_events if e.get("id")}
         written = 0
@@ -2200,6 +2226,13 @@ class MemoryStore:
                         dual_recorded = True
             if write_totals["memory_writes_total"] > 0 or write_totals["memory_write_failures"] > 0:
                 self._record_metrics(write_totals)
+        bind_trace().debug(
+            "memory_append | written={} | merged={} | superseded={} | {:.0f}ms",
+            written,
+            merged,
+            superseded,
+            (time.monotonic() - t0_append) * 1000,
+        )
         return written
 
     async def _ingest_graph_triples(self, events: list[dict[str, Any]]) -> int:
@@ -2750,14 +2783,16 @@ class MemoryStore:
         if isinstance(raw_triples, list):
             for t in raw_triples:
                 if isinstance(t, dict) and t.get("subject") and t.get("object"):
-                    triples.append({
-                        "subject": str(t["subject"]).strip(),
-                        "predicate": str(t.get("predicate", "RELATED_TO")).strip(),
-                        "object": str(t["object"]).strip(),
-                        "confidence": min(
-                            max(self._safe_float(t.get("confidence"), confidence), 0.0), 1.0
-                        ),
-                    })
+                    triples.append(
+                        {
+                            "subject": str(t["subject"]).strip(),
+                            "predicate": str(t.get("predicate", "RELATED_TO")).strip(),
+                            "object": str(t["object"]).strip(),
+                            "confidence": min(
+                                max(self._safe_float(t.get("confidence"), confidence), 0.0), 1.0
+                            ),
+                        }
+                    )
 
         return {
             "id": event_id,
@@ -2789,6 +2824,7 @@ class MemoryStore:
         recency_half_life_days: float | None = None,
         embedding_provider: str | None = None,
     ) -> list[dict[str, Any]]:
+        t0 = time.monotonic()
         # Local BM25 retrieval with intent routing when mem0 is unavailable.
         if not self.mem0.enabled:
             events = self.read_events()
@@ -2809,13 +2845,16 @@ class MemoryStore:
                 query_keywords = self._extract_query_keywords(query)
                 if query_keywords:
                     neo4j_related = self.graph.get_related_entity_names_sync(
-                        query_keywords, depth=2,
+                        query_keywords,
+                        depth=2,
                     )
                     # Append related entity names to the query for BM25 matching.
                     extra_terms = neo4j_related - query_keywords
                     if extra_terms:
-                        augmented_query = query + " " + " ".join(
-                            t.replace("-", " ").replace("_", " ") for t in extra_terms
+                        augmented_query = (
+                            query
+                            + " "
+                            + " ".join(t.replace("-", " ").replace("_", " ") for t in extra_terms)
                         )
 
             candidates = _local_retrieve(
@@ -2859,7 +2898,8 @@ class MemoryStore:
                             graph_entity_names.add(subj)
                 # Augment with Neo4j graph neighbors when available.
                 neo4j_related = self.graph.get_related_entity_names_sync(
-                    query_entities, depth=2,
+                    query_entities,
+                    depth=2,
                 )
                 graph_entity_names |= neo4j_related
 
@@ -2892,6 +2932,11 @@ class MemoryStore:
             if results:
                 self._record_metric("retrieval_hits", 1)
             self._record_metric("retrieval_candidates", len(results))
+            bind_trace().debug(
+                "Memory retrieve source=bm25 results={} duration_ms={:.0f}",
+                len(results),
+                (time.monotonic() - t0) * 1000,
+            )
             return results
 
         mode = str(self.rollout.get("memory_rollout_mode", "enabled")).strip().lower()
@@ -2956,6 +3001,12 @@ class MemoryStore:
                         "retrieval_shadow_overlap_sum": int(round(overlap * 1000)),
                     }
                 )
+        bind_trace().debug(
+            "Memory retrieve source=mem0 results={} intent={} duration_ms={:.0f}",
+            len(final),
+            stats["intent"],
+            (time.monotonic() - t0) * 1000,
+        )
         return final
 
     def _retrieve_core(
@@ -2986,7 +3037,8 @@ class MemoryStore:
             query_keywords = self._extract_query_keywords(query)
             if query_keywords:
                 neo4j_related = self.graph.get_related_entity_names_sync(
-                    query_keywords, depth=2,
+                    query_keywords,
+                    depth=2,
                 )
                 graph_extra_terms = neo4j_related - query_keywords
 
@@ -3046,8 +3098,10 @@ class MemoryStore:
         # that mem0 vector search may have missed.
         if graph_extra_terms and retrieved is not None:
             retrieved_ids = {str(r.get("id", "")) for r in retrieved}
-            graph_query = query + " " + " ".join(
-                t.replace("-", " ").replace("_", " ") for t in graph_extra_terms
+            graph_query = (
+                query
+                + " "
+                + " ".join(t.replace("-", " ").replace("_", " ") for t in graph_extra_terms)
             )
             events = self.read_events()
             bm25_supplement = _local_retrieve(
@@ -3358,7 +3412,9 @@ class MemoryStore:
         return index
 
     def _extract_query_entities(
-        self, query: str, entity_index: set[str],
+        self,
+        query: str,
+        entity_index: set[str],
     ) -> set[str]:
         """Extract entities from a query by matching tokens against known entities.
 
@@ -3408,9 +3464,7 @@ class MemoryStore:
         rel_triples: list[tuple[str, str, str]] = []
 
         if self.graph.enabled:
-            rel_triples.extend(
-                self.graph.get_triples_for_entities_sync(query_entities)
-            )
+            rel_triples.extend(self.graph.get_triples_for_entities_sync(query_entities))
 
         # Supplement with local event triples (may add context Neo4j lacks).
         for evt in events:
@@ -3819,7 +3873,7 @@ class MemoryStore:
                 recency_half_life_days=recency_half_life_days,
                 embedding_provider=embedding_provider,
             )
-        except Exception:
+        except Exception:  # crash-barrier: multi-subsystem retrieval pipeline
             logger.warning("Memory retrieval failed; continuing with local data only")
             retrieved = []
 
@@ -3859,7 +3913,9 @@ class MemoryStore:
         raw_graph: list[str] = []
         if query:
             raw_graph = self._build_graph_context_lines(
-                query, retrieved, max_tokens=budget,
+                query,
+                retrieved,
+                max_tokens=budget,
             )
 
         unresolved = self._recent_unresolved(self.read_events(limit=60), max_items=6)
@@ -3895,22 +3951,28 @@ class MemoryStore:
             )
 
         semantic_lines = self._fit_lines_to_token_cap(
-            raw_semantic, token_cap=alloc["semantic"],
+            raw_semantic,
+            token_cap=alloc["semantic"],
         )
         episodic_lines = self._fit_lines_to_token_cap(
-            raw_episodic, token_cap=alloc["episodic"],
+            raw_episodic,
+            token_cap=alloc["episodic"],
         )
         reflection_lines = self._fit_lines_to_token_cap(
-            raw_reflection, token_cap=alloc["reflection"],
+            raw_reflection,
+            token_cap=alloc["reflection"],
         )
         graph_lines = self._fit_lines_to_token_cap(
-            raw_graph, token_cap=alloc["graph"],
+            raw_graph,
+            token_cap=alloc["graph"],
         )
         unresolved_lines = self._fit_lines_to_token_cap(
-            raw_unresolved, token_cap=alloc["unresolved"],
+            raw_unresolved,
+            token_cap=alloc["unresolved"],
         )
         fitted_profile_lines = self._fit_lines_to_token_cap(
-            profile_lines, token_cap=alloc["profile"],
+            profile_lines,
+            token_cap=alloc["profile"],
         )
 
         # ── Phase 4: assemble in logical presentation order ──
@@ -4514,6 +4576,7 @@ class MemoryStore:
 
         Returns True on success (including no-op), False on failure.
         """
+        t0 = time.monotonic()
         selection = self._select_messages_for_consolidation(
             session,
             archive_all=archive_all,
@@ -4656,7 +4719,12 @@ class MemoryStore:
                 archive_all=archive_all,
                 keep_count=keep_count,
             )
+            bind_trace().debug(
+                "Memory consolidate events={} duration_ms={:.0f}",
+                events_written,
+                (time.monotonic() - t0) * 1000,
+            )
             return True
-        except Exception:
+        except Exception:  # crash-barrier: multi-stage consolidation must not crash
             logger.exception("Memory consolidation failed")
             return False

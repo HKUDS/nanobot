@@ -1,4 +1,4 @@
-.PHONY: install install-all test test-verbose test-cov lint format typecheck check memory-eval clean pre-commit-install
+.PHONY: install install-all test test-verbose test-cov lint format typecheck check ci import-check prompt-check memory-eval clean pre-commit-install
 
 PYTHON ?= python3
 
@@ -16,7 +16,7 @@ test-verbose:
 	$(PYTHON) -m pytest tests/ -v
 
 test-cov:
-	$(PYTHON) -m pytest tests/ --cov=nanobot --cov-report=term-missing
+	$(PYTHON) -m pytest tests/ --cov=nanobot --cov-report=term-missing --cov-fail-under=85
 
 lint:
 	ruff check nanobot/ tests/
@@ -28,7 +28,15 @@ format:
 typecheck:
 	$(PYTHON) -m mypy nanobot/
 
-check: lint typecheck test
+check: lint typecheck import-check prompt-check test
+
+ci: lint typecheck import-check prompt-check test-cov
+
+import-check:
+	$(PYTHON) scripts/check_imports.py
+
+prompt-check:
+	$(PYTHON) scripts/check_prompt_manifest.py
 
 memory-eval:
 	$(PYTHON) scripts/memory_eval_ci.py \

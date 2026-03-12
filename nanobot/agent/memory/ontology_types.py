@@ -248,34 +248,38 @@ class TypeScore:
 # Convenience constant: the set of agent-native entity types
 # ---------------------------------------------------------------------------
 
-AGENT_NATIVE_TYPES: frozenset[EntityType] = frozenset({
-    EntityType.AGENT,
-    EntityType.USER,
-    EntityType.TASK,
-    EntityType.ACTION,
-    EntityType.OBSERVATION,
-    EntityType.MEMORY,
-    EntityType.SESSION,
-    EntityType.MESSAGE,
-    EntityType.DOCUMENT,
-    EntityType.TOOL,
-    EntityType.MODEL,
-})
+AGENT_NATIVE_TYPES: frozenset[EntityType] = frozenset(
+    {
+        EntityType.AGENT,
+        EntityType.USER,
+        EntityType.TASK,
+        EntityType.ACTION,
+        EntityType.OBSERVATION,
+        EntityType.MEMORY,
+        EntityType.SESSION,
+        EntityType.MESSAGE,
+        EntityType.DOCUMENT,
+        EntityType.TOOL,
+        EntityType.MODEL,
+    }
+)
 
 # Convenience: the set of agent-operational relation types
-AGENT_RELATION_TYPES: frozenset[RelationType] = frozenset({
-    RelationType.PERFORMS,
-    RelationType.EXECUTES,
-    RelationType.CALLS,
-    RelationType.PRODUCES,
-    RelationType.OBSERVES,
-    RelationType.STORES,
-    RelationType.RECALLS,
-    RelationType.REFERENCES,
-    RelationType.DERIVED_FROM,
-    RelationType.SAME_AS,
-    RelationType.PART_OF,
-})
+AGENT_RELATION_TYPES: frozenset[RelationType] = frozenset(
+    {
+        RelationType.PERFORMS,
+        RelationType.EXECUTES,
+        RelationType.CALLS,
+        RelationType.PRODUCES,
+        RelationType.OBSERVES,
+        RelationType.STORES,
+        RelationType.RECALLS,
+        RelationType.REFERENCES,
+        RelationType.DERIVED_FROM,
+        RelationType.SAME_AS,
+        RelationType.PART_OF,
+    }
+)
 
 # Pre-compiled regex for canonical name normalisation
 _CANONICAL_RE = re.compile(r"\s+")

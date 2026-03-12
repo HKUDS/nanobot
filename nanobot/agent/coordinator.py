@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.registry import AgentRegistry
 from nanobot.config.schema import AgentRoleConfig
 
@@ -114,26 +115,6 @@ def build_default_registry(default_role: str = "general") -> AgentRegistry:
 # Coordinator
 # ------------------------------------------------------------------
 
-_CLASSIFY_SYSTEM = (
-    "You are a message router. Given a user message, decide which specialist agent "
-    "should handle it. Reply with ONLY a JSON object:\n"
-    '{\"role\": \"<primary_role>\", \"confidence\": <0.0-1.0>, '
-    '\"needs_orchestration\": <true|false>, '
-    '\"relevant_roles\": [\"<role1>\", \"<role2>\", ...]}\n\n'
-    "Field definitions:\n"
-    "- role: the single best specialist for this task.\n"
-    "- confidence: 1.0 = very certain, 0.0 = no idea.\n"
-    "- needs_orchestration: true when the task would benefit from a "
-    "coordinator breaking it into parallel sub-tasks for multiple specialists. "
-    "Set true when: the task involves multiple independent areas of work; "
-    "requires both investigation/analysis AND synthesis/output; mentions 3+ "
-    "distinct files, topics, or areas to examine; or explicitly lists sub-tasks "
-    "(e.g. 'review X, Y, and Z'). Set false for single-focus requests.\n"
-    "- relevant_roles: ALL roles that could contribute (including the primary). "
-    "List only roles from the available agents.\n\n"
-    "Do not include any other text."
-)
-
 
 class Coordinator:
     """LLM-based message router that classifies intent and selects an agent role."""
@@ -162,7 +143,7 @@ class Coordinator:
         return (
             f"Available agents:\n{role_lines}\n\n"
             f"User message:\n{message}\n\n"
-            f"Which agent should handle this? Reply with {{\"role\": \"<name>\"}}."
+            f'Which agent should handle this? Reply with {{"role": "<name>"}}.'
         )
 
     async def classify(self, message: str) -> tuple[str, float]:
@@ -180,7 +161,7 @@ class Coordinator:
         try:
             response = await self._provider.chat(
                 messages=[
-                    {"role": "system", "content": _CLASSIFY_SYSTEM},
+                    {"role": "system", "content": prompts.get("classify")},
                     {"role": "user", "content": user_prompt},
                 ],
                 tools=None,
@@ -189,9 +170,7 @@ class Coordinator:
                 max_tokens=128,
             )
             raw = (response.content or "").strip()
-            parsed_role, confidence, needs_orchestration, relevant_roles = (
-                self._parse_response(raw)
-            )
+            parsed_role, confidence, needs_orchestration, relevant_roles = self._parse_response(raw)
             role_name = parsed_role if parsed_role in self._registry else self._default_role
 
             # Orchestration override: route to "pm" when the classifier
@@ -202,8 +181,7 @@ class Coordinator:
                 and (needs_orchestration or len(relevant_roles) >= 2)
             ):
                 logger.info(
-                    "Orchestration override: {} → pm "
-                    "(needs_orchestration={}, relevant_roles={})",
+                    "Orchestration override: {} → pm (needs_orchestration={}, relevant_roles={})",
                     role_name,
                     needs_orchestration,
                     relevant_roles,
@@ -219,7 +197,7 @@ class Coordinator:
                 raw,
             )
             return role_name, confidence
-        except Exception:
+        except Exception:  # crash-barrier: LLM-based classification
             logger.warning("Coordinator classification failed, using default role")
             return self._default_role, 0.0
 

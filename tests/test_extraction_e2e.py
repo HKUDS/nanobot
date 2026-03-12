@@ -31,17 +31,18 @@ class TestExtractionToRetrieval:
             }
             for m in messages
         ]
-        events, _updates = store.extractor.heuristic_extract_events(
-            msg_dicts, source_start=0
-        )
+        events, _updates = store.extractor.heuristic_extract_events(msg_dicts, source_start=0)
         return store.append_events(events)
 
     def test_preference_roundtrip(self, tmp_path: Path) -> None:
         """A preference message should be extractable and retrievable."""
         store = self._make_store(tmp_path)
-        written = self._extract_and_store(store, [
-            {"role": "user", "content": "I prefer dark mode for all my editors."},
-        ])
+        written = self._extract_and_store(
+            store,
+            [
+                {"role": "user", "content": "I prefer dark mode for all my editors."},
+            ],
+        )
         assert written >= 1
 
         results = store.retrieve("dark mode preference", top_k=5)
@@ -51,9 +52,12 @@ class TestExtractionToRetrieval:
     def test_constraint_roundtrip(self, tmp_path: Path) -> None:
         """A constraint message should be typed correctly and retrievable."""
         store = self._make_store(tmp_path)
-        written = self._extract_and_store(store, [
-            {"role": "user", "content": "I must never deploy to production on Fridays."},
-        ])
+        written = self._extract_and_store(
+            store,
+            [
+                {"role": "user", "content": "I must never deploy to production on Fridays."},
+            ],
+        )
         assert written >= 1
 
         events = store.read_events()
@@ -66,9 +70,15 @@ class TestExtractionToRetrieval:
     def test_entity_extraction_heuristic(self, tmp_path: Path) -> None:
         """Heuristic extractor should populate entities from capitalized words."""
         store = self._make_store(tmp_path)
-        self._extract_and_store(store, [
-            {"role": "user", "content": "I use Visual Studio Code with Python for development."},
-        ])
+        self._extract_and_store(
+            store,
+            [
+                {
+                    "role": "user",
+                    "content": "I use Visual Studio Code with Python for development.",
+                },
+            ],
+        )
         events = store.read_events()
         assert len(events) >= 1
         entities = events[0].get("entities", [])
@@ -80,19 +90,25 @@ class TestExtractionToRetrieval:
     def test_short_messages_skipped(self, tmp_path: Path) -> None:
         """Messages shorter than 8 chars should be skipped by heuristic extractor."""
         store = self._make_store(tmp_path)
-        written = self._extract_and_store(store, [
-            {"role": "user", "content": "ok"},
-            {"role": "user", "content": "yes"},
-        ])
+        written = self._extract_and_store(
+            store,
+            [
+                {"role": "user", "content": "ok"},
+                {"role": "user", "content": "yes"},
+            ],
+        )
         assert written == 0
 
     def test_confidence_varies_by_type(self, tmp_path: Path) -> None:
         """Different event types should have calibrated confidence scores."""
         store = self._make_store(tmp_path)
-        self._extract_and_store(store, [
-            {"role": "user", "content": "I prefer using TypeScript over JavaScript."},
-            {"role": "user", "content": "Remember that the server runs on port 8080."},
-        ])
+        self._extract_and_store(
+            store,
+            [
+                {"role": "user", "content": "I prefer using TypeScript over JavaScript."},
+                {"role": "user", "content": "Remember that the server runs on port 8080."},
+            ],
+        )
         events = store.read_events()
         pref_events = [e for e in events if e.get("type") == "preference"]
         fact_events = [e for e in events if e.get("type") == "fact"]
@@ -102,10 +118,13 @@ class TestExtractionToRetrieval:
     def test_multi_message_dedup(self, tmp_path: Path) -> None:
         """Duplicate messages should be merged, not stored twice."""
         store = self._make_store(tmp_path)
-        written = self._extract_and_store(store, [
-            {"role": "user", "content": "I prefer dark mode for all my editors."},
-            {"role": "user", "content": "I prefer dark mode for all my editors."},
-        ])
+        written = self._extract_and_store(
+            store,
+            [
+                {"role": "user", "content": "I prefer dark mode for all my editors."},
+                {"role": "user", "content": "I prefer dark mode for all my editors."},
+            ],
+        )
         events = store.read_events()
         # Should have at most 1 event (second is deduped)
         assert len(events) <= 1 or written <= 1
@@ -128,7 +147,10 @@ class TestExtractionToRetrieval:
     def test_assistant_messages_ignored(self, tmp_path: Path) -> None:
         """Only user messages should produce events in heuristic mode."""
         store = self._make_store(tmp_path)
-        written = self._extract_and_store(store, [
-            {"role": "assistant", "content": "I prefer using Python for backend work."},
-        ])
+        written = self._extract_and_store(
+            store,
+            [
+                {"role": "assistant", "content": "I prefer using Python for backend work."},
+            ],
+        )
         assert written == 0

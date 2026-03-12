@@ -27,14 +27,65 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
 # Words to skip when extracting single-capitalized-word entities
-_COMMON_WORDS = frozenset({
-    "the", "this", "that", "then", "than", "they", "them", "there", "these", "those",
-    "what", "when", "where", "which", "while", "who", "whom", "whose", "why", "how",
-    "also", "and", "but", "for", "from", "into", "just", "like", "not", "only",
-    "some", "such", "very", "will", "with", "would", "could", "should", "about",
-    "after", "before", "been", "being", "have", "here", "more", "most", "much",
-    "over", "same", "still", "each", "even", "every", "other",
-})
+_COMMON_WORDS = frozenset(
+    {
+        "the",
+        "this",
+        "that",
+        "then",
+        "than",
+        "they",
+        "them",
+        "there",
+        "these",
+        "those",
+        "what",
+        "when",
+        "where",
+        "which",
+        "while",
+        "who",
+        "whom",
+        "whose",
+        "why",
+        "how",
+        "also",
+        "and",
+        "but",
+        "for",
+        "from",
+        "into",
+        "just",
+        "like",
+        "not",
+        "only",
+        "some",
+        "such",
+        "very",
+        "will",
+        "with",
+        "would",
+        "could",
+        "should",
+        "about",
+        "after",
+        "before",
+        "been",
+        "being",
+        "have",
+        "here",
+        "more",
+        "most",
+        "much",
+        "over",
+        "same",
+        "still",
+        "each",
+        "even",
+        "every",
+        "other",
+    }
+)
 
 
 class MemoryExtractor:
@@ -232,13 +283,32 @@ class MemoryExtractor:
     # Pattern → (subject group, predicate, object group)
     _TRIPLE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         (re.compile(r"(\b\w[\w\s]{0,30}?)\s+works?\s+on\s+(\b\w[\w\s]{0,30})", re.I), "WORKS_ON"),
-        (re.compile(r"(\b\w[\w\s]{0,30}?)\s+works?\s+with\s+(\b\w[\w\s]{0,30})", re.I), "WORKS_WITH"),
+        (
+            re.compile(r"(\b\w[\w\s]{0,30}?)\s+works?\s+with\s+(\b\w[\w\s]{0,30})", re.I),
+            "WORKS_WITH",
+        ),
         (re.compile(r"(\b\w[\w\s]{0,30}?)\s+uses?\s+(\b\w[\w\s]{0,30})", re.I), "USES"),
-        (re.compile(r"(\b\w[\w\s]{0,30}?)\s+(?:is|are)\s+(?:in|at|from)\s+(\b\w[\w\s]{0,30})", re.I), "LOCATED_IN"),
-        (re.compile(r"(\b\w[\w\s]{0,30}?)\s+(?:caused|causes)\s+(\b\w[\w\s]{0,30})", re.I), "CAUSED_BY"),
-        (re.compile(r"(\b\w[\w\s]{0,30}?)\s+depends?\s+on\s+(\b\w[\w\s]{0,30})", re.I), "DEPENDS_ON"),
+        (
+            re.compile(
+                r"(\b\w[\w\s]{0,30}?)\s+(?:is|are)\s+(?:in|at|from)\s+(\b\w[\w\s]{0,30})", re.I
+            ),
+            "LOCATED_IN",
+        ),
+        (
+            re.compile(r"(\b\w[\w\s]{0,30}?)\s+(?:caused|causes)\s+(\b\w[\w\s]{0,30})", re.I),
+            "CAUSED_BY",
+        ),
+        (
+            re.compile(r"(\b\w[\w\s]{0,30}?)\s+depends?\s+on\s+(\b\w[\w\s]{0,30})", re.I),
+            "DEPENDS_ON",
+        ),
         (re.compile(r"(\b\w[\w\s]{0,30}?)\s+owns?\s+(\b\w[\w\s]{0,30})", re.I), "OWNS"),
-        (re.compile(r"(\b\w[\w\s]{0,30}?)\s+(?:is|are)\s+constrained\s+by\s+(\b\w[\w\s]{0,30})", re.I), "CONSTRAINED_BY"),
+        (
+            re.compile(
+                r"(\b\w[\w\s]{0,30}?)\s+(?:is|are)\s+constrained\s+by\s+(\b\w[\w\s]{0,30})", re.I
+            ),
+            "CONSTRAINED_BY",
+        ),
     ]
 
     @classmethod
@@ -266,12 +336,14 @@ class MemoryExtractor:
                 key = (subj.lower(), predicate, obj.lower())
                 if key not in seen:
                     seen.add(key)
-                    triples.append({
-                        "subject": subj,
-                        "predicate": predicate,
-                        "object": obj,
-                        "confidence": 0.55,
-                    })
+                    triples.append(
+                        {
+                            "subject": subj,
+                            "predicate": predicate,
+                            "object": obj,
+                            "confidence": 0.55,
+                        }
+                    )
 
         # Infer from entity pairs + event type
         _type_predicates: dict[str, str] = {
@@ -285,12 +357,14 @@ class MemoryExtractor:
             key = (subj.lower(), pred, obj.lower())
             if key not in seen:
                 seen.add(key)
-                triples.append({
-                    "subject": subj,
-                    "predicate": pred,
-                    "object": obj,
-                    "confidence": 0.45,
-                })
+                triples.append(
+                    {
+                        "subject": subj,
+                        "predicate": pred,
+                        "object": obj,
+                        "confidence": 0.45,
+                    }
+                )
 
         return triples[:10]
 
@@ -395,9 +469,7 @@ class MemoryExtractor:
                 args = self.parse_tool_args(response.tool_calls[0].arguments)
                 if args:
                     _raw_events = args.get("events")
-                    raw_events: list[Any] = (
-                        _raw_events if isinstance(_raw_events, list) else []
-                    )
+                    raw_events: list[Any] = _raw_events if isinstance(_raw_events, list) else []
                     _raw_updates = args.get("profile_updates")
                     raw_updates: dict[str, Any] = (
                         _raw_updates if isinstance(_raw_updates, dict) else {}
@@ -427,7 +499,7 @@ class MemoryExtractor:
                             break
                     self.last_extraction_source = "llm"
                     return events, updates
-        except Exception:
+        except Exception:  # crash-barrier: LLM extraction + parsing
             logger.exception(
                 "Structured event extraction failed, falling back to heuristic extraction"
             )

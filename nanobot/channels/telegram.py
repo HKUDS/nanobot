@@ -185,7 +185,7 @@ class TelegramChannel(BaseChannel):
         try:
             await self._app.bot.set_my_commands(self.BOT_COMMANDS)
             logger.debug("Telegram bot commands registered")
-        except Exception as e:
+        except Exception as e:  # crash-barrier: Telegram API
             logger.warning("Failed to register bot commands: {}", e)
 
         # Start polling (this runs until stopped)
@@ -283,7 +283,7 @@ class TelegramChannel(BaseChannel):
                 with open(media_path, "rb") as f:
                     await sender(chat_id=chat_id, **{param: f}, reply_parameters=reply_params)
                 sent_any = True
-            except Exception as e:
+            except Exception as e:  # crash-barrier: Telegram API
                 filename = media_path.rsplit("/", 1)[-1]
                 logger.error("Failed to send media {}: {}", media_path, e)
                 last_error = e
@@ -317,7 +317,7 @@ class TelegramChannel(BaseChannel):
                             reply_parameters=reply_params,
                         )
                     sent_any = True
-                except Exception as e:
+                except Exception as e:  # crash-barrier: Telegram API
                     logger.warning("HTML parse failed, falling back to plain text: {}", e)
                     last_error = e
                     try:
@@ -325,14 +325,19 @@ class TelegramChannel(BaseChannel):
                             chat_id=chat_id, text=chunk, reply_parameters=reply_params
                         )
                         sent_any = True
-                    except Exception as e2:
+                    except Exception as e2:  # crash-barrier: Telegram API
                         logger.error("Error sending Telegram message: {}", e2)
                         last_error = e2
 
         has_payload = bool((msg.media or []) or (msg.content and msg.content != "[empty message]"))
         if has_payload and not sent_any:
             err = f": {last_error}" if last_error else ""
-            raise RuntimeError(f"Telegram delivery failed{err}")
+            exc = RuntimeError(f"Telegram delivery failed{err}")
+            self._health.record_failure(exc)
+            raise exc
+
+        if has_payload:
+            self._health.record_success()
 
     async def _send_streaming(self, msg: OutboundMessage) -> None:
         """Edit-in-place streaming: update a single message as tokens arrive."""
@@ -346,7 +351,7 @@ class TelegramChannel(BaseChannel):
         if not html.strip():
             return
         if len(html.encode("utf-8")) > 4096:
-            html = html[: 4000]  # truncate rather than error on streaming preview
+            html = html[:4000]  # truncate rather than error on streaming preview
 
         existing_msg_id = self._streaming_msg_ids.get(msg.chat_id)
 
@@ -360,7 +365,7 @@ class TelegramChannel(BaseChannel):
                     parse_mode="HTML",
                 )
                 return
-            except Exception as e:
+            except Exception as e:  # crash-barrier: Telegram API
                 err_str = str(e).lower()
                 # "message is not modified" is fine — content hasn't changed yet
                 if "not modified" in err_str:
@@ -377,7 +382,7 @@ class TelegramChannel(BaseChannel):
                 parse_mode="HTML",
             )
             self._streaming_msg_ids[msg.chat_id] = sent.message_id
-        except Exception as e:
+        except Exception as e:  # crash-barrier: Telegram API
             logger.debug("Failed to send streaming message: {}", e)
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -460,7 +465,9 @@ class TelegramChannel(BaseChannel):
         if media_file and self._app:
             try:
                 file = await self._app.bot.get_file(media_file.file_id)
-                ext = self._get_extension(media_type or "file", getattr(media_file, "mime_type", None))
+                ext = self._get_extension(
+                    media_type or "file", getattr(media_file, "mime_type", None)
+                )
 
                 # Save to workspace/media/
                 from pathlib import Path
@@ -488,7 +495,7 @@ class TelegramChannel(BaseChannel):
                     content_parts.append(f"[{media_type}: {file_path}]")
 
                 logger.debug("Downloaded {} to {}", media_type, file_path)
-            except Exception as e:
+            except Exception as e:  # crash-barrier: Telegram API
                 logger.error("Failed to download media: {}", e)
                 content_parts.append(f"[{media_type}: download failed]")
 
@@ -536,7 +543,7 @@ class TelegramChannel(BaseChannel):
                 await asyncio.sleep(4)
         except asyncio.CancelledError:
             pass
-        except Exception as e:
+        except Exception as e:  # crash-barrier: Telegram API
             logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

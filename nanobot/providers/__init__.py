@@ -9,6 +9,6 @@ try:
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider  # noqa: F401
 
     __all__.append("OpenAICodexProvider")
-except Exception:
+except ImportError:
     # Optional OAuth dependency may not be installed.
     pass

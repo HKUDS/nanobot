@@ -41,7 +41,7 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
             cron = croniter(schedule.expr, base_dt)
             next_dt = cron.get_next(datetime)
             return int(next_dt.timestamp() * 1000)
-        except Exception:
+        except Exception:  # crash-barrier: croniter + ZoneInfo produce varied errors
             return None
 
     return None
@@ -57,7 +57,7 @@ def _validate_schedule_for_add(schedule: CronSchedule) -> None:
             from zoneinfo import ZoneInfo
 
             ZoneInfo(schedule.tz)
-        except Exception:
+        except (KeyError, ValueError):
             raise ValueError(f"unknown timezone '{schedule.tz}'") from None
 
 
@@ -116,7 +116,7 @@ class CronService:
                         )
                     )
                 self._store = CronStore(jobs=jobs)
-            except Exception as e:
+            except (json.JSONDecodeError, KeyError, OSError) as e:
                 logger.warning("Failed to load cron store: {}", e)
                 self._store = CronStore()
         else:
@@ -254,7 +254,7 @@ class CronService:
             job.state.last_error = None
             logger.info("Cron: job '{}' completed", job.name)
 
-        except Exception as e:
+        except Exception as e:  # crash-barrier: user-supplied callback
             job.state.last_status = "error"
             job.state.last_error = str(e)
             logger.error("Cron: job '{}' failed: {}", job.name, e)

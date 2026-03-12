@@ -1,6 +1,5 @@
 """QQ channel implementation using botpy SDK."""
 
-import asyncio
 from collections import deque
 from typing import TYPE_CHECKING
 
@@ -9,6 +8,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.retry import connection_loop, retry_send
 from nanobot.config.schema import QQConfig
 
 try:
@@ -75,15 +75,12 @@ class QQChannel(BaseChannel):
 
     async def _run_bot(self) -> None:
         """Run the bot connection with auto-reconnect."""
-        while self._running:
-            try:
-                if self._client:
-                    await self._client.start(appid=self.config.app_id, secret=self.config.secret)
-            except Exception as e:
-                logger.warning("QQ bot error: {}", e)
-            if self._running:
-                logger.info("Reconnecting QQ bot in 5 seconds...")
-                await asyncio.sleep(5)
+
+        async def _connect() -> None:
+            if self._client:
+                await self._client.start(appid=self.config.app_id, secret=self.config.secret)
+
+        await connection_loop("QQ", _connect, running_flag=lambda: self._running)
 
     async def stop(self) -> None:
         """Stop the QQ bot."""
@@ -91,7 +88,7 @@ class QQChannel(BaseChannel):
         if self._client:
             try:
                 await self._client.close()
-            except Exception:
+            except Exception:  # crash-barrier: QQ API
                 pass
         logger.info("QQ bot stopped")
 
@@ -100,14 +97,15 @@ class QQChannel(BaseChannel):
         if not self._client:
             logger.warning("QQ client not initialized")
             return
-        try:
-            await self._client.api.post_c2c_message(
+
+        async def _do_send() -> None:
+            await self._client.api.post_c2c_message(  # type: ignore[union-attr]
                 openid=msg.chat_id,
                 msg_type=0,
                 content=msg.content,
             )
-        except Exception as e:
-            logger.error("Error sending QQ message: {}", e)
+
+        await retry_send(_do_send, channel_name=self.name, health=self._health)
 
     async def _on_message(self, data: "C2CMessage") -> None:
         """Handle incoming message from QQ."""
@@ -129,5 +127,5 @@ class QQChannel(BaseChannel):
                 content=content,
                 metadata={"message_id": data.id},
             )
-        except Exception:
+        except Exception:  # crash-barrier: QQ API
             logger.exception("Error handling QQ message")

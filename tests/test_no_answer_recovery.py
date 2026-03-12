@@ -130,9 +130,7 @@ class TestRecoveryRetry:
             ]
         )
         loop = _make_loop(tmp_path, provider)
-        result = await loop._process_message(
-            _make_inbound("What is the meaning of life?")
-        )
+        result = await loop._process_message(_make_inbound("What is the meaning of life?"))
 
         assert result is not None
         assert "Sorry" in result.content

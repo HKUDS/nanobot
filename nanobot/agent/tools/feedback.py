@@ -118,7 +118,7 @@ class FeedbackTool(Tool):
                 self._events_file.parent.mkdir(parents=True, exist_ok=True)
                 with open(self._events_file, "a", encoding="utf-8") as f:
                     f.write(json.dumps(event, ensure_ascii=False) + "\n")
-            except Exception as exc:
+            except OSError as exc:
                 return ToolResult.fail(f"Failed to persist feedback: {exc}")
 
         label = f"{rating}"

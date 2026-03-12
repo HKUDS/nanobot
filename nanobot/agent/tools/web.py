@@ -39,7 +39,7 @@ def _validate_url(url: str) -> tuple[bool, str]:
         if not p.netloc:
             return False, "Missing domain"
         return True, ""
-    except Exception as e:
+    except ValueError as e:
         return False, str(e)
 
 
@@ -101,7 +101,7 @@ class WebSearchTool(Tool):
                 if desc := item.get("description"):
                     lines.append(f"   {desc}")
             return ToolResult.ok("\n".join(lines))
-        except Exception as e:
+        except Exception as e:  # crash-barrier: third-party httpx + API errors
             return ToolResult.fail(f"Error: {e}")
 
 
@@ -126,11 +126,17 @@ class WebFetchTool(Tool):
         self.max_chars = max_chars
 
     async def execute(  # type: ignore[override]
-        self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any  # noqa: N803
+        self,
+        url: str,
+        extract_mode: str = "markdown",  # noqa: N803
+        max_chars: int | None = None,
+        **kwargs: Any,
     ) -> ToolResult:
         from readability import Document
 
-        max_chars = maxChars or self.max_chars
+        # Accept camelCase from LLM tool calls
+        extract_mode = kwargs.pop("extractMode", extract_mode)  # type: ignore[assignment]
+        max_chars = kwargs.pop("maxChars", max_chars) or self.max_chars  # type: ignore[assignment]
 
         # Validate URL before fetching
         is_valid, error_msg = _validate_url(url)
@@ -158,7 +164,7 @@ class WebFetchTool(Tool):
                 doc = Document(r.text)
                 content = (
                     self._to_markdown(doc.summary())
-                    if extractMode == "markdown"
+                    if extract_mode == "markdown"
                     else _strip_tags(doc.summary())
                 )
                 text = f"# {doc.title()}\n\n{content}" if doc.title() else content
@@ -183,7 +189,7 @@ class WebFetchTool(Tool):
                 ensure_ascii=False,
             )
             return ToolResult.ok(output, truncated=truncated)
-        except Exception as e:
+        except Exception as e:  # crash-barrier: third-party httpx + readability errors
             return ToolResult.fail(json.dumps({"error": str(e), "url": url}, ensure_ascii=False))
 
     def _to_markdown(self, html: str) -> str:

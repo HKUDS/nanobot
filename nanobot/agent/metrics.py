@@ -72,6 +72,30 @@ class MetricsCollector:
             self._counters[key] = int(self._counters.get(key, 0)) + int(delta)
         self._dirty = True
 
+    def record_request(
+        self,
+        *,
+        duration_ms: float,
+        llm_calls: int = 0,
+        tool_calls: int = 0,
+        tokens_prompt: int = 0,
+        tokens_completion: int = 0,
+        failed: bool = False,
+    ) -> None:
+        """Record aggregated metrics for a completed request."""
+        self.record(REQUESTS_TOTAL)
+        self.record(REQUEST_DURATION_SUM_MS, int(duration_ms))
+        if failed:
+            self.record(REQUESTS_FAILED)
+        if llm_calls:
+            self.record(LLM_CALLS_TOTAL, llm_calls)
+        if tool_calls:
+            self.record(TOOL_CALLS_TOTAL, tool_calls)
+        if tokens_prompt:
+            self.record(TOKENS_PROMPT_TOTAL, tokens_prompt)
+        if tokens_completion:
+            self.record(TOKENS_COMPLETION_TOTAL, tokens_completion)
+
     def set_fields(self, fields: dict[str, Any]) -> None:
         """Set arbitrary key-value pairs (overwrites, not increments)."""
         self._ensure_loaded()
@@ -108,7 +132,7 @@ class MetricsCollector:
                 tmp.write_text(json.dumps(self._counters, indent=2, default=str))
                 tmp.replace(self._path)
                 self._dirty = False
-            except Exception as exc:
+            except OSError as exc:
                 logger.warning("Failed to flush metrics to {}: {}", self._path, exc)
 
     def flush_sync(self) -> None:
@@ -122,7 +146,7 @@ class MetricsCollector:
             tmp.write_text(json.dumps(self._counters, indent=2, default=str))
             tmp.replace(self._path)
             self._dirty = False
-        except Exception as exc:
+        except OSError as exc:
             logger.warning("Failed to flush metrics to {}: {}", self._path, exc)
 
     # ------------------------------------------------------------------
@@ -140,7 +164,7 @@ class MetricsCollector:
                 parsed = json.loads(raw)
                 if isinstance(parsed, dict):
                     data = parsed
-            except Exception:
+            except (json.JSONDecodeError, OSError):
                 logger.warning("Failed to parse metrics file, starting fresh")
         # Merge defaults for any missing keys
         merged = {**self._defaults, **data}
@@ -171,6 +195,15 @@ ROUTING_CLASSIFICATIONS = "routing_classifications"
 ROUTING_DELEGATIONS = "routing_delegations"
 ROUTING_CYCLES_BLOCKED = "routing_cycles_blocked"
 ROUTING_CLASSIFY_LATENCY_SUM_MS = "routing_classify_latency_sum_ms"
+
+# Request-level metric keys
+REQUESTS_TOTAL = "requests_total"
+REQUESTS_FAILED = "requests_failed"
+REQUEST_DURATION_SUM_MS = "request_duration_sum_ms"
+LLM_CALLS_TOTAL = "llm_calls_total"
+TOOL_CALLS_TOTAL = "tool_calls_total"
+TOKENS_PROMPT_TOTAL = "tokens_prompt_total"
+TOKENS_COMPLETION_TOTAL = "tokens_completion_total"
 ROUTING_CLASSIFY_LATENCY_MAX_MS = "routing_classify_latency_max_ms"
 DELEGATION_LATENCY_SUM_MS = "delegation_latency_sum_ms"
 DELEGATION_LATENCY_MAX_MS = "delegation_latency_max_ms"

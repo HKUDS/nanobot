@@ -14,25 +14,36 @@ from loguru import logger
 
 try:
     from mem0 import Memory as Mem0Memory
-except Exception:  # pragma: no cover - optional dependency
+except Exception:  # crash-barrier: mem0 SDK  # pragma: no cover - optional dependency
     Mem0Memory = None
 
 try:
     from mem0 import MemoryClient as Mem0MemoryClient
-except Exception:  # pragma: no cover - optional dependency
+except Exception:  # crash-barrier: mem0 SDK  # pragma: no cover - optional dependency
     Mem0MemoryClient = None
 
 
 class _Mem0Adapter:
     """Thin compatibility wrapper around mem0 OSS/hosted clients."""
 
-    def __init__(self, *, workspace: Path):
+    def __init__(
+        self,
+        *,
+        workspace: Path,
+        user_id: str = "nanobot",
+        add_debug: bool = False,
+        verify_write: bool = True,
+        force_infer_true: bool = False,
+    ):
         self.workspace = workspace
-        self.user_id = os.getenv("NANOBOT_MEM0_USER_ID", "nanobot")
+        self.user_id = user_id
         self.enabled = False
         self.client: Any | None = None
         self.mode = "disabled"
         self.error: str | None = None
+        self._add_debug = add_debug
+        self._verify_write = verify_write
+        self._force_infer_true = force_infer_true
         self._local_fallback_attempted = False
         self._local_mem0_dir: Path | None = None
         self._fallback_enabled = True
@@ -99,7 +110,7 @@ class _Mem0Adapter:
         for path in candidates:
             try:
                 p = path.expanduser().resolve()
-            except Exception:
+            except (OSError, ValueError):
                 p = path
             if p in seen or not p.exists() or not p.is_file():
                 continue
@@ -111,7 +122,7 @@ class _Mem0Adapter:
                         continue
                     key, value = parsed
                     os.environ.setdefault(key, value)
-            except Exception:
+            except (OSError, UnicodeDecodeError):
                 continue
         # Also load provider API keys from nanobot config.json so mem0 can use them.
         self._load_api_keys_from_config()
@@ -131,7 +142,7 @@ class _Mem0Adapter:
             return
         try:
             cfg = json.loads(config_path.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             return
         providers = cfg.get("providers")
         if not isinstance(providers, dict):
@@ -164,7 +175,7 @@ class _Mem0Adapter:
             mem0_base.mem0_dir = str(local_mem0_dir)
             mem0_setup.mem0_dir = str(local_mem0_dir)
             mem0_main.mem0_dir = str(local_mem0_dir)
-        except Exception:
+        except Exception:  # crash-barrier: mem0 SDK
             pass
         api_key = os.getenv("MEM0_API_KEY", "").strip()
 
@@ -181,7 +192,7 @@ class _Mem0Adapter:
                 self.enabled = True
                 self.mode = "hosted"
                 return
-            except Exception as exc:
+            except Exception as exc:  # crash-barrier: mem0 SDK
                 self.error = str(exc)
 
         if Mem0Memory is None:
@@ -194,7 +205,7 @@ class _Mem0Adapter:
                 loaded = json.loads(config_path.read_text(encoding="utf-8"))
                 if isinstance(loaded, dict):
                     payload = loaded
-            except Exception:
+            except (OSError, json.JSONDecodeError):
                 payload = None
         self._load_fallback_config(payload)
 
@@ -239,7 +250,7 @@ class _Mem0Adapter:
             self.enabled = True
             self.mode = "oss"
             return
-        except Exception as exc:
+        except Exception as exc:  # crash-barrier: mem0 SDK
             if self._activate_local_fallback(reason=f"initialization failed: {exc}"):
                 return
             self.error = str(exc)
@@ -284,7 +295,7 @@ class _Mem0Adapter:
                     "mem0 switched to local fallback embedder ({}): {}", provider, reason
                 )
                 return True
-            except Exception as exc:
+            except Exception as exc:  # crash-barrier: mem0 SDK
                 self.error = str(exc)
                 logger.warning("mem0 local fallback ({}) failed: {}", provider, self.error)
                 continue
@@ -309,9 +320,9 @@ class _Mem0Adapter:
         except TypeError:
             try:
                 raw = self.client.get_all(self.user_id, max(1, limit))
-            except Exception:
+            except Exception:  # crash-barrier: mem0 SDK
                 return 0
-        except Exception:
+        except Exception:  # crash-barrier: mem0 SDK
             return 0
         return len(self._rows(raw))
 
@@ -327,7 +338,7 @@ class _Mem0Adapter:
                 return False
             vector_client.close()
             return True
-        except Exception:
+        except Exception:  # crash-barrier: mem0 SDK
             return False
 
     def reopen_client(self) -> None:
@@ -350,9 +361,9 @@ class _Mem0Adapter:
             try:
                 self.client.delete_all(self.user_id)
                 return True, "delete_all_positional_user_id", before
-            except Exception as exc:
+            except Exception as exc:  # crash-barrier: mem0 SDK
                 return False, f"delete_all_failed:{exc}", 0
-        except Exception as exc:
+        except Exception as exc:  # crash-barrier: mem0 SDK
             return False, f"delete_all_failed:{exc}", 0
 
     @staticmethod
@@ -460,9 +471,9 @@ class _Mem0Adapter:
         except TypeError:
             try:
                 raw = self.client.get_all(self.user_id, max(100, top_k * 25))
-            except Exception:
+            except Exception:  # crash-barrier: mem0 SDK
                 return [], 0
-        except Exception:
+        except Exception:  # crash-barrier: mem0 SDK
             return [], 0
 
         ranked: list[tuple[float, dict[str, Any]]] = []
@@ -558,7 +569,7 @@ class _Mem0Adapter:
             )
             rows = cur.fetchall()
             conn.close()
-        except Exception:
+        except (sqlite3.Error, OSError):
             return [], 0
 
         ranked: list[tuple[float, dict[str, Any]]] = []
@@ -617,24 +628,9 @@ class _Mem0Adapter:
         kwargs: dict[str, Any] = {"user_id": self.user_id}
         if metadata:
             kwargs["metadata"] = metadata
-        add_debug = str(os.getenv("NANOBOT_MEM0_ADD_DEBUG", "")).strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        verify_write = str(os.getenv("NANOBOT_MEM0_VERIFY_WRITE", "true")).strip().lower() not in {
-            "0",
-            "false",
-            "no",
-            "off",
-        }
-        force_infer_true = str(os.getenv("NANOBOT_MEM0_FORCE_INFER_TRUE", "")).strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        add_debug = self._add_debug
+        verify_write = self._verify_write
+        force_infer_true = self._force_infer_true
         before_count = self.get_all_count(limit=200) if verify_write or add_debug else -1
 
         def _is_infer_true_disabled_error(exc: Exception) -> bool:
@@ -654,7 +650,7 @@ class _Mem0Adapter:
         def _attempt(mode: str, fn) -> bool:
             try:
                 fn()
-            except Exception as exc:
+            except Exception as exc:  # crash-barrier: mem0 SDK
                 if mode.startswith("infer_true") and _is_infer_true_disabled_error(exc):
                     self._infer_true_disabled = True
                     self._infer_true_disable_reason = str(exc)
@@ -746,7 +742,7 @@ class _Mem0Adapter:
         except TypeError:
             try:
                 raw = self.client.search(query, **kwargs)
-            except Exception:
+            except Exception:  # crash-barrier: mem0 SDK
                 empty_stats = {
                     "source_vector": 0,
                     "source_get_all": 0,
@@ -754,14 +750,14 @@ class _Mem0Adapter:
                     "rejected_blob_like": 0,
                 }
                 return ([], empty_stats) if return_stats else []
-        except Exception as exc:
+        except Exception as exc:  # crash-barrier: mem0 SDK
             if self._activate_local_fallback(reason=f"search failed: {exc}") and self.client:
                 try:
                     raw = self.client.search(query=query, **kwargs)
                 except TypeError:
                     try:
                         raw = self.client.search(query, **kwargs)
-                    except Exception:
+                    except Exception:  # crash-barrier: mem0 SDK
                         empty_stats = {
                             "source_vector": 0,
                             "source_get_all": 0,
@@ -769,7 +765,7 @@ class _Mem0Adapter:
                             "rejected_blob_like": 0,
                         }
                         return ([], empty_stats) if return_stats else []
-                except Exception:
+                except Exception:  # crash-barrier: mem0 SDK
                     empty_stats = {
                         "source_vector": 0,
                         "source_get_all": 0,
@@ -837,14 +833,14 @@ class _Mem0Adapter:
             try:
                 self.client.update(memory_id, data=text)
                 return True
-            except Exception:
+            except Exception:  # crash-barrier: mem0 SDK
                 return False
-        except Exception as exc:
+        except Exception as exc:  # crash-barrier: mem0 SDK
             if self._activate_local_fallback(reason=f"update failed: {exc}") and self.client:
                 try:
                     self.client.update(memory_id, text)
                     return True
-                except Exception:
+                except Exception:  # crash-barrier: mem0 SDK
                     return False
             return False
 
@@ -854,12 +850,12 @@ class _Mem0Adapter:
         try:
             self.client.delete(memory_id)
             return True
-        except Exception as exc:
+        except Exception as exc:  # crash-barrier: mem0 SDK
             if self._activate_local_fallback(reason=f"delete failed: {exc}") and self.client:
                 try:
                     self.client.delete(memory_id)
                     return True
-                except Exception:
+                except Exception:  # crash-barrier: mem0 SDK
                     return False
             return False
 

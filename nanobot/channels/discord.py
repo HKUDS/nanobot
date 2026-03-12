@@ -12,6 +12,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.retry import connection_loop
 from nanobot.config.schema import DiscordConfig
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
@@ -64,19 +65,13 @@ class DiscordChannel(BaseChannel):
         self._running = True
         self._http = httpx.AsyncClient(timeout=30.0)
 
-        while self._running:
-            try:
-                logger.info("Connecting to Discord gateway...")
-                async with websockets.connect(self.config.gateway_url) as ws:
-                    self._ws = ws
-                    await self._gateway_loop()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.warning("Discord gateway error: {}", e)
-                if self._running:
-                    logger.info("Reconnecting to Discord gateway in 5 seconds...")
-                    await asyncio.sleep(5)
+        async def _connect() -> None:
+            logger.info("Connecting to Discord gateway...")
+            async with websockets.connect(self.config.gateway_url) as ws:
+                self._ws = ws
+                await self._gateway_loop()
+
+        await connection_loop("Discord", _connect, running_flag=lambda: self._running)
 
     async def stop(self) -> None:
         """Stop the Discord channel."""
@@ -125,6 +120,7 @@ class DiscordChannel(BaseChannel):
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
     ) -> bool:
         """Send a single Discord API payload with retry on rate-limit. Returns True on success."""
+        last_exc: Exception | None = None
         for attempt in range(3):
             try:
                 response = await self._http.post(url, headers=headers, json=payload)  # type: ignore[union-attr]
@@ -135,12 +131,17 @@ class DiscordChannel(BaseChannel):
                     await asyncio.sleep(retry_after)
                     continue
                 response.raise_for_status()
+                self._health.record_success()
                 return True
-            except Exception as e:
+            except Exception as e:  # crash-barrier: Discord API
+                last_exc = e
                 if attempt == 2:
-                    logger.error("Error sending Discord message: {}", e)
-                else:
-                    await asyncio.sleep(1)
+                    logger.exception("Error sending Discord message: {}", e)
+                    self._health.record_failure(e)
+                    raise
+                await asyncio.sleep(1)
+        if last_exc:
+            raise last_exc
         return False
 
     async def _gateway_loop(self) -> None:
@@ -210,7 +211,7 @@ class DiscordChannel(BaseChannel):
                 payload = {"op": 1, "d": self._seq}
                 try:
                     await self._ws.send(json.dumps(payload))
-                except Exception as e:
+                except Exception as e:  # crash-barrier: Discord API
                     logger.warning("Discord heartbeat failed: {}", e)
                     break
                 await asyncio.sleep(interval_s)
@@ -256,7 +257,7 @@ class DiscordChannel(BaseChannel):
                 file_path.write_bytes(resp.content)
                 media_paths.append(str(file_path))
                 content_parts.append(f"[attachment: {file_path}]")
-            except Exception as e:
+            except Exception as e:  # crash-barrier: Discord API
                 logger.warning("Failed to download Discord attachment: {}", e)
                 content_parts.append(f"[attachment: {filename} - download failed]")
 
@@ -288,7 +289,7 @@ class DiscordChannel(BaseChannel):
                     await self._http.post(url, headers=headers)  # type: ignore[union-attr]
                 except asyncio.CancelledError:
                     return
-                except Exception as e:
+                except Exception as e:  # crash-barrier: Discord API
                     logger.debug("Discord typing indicator failed for {}: {}", channel_id, e)
                     return
                 await asyncio.sleep(8)

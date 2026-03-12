@@ -5,8 +5,6 @@ This script bypasses the Rich CLI to get clean text output.
 
 from __future__ import annotations
 
-import asyncio
-import json
 import os
 import sys
 from pathlib import Path

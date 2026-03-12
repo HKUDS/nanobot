@@ -38,6 +38,9 @@ make check    # lint + typecheck + test (full validation)
 nanobot/
 ├── agent/                # Core agent engine
 │   ├── loop.py          # Plan-Act-Observe-Reflect main loop
+│   ├── streaming.py     # Streaming LLM call with think-tag stripping
+│   ├── verifier.py      # Answer verification via LLM + grounding confidence
+│   ├── consolidation.py # Memory consolidation orchestration + fallback archival
 │   ├── context.py       # Prompt assembly + token budgeting
 │   ├── skills.py        # Skill discovery and loading
 │   ├── subagent.py      # Subagent spawning
@@ -60,6 +63,10 @@ nanobot/
 │       └── ...          # feedback, cron, message, spawn tools
 ├── config/              # Pydantic config models + loader with migration
 ├── channels/            # Chat platforms (Telegram, Discord, Slack, WhatsApp, ...)
+│   ├── base.py          # BaseChannel ABC + ChannelHealth
+│   ├── retry.py         # Shared retry helpers, health tracking, reconnection loop
+│   ├── manager.py       # ChannelManager (multi-channel orchestration + dead-letter queue)
+│   └── ...              # 9 platform adapters
 ├── providers/           # LLM providers (litellm, OpenAI Codex, custom)
 ├── bus/                 # Async message bus (decoupled channel↔agent)
 ├── session/             # Conversation session management
@@ -78,6 +85,7 @@ nanobot/
 - **`__all__`** in every `__init__.py` — list all public exports explicitly
 - **Tool results**: return `ToolResult.ok(output)` or `ToolResult.fail(error)`, never bare strings
 - **Error handling**: use typed exceptions from `nanobot/errors.py` — never bare `Exception`
+- **`except Exception`**: narrow to specific types when possible; mark intentionally-broad catches with `# crash-barrier: <reason>`
 - **Imports**: stdlib → third-party → local (enforced by ruff `I` rules)
 
 ## Testing
@@ -140,3 +148,27 @@ make check          # Full validation: lint + typecheck + test
 make memory-eval    # Deterministic memory retrieval benchmark
 make clean          # Remove __pycache__, .mypy_cache, etc.
 ```
+
+## Architecture & Refactoring
+
+- Architecture decisions: `docs/adr/` (ADR-001 through ADR-005)
+- Module ownership and import rules: `docs/architecture.md`
+- Refactoring guidelines: `docs/refactoring-principles.md`
+- Reusable prompts: `.github/prompts/`
+
+### Module Boundaries
+
+- `channels/` must **never** import from `agent/loop`, `agent/tools/`, or `agent/memory/`
+- `providers/` must **never** import from `agent/` or `channels/`
+- `config/` must **never** import from `agent/`, `channels/`, or `providers/`
+- `bus/` must **never** import from `agent/`, `channels/`, or `providers/`
+- `agent/tools/` must **never** import from `channels/`
+
+### Refactoring Rules
+
+- Refactor by seams, not by folders
+- One PR, one change
+- Tests first, then extract
+- Preserve `__all__` exports without an ADR
+- No speculative abstraction
+- Run `make lint && make typecheck` after every edit

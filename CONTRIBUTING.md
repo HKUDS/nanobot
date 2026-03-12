@@ -268,3 +268,32 @@ The memory system uses a **mem0-first strategy** with local fallback:
 - **Shell execution**: All commands pass through `_guard_command()` in `nanobot/agent/tools/shell.py` — deny patterns block destructive commands, optional allowlist mode restricts to safe commands only.
 - **Filesystem**: Path traversal protection validates all paths against the workspace root.
 - **Network**: Internal bridges bind to localhost only.
+
+## PR Workflow
+
+All changes follow a PR-first workflow. No direct pushes to `main`.
+
+### For features and bug fixes
+
+1. **Create an issue** (or reference an existing one) describing the goal.
+2. **Branch** from `main`: `git checkout -b feature/short-description`
+3. **Implement** the change. Run `make check` after every edit.
+4. **Commit** with a clear message: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`.
+5. **Push** and open a PR. Fill out the PR template checklist.
+6. **CI must pass** — lint, typecheck, and tests.
+7. **Review** — request Copilot review + human review for non-trivial changes.
+8. **Merge** only after all checks pass.
+
+### For refactors
+
+1. Write or update the relevant **ADR** (`docs/adr/`) before making code changes.
+2. Follow `docs/refactoring-principles.md` — one extraction per PR, tests first.
+3. Keep PRs under 500 lines of changed code. Split larger refactors.
+4. Verify behavior is preserved: existing tests pass without logic changes.
+
+### Architecture resources
+
+- Module ownership and import rules: `docs/architecture.md`
+- Architecture Decision Records: `docs/adr/`
+- Refactoring guidelines: `docs/refactoring-principles.md`
+- Reusable Copilot prompts: `.github/prompts/`
