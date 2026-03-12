@@ -4,7 +4,7 @@ import asyncio
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
@@ -263,6 +263,25 @@ class LLMProvider(ABC):
                 content=f"Error calling LLM: {exc}",
                 finish_reason="error",
             )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        on_token: Callable[[str], Awaitable[None]] | None = None,
+    ) -> "LLMResponse":
+        """Stream response tokens via on_token callback. Returns complete LLMResponse when done.
+
+        Default implementation falls back to chat_with_retry() and emits the full
+        content as a single chunk. Override for real token-level streaming.
+        Generation settings (temperature, max_tokens, reasoning_effort) are read
+        from self.generation by chat_with_retry.
+        """
+        response = await self.chat_with_retry(messages, tools, model)
+        if on_token and response.content:
+            await on_token(response.content)
+        return response
 
     @abstractmethod
     def get_default_model(self) -> str:

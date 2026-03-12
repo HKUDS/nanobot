@@ -211,6 +211,16 @@ class WecomConfig(Base):
     welcome_message: str = ""  # Welcome message for enter_chat event
 
 
+class WebConfig(Base):
+    """Web chat channel configuration (HTTP + SSE streaming)."""
+
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 8080
+    static_dir: str = ""  # Path to frontend directory; defaults to ./web relative to CWD
+    allow_from: list[str] = Field(default_factory=list)  # empty = allow all
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -227,6 +237,7 @@ class ChannelsConfig(Base):
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
     wecom: WecomConfig = Field(default_factory=WecomConfig)
+    web: WebConfig = Field(default_factory=WebConfig)
 
 
 class AgentDefaults(Base):

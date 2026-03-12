@@ -399,8 +399,8 @@ def gateway(
         return response
     cron.on_job = on_cron_job
 
-    # Create channel manager
-    channels = ChannelManager(config, bus)
+    # Create channel manager (pass agent for web channel token streaming)
+    channels = ChannelManager(config, bus, agent_loop=agent)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""

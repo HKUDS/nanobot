@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>nanobot</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#7c6af7" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="nanobot" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+
+    <aside id="sidebar">
+      <button id="btn-new">＋ New chat</button>
+      <div id="session-list"></div>
+    </aside>
+
+    <!-- Backdrop: tap to close sidebar on mobile -->
+    <div id="sidebar-overlay"></div>
+
+    <div id="main">
+      <header>
+        <button id="btn-menu" aria-label="Open menu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+               stroke-linecap="round" width="20" height="20">
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <line x1="3" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
+        <img src="nanobot_logo.png" alt="nanobot" class="logo-img" />
+      </header>
+
+      <div id="messages" role="log" aria-live="polite"></div>
+
+      <form id="chat-form">
+        <textarea
+          id="input"
+          rows="1"
+          placeholder="Message nanobot…"
+          autocomplete="off"
+          spellcheck="true"
+        ></textarea>
+        <button type="submit" id="btn-send" aria-label="Send">
+          <svg class="icon-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+               stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+          <svg class="icon-stop" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+            <rect x="4" y="4" width="16" height="16" rx="2"/>
+          </svg>
+        </button>
+      </form>
+    </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
+
+if TYPE_CHECKING:
+    from nanobot.agent.loop import AgentLoop
 
 
 class ChannelManager:
@@ -22,9 +25,10 @@ class ChannelManager:
     - Route outbound messages
     """
 
-    def __init__(self, config: Config, bus: MessageBus):
+    def __init__(self, config: Config, bus: MessageBus, agent_loop: "AgentLoop | None" = None):
         self.config = config
         self.bus = bus
+        self._agent_loop = agent_loop
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
 
@@ -48,6 +52,19 @@ class ChannelManager:
                 logger.info("{} channel enabled", cls.display_name)
             except ImportError as e:
                 logger.warning("{} channel not available: {}", modname, e)
+
+        # Web channel
+        if self.config.channels.web.enabled:
+            try:
+                from nanobot.channels.web import WebChannel
+                self.channels["web"] = WebChannel(
+                    self.config.channels.web,
+                    self.bus,
+                    agent_loop=self._agent_loop,
+                )
+                logger.info("Web channel enabled on port {}", self.config.channels.web.port)
+            except ImportError as e:
+                logger.warning("Web channel not available (install aiohttp): {}", e)
 
         self._validate_allow_from()
 

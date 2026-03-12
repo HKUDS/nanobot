@@ -16,14 +16,15 @@ WORKDIR /app
 
 # Install Python dependencies first (cached layer)
 COPY pyproject.toml README.md LICENSE ./
-RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
-    uv pip install --system --no-cache . && \
-    rm -rf nanobot bridge
+RUN mkdir -p nanobot bridge web && touch nanobot/__init__.py && \
+    uv pip install --system --no-cache ".[web]" && \
+    rm -rf nanobot bridge web
 
 # Copy the full source and install
 COPY nanobot/ nanobot/
 COPY bridge/ bridge/
-RUN uv pip install --system --no-cache .
+COPY web/ web/
+RUN uv pip install --system --no-cache ".[web]"
 
 # Build the WhatsApp bridge
 WORKDIR /app/bridge
@@ -33,8 +34,9 @@ WORKDIR /app
 # Create config directory
 RUN mkdir -p /root/.nanobot
 
-# Gateway default port
+# Gateway default port + web chat port
 EXPOSE 18790
+EXPOSE 8080
 
 ENTRYPOINT ["nanobot"]
 CMD ["status"]
