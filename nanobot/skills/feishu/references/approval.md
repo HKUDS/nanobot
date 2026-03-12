@@ -1,212 +1,156 @@
 # 审批 (Approval)
 
-使用 `@larksuiteoapi/node-sdk` 在 NestJS 中管理飞书审批流程。
+飞书审批 API，管理审批定义、审批实例，以及请假审批便捷函数。
+
+## 预置常量
+
+### 默认请假审批编码
+
+```
+DEFAULT_APPROVAL_CODE = "E565EC28-57C7-461C-B7ED-1E2D838F4878"
+```
+
+### 假期类型映射
+
+| 名称 | leave_id |
+|------|----------|
+| 年假 | 7138673249737506817 |
+| 事假 | 7138673250187935772 |
+| 病假 | 7138673250640347138 |
+| 调休假 | 7138673251139731484 |
+| 婚假 | 7138673251697475612 |
+| 产假 | 7138673252143726594 |
+| 陪产假 | 7138673252595236865 |
+| 丧假 | 7138673253106663426 |
+| 哺乳假 | 7138673253534695425 |
+
+`create_leave_approval` 的 `leave_type` 参数可直接传中文名称（如 `"年假"`），会自动映射为 leave_id。
+
+## API 函数
+
+### approval_get_definition
+
+获取审批定义详情（含表单结构）。
+
+```python
+from feishu_api import approval_get_definition
+
+data = approval_get_definition("E565EC28-57C7-461C-B7ED-1E2D838F4878")
+# data -> {approval_name, form, node_list, ...}
+```
+
+**CLI**:
+```bash
+python3 ${SKILL_DIR}/scripts/feishu_api.py approval definition --code E565EC28-57C7-461C-B7ED-1E2D838F4878
+```
+
+### approval_list_instances
+
+批量获取审批实例 ID。默认查询最近 30 天。
+
+```python
+from feishu_api import approval_list_instances
+
+data = approval_list_instances(
+    approval_code="E565EC28-...",
+    start_time="1710000000000",   # 毫秒时间戳（可选）
+    end_time="1710086400000",     # 毫秒时间戳（可选）
+    page_size=100,
+    user_id="ou_xxx",             # 筛选特定用户（可选）
+)
+# data["instance_code_list"] -> ["xxx", ...]
+```
+
+**CLI**:
+```bash
+python3 ${SKILL_DIR}/scripts/feishu_api.py approval list --code E565EC28-... --limit 20
+```
+
+### approval_get_instance
+
+获取审批实例详情。
+
+```python
+from feishu_api import approval_get_instance
+
+data = approval_get_instance("xxx-instance-code")
+# data -> {approval_code, approval_name, open_id, status, form, timeline, ...}
+```
+
+**CLI**:
+```bash
+python3 ${SKILL_DIR}/scripts/feishu_api.py approval get --instance-code xxx
+```
+
+### approval_create_instance
+
+创建审批实例。
+
+```python
+from feishu_api import approval_create_instance
+import json
+
+form = json.dumps([...])  # 表单内容，结构取决于审批定义
+data = approval_create_instance("E565EC28-...", "ou_xxx", form)
+# data -> {instance_code}
+```
+
+**CLI**:
+```bash
+python3 ${SKILL_DIR}/scripts/feishu_api.py approval create --code ... --user-id ou_xxx --form '[...]'
+```
+
+### approval_cancel_instance
+
+撤回审批实例。
+
+```python
+from feishu_api import approval_cancel_instance
+
+data = approval_cancel_instance("E565EC28-...", "instance_code", "ou_xxx", reason="取消")
+```
+
+### approval_approve_task / approval_reject_task
+
+审批同意或拒绝。
+
+```python
+from feishu_api import approval_approve_task, approval_reject_task
+
+approval_approve_task("E565EC28-...", "instance_code", "task_id", "ou_xxx", comment="同意")
+approval_reject_task("E565EC28-...", "instance_code", "task_id", "ou_xxx", comment="不同意")
+```
+
+### approval_list_comments
+
+获取审批评论。
+
+```python
+from feishu_api import approval_list_comments
+
+data = approval_list_comments("instance_id")
+# data["comment_list"] -> [{id, content, create_time, ...}]
+```
+
+### create_leave_approval
+
+请假审批便捷函数。
+
+```python
+from feishu_api import create_leave_approval
+
+data = create_leave_approval(
+    approval_code="E565EC28-...",
+    user_id="ou_xxx",
+    leave_type="年假",            # 或直接传 leave_id
+    start_time="2026-03-15",
+    end_time="2026-03-16",
+    reason="个人事务",
+    unit="DAY",                   # DAY / HOUR / HALF_DAY
+)
+```
 
 ## 所需权限
 
-| 权限标识 | 说明 |
-|----------|------|
-| `approval:approval` | 读写审批信息 |
-| `approval:approval.list:readonly` | 查询审批实例列表 |
-| `approval:task` | 审批人操作（同意/拒绝/转交、查询任务） |
-
-## 获取 Approval Code
-
-飞书不提供「列出所有审批定义」的 API，需从管理后台手动获取：
-
-1. 打开 [飞书审批管理后台（开发者模式）](https://www.feishu.cn/approval/admin/approvalList?devMode=on)
-2. 找到目标审批 → 点击 **编辑**
-3. 从浏览器地址栏复制 `definitionCode=` 后面的值
-   - 示例：`https://www.feishu.cn/approval/admin/edit?definitionCode=48D49517-C979-447E-AD93-4BAE0FBC57EA`
-4. 获取到的 Code 即为 `approval_code`
-
-## 获取审批定义
-
-查看审批表单结构，了解需要填写哪些字段：
-
-```typescript
-const definition = await client.approval.approval.get({
-  path: { approval_code: '48D49517-C979-447E-AD93-4BAE0FBC57EA' },
-});
-// definition.data?.form — 表单控件 JSON 字符串
-// definition.data?.node_list — 审批节点列表
-```
-
-## 创建审批实例
-
-```typescript
-const instance = await client.approval.instance.create({
-  data: {
-    approval_code: '48D49517-C979-447E-AD93-4BAE0FBC57EA',
-    open_id: 'ou_xxx', // 发起人
-    form: JSON.stringify([
-      {
-        id: 'widget001',
-        type: 'input',
-        value: '出差事由：参加客户交流会',
-      },
-      {
-        id: 'widget002',
-        type: 'date',
-        value: '2026-03-01T09:00:00+08:00',
-      },
-    ]),
-    // department_id: 'od_xxx', // 多部门用户需填写
-  },
-});
-const instanceCode = instance.data?.instance_code;
-```
-
-## 获取审批详情
-
-```typescript
-const detail = await client.approval.instance.get({
-  path: { instance_id: instanceCode },
-});
-// detail.data?.status — PENDING / APPROVED / REJECTED / CANCELED
-// detail.data?.form — 表单数据
-// detail.data?.task_list — 任务列表
-// detail.data?.timeline — 审批动态
-```
-
-## 查询审批实例列表
-
-```typescript
-const list = await client.approval.instance.query({
-  data: {
-    approval_code: '48D49517-...',
-    instance_status: 'PENDING', // PENDING / APPROVED / REJECT / RECALL / ALL
-    // user_id: 'ou_xxx', // 按发起人过滤
-    // start_time: '1708300800000', // Unix 毫秒时间戳
-    // end_time: '1708387200000',
-    page_size: 20,
-  },
-});
-```
-
-## 撤回审批
-
-```typescript
-await client.approval.instance.cancel({
-  data: {
-    approval_code: '48D49517-...',
-    instance_code: instanceCode,
-    user_id: 'ou_xxx', // 审批提交人
-  },
-});
-```
-
-> 撤回需要在审批后台对应审批定义中勾选「允许撤销审批中的申请」或「允许撤销 x 天内通过的审批」。
-
-## 查询审批人待办任务
-
-```typescript
-const tasks = await client.approval.task.search({
-  data: {
-    user_id: 'ou_xxx', // 审批人 open_id
-    approval_code: '48D49517-...', // 可选
-    task_status: 'PENDING', // PENDING / APPROVED / REJECTED / TRANSFERRED
-    page_size: 10,
-  },
-  params: { user_id_type: 'open_id' },
-});
-```
-
-也可以通过 `query` 方法查询任务：
-
-```typescript
-const taskQuery = await client.approval.task.query({
-  params: {
-    page_size: 20,
-    // page_token: '...',
-  },
-  data: {
-    topic: 'pending', // pending / approved / rejected
-    user_id: 'ou_xxx',
-  },
-});
-```
-
-## 同意审批
-
-```typescript
-await client.approval.task.approve({
-  data: {
-    approval_code: '48D49517-...',
-    instance_code: instanceCode,
-    user_id: 'ou_xxx', // 审批人
-    task_id: '7605931414537653476',
-    comment: '同意，请注意安全',
-    // form: '...', // 部分审批需要补充表单
-  },
-});
-```
-
-## 拒绝审批
-
-```typescript
-await client.approval.task.reject({
-  data: {
-    approval_code: '48D49517-...',
-    instance_code: instanceCode,
-    user_id: 'ou_xxx',
-    task_id: '7605931414537653476',
-    comment: '时间冲突，建议改期',
-  },
-});
-```
-
-## 转交审批
-
-```typescript
-await client.approval.task.transfer({
-  data: {
-    approval_code: '48D49517-...',
-    instance_code: instanceCode,
-    user_id: 'ou_xxx', // 当前审批人
-    task_id: '7605931414537653476',
-    comment: '转交给主管处理',
-    transfer_user_id: 'ou_yyy', // 转交目标
-  },
-});
-```
-
-## 常见表单控件类型
-
-| 控件类型 | 说明 | value 格式 |
-|----------|------|------------|
-| `input` | 单行文本 | `"文本内容"` |
-| `textarea` | 多行文本 | `"文本内容"` |
-| `number` | 数字 | `123.45` |
-| `date` | 日期 | `"2026-02-12T09:00:00+08:00"` (RFC3339) |
-| `leaveGroup` | 请假控件组 | `{"name":"年假","start":"...","end":"...","interval":2.0}` |
-| `remedyGroupV2` | 补卡控件组 | `[{"date":"2026-02-12","remedy_time":"...","reason":"..."}]` |
-| `tripGroup` | 出差控件组 | `{"schedule":[...],"interval":2.0,"reason":"..."}` |
-| `radioV2` | 单选 | `"选项名称"` |
-| `checkboxV2` | 多选 | `["选项1","选项2"]` |
-| `attachmentV2` | 附件 | 附件 token 列表 |
-
-## 典型工作流
-
-### 发起审批（发起人视角）
-
-1. 获取 approval_code（管理后台或预配置）
-2. `client.approval.approval.get()` → 查看表单结构
-3. 组装 form JSON → `client.approval.instance.create()` 发起审批
-4. `client.approval.instance.get()` → 查询审批状态
-
-### 处理审批（审批人视角）
-
-1. `client.approval.task.search({ data: { user_id, task_status: 'PENDING' } })` → 获取待办
-2. 根据标题/申请人匹配目标任务 → 拿到 `task_id` 和 `instance_code`
-3. `client.approval.task.approve()` 同意 / `reject()` 拒绝 / `transfer()` 转交
-
-## Common Mistakes
-
-| 错误 | 正确做法 |
-|------|----------|
-| 想用 API 列出所有审批定义 | 无此 API，从管理后台获取 approval_code |
-| form 传对象而非 JSON 字符串 | `form: JSON.stringify([{id, type, value}])` |
-| 忘记传 `task_id` 执行同意/拒绝 | 先通过 `task.search()` 获取 task_id |
-| 撤回失败 | 检查审批定义是否允许撤回 |
-| `instance_status` 拼写 | `REJECT`（不是 `REJECTED`），`RECALL`（不是 `CANCELED`） |
+- `approval:approval` — 审批完整权限
+- `approval:approval:readonly` — 只读权限

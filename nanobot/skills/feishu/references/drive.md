@@ -1,101 +1,105 @@
-# 云空间 (Drive)
+# 云空间 / 文件管理 (Drive)
 
-使用 `@larksuiteoapi/node-sdk` 在 NestJS 中管理飞书云空间文件和文件夹。
+飞书云空间 API，管理文件夹、上传下载文件和文档权限。
+
+## API 函数
+
+### drive_create_folder
+
+创建文件夹。
+
+```python
+from feishu_api import drive_create_folder
+
+data = drive_create_folder("新文件夹", folder_token="fldcnXXX")
+# data -> {token, url}
+```
+
+**CLI**:
+```bash
+python3 ${SKILL_DIR}/scripts/feishu_api.py drive mkdir --name "新文件夹" --folder-token fldcnXXX
+```
+
+### drive_upload_file
+
+上传文件到云空间（< 20MB 文件使用 upload_all）。
+
+```python
+from feishu_api import drive_upload_file
+
+data = drive_upload_file("/path/to/file.pdf", parent_node="fldcnXXX")
+# data -> {file_token}
+```
+
+**CLI**:
+```bash
+python3 ${SKILL_DIR}/scripts/feishu_api.py drive upload --file /path/to/file.pdf --parent-node fldcnXXX
+```
+
+### drive_download_file
+
+下载文件。
+
+```python
+from feishu_api import drive_download_file
+
+path = drive_download_file("boxcnXXX", "/tmp/output.pdf")
+```
+
+**CLI**:
+```bash
+python3 ${SKILL_DIR}/scripts/feishu_api.py drive download --file-token boxcnXXX --save-path /tmp/output.pdf
+```
+
+### drive_move_file
+
+移动文件。
+
+```python
+from feishu_api import drive_move_file
+
+drive_move_file("boxcnXXX", dst_folder_token="fldcnYYY")
+```
+
+### drive_copy_file
+
+复制文件。
+
+```python
+from feishu_api import drive_copy_file
+
+data = drive_copy_file("boxcnXXX", dst_folder_token="fldcnYYY", name="副本")
+```
+
+### drive_delete_file
+
+删除文件。
+
+```python
+from feishu_api import drive_delete_file
+
+drive_delete_file("boxcnXXX")
+```
+
+### drive_add_permission
+
+添加文档权限。
+
+```python
+from feishu_api import drive_add_permission
+
+drive_add_permission(
+    token="doxcnXXX",
+    member_type="user",          # user / chat / department
+    member_id="ou_xxx",
+    perm="view",                 # view / edit / full_access
+    token_type="docx",           # doc / sheet / bitable / folder / docx
+)
+```
 
 ## 所需权限
 
-| 权限标识 | 说明 |
-|----------|------|
-| `drive:drive` | 读写云空间（创建、移动、删除） |
-| `drive:drive:readonly` | 只读云空间（列出、查看） |
-
-## 从 URL 提取 Token
-
-文件夹 URL 格式：`https://xxx.feishu.cn/drive/folder/{folder_token}`
-
-```typescript
-const url = 'https://xxx.feishu.cn/drive/folder/ABC123';
-const folderToken = new URL(url).pathname.split('/drive/folder/')[1]; // 'ABC123'
-```
-
-## 列出文件夹内容
-
-```typescript
-// 列出指定文件夹
-const res = await client.drive.file.list({
-  params: { folder_token: 'fldcnXXX' },
-});
-const files = res.data?.files ?? [];
-// files: [{token, name, type, url, created_time, modified_time, owner_id}, ...]
-
-// 列出根目录（不传 folder_token）
-const rootRes = await client.drive.file.list({
-  params: {},
-});
-```
-
-## 创建文件夹
-
-```typescript
-const res = await client.drive.file.createFolder({
-  data: {
-    name: '新文件夹',
-    folder_token: 'fldcnXXX', // 父文件夹 token
-  },
-});
-const folderToken = res.data?.token;
-const folderUrl = res.data?.url;
-```
-
-## 移动文件
-
-```typescript
-const res = await client.drive.file.move({
-  path: { file_token: 'ABC123' },
-  data: {
-    type: 'docx', // 文件类型
-    folder_token: 'fldcnXXX', // 目标文件夹
-  },
-});
-```
-
-## 删除文件
-
-```typescript
-const res = await client.drive.file.delete({
-  path: { file_token: 'ABC123' },
-  params: {
-    type: 'docx', // 文件类型
-  },
-});
-```
-
-## 文件类型参考
-
-| 类型 | 说明 |
-|------|------|
-| `doc` | 旧版文档 |
-| `docx` | 新版文档 |
-| `sheet` | 电子表格 |
-| `bitable` | 多维表格 |
-| `folder` | 文件夹 |
-| `file` | 上传的文件 |
-| `mindnote` | 思维导图 |
-| `shortcut` | 快捷方式 |
-
-## 机器人根文件夹限制
-
-飞书机器人使用 `tenant_access_token`，没有自己的「我的空间」根文件夹。这意味着：
-
-- 不指定 `folder_token` 创建文件夹会失败（400 错误）
-- 机器人只能访问**已共享给它**的文件和文件夹
-- **解决方案**：用户先手动创建一个文件夹并共享给机器人，机器人就可以在其中创建子文件夹和文件
-
-## Common Mistakes
-
-| 错误 | 正确做法 |
-|------|----------|
-| 机器人不指定 folder_token 创建文件夹 | 必须指定一个已共享给机器人的 folder_token |
-| move/delete 时 type 参数搞错 | type 必须与文件实际类型一致 |
-| 用 folder_token 当 file_token | `folder_token` 用于列出目录，`file_token` 用于移动/删除 |
-| 文件不在机器人可访问范围内 | 需先将文件/文件夹共享给机器人应用 |
+- `drive:drive` — 云空间完整权限
+- `drive:drive:readonly` — 只读权限
+- `drive:file:upload` — 上传文件
+- `drive:file:download` — 下载文件
