@@ -259,21 +259,34 @@ class AgentLoop:
             if msg.content.strip().lower() == "/stop":
                 await self._handle_stop(msg)
             else:
+                running_tasks = any(not t.done() for t in self._active_tasks.get(msg.session_key, []))
+                if running_tasks:
+                    interrupted = await self._cancel_session_tasks(msg.session_key)
+                    if interrupted:
+                        await self.bus.publish_outbound(OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content="⏹ Previous task interrupted. Processing your latest message.",
+                        ))
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
                 task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
 
-    async def _handle_stop(self, msg: InboundMessage) -> None:
-        """Cancel all active tasks and subagents for the session."""
-        tasks = self._active_tasks.pop(msg.session_key, [])
+    async def _cancel_session_tasks(self, session_key: str) -> int:
+        """Cancel active tasks and subagents for a session. Returns cancellation count."""
+        tasks = self._active_tasks.pop(session_key, [])
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
         for t in tasks:
             try:
                 await t
             except (asyncio.CancelledError, Exception):
                 pass
-        sub_cancelled = await self.subagents.cancel_by_session(msg.session_key)
-        total = cancelled + sub_cancelled
+        sub_cancelled = await self.subagents.cancel_by_session(session_key)
+        return cancelled + sub_cancelled
+
+    async def _handle_stop(self, msg: InboundMessage) -> None:
+        """Cancel all active tasks and subagents for the session."""
+        total = await self._cancel_session_tasks(msg.session_key)
         content = f"⏹ Stopped {total} task(s)." if total else "No active task to stop."
         await self.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
