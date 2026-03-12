@@ -797,7 +797,6 @@ async def test_loop_dispatch_delegation_route_and_exception_paths(tmp_path: Path
     dispatcher.delegation_count = 0
     dispatcher.routing_trace = []
     dispatcher.coordinator = None
-    dispatcher.routing_metrics = None
     dispatcher.active_messages = None
     dispatcher.role_name = "general"
     dispatcher.record_route_trace = MagicMock()

@@ -546,6 +546,15 @@ class LLMConfig(Base):
     max_retries: int = 1  # Retry count (was NANOBOT_LLM_MAX_RETRIES)
 
 
+class LangfuseConfig(Base):
+    """Langfuse observability configuration."""
+
+    enabled: bool = True
+    public_key: str = ""
+    secret_key: str = ""
+    host: str = "https://cloud.langfuse.com"
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot.
 
@@ -565,6 +574,7 @@ class Config(BaseSettings):
     features: FeaturesConfig = Field(default_factory=FeaturesConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     log: LogConfig = Field(default_factory=LogConfig)
+    langfuse: LangfuseConfig = Field(default_factory=LangfuseConfig)
 
     @property
     def workspace_path(self) -> Path:

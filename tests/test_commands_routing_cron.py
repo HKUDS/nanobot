@@ -19,7 +19,8 @@ def test_routing_trace_branches(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
 
     missing = runner.invoke(app, ["routing", "trace"])
     assert missing.exit_code == 0
-    assert "No routing trace" in missing.stdout
+    assert "No legacy routing trace" in missing.stdout
+    assert "Langfuse" in missing.stdout
 
     trace_path = tmp_path / "memory" / "routing_trace.jsonl"
     trace_path.parent.mkdir(parents=True, exist_ok=True)
@@ -55,7 +56,8 @@ def test_routing_metrics_branches(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
     missing = runner.invoke(app, ["routing", "metrics"])
     assert missing.exit_code == 0
-    assert "No routing metrics" in missing.stdout
+    assert "No legacy routing metrics" in missing.stdout
+    assert "Langfuse" in missing.stdout
 
     metrics_path = tmp_path / "memory" / "routing_metrics.json"
     metrics_path.parent.mkdir(parents=True, exist_ok=True)

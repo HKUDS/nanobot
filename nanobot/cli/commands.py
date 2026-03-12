@@ -407,6 +407,11 @@ def gateway(
 
     config = load_config()
 
+    # Initialize langfuse observability (auto-instruments litellm via OTEL)
+    from nanobot.agent.observability import init_langfuse
+
+    init_langfuse(config.langfuse)
+
     # Apply structured logging config
     from loguru import logger as _gw_logger2
 
@@ -575,6 +580,11 @@ def agent(
     from nanobot.cron.service import CronService
 
     config = load_config()
+
+    # Initialize langfuse observability (auto-instruments litellm via OTEL)
+    from nanobot.agent.observability import init_langfuse
+
+    init_langfuse(config.langfuse)
 
     bus = MessageBus()
     provider = _make_provider(config)
@@ -1102,6 +1112,12 @@ def cron_run(
     logger.disable("nanobot")
 
     config = load_config()
+
+    # Initialize langfuse observability (auto-instruments litellm via OTEL)
+    from nanobot.agent.observability import init_langfuse
+
+    init_langfuse(config.langfuse)
+
     provider = _make_provider(config)
     bus = MessageBus()
     agent_loop = AgentLoop(
@@ -1155,7 +1171,12 @@ app.add_typer(routing_app, name="routing")
 def routing_trace(
     last: int = typer.Option(20, "--last", "-n", help="Number of recent trace entries to show"),
 ):
-    """Show the last N routing decisions from the trace log."""
+    """Show the last N routing decisions from the trace log.
+
+    Routing traces are now captured by Langfuse.  Use the Langfuse dashboard
+    for full trace exploration.  This command reads any legacy JSONL trace
+    file that may still exist on disk.
+    """
     import json
 
     from nanobot.config.loader import load_config
@@ -1163,7 +1184,11 @@ def routing_trace(
     config = load_config()
     trace_path = config.workspace_path / "memory" / "routing_trace.jsonl"
     if not trace_path.exists():
-        console.print("[dim]No routing trace found. Is multi-agent routing enabled?[/dim]")
+        console.print(
+            "[dim]No legacy routing trace found.[/dim]\n"
+            "[dim]Routing traces are now captured by Langfuse — "
+            "check the Langfuse dashboard.[/dim]"
+        )
         raise typer.Exit(0)
 
     entries: list[dict] = []
@@ -1181,7 +1206,7 @@ def routing_trace(
         raise typer.Exit(0)
 
     recent = entries[-last:]
-    table = Table(title=f"Routing Trace (last {len(recent)} of {len(entries)})")
+    table = Table(title=f"Routing Trace (last {len(recent)} of {len(entries)}) [legacy]")
     table.add_column("Time", style="dim", max_width=19)
     table.add_column("Event", style="cyan")
     table.add_column("Role", style="green")
@@ -1205,11 +1230,20 @@ def routing_trace(
             str(e.get("message", ""))[:40],
         )
     console.print(table)
+    console.print(
+        "\n[dim]Note: New routing traces are captured by Langfuse. "
+        "This shows legacy on-disk data only.[/dim]"
+    )
 
 
 @routing_app.command("metrics")
 def routing_metrics_cmd():
-    """Show routing metrics (classifications, delegations, latencies)."""
+    """Show routing metrics (classifications, delegations, latencies).
+
+    Routing metrics are now captured by Langfuse.  Use the Langfuse dashboard
+    for real-time metrics.  This command reads any legacy metrics JSON file
+    that may still exist on disk.
+    """
     import json
 
     from nanobot.config.loader import load_config
@@ -1217,7 +1251,11 @@ def routing_metrics_cmd():
     config = load_config()
     metrics_path = config.workspace_path / "memory" / "routing_metrics.json"
     if not metrics_path.exists():
-        console.print("[dim]No routing metrics found. Is multi-agent routing enabled?[/dim]")
+        console.print(
+            "[dim]No legacy routing metrics found.[/dim]\n"
+            "[dim]Routing metrics are now captured by Langfuse — "
+            "check the Langfuse dashboard.[/dim]"
+        )
         raise typer.Exit(0)
 
     try:
@@ -1226,7 +1264,7 @@ def routing_metrics_cmd():
         console.print(f"[red]Failed to read metrics:[/red] {exc}")
         raise typer.Exit(1)
 
-    table = Table(title="Routing Metrics")
+    table = Table(title="Routing Metrics [legacy]")
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="green", justify="right")
 
@@ -1266,6 +1304,11 @@ def routing_metrics_cmd():
             tool_calls = data.get(f"role_tool_calls:{role_name}", 0)
             role_table.add_row(role_name, str(invocations), str(tool_calls))
         console.print(role_table)
+
+    console.print(
+        "\n[dim]Note: New routing metrics are captured by Langfuse. "
+        "This shows legacy on-disk data only.[/dim]"
+    )
 
 
 # ============================================================================

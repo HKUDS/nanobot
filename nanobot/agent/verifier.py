@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from nanobot.agent.observability import span as langfuse_span
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.streaming import strip_think
 
@@ -79,61 +80,66 @@ class AnswerVerifier:
             },
         ]
 
-        try:
-            critique_response = await self.provider.chat(
-                messages=critique_messages,
-                tools=None,
-                model=self.model,
-                temperature=0.0,
-                max_tokens=512,
-            )
-            raw = (critique_response.content or "").strip()
-            parsed = json.loads(raw)
-            confidence = int(parsed.get("confidence", 5))
-            issues = parsed.get("issues", [])
+        async with langfuse_span(
+            name="verify",
+            metadata={"mode": self.verification_mode, "model": self.model},
+        ):
+            try:
+                critique_response = await self.provider.chat(
+                    messages=critique_messages,
+                    tools=None,
+                    model=self.model,
+                    temperature=0.0,
+                    max_tokens=512,
+                )
+                raw = (critique_response.content or "").strip()
+                parsed = json.loads(raw)
+                confidence = int(parsed.get("confidence", 5))
+                issues = parsed.get("issues", [])
 
-            if confidence >= 3 and not issues:
-                logger.debug("Verification passed (confidence={})", confidence)
+                if confidence >= 3 and not issues:
+                    logger.debug("Verification passed (confidence={})", confidence)
+                    return candidate, messages
+
+                logger.info(
+                    "Verification flagged issues (confidence={}): {}",
+                    confidence,
+                    issues,
+                )
+                issue_text = "\n".join(f"- {i}" for i in issues) if issues else "Low confidence"
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            f"Self-check found potential issues with your answer:\n"
+                            f"{issue_text}\n\n"
+                            "Please revise your answer addressing these concerns. "
+                            "If you're uncertain about a claim, say so explicitly."
+                        ),
+                    }
+                )
+
+                revision = await self.provider.chat(
+                    messages=messages,
+                    tools=None,
+                    model=self.model,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                )
+                revised = strip_think(revision.content) or candidate
+                for i in range(len(messages) - 1, -1, -1):
+                    if messages[i].get("role") == "assistant":
+                        messages[i]["content"] = revised
+                        break
+                logger.info("Answer revised after verification")
+                return revised, messages
+
+            except (json.JSONDecodeError, KeyError, ValueError):
+                logger.debug("Verification response not parseable, skipping")
                 return candidate, messages
-
-            logger.info(
-                "Verification flagged issues (confidence={}): {}",
-                confidence,
-                issues,
-            )
-            issue_text = "\n".join(f"- {i}" for i in issues) if issues else "Low confidence"
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        f"Self-check found potential issues with your answer:\n{issue_text}\n\n"
-                        "Please revise your answer addressing these concerns. "
-                        "If you're uncertain about a claim, say so explicitly."
-                    ),
-                }
-            )
-
-            revision = await self.provider.chat(
-                messages=messages,
-                tools=None,
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-            revised = strip_think(revision.content) or candidate
-            for i in range(len(messages) - 1, -1, -1):
-                if messages[i].get("role") == "assistant":
-                    messages[i]["content"] = revised
-                    break
-            logger.info("Answer revised after verification")
-            return revised, messages
-
-        except (json.JSONDecodeError, KeyError, ValueError):
-            logger.debug("Verification response not parseable, skipping")
-            return candidate, messages
-        except Exception:  # crash-barrier: LLM verification call
-            logger.debug("Verification call failed, returning original answer")
-            return candidate, messages
+            except Exception:  # crash-barrier: LLM verification call
+                logger.debug("Verification call failed, returning original answer")
+                return candidate, messages
 
     def should_force_verification(self, text: str) -> bool:
         """Return True when the text is a question with low memory grounding."""

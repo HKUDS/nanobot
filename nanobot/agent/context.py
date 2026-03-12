@@ -31,6 +31,7 @@ from typing import Any, Protocol
 from loguru import logger
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.observability import span as langfuse_span
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools.feedback import feedback_summary
@@ -236,16 +237,20 @@ async def summarize_and_compress(
         digest = "\n".join(digest_parts)
 
         try:
-            resp = await provider.chat(
-                messages=[
-                    {"role": "system", "content": prompts.get("compress")},
-                    {"role": "user", "content": digest},
-                ],
-                tools=None,
-                model=model,
-                temperature=0.0,
-                max_tokens=summary_max_tokens,
-            )
+            async with langfuse_span(
+                name="compress",
+                metadata={"middle_msgs": len(middle), "model": model},
+            ):
+                resp = await provider.chat(
+                    messages=[
+                        {"role": "system", "content": prompts.get("compress")},
+                        {"role": "user", "content": digest},
+                    ],
+                    tools=None,
+                    model=model,
+                    temperature=0.0,
+                    max_tokens=summary_max_tokens,
+                )
             summary_text = (resp.content or "").strip()
             if summary_text:
                 _summary_cache[cache_key] = summary_text
