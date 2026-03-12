@@ -243,7 +243,7 @@ class EditFileTool(_FsTool):
             if not file_path.exists():
                 return f"Error: File not found: {path}"
 
-            raw = fp.read_bytes()
+            raw = file_path.read_bytes()
             uses_crlf = b"\r\n" in raw
             content = raw.decode("utf-8").replace("\r\n", "\n")
             match, count = _find_match(content, old_text.replace("\r\n", "\n"))
@@ -261,8 +261,8 @@ class EditFileTool(_FsTool):
             if uses_crlf:
                 new_content = new_content.replace("\n", "\r\n")
 
-            fp.write_bytes(new_content.encode("utf-8"))
-            return f"Successfully edited {fp}"
+            file_path.write_bytes(new_content.encode("utf-8"))
+            return f"Successfully edited {file_path}"
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
