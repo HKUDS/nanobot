@@ -45,8 +45,8 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
-
+    """Search the web using Brave Search API (requires API key)."""
+    
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
     parameters = {
@@ -83,8 +83,11 @@ class WebSearchTool(Tool):
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
                     params={"q": query, "count": n},
-                    headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
-                    timeout=10.0
+                    headers={
+                        "Accept": "application/json",
+                        "X-Subscription-Token": self.api_key,
+                    },
+                    timeout=10.0,
                 )
                 r.raise_for_status()
 

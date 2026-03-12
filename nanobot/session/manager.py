@@ -31,7 +31,12 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
-
+    total_tokens: int = 0  # Track cumulative token usage for context management
+    
+    def estimate_tokens(self, text: str) -> int:
+        """Rough token estimation: ~4 characters per token."""
+        return len(text) // 4 + 1
+    
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
         msg = {
@@ -41,6 +46,7 @@ class Session:
             **kwargs
         }
         self.messages.append(msg)
+        self.total_tokens += self.estimate_tokens(content)
         self.updated_at = datetime.now()
 
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
@@ -67,6 +73,7 @@ class Session:
         """Clear all messages and reset session to initial state."""
         self.messages = []
         self.last_consolidated = 0
+        self.total_tokens = 0
         self.updated_at = datetime.now()
 
 
@@ -133,6 +140,7 @@ class SessionManager:
             metadata = {}
             created_at = None
             last_consolidated = 0
+            total_tokens = 0
 
             with open(path, encoding="utf-8") as f:
                 for line in f:
@@ -146,6 +154,7 @@ class SessionManager:
                         metadata = data.get("metadata", {})
                         created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
                         last_consolidated = data.get("last_consolidated", 0)
+                        total_tokens = data.get("total_tokens", 0)
                     else:
                         messages.append(data)
 
@@ -154,7 +163,8 @@ class SessionManager:
                 messages=messages,
                 created_at=created_at or datetime.now(),
                 metadata=metadata,
-                last_consolidated=last_consolidated
+                last_consolidated=last_consolidated,
+                total_tokens=total_tokens,
             )
         except Exception as e:
             logger.warning("Failed to load session {}: {}", key, e)
@@ -171,7 +181,8 @@ class SessionManager:
                 "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(),
                 "metadata": session.metadata,
-                "last_consolidated": session.last_consolidated
+                "last_consolidated": session.last_consolidated,
+                "total_tokens": session.total_tokens,
             }
             f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
             for msg in session.messages:
@@ -194,7 +205,6 @@ class SessionManager:
 
         for path in self.sessions_dir.glob("*.jsonl"):
             try:
-                # Read just the metadata line
                 with open(path, encoding="utf-8") as f:
                     first_line = f.readline().strip()
                     if first_line:
@@ -207,7 +217,8 @@ class SessionManager:
                                 "updated_at": data.get("updated_at"),
                                 "path": str(path)
                             })
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to read session file {path}: {e}")
                 continue
 
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)

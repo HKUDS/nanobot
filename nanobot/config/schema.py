@@ -276,6 +276,8 @@ class ProvidersConfig(Base):
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
+    zaicoding: ProviderConfig = Field(default_factory=ProviderConfig)  # Z.ai Coding API
+    zaicodingplan: ProviderConfig = Field(default_factory=ProviderConfig)  # Z.ai Coding Plan API
     dashscope: ProviderConfig = Field(default_factory=ProviderConfig)  # 阿里云通义千问
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -287,6 +289,8 @@ class ProvidersConfig(Base):
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+    kilocode: ProviderConfig = Field(default_factory=ProviderConfig)  # Kilo Code API gateway (GLM-5)
+    opencode: ProviderConfig = Field(default_factory=lambda: ProviderConfig(api_key=" "))  # OpenCode Zen (free, no auth)
 
 
 class HeartbeatConfig(Base):
@@ -303,8 +307,12 @@ class GatewayConfig(Base):
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
+class UIConfig(BaseModel):
+    """UI/Timeline configuration."""
+    timeline_emoji: str | None = "📊"  # Emoji used for timeline headers (set to null/"" to disable)
 
-class WebSearchConfig(Base):
+
+class WebSearchConfig(BaseModel):
     """Web search tool configuration."""
 
     api_key: str = ""  # Brave Search API key
@@ -355,6 +363,7 @@ class Config(BaseSettings):
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
+    ui: UIConfig = Field(default_factory=UIConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
 
     @property
