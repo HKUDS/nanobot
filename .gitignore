@@ -3,7 +3,6 @@
 *.pyc
 dist/
 build/
-docs/
 *.egg-info/
 *.egg
 *.pyc
@@ -23,7 +22,6 @@ botpy.log
 tests/__pycache__/
 .ci/
 artifacts/
-docs
 .github/prompts/
 node_modules/
 bridge/node_modules/
