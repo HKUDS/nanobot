@@ -49,7 +49,11 @@ class SkillsLoader:
         for skill_dir in self._find_all_skill_dirs(self.workspace_skills):
             if skill_dir.name not in seen_names:
                 skills.append(
-                    {"name": skill_dir.name, "path": str(skill_dir / "SKILL.md"), "source": "workspace"}
+                    {
+                        "name": skill_dir.name,
+                        "path": str(skill_dir / "SKILL.md"),
+                        "source": "workspace",
+                    }
                 )
                 seen_names.add(skill_dir.name)
 
@@ -57,7 +61,11 @@ class SkillsLoader:
         for skill_dir in self._find_all_skill_dirs(self.builtin_skills):
             if skill_dir.name not in seen_names:
                 skills.append(
-                    {"name": skill_dir.name, "path": str(skill_dir / "SKILL.md"), "source": "builtin"}
+                    {
+                        "name": skill_dir.name,
+                        "path": str(skill_dir / "SKILL.md"),
+                        "source": "builtin",
+                    }
                 )
                 seen_names.add(skill_dir.name)
 

@@ -138,8 +138,11 @@ class TestStoreWithSummary:
         cache = ToolResultCache(workspace=tmp_path)
         result = ToolResult.ok("x" * 5000)
         key = await cache.store_with_summary(
-            "read_excel", {"path": "a.xlsx"}, result,
-            provider=mock_provider, model="gpt-4o-mini",
+            "read_excel",
+            {"path": "a.xlsx"},
+            result,
+            provider=mock_provider,
+            model="gpt-4o-mini",
         )
         entry = cache.get(key)
         assert entry is not None
@@ -155,8 +158,11 @@ class TestStoreWithSummary:
         cache = ToolResultCache(workspace=tmp_path)
         result = ToolResult.ok("x" * 5000)
         key = await cache.store_with_summary(
-            "read_excel", {"path": "a.xlsx"}, result,
-            provider=provider, model="gpt-4o-mini",
+            "read_excel",
+            {"path": "a.xlsx"},
+            result,
+            provider=provider,
+            model="gpt-4o-mini",
         )
         entry = cache.get(key)
         assert entry is not None
@@ -222,14 +228,16 @@ class TestSliceOutput:
         assert parsed[0]["a"] == 5
 
     def test_excel_json_with_sheets(self):
-        data = json.dumps({
-            "sheets": {
-                "Sheet1": {
-                    "rows": [{"col": i} for i in range(30)],
-                    "headers": ["col"],
+        data = json.dumps(
+            {
+                "sheets": {
+                    "Sheet1": {
+                        "rows": [{"col": i} for i in range(30)],
+                        "headers": ["col"],
+                    }
                 }
             }
-        })
+        )
         result = _slice_output(data, 0, 5)
         parsed = json.loads(result)
         assert len(parsed) == 5
@@ -295,26 +303,32 @@ class TestCacheGetSliceTool:
 # ExcelGetRowsTool
 # ---------------------------------------------------------------------------
 
-_EXCEL_CACHE_DATA = json.dumps({
-    "file": "test.xlsx",
-    "sheets": {
-        "Sheet1": {
-            "headers": ["Name", "Status", "Hours"],
-            "row_count": 10,
-            "total_rows": 10,
-            "rows": [
-                {"Name": f"Task {i}", "Status": "Active" if i % 2 == 0 else "Done", "Hours": i * 8}
-                for i in range(10)
-            ],
+_EXCEL_CACHE_DATA = json.dumps(
+    {
+        "file": "test.xlsx",
+        "sheets": {
+            "Sheet1": {
+                "headers": ["Name", "Status", "Hours"],
+                "row_count": 10,
+                "total_rows": 10,
+                "rows": [
+                    {
+                        "Name": f"Task {i}",
+                        "Status": "Active" if i % 2 == 0 else "Done",
+                        "Hours": i * 8,
+                    }
+                    for i in range(10)
+                ],
+            },
+            "Sheet2": {
+                "headers": ["X"],
+                "row_count": 3,
+                "total_rows": 3,
+                "rows": [{"X": j} for j in range(3)],
+            },
         },
-        "Sheet2": {
-            "headers": ["X"],
-            "row_count": 3,
-            "total_rows": 3,
-            "rows": [{"X": j} for j in range(3)],
-        },
-    },
-})
+    }
+)
 
 
 class TestExcelGetRowsTool:

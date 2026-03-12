@@ -35,8 +35,8 @@ _SUMMARY_SYSTEM = (
     "- For spreadsheet/tabular data: list ALL task/item names with their key attributes "
     "(status, dates, owner) so the agent can produce a complete summary without fetching raw rows. "
     "Prefer a compact table or bullet list format.\n"
-    "- End with a note: 'Full data cached. Use excel_get_rows(cache_key=\"{key}\", start_row=N, "
-    "end_row=M) for row ranges, or cache_get_slice(cache_key=\"{key}\", start=N, end=M) "
+    '- End with a note: \'Full data cached. Use excel_get_rows(cache_key="{key}", start_row=N, '
+    'end_row=M) for row ranges, or cache_get_slice(cache_key="{key}", start=N, end=M) '
     "for raw lines.'\n"
     "- Keep the summary under 4000 characters\n"
     "- Do NOT reproduce raw JSON — restructure into human-readable format"
@@ -298,9 +298,7 @@ class ToolResultCache:
             lines = self._disk_path.read_text(encoding="utf-8").strip().splitlines()
             if len(lines) > _MAX_DISK_ENTRIES:
                 keep = lines[-_MAX_DISK_ENTRIES:]
-                self._disk_path.write_text(
-                    "\n".join(keep) + "\n", encoding="utf-8"
-                )
+                self._disk_path.write_text("\n".join(keep) + "\n", encoding="utf-8")
         except Exception:
             pass
 

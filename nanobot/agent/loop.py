@@ -49,7 +49,7 @@ from nanobot.agent.streaming import StreamingLLMCaller, strip_think
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tool_executor import ToolExecutor
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool, _CycleError
+from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool
 from nanobot.agent.tools.excel import ExcelFindTool, ExcelGetRowsTool, ReadExcelTool
 from nanobot.agent.tools.feedback import FeedbackTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool

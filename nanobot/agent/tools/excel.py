@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 _DATE_ALLOC_RE = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}\s*\(")
 
 
-
 class ReadExcelTool(Tool):
     """Read an Excel workbook and return structured sheet data.
 
@@ -60,9 +59,7 @@ class ReadExcelTool(Tool):
                 },
                 "sheet": {
                     "type": "string",
-                    "description": (
-                        "Sheet name to read. If omitted, reads all sheets."
-                    ),
+                    "description": ("Sheet name to read. If omitted, reads all sheets."),
                 },
                 "max_rows": {
                     "type": "integer",
@@ -140,7 +137,9 @@ class ReadExcelTool(Tool):
                     result["sheets"][sname] = {"headers": [], "rows": [], "total_rows": 0}
                     continue
 
-                headers = [str(h) if h is not None else f"col_{i}" for i, h in enumerate(header_row)]
+                headers = [
+                    str(h) if h is not None else f"col_{i}" for i, h in enumerate(header_row)
+                ]
 
                 # Determine column indices to keep
                 if columns:
@@ -438,9 +437,7 @@ class ExcelFindTool(Tool):
         if sheet:
             sheet_data = sheets.get(sheet)
             if not sheet_data:
-                return ToolResult.fail(
-                    f"Sheet '{sheet}' not found.", error_type="not_found"
-                )
+                return ToolResult.fail(f"Sheet '{sheet}' not found.", error_type="not_found")
         else:
             sheet_data = next(iter(sheets.values()))
 
