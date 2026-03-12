@@ -29,7 +29,7 @@ from skills.feishu_bitable import (
 
 # 录入日报
 result = daily_add(
-    user_id="ou_fb8ed1f2da72bd32207a7c75494fd8a0",
+    user_id="ou_xxxx",
     date="2026-03-06",
     project="HiperOne",
     content="完成飞书 API 集成",
@@ -39,7 +39,7 @@ print(result)  # {"record_id": "recxxx", "success": True}
 
 # 查询日报
 records = daily_query(
-    user_id="ou_fb8ed1f2da72bd32207a7c75494fd8a0",
+    user_id="ou_xxxx",
     date_from="2026-03-01",
     date_to="2026-03-06",
     limit=10
@@ -65,7 +65,7 @@ result = task_add(
     name="测试 API",
     serial=1001,
     project="recvcGZsmzHcCF",  # 项目记录 ID
-    executor="ou_fb8ed1f2da72bd32207a7c75494fd8a0",
+    executor="ou_xxxx",
     status="进行中",
     deadline=deadline,
     hours=4,
@@ -74,7 +74,7 @@ result = task_add(
 
 # 查询任务
 tasks = task_query(
-    executor="ou_fb8ed1f2da72bd32207a7c75494fd8a0",
+    executor="ou_xxxx",
     status="进行中",
     limit=10
 )
@@ -107,7 +107,7 @@ cd skills/feishu-bitable
 
 # 录入日报
 python3 scripts/bitable.py daily add \
-  --user-id ou_fb8ed1f2da72bd32207a7c75494fd8a0 \
+  --user-id ou_xxxx \
   --date 2026-03-06 \
   --project HiperOne \
   --content "完成飞书 API 集成" \
@@ -118,7 +118,7 @@ python3 scripts/bitable.py daily query --limit 10
 
 # 按用户查询
 python3 scripts/bitable.py daily query \
-  --user-id ou_fb8ed1f2da72bd32207a7c75494fd8a0 \
+  --user-id ou_xxxx \
   --limit 5
 
 # 更新日报
@@ -137,7 +137,7 @@ python3 scripts/bitable.py task add \
   --name "测试 API" \
   --serial 1001 \
   --project recvcGZsmzHcCF \
-  --executor ou_fb8ed1f2da72bd32207a7c75494fd8a0 \
+  --executor ou_xxxx \
   --status 进行中 \
   --deadline 7 \
   --hours 4 \
@@ -148,7 +148,7 @@ python3 scripts/bitable.py task query --limit 10
 
 # 按执行人查询
 python3 scripts/bitable.py task query \
-  --executor ou_fb8ed1f2da72bd32207a7c75494fd8a0 \
+  --executor ou_xxxx \
   --limit 5
 
 # 更新任务
@@ -219,39 +219,6 @@ skills/feishu-bitable/
 └── scripts/
     └── bitable.py        # 命令行工具
 ```
-
-## 测试状态
-
-✅ **Python API: 9/9 通过** | **命令行：8/8 通过** (2026-03-06 16:15)
-
-### Python API 测试
-
-| 测试项目 | 状态 |
-|---------|------|
-| get_fields | ✅ |
-| daily_add | ✅ |
-| daily_query | ✅ |
-| daily_update | ✅ |
-| daily_delete | ✅ |
-| task_add | ✅ |
-| task_query | ✅ |
-| task_update | ✅ |
-| task_delete | ✅ |
-
-### 命令行测试
-
-| 测试项目 | 状态 |
-|---------|------|
-| help | ✅ |
-| fields | ✅ |
-| daily add | ✅ |
-| daily query | ✅ |
-| daily update | ✅ |
-| daily delete | ✅ |
-| task add | ✅ |
-| task query | ✅ |
-| task update | ✅ |
-| task delete | ✅ |
 
 ## 常见错误码
 
