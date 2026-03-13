@@ -229,6 +229,15 @@ class ChannelsConfig(Base):
     wecom: WecomConfig = Field(default_factory=WecomConfig)
 
 
+class MemorySharingConfig(Base):
+    """Memory sharing configuration for multi-instance memory migration."""
+
+    enabled: bool = True  # Whether this instance allows other instances to read its memory
+    allow_from: list[str] = Field(
+        default_factory=list
+    )  # Whitelist of instance names allowed to read (empty = all allowed when enabled)
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -244,6 +253,7 @@ class AgentDefaults(Base):
     # Deprecated compatibility field: accepted from old configs but ignored at runtime.
     memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    memory_sharing: MemorySharingConfig = Field(default_factory=MemorySharingConfig)
 
     @property
     def should_warn_deprecated_memory_window(self) -> bool:
