@@ -211,6 +211,15 @@ class WecomConfig(Base):
     welcome_message: str = ""  # Welcome message for enter_chat event
 
 
+class WebUIConfig(Base):
+    """Web UI channel configuration (FastAPI + WebSocket, zero npm)."""
+
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 7860
+    allow_from: list[str] = Field(default_factory=lambda: ["*"])  # ["*"] = open to all
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -226,7 +235,8 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
-    wecom: WecomConfig = Field(default_factory=WecomConfig)
+    webui: WebUIConfig = Field(default_factory=WebUIConfig)
+
 
 
 class AgentDefaults(Base):
