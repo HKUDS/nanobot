@@ -312,6 +312,12 @@ def _map_finish_reason(status: str | None) -> str:
 
 
 def _friendly_error(status_code: int, raw: str) -> str:
+    raw_lower = raw.lower()
     if status_code == 429:
         return "ChatGPT usage quota exceeded or rate limit triggered. Please try again later."
+    if status_code == 402 and "deactivated_workspace" in raw_lower:
+        return (
+            "Codex workspace is deactivated (HTTP 402: deactivated_workspace). "
+            "Switch to an active ChatGPT workspace and run `nanobot provider login openai-codex` again."
+        )
     return f"HTTP {status_code}: {raw}"
