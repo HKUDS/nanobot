@@ -1,6 +1,9 @@
 """Tool registry for dynamic tool management."""
 
+import asyncio
 from typing import Any
+
+from loguru import logger
 
 from nanobot.agent.tools.base import Tool
 
@@ -55,6 +58,9 @@ class ToolRegistry:
             if isinstance(result, str) and result.startswith("Error"):
                 return result + _HINT
             return result
+        except asyncio.CancelledError:
+            logger.warning("Tool '{}' was cancelled", name)
+            return f"Error: Tool '{name}' was cancelled before it could complete." + _HINT
         except Exception as e:
             return f"Error executing {name}: {str(e)}" + _HINT
 
