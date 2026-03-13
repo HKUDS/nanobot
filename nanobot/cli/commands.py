@@ -19,10 +19,12 @@ if sys.platform == "win32":
             pass
 
 import typer
+from prompt_toolkit import print_formatted_text
 from prompt_toolkit import PromptSession
-from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.formatted_text import ANSI, HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.application import run_in_terminal
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.table import Table
@@ -111,14 +113,59 @@ def _init_prompt_session() -> None:
     )
 
 
+def _make_console() -> Console:
+    return Console(file=sys.stdout)
+
+
+def _render_interactive_ansi(render_fn) -> str:
+    """Render Rich output to ANSI so prompt_toolkit can print it safely."""
+    ansi_console = Console(
+        force_terminal=True,
+        color_system=console.color_system or "standard",
+        width=console.width,
+    )
+    with ansi_console.capture() as capture:
+        render_fn(ansi_console)
+    return capture.get()
+
+
 def _print_agent_response(response: str, render_markdown: bool) -> None:
     """Render assistant response with consistent terminal styling."""
+    console = _make_console()
     content = response or ""
     body = Markdown(content) if render_markdown else Text(content)
     console.print()
     console.print(f"[cyan]{__logo__} nanobot[/cyan]")
     console.print(body)
     console.print()
+
+
+async def _print_interactive_line(text: str) -> None:
+    """Print async interactive updates with prompt_toolkit-safe Rich styling."""
+    def _write() -> None:
+        ansi = _render_interactive_ansi(
+            lambda c: c.print(f"  [dim]↳ {text}[/dim]")
+        )
+        print_formatted_text(ANSI(ansi), end="")
+
+    await run_in_terminal(_write)
+
+
+async def _print_interactive_response(response: str, render_markdown: bool) -> None:
+    """Print async interactive replies with prompt_toolkit-safe Rich styling."""
+    def _write() -> None:
+        content = response or ""
+        ansi = _render_interactive_ansi(
+            lambda c: (
+                c.print(),
+                c.print(f"[cyan]{__logo__} nanobot[/cyan]"),
+                c.print(Markdown(content) if render_markdown else Text(content)),
+                c.print(),
+            )
+        )
+        print_formatted_text(ANSI(ansi), end="")
+
+    await run_in_terminal(_write)
 
 
 def _is_exit_command(command: str) -> bool:
@@ -348,7 +395,7 @@ def gateway(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
-        brave_api_key=config.tools.web.search.api_key or None,
+        web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
@@ -531,7 +578,7 @@ def agent(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
-        brave_api_key=config.tools.web.search.api_key or None,
+        web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
@@ -610,14 +657,15 @@ def agent(
                             elif ch and not is_tool_hint and not ch.send_progress:
                                 pass
                             else:
-                                console.print(f"  [dim]↳ {msg.content}[/dim]")
+                                await _print_interactive_line(msg.content)
+
                         elif not turn_done.is_set():
                             if msg.content:
                                 turn_response.append(msg.content)
                             turn_done.set()
                         elif msg.content:
-                            console.print()
-                            _print_agent_response(msg.content, render_markdown=markdown)
+                            await _print_interactive_response(msg.content, render_markdown=markdown)
+
                     except asyncio.TimeoutError:
                         continue
                     except asyncio.CancelledError:

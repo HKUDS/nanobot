@@ -149,13 +149,22 @@ class MatrixChannel(BaseChannel):
     name = "matrix"
     display_name = "Matrix"
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self,
+        config: Any,
+        bus: MessageBus,
+        *,
+        restrict_to_workspace: bool = False,
+        workspace: str | Path | None = None,
+    ):
         super().__init__(config, bus)
         self.client: AsyncClient | None = None
         self._sync_task: asyncio.Task | None = None
         self._typing_tasks: dict[str, asyncio.Task] = {}
-        self._restrict_to_workspace = False
-        self._workspace: Path | None = None
+        self._restrict_to_workspace = bool(restrict_to_workspace)
+        self._workspace = (
+            Path(workspace).expanduser().resolve(strict=False) if workspace is not None else None
+        )
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
 
