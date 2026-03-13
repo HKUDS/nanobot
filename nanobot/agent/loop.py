@@ -110,6 +110,48 @@ class AgentLoop:
         )
         self._register_default_tools()
 
+        # Hot-reload: track config file mtime to detect changes
+        self._config_mtime: float = self._get_config_mtime()
+
+    # ------------------------------------------------------------------
+    # Hot-reload: detect config changes and rebuild provider on the fly
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_config_mtime() -> float:
+        """Return mtime of config.json, or 0 if it doesn't exist."""
+        from nanobot.config.loader import get_config_path
+        p = get_config_path()
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    async def _maybe_reload_config(self) -> None:
+        """Check if config.json changed; if so, rebuild provider and update model."""
+        mtime = self._get_config_mtime()
+        if mtime == self._config_mtime:
+            return
+
+        try:
+            from nanobot.config.loader import load_config
+            from nanobot.cli.commands import _make_provider
+            config = load_config()
+            new_model = config.agents.defaults.model
+            new_provider = _make_provider(config)
+            self.provider = new_provider
+            self.model = new_model
+            self.subagents.provider = new_provider
+            self.subagents.model = new_model
+            self._config_mtime = mtime
+            logger.info(
+                "Config hot-reloaded: model={}, provider={}",
+                new_model,
+                type(new_provider).__name__,
+            )
+        except Exception:
+            logger.exception("Failed to hot-reload config, keeping existing provider")
+
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         allowed_dir = self.workspace if self.restrict_to_workspace else None
@@ -301,6 +343,7 @@ class AgentLoop:
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message under the global lock."""
         async with self._processing_lock:
+            await self._maybe_reload_config()
             try:
                 response = await self._process_message(msg)
                 if response is not None:
