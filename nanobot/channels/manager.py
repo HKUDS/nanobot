@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from loguru import logger
+
 
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
+
+if TYPE_CHECKING:
+    from nanobot.session.manager import SessionManager
 
 
 class ChannelManager:
@@ -22,49 +26,150 @@ class ChannelManager:
     - Route outbound messages
     """
 
-    def __init__(self, config: Config, bus: MessageBus):
+    def __init__(
+        self, config: Config, bus: MessageBus, session_manager: "SessionManager | None" = None
+    ):
         self.config = config
         self.bus = bus
+        self.session_manager = session_manager
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
 
         self._init_channels()
 
     def _init_channels(self) -> None:
-        """Initialize channels discovered via pkgutil scan."""
-        from nanobot.channels.registry import discover_channel_names, load_channel_class
+        """Initialize channels based on config."""
 
-        groq_key = self.config.providers.groq.api_key
-
-        for modname in discover_channel_names():
-            section = getattr(self.config.channels, modname, None)
-            if not section or not getattr(section, "enabled", False):
-                continue
+        # Telegram channel
+        if self.config.channels.telegram.enabled:
             try:
-                cls = load_channel_class(modname)
-                channel = cls(section, self.bus)
-                channel.transcription_api_key = groq_key
-                self.channels[modname] = channel
-                logger.info("{} channel enabled", cls.display_name)
-            except ImportError as e:
-                logger.warning("{} channel not available: {}", modname, e)
+                from nanobot.channels.telegram import TelegramChannel
 
-        self._validate_allow_from()
-
-    def _validate_allow_from(self) -> None:
-        for name, ch in self.channels.items():
-            if getattr(ch.config, "allow_from", None) == []:
-                raise SystemExit(
-                    f'Error: "{name}" has empty allowFrom (denies all). '
-                    f'Set ["*"] to allow everyone, or add specific user IDs.'
+                self.channels["telegram"] = TelegramChannel(
+                    self.config.channels.telegram,
+                    self.bus,
+                    groq_api_key=self.config.providers.groq.api_key,
+                    session_manager=self.session_manager,
                 )
+                logger.info("Telegram channel enabled")
+            except ImportError as e:
+                logger.warning(f"Telegram channel not available: {e}")
+
+        # WhatsApp channel
+        if self.config.channels.whatsapp.enabled:
+            try:
+                from nanobot.channels.whatsapp import WhatsAppChannel
+
+                self.channels["whatsapp"] = WhatsAppChannel(self.config.channels.whatsapp, self.bus)
+                logger.info("WhatsApp channel enabled")
+            except ImportError as e:
+                logger.warning(f"WhatsApp channel not available: {e}")
+
+        # Discord channel
+        if self.config.channels.discord.enabled:
+            try:
+                from nanobot.channels.discord import DiscordChannel
+
+                self.channels["discord"] = DiscordChannel(self.config.channels.discord, self.bus)
+                logger.info("Discord channel enabled")
+            except ImportError as e:
+                logger.warning(f"Discord channel not available: {e}")
+
+        # Feishu channel
+        if self.config.channels.feishu.enabled:
+            try:
+                from nanobot.channels.feishu import FeishuChannel
+
+                self.channels["feishu"] = FeishuChannel(self.config.channels.feishu, self.bus)
+                logger.info("Feishu channel enabled")
+            except ImportError as e:
+                logger.warning(f"Feishu channel not available: {e}")
+
+        # Mochat channel
+        if self.config.channels.mochat.enabled:
+            try:
+                from nanobot.channels.mochat import MochatChannel
+
+                self.channels["mochat"] = MochatChannel(self.config.channels.mochat, self.bus)
+                logger.info("Mochat channel enabled")
+            except ImportError as e:
+                logger.warning(f"Mochat channel not available: {e}")
+
+        # DingTalk channel
+        if self.config.channels.dingtalk.enabled:
+            try:
+                from nanobot.channels.dingtalk import DingTalkChannel
+
+                self.channels["dingtalk"] = DingTalkChannel(self.config.channels.dingtalk, self.bus)
+                logger.info("DingTalk channel enabled")
+            except ImportError as e:
+                logger.warning(f"DingTalk channel not available: {e}")
+
+        # Email channel
+        if self.config.channels.email.enabled:
+            try:
+                from nanobot.channels.email import EmailChannel
+
+                self.channels["email"] = EmailChannel(self.config.channels.email, self.bus)
+                logger.info("Email channel enabled")
+            except ImportError as e:
+                logger.warning(f"Email channel not available: {e}")
+
+        # Slack channel
+        if self.config.channels.slack.enabled:
+            try:
+                from nanobot.channels.slack import SlackChannel
+
+                self.channels["slack"] = SlackChannel(self.config.channels.slack, self.bus)
+                logger.info("Slack channel enabled")
+            except ImportError as e:
+                logger.warning(f"Slack channel not available: {e}")
+
+        # QQ channel
+        if self.config.channels.qq.enabled:
+            try:
+                from nanobot.channels.qq import QQChannel
+
+                self.channels["qq"] = QQChannel(
+                    self.config.channels.qq,
+                    self.bus,
+                )
+                logger.info("QQ channel enabled")
+            except ImportError as e:
+                logger.warning(f"QQ channel not available: {e}")
+
+        # Zalo channel
+        if self.config.channels.zalo.enabled:
+            try:
+                from nanobot.channels.zalo import ZaloChannel
+
+                self.channels["zalo"] = ZaloChannel(
+                    self.config.channels.zalo,
+                    self.bus,
+                )
+                logger.info("Zalo channel enabled")
+            except ImportError as e:
+                logger.warning(f"Zalo channel not available: {e}")
+
+        # Zalo channel
+        if self.config.channels.zalo.enabled:
+            try:
+                from nanobot.channels.zalo import ZaloChannel
+
+                self.channels["zalo"] = ZaloChannel(
+                    self.config.channels.zalo,
+                    self.bus,
+                )
+                logger.info("Zalo channel enabled")
+            except ImportError as e:
+                logger.warning(f"Zalo channel not available: {e}")
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
         try:
             await channel.start()
         except Exception as e:
-            logger.error("Failed to start channel {}: {}", name, e)
+            logger.error(f"Failed to start channel {name}: {e}")
 
     async def start_all(self) -> None:
         """Start all channels and the outbound dispatcher."""
@@ -78,7 +183,7 @@ class ChannelManager:
         # Start channels
         tasks = []
         for name, channel in self.channels.items():
-            logger.info("Starting {} channel...", name)
+            logger.info(f"Starting {name} channel...")
             tasks.append(asyncio.create_task(self._start_channel(name, channel)))
 
         # Wait for all to complete (they should run forever)
@@ -100,9 +205,9 @@ class ChannelManager:
         for name, channel in self.channels.items():
             try:
                 await channel.stop()
-                logger.info("Stopped {} channel", name)
+                logger.info(f"Stopped {name} channel")
             except Exception as e:
-                logger.error("Error stopping {}: {}", name, e)
+                logger.error(f"Error stopping {name}: {e}")
 
     async def _dispatch_outbound(self) -> None:
         """Dispatch outbound messages to the appropriate channel."""
@@ -110,25 +215,16 @@ class ChannelManager:
 
         while True:
             try:
-                msg = await asyncio.wait_for(
-                    self.bus.consume_outbound(),
-                    timeout=1.0
-                )
-
-                if msg.metadata.get("_progress"):
-                    if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
-                        continue
-                    if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
-                        continue
+                msg = await asyncio.wait_for(self.bus.consume_outbound(), timeout=1.0)
 
                 channel = self.channels.get(msg.channel)
                 if channel:
                     try:
                         await channel.send(msg)
                     except Exception as e:
-                        logger.error("Error sending to {}: {}", msg.channel, e)
+                        logger.error(f"Error sending to {msg.channel}: {e}")
                 else:
-                    logger.warning("Unknown channel: {}", msg.channel)
+                    logger.warning(f"Unknown channel: {msg.channel}")
 
             except asyncio.TimeoutError:
                 continue
@@ -142,10 +238,7 @@ class ChannelManager:
     def get_status(self) -> dict[str, Any]:
         """Get status of all channels."""
         return {
-            name: {
-                "enabled": True,
-                "running": channel.is_running
-            }
+            name: {"enabled": True, "running": channel.is_running}
             for name, channel in self.channels.items()
         }
 

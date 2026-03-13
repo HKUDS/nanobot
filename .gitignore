@@ -22,4 +22,12 @@ poetry.lock
 .pytest_cache/
 botpy.log
 nano.*.save
-
+data/*
+docs/git_history.md
+docs/rag_anything_logic.md
+.omc/
+rag_storage/
+tests/verify_dual_model_config.py
+uv.lock
+nanobot/agent/tools/rag.py
+scripts/debug_rag_test.py
