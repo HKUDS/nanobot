@@ -2,10 +2,27 @@
 
 from __future__ import annotations
 
+import importlib
+import pkgutil
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from nanobot.config.schema import Config
+
+if TYPE_CHECKING:
+    from nanobot.channels.base import BaseChannel
+
+_INTERNAL = frozenset(
+    {
+        "base",
+        "builtins",
+        "dispatcher",
+        "factory",
+        "manager",
+        "policy",
+        "registry",
+    }
+)
 
 
 def _default_extra_kwargs_factory(config: Config) -> dict[str, Any]:
@@ -51,3 +68,26 @@ class ChannelRegistry:
 
     def all(self) -> tuple[ChannelSpec, ...]:
         return tuple(self._specs.values())
+
+
+def discover_channel_names() -> list[str]:
+    """Return all loadable channel module names for CLI discovery."""
+    import nanobot.channels as pkg
+
+    return [
+        name
+        for _, name, ispkg in pkgutil.iter_modules(pkg.__path__)
+        if name not in _INTERNAL and not ispkg
+    ]
+
+
+def load_channel_class(module_name: str) -> type[BaseChannel]:
+    """Import a channel module and return the first BaseChannel subclass."""
+    from nanobot.channels.base import BaseChannel as _Base
+
+    module = importlib.import_module(f"nanobot.channels.{module_name}")
+    for attr in dir(module):
+        obj = getattr(module, attr)
+        if isinstance(obj, type) and issubclass(obj, _Base) and obj is not _Base:
+            return obj
+    raise ImportError(f"No BaseChannel subclass in nanobot.channels.{module_name}")

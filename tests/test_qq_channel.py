@@ -44,7 +44,7 @@ async def test_on_group_message_routes_to_group_chat_id() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_group_message_uses_group_api_with_msg_seq() -> None:
+async def test_send_group_message_uses_plain_text_group_api_with_msg_seq() -> None:
     channel = QQChannel(QQConfig(app_id="app", secret="secret", allow_from=["*"]), MessageBus())
     channel._client = _FakeClient()
     channel._chat_type_cache["group123"] = "group"
@@ -60,7 +60,37 @@ async def test_send_group_message_uses_group_api_with_msg_seq() -> None:
 
     assert len(channel._client.api.group_calls) == 1
     call = channel._client.api.group_calls[0]
-    assert call["group_openid"] == "group123"
-    assert call["msg_id"] == "msg1"
-    assert call["msg_seq"] == 2
+    assert call == {
+        "group_openid": "group123",
+        "msg_type": 0,
+        "content": "hello",
+        "msg_id": "msg1",
+        "msg_seq": 2,
+    }
     assert not channel._client.api.c2c_calls
+
+
+@pytest.mark.asyncio
+async def test_send_c2c_message_uses_plain_text_c2c_api_with_msg_seq() -> None:
+    channel = QQChannel(QQConfig(app_id="app", secret="secret", allow_from=["*"]), MessageBus())
+    channel._client = _FakeClient()
+
+    await channel.send(
+        OutboundMessage(
+            channel="qq",
+            chat_id="user123",
+            content="hello",
+            metadata={"message_id": "msg1"},
+        )
+    )
+
+    assert len(channel._client.api.c2c_calls) == 1
+    call = channel._client.api.c2c_calls[0]
+    assert call == {
+        "openid": "user123",
+        "msg_type": 0,
+        "content": "hello",
+        "msg_id": "msg1",
+        "msg_seq": 2,
+    }
+    assert not channel._client.api.group_calls

@@ -25,6 +25,7 @@ class DiscordChannel(BaseChannel):
     """Discord channel using Gateway websocket."""
 
     name = "discord"
+    display_name = "Discord"
 
     def __init__(self, config: DiscordConfig, bus: MessageBus):
         super().__init__(config, bus)
