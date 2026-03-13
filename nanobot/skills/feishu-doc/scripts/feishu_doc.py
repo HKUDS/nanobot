@@ -259,17 +259,37 @@ def create_text_blocks(document_id: str, texts: List[str], block_id: str = "") -
     return create_blocks(document_id, parent, children)
 
 
+def _batch_create_blocks(document_id: str, blocks: List[Dict], batch_size: int = 50) -> None:
+    """分批写入 blocks，每批 batch_size 个，按顺序追加"""
+    for i in range(0, len(blocks), batch_size):
+        chunk = blocks[i:i + batch_size]
+        try:
+            create_blocks(document_id, document_id, chunk)
+        except RuntimeError:
+            for b in chunk:
+                try:
+                    create_blocks(document_id, document_id, [b])
+                except RuntimeError:
+                    pass
+
+
 def create_doc_with_content(title: str, content: str, folder_token: str = "") -> Dict:
-    """创建文档并一次性写入 Markdown 内容
+    """创建文档并写入 Markdown 内容（优先一次性写入，失败则分批重试）
 
     content: Markdown 格式文本，支持标题、列表、加粗、斜体、引用
     返回: {document_id, title, url}
     """
     result = create_doc(title, folder_token)
-    if content and content.strip():
-        blocks = markdown_to_blocks(content)
-        if blocks:
-            create_blocks(result["document_id"], result["document_id"], blocks)
+    if not (content and content.strip()):
+        return result
+    blocks = markdown_to_blocks(content)
+    if not blocks:
+        return result
+    doc_id = result["document_id"]
+    try:
+        create_blocks(doc_id, doc_id, blocks)
+    except RuntimeError:
+        _batch_create_blocks(doc_id, blocks)
     return result
 
 

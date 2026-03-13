@@ -49,13 +49,25 @@ python3 scripts/feishu_doc.py read --document-id doxcnXXX
 
 ### create_doc
 
-创建新的云文档。可选指定目标文件夹和初始文本内容。
+创建新的云文档。支持通过 Markdown 一次性写入带样式的内容（标题、列表、加粗、斜体、引用）。
+
+**推荐方式 — Markdown 内容写入（样式完整）：**
+
+```
+python3 scripts/feishu_doc.py create --title "周报" --content "# 本周重点\n\n## 技术\n\n- **项目A**进展顺利\n- 完成代码重构\n\n> 下周计划：上线 v2.0"
+python3 scripts/feishu_doc.py create --title "方案" --content-file design.md
+```
+
+**仅创建空文档：**
 
 ```
 python3 scripts/feishu_doc.py create --title "会议纪要"
 python3 scripts/feishu_doc.py create --title "会议纪要" --folder-token fldcnXXX
-python3 scripts/feishu_doc.py create --title "会议纪要" --content "第一段内容\n第二段内容"
 ```
+
+支持的 Markdown 语法: `# ~ ######` 标题、`- * +` 无序列表、`1. 2.` 有序列表、`> ` 引用、`**加粗**`、`*斜体*`
+
+写入策略: 优先一次性提交全部内容块（保证样式完整），若失败自动分批逐个写入。
 
 返回: {document_id, revision_id, title, url}
 
