@@ -41,7 +41,7 @@ class XmppClient(ClientXMPP):
         self,
         jid: str,
         password: str,
-        channel: XmppChannel,
+        channel: object,
         nickname: str = "nanobot",
         rooms: list[str] | None = None,
         file_transfer_enabled = True
