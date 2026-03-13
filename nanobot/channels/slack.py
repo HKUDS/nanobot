@@ -60,9 +60,19 @@ class SlackChannel(BaseChannel):
         logger.info("Starting Slack Socket Mode client...")
         await self._socket_client.connect()
 
+        # Connection retry loop with exception handling
+        retry_delay = 1
+        max_retry_delay = 60
         while self._running:
-            await asyncio.sleep(1)
-
+            try:
+                await self._run_socket_listener()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.exception("Slack socket error: {}", e)
+                if self._running:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, max_retry_delay)
     async def stop(self) -> None:
         """Stop the Slack client."""
         self._running = False
@@ -72,6 +82,17 @@ class SlackChannel(BaseChannel):
             except Exception as e:
                 logger.warning("Slack socket close failed: {}", e)
             self._socket_client = None
+
+    async def _run_socket_listener(self) -> None:
+        """Run the socket listener with exception handling."""
+        while self._running:
+            try:
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.exception("Error in Slack socket listener loop: {}", e)
+                await asyncio.sleep(1)
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Slack."""
