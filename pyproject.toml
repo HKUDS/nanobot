@@ -44,6 +44,8 @@ dependencies = [
     "json-repair>=0.57.0,<1.0.0",
     "chardet>=3.0.2,<6.0.0",
     "openai>=2.8.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
     "tiktoken>=0.12.0,<1.0.0",
 ]
 
@@ -81,6 +83,7 @@ include = [
     "nanobot/templates/**/*.md",
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",
+    "nanobot/gateway/ui/**",
 ]
 
 [tool.hatch.build.targets.wheel]

@@ -6,6 +6,7 @@ from pathlib import Path
 from nanobot.config.schema import Config
 
 
+_config_cache: Config | None = None
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
 
@@ -23,24 +24,40 @@ def get_config_path() -> Path:
     return Path.home() / ".nanobot" / "config.json"
 
 
-def load_config(config_path: Path | None = None) -> Config:
+def get_data_dir() -> Path:
+    """Get the nanobot data directory."""
+    from nanobot.utils.helpers import get_data_path
+
+    return get_data_path()
+
+
+def load_config(config_path: Path | None = None, force_reload: bool = False) -> Config:
     """
     Load configuration from file or create default.
 
     Args:
         config_path: Optional path to config file. Uses default if not provided.
+        force_reload: If True, ignore cache and reload from disk.
 
     Returns:
         Loaded configuration object.
     """
+    global _config_cache
+
     path = config_path or get_config_path()
+
+    if not force_reload and _config_cache is not None and path == get_config_path():
+        return _config_cache
 
     if path.exists():
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             data = _migrate_config(data)
-            return Config.model_validate(data)
+            config = Config.model_validate(data)
+            if path == get_config_path():
+                _config_cache = config
+            return config
         except (json.JSONDecodeError, ValueError) as e:
             print(f"Warning: Failed to load config from {path}: {e}")
             print("Using default configuration.")

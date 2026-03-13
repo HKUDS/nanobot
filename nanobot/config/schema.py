@@ -269,7 +269,9 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
-    azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
+    azure_openai: ProviderConfig = Field(
+        default_factory=ProviderConfig
+    )  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -299,11 +301,27 @@ class HeartbeatConfig(Base):
     interval_s: int = 30 * 60  # 30 minutes
 
 
-class GatewayConfig(Base):
-    """Gateway/server configuration."""
+class GatewayAuthConfig(Base):
+    """Gateway authentication configuration."""
 
-    host: str = "0.0.0.0"
+    token: str = ""  # Random auth token for gateway UI access
+
+
+class GatewayConfig(Base):
+    """Gateway/server configuration.
+
+    The default value here is intended to be a sensible non-Docker default (127.0.0.1).
+    The CLI/onboard code will still inspect the environment and may override it (e.g. when
+    running inside a container).  Keeping the schema default narrow avoids surprising
+    users who read the generated config file and expect the service to bind accordingly.
+    """
+
+    # binding address that should be used when starting the HTTP server
+    # (see :func:`nanobot.gateway.server.detect_gateway_host` for how the value is
+    # determined during onboarding/startup).
+    host: str = "127.0.0.1"
     port: int = 18790
+    auth: GatewayAuthConfig = Field(default_factory=GatewayAuthConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
