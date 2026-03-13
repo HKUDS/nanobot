@@ -2,7 +2,7 @@
 
 import asyncio
 import re
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from loguru import logger
 from slack_sdk.socket_mode.request import SocketModeRequest
@@ -106,6 +106,20 @@ class SlackChannel(BaseChannel):
         except Exception as e:
             logger.error("Error sending Slack message: {}", e)
 
+    def _prepare_reaction(self, chat_id: str, timestamp: str) -> Callable[[], Awaitable]:
+        """Prepare a reaction to be added when the message is consumed."""
+        async def add_reaction():
+            # Add :eyes: reaction to the triggering message (best-effort)
+            try:
+                await self._web_client.reactions_add(
+                    channel=chat_id,
+                    name=self.config.react_emoji,
+                    timestamp=timestamp,
+                )
+            except Exception as e:
+                logger.debug("Slack reactions_add failed: {}", e)
+        return add_reaction
+
     async def _on_socket_request(
         self,
         client: SocketModeClient,
@@ -169,16 +183,8 @@ class SlackChannel(BaseChannel):
         thread_ts = event.get("thread_ts")
         if self.config.reply_in_thread and not thread_ts:
             thread_ts = event.get("ts")
-        # Add :eyes: reaction to the triggering message (best-effort)
-        try:
-            if self._web_client and event.get("ts"):
-                await self._web_client.reactions_add(
-                    channel=chat_id,
-                    name=self.config.react_emoji,
-                    timestamp=event.get("ts"),
-                )
-        except Exception as e:
-            logger.debug("Slack reactions_add failed: {}", e)
+
+        consumed_callback = self._prepare_reaction(chat_id, event.get("ts")) if self._web_client and event.get("ts") else None
 
         # Thread-scoped session key for channel/group messages
         session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts and channel_type != "im" else None
@@ -196,6 +202,7 @@ class SlackChannel(BaseChannel):
                     },
                 },
                 session_key=session_key,
+                consumed_callback=consumed_callback,
             )
         except Exception:
             logger.exception("Error handling Slack message from {}", sender_id)

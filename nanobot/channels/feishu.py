@@ -7,7 +7,7 @@ import re
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
@@ -888,6 +888,13 @@ class FeishuChannel(BaseChannel):
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self._on_message(data), self._loop)
 
+    def _prepare_reaction(self, message_id: str) -> Callable[[], Awaitable]:
+        """Prepare a reaction to be added when the message is consumed."""
+        async def add_reaction():
+            # Add reaction
+            await self._add_reaction(message_id, self.config.react_emoji)
+        return add_reaction
+
     async def _on_message(self, data: Any) -> None:
         """Handle incoming message from Feishu."""
         try:
@@ -917,9 +924,6 @@ class FeishuChannel(BaseChannel):
             if chat_type == "group" and not self._is_group_message_for_bot(message):
                 logger.debug("Feishu: skipping group message (not mentioned)")
                 return
-
-            # Add reaction
-            await self._add_reaction(message_id, self.config.react_emoji)
 
             # Parse content
             content_parts = []
@@ -985,7 +989,8 @@ class FeishuChannel(BaseChannel):
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
-                }
+                },
+                consumed_callback=self._prepare_reaction(message_id)
             )
 
         except Exception as e:

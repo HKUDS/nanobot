@@ -23,7 +23,10 @@ class MessageBus:
 
     async def consume_inbound(self) -> InboundMessage:
         """Consume the next inbound message (blocks until available)."""
-        return await self.inbound.get()
+        msg = await self.inbound.get()
+        if msg.consumed_callback:
+            await msg.consumed_callback()
+        return msg
 
     async def publish_outbound(self, msg: OutboundMessage) -> None:
         """Publish a response from the agent to channels."""
