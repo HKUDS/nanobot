@@ -272,9 +272,13 @@ class TestLoggingFilters:
 
         litellm_logger = logging.getLogger("LiteLLM")
         record = logging.LogRecord(
-            name="LiteLLM", level=logging.WARNING, pathname="", lineno=0,
+            name="LiteLLM",
+            level=logging.WARNING,
+            pathname="",
+            lineno=0,
             msg="Proxy Server is not installed. Skipping OpenTelemetry initialization.",
-            args=(), exc_info=None,
+            args=(),
+            exc_info=None,
         )
         # At least one filter should suppress this record
         assert not all(f.filter(record) for f in litellm_logger.filters)
@@ -291,9 +295,13 @@ class TestLoggingFilters:
 
         langfuse_logger = logging.getLogger("langfuse")
         record = logging.LogRecord(
-            name="langfuse", level=logging.WARNING, pathname="", lineno=0,
+            name="langfuse",
+            level=logging.WARNING,
+            pathname="",
+            lineno=0,
             msg="No active span in current context",
-            args=(), exc_info=None,
+            args=(),
+            exc_info=None,
         )
         assert not all(f.filter(record) for f in langfuse_logger.filters)
 
@@ -309,8 +317,13 @@ class TestLoggingFilters:
 
         litellm_logger = logging.getLogger("LiteLLM")
         record = logging.LogRecord(
-            name="LiteLLM", level=logging.INFO, pathname="", lineno=0,
-            msg="Normal log message", args=(), exc_info=None,
+            name="LiteLLM",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="Normal log message",
+            args=(),
+            exc_info=None,
         )
         assert all(f.filter(record) for f in litellm_logger.filters)
 

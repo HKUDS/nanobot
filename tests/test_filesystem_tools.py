@@ -116,9 +116,7 @@ class TestEditFileTool:
 
     async def test_edit_missing_file(self, tmp_path: Path):
         tool = EditFileTool(workspace=tmp_path, allowed_dir=tmp_path)
-        result = await tool.execute(
-            path=str(tmp_path / "nope.py"), old_text="a", new_text="b"
-        )
+        result = await tool.execute(path=str(tmp_path / "nope.py"), old_text="a", new_text="b")
         assert not result.success
         assert "not found" in result.output.lower()
 

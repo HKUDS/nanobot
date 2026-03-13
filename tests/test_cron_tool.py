@@ -59,18 +59,14 @@ class TestCronToolExecute:
         mock_job = MagicMock(id="j2")
         mock_job.name = "daily"
         cron_tool._cron.add_job.return_value = mock_job
-        result = await cron_tool.execute(
-            action="add", message="daily task", cron_expr="0 9 * * *"
-        )
+        result = await cron_tool.execute(action="add", message="daily task", cron_expr="0 9 * * *")
         assert result.success
 
     async def test_add_with_at(self, cron_tool: CronTool):
         mock_job = MagicMock(id="j3")
         mock_job.name = "once"
         cron_tool._cron.add_job.return_value = mock_job
-        result = await cron_tool.execute(
-            action="add", message="one-time", at="2026-12-25T10:00:00"
-        )
+        result = await cron_tool.execute(action="add", message="one-time", at="2026-12-25T10:00:00")
         assert result.success
 
     async def test_add_no_schedule_fails(self, cron_tool: CronTool):

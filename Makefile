@@ -1,4 +1,4 @@
-.PHONY: install install-all test test-verbose test-cov lint format typecheck check ci import-check prompt-check memory-eval live-eval clean pre-commit-install
+.PHONY: install install-all test test-verbose test-cov lint format typecheck check ci pre-push import-check prompt-check memory-eval live-eval clean pre-commit-install
 
 PYTHON ?= python3
 
@@ -32,6 +32,18 @@ typecheck:
 check: lint typecheck import-check prompt-check test
 
 ci: lint typecheck import-check prompt-check test-cov
+
+pre-push: ## Full CI validation + merge-readiness check (run before pushing PRs)
+	@echo "=== Syncing with origin/main ==="
+	git fetch origin main
+	@if ! git merge-base --is-ancestor origin/main HEAD; then \
+		echo "ERROR: Branch is behind origin/main. Run: git merge origin/main"; \
+		exit 1; \
+	fi
+	@echo "=== Running full CI pipeline ==="
+	$(MAKE) ci
+	@echo ""
+	@echo "✓ All checks passed — safe to push."
 
 import-check:
 	$(PYTHON) scripts/check_imports.py
