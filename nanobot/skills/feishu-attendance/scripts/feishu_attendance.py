@@ -85,15 +85,15 @@ def _pp(data: Any) -> None:
 # 考勤 (attendance/v1)
 # ============================================================
 
-def get_user_employee_id(open_id: str) -> str:
-    """通过 open_id 获取 employee_id（考勤 API 前置步骤）"""
+def get_user_id_from_open_id(open_id: str) -> str:
+    """通过 open_id 获取 user_id（考勤 API 的 employee_id 类型对应 contact 的 user_id）"""
     data = _get(f"/contact/v3/users/{open_id}", {"user_id_type": "open_id"},
                 action="获取用户信息")
     user = data.get("user", {})
-    eid = user.get("employee_id")
-    if not eid:
-        raise RuntimeError(f"用户 {open_id} 没有 employee_id（需权限 contact:user.employee_id:readonly）")
-    return eid
+    uid = user.get("user_id")
+    if not uid:
+        raise RuntimeError(f"用户 {open_id} 没有 user_id（需权限 contact:user.base:readonly）")
+    return uid
 
 
 def get_attendance(
@@ -121,12 +121,12 @@ def get_attendance(
 # ============================================================
 
 def _resolve_ids(raw: str) -> List[str]:
-    """接受 open_id 或 employee_id，自动转换为 employee_id 列表"""
+    """接受 open_id 或 user_id，自动将 open_id 转换为 user_id"""
     ids = [i.strip() for i in raw.split(",") if i.strip()]
     result = []
     for uid in ids:
         if uid.startswith("ou_"):
-            result.append(get_user_employee_id(uid))
+            result.append(get_user_id_from_open_id(uid))
         else:
             result.append(uid)
     return result
@@ -136,7 +136,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="feishu_attendance", description="飞书考勤查询")
     sub = parser.add_subparsers(dest="action")
     p = sub.add_parser("query", help="查询打卡")
-    p.add_argument("--user-ids", required=True, help="employee_id 或 open_id(ou_开头自动转换)，逗号分隔")
+    p.add_argument("--user-ids", required=True, help="user_id 或 open_id(ou_开头自动转换)，逗号分隔")
     p.add_argument("--date-from", type=int, required=True, help="yyyyMMdd")
     p.add_argument("--date-to", type=int, required=True, help="yyyyMMdd")
     return parser
