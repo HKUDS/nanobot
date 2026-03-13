@@ -11,9 +11,8 @@ from nanobot.agent.tools.filesystem import (
     ListDirTool,
     ReadFileTool,
     WriteFileTool,
-    _resolve_path,
+    _resolve_path,  # noqa: PLC2701
 )
-
 
 # ---------------------------------------------------------------------------
 # _resolve_path

@@ -348,7 +348,7 @@ class TestObserveDecoratorWhenEnabled:
             "sys.modules",
             {"langfuse": MagicMock(observe=mock_lf_observe)},
         ):
-            decorator = observability.observe(name="test_op", as_type="span")
+            observability.observe(name="test_op", as_type="span")
 
         mock_lf_observe.assert_called_once_with(
             name="test_op", as_type="span", capture_input=None, capture_output=None
