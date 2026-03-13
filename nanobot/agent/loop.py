@@ -17,6 +17,7 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.end_turn import EndTurnTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -126,6 +127,7 @@ class AgentLoop:
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
+        self.tools.register(EndTurnTool())
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
@@ -189,6 +191,14 @@ class AgentLoop:
 
         while iteration < self.max_iterations:
             iteration += 1
+            messages.append({
+                "role": "user",
+                "content": (
+                    f"[System: Iteration {iteration} of {self.max_iterations}. "
+                    "To end your turn and let the user reply you MUST call the end_turn tool—text alone is not enough. "
+                    "Call end_turn when your response is complete; end before the limit.]"
+                ),
+            })
 
             tool_defs = self.tools.get_definitions()
 
@@ -200,8 +210,12 @@ class AgentLoop:
 
             if response.has_tool_calls:
                 if on_progress:
+                    # When end_turn is in this batch, we'll send final_content once at the end;
+                    # don't send the same content as progress to avoid duplicate messages.
+                    end_turn_in_batch = any(tc.name == "end_turn" for tc in response.tool_calls)
                     thought = self._strip_think(response.content)
-                    if thought:
+                    
+                    if thought and not end_turn_in_batch:
                         await on_progress(thought)
                     await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
@@ -215,14 +229,23 @@ class AgentLoop:
                     thinking_blocks=response.thinking_blocks,
                 )
 
+                end_turn_called = False
+                end_turn_content = ""
                 for tool_call in response.tool_calls:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    if tool_call.name == "end_turn":
+                        end_turn_called = True
+                        end_turn_content = (tool_call.arguments.get("content") or "").strip()
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+
+                if end_turn_called:
+                    final_content = end_turn_content or self._strip_think(response.content) or ""
+                    break
             else:
                 clean = self._strip_think(response.content)
                 # Don't persist error responses to session history — they can
@@ -235,8 +258,15 @@ class AgentLoop:
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
-                final_content = clean
-                break
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "[System: You replied with text but did not call end_turn. The user cannot reply until you call end_turn. "
+                        "You MUST call the end_turn tool now with your final message (use the content you just wrote, or a summary). "
+                        "If you have more to add, call more tools or send more text first, then call end_turn when done.]"
+                    ),
+                })
+                # Do not set final_content; do not break — loop again
 
         if final_content is None and iteration >= self.max_iterations:
             logger.warning("Max iterations ({}) reached", self.max_iterations)
@@ -447,6 +477,9 @@ class AgentLoop:
             metadata=msg.metadata or {},
         )
 
+    _END_TURN_REMINDER_PREFIX = "[System: You replied with text but did not call end_turn"
+    _ITERATION_PREFIX = "[System: Tool call iteration "
+
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
@@ -458,13 +491,18 @@ class AgentLoop:
             if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
                 entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
             elif role == "user":
-                if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                    # Strip the runtime-context prefix, keep only the user text.
-                    parts = content.split("\n\n", 1)
-                    if len(parts) > 1 and parts[1].strip():
-                        entry["content"] = parts[1]
-                    else:
+                if isinstance(content, str):
+                    if content.startswith(self._END_TURN_REMINDER_PREFIX):
                         continue
+                    if content.startswith(self._ITERATION_PREFIX):
+                        continue
+                    if content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
+                        # Strip the runtime-context prefix, keep only the user text.
+                        parts = content.split("\n\n", 1)
+                        if len(parts) > 1 and parts[1].strip():
+                            entry["content"] = parts[1]
+                        else:
+                            continue
                 if isinstance(content, list):
                     filtered = []
                     for c in content:

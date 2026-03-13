@@ -85,6 +85,10 @@ Your workspace is at: {workspace_path}
 - History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
+## Turn-taking (required)
+- The user cannot reply until you call the **end_turn** tool. Replying with text only does NOT end your turn.
+- When your response is complete, you MUST call **end_turn** (with your final message as content, or leave content empty to use your last message). If you have more to add, use more tools or send more text, then call end_turn when done.
+- Use the 'message' tool only to send to a specific chat channel (e.g. progress or cron).
 {platform_policy}
 
 ## nanobot Guidelines
@@ -92,9 +96,7 @@ Your workspace is at: {workspace_path}
 - Before modifying a file, read it first. Do not assume files or directories exist.
 - After writing or editing a file, re-read it if accuracy matters.
 - If a tool call fails, analyze the error before retrying with a different approach.
-- Ask for clarification when the request is ambiguous.
-
-Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
+- Ask for clarification when the request is ambiguous."""
 
     @staticmethod
     def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:

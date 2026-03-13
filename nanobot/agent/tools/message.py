@@ -42,7 +42,10 @@ class MessageTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Send a message to the user. Use this when you want to communicate something."
+        return (
+            "Send a reply or notification to the user on the current (or specified) chat channel. "
+            "Use to deliver answers, progress updates, or when the user expects a direct message (e.g. from cron/heartbeat)."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -51,20 +54,20 @@ class MessageTool(Tool):
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "The message content to send"
+                    "description": "Message text to send to the user"
                 },
                 "channel": {
                     "type": "string",
-                    "description": "Optional: target channel (telegram, discord, etc.)"
+                    "description": "Target channel (telegram, discord, cli, etc.); defaults to current"
                 },
                 "chat_id": {
                     "type": "string",
-                    "description": "Optional: target chat/user ID"
+                    "description": "Target chat/user ID; defaults to current"
                 },
                 "media": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional: list of file paths to attach (images, audio, documents)"
+                    "description": "Optional file paths to attach (images, audio, documents)"
                 }
             },
             "required": ["content"]

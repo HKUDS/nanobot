@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: Create or update AgentSkills. Use when designing, structuring, or packaging skills with scripts, references, and assets.
+description: Create or update nanobot/OpenClaw-style skills. Use when designing, structuring, or packaging new skills (SKILL.md, scripts, references, assets).
 ---
 
 # Skill Creator

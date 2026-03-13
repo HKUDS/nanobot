@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Two-layer memory system with grep-based recall.
+description: Long-term facts in MEMORY.md and event log in HISTORY.md; search history with grep via exec. Use to store preferences and project context, and to recall past events.
 always: true
 ---
 

@@ -47,7 +47,10 @@ class ExecTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Execute a shell command and return its output. Use with caution."
+        return (
+            "Run a shell/terminal command in the workspace. Use for running scripts, "
+            "installing packages (pip, npm, apt, brew), git, or any CLI tool. Returns stdout/stderr; "
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -56,7 +59,7 @@ class ExecTool(Tool):
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The shell command to execute",
+                    "description": "The shell command to run (e.g. 'ls -la', 'python script.py')",
                 },
                 "working_dir": {
                     "type": "string",

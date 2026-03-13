@@ -51,8 +51,8 @@ class ReadFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Read the contents of a file. Returns numbered lines. "
-            "Use offset and limit to paginate through large files."
+            "Read the full contents of a file. Use to inspect code, configs, a skill's SKILL.md, "
+            "MEMORY.md, or any file in the workspace. Paths are relative to workspace unless absolute."
         )
 
     @property
@@ -132,15 +132,24 @@ class WriteFileTool(_FsTool):
 
     @property
     def description(self) -> str:
-        return "Write content to a file at the given path. Creates parent directories if needed."
+        return (
+            "Write or overwrite a file with the given content. Creates parent directories if needed. "
+            "Use to create new files or replace entire file contents."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "The file path to write to"},
-                "content": {"type": "string", "description": "The content to write"},
+                "path": {
+                    "type": "string",
+                    "description": "File path to write to (relative to workspace or absolute)"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Exact content to write"
+                }
             },
             "required": ["path", "content"],
         }
@@ -296,7 +305,8 @@ class ListDirTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "List the contents of a directory. "
+            "List files and subdirectories in a directory. Use to explore the workspace, "
+            "find skills under skills/, or discover project structure. Paths are relative to workspace unless absolute."
             "Set recursive=true to explore nested structure. "
             "Common noise directories (.git, node_modules, __pycache__, etc.) are auto-ignored."
         )
