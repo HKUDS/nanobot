@@ -326,9 +326,10 @@ class WebToolsConfig(Base):
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
+    enable: bool = True
     timeout: int = 60
     path_append: str = ""
-
+    deny_patterns: list[str] | None = None
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
