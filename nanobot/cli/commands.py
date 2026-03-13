@@ -944,6 +944,13 @@ def _login_openai_codex() -> None:
         if not (token and token.access):
             console.print("[red]✗ Authentication failed[/red]")
             raise typer.Exit(1)
+
+        # Persist token to config so it survives restarts
+        from nanobot.config.loader import load_config, save_config
+        config = load_config()
+        config.providers.openai_codex.api_key = token.access
+        save_config(config)
+
         console.print(f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]")
     except ImportError:
         console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
