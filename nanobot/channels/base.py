@@ -10,6 +10,7 @@ from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.providers.transcription import TranscriptionProvider
 
 
 class BaseChannel(ABC):
@@ -22,29 +23,29 @@ class BaseChannel(ABC):
 
     name: str = "base"
     display_name: str = "Base"
-    transcription_api_key: str = ""
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(self, config: Any, bus: MessageBus, transcription_service: TranscriptionProvider | None = None):
         """
         Initialize the channel.
 
         Args:
             config: Channel-specific configuration.
             bus: The message bus for communication.
+            transcription_service: Optional transcription service.
         """
         self.config = config
         self.bus = bus
+        self.transcription_service = transcription_service
         self._running = False
 
     async def transcribe_audio(self, file_path: str | Path) -> str:
-        """Transcribe an audio file via Groq Whisper. Returns empty string on failure."""
-        if not self.transcription_api_key:
+        """Transcribe an audio file using the configured transcription service."""
+        if not self.transcription_service:
+            logger.debug("{}: transcription service not available", self.name)
             return ""
-        try:
-            from nanobot.providers.transcription import GroqTranscriptionProvider
 
-            provider = GroqTranscriptionProvider(api_key=self.transcription_api_key)
-            return await provider.transcribe(file_path)
+        try:
+            return await self.transcription_service.transcribe(file_path)
         except Exception as e:
             logger.warning("{}: audio transcription failed: {}", self.name, e)
             return ""

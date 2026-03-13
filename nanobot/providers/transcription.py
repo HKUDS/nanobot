@@ -1,64 +1,85 @@
-"""Voice transcription provider using Groq."""
+"""Voice transcription — LiteLLM for supported providers, AsyncOpenAI direct for others."""
 
-import os
+from __future__ import annotations
+
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import httpx
+import litellm
 from loguru import logger
+from openai import AsyncOpenAI
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import Config
 
 
-class GroqTranscriptionProvider:
-    """
-    Voice transcription provider using Groq's Whisper API.
-
-    Groq offers extremely fast transcription with a generous free tier.
-    """
-
-    def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or os.environ.get("GROQ_API_KEY")
-        self.api_url = "https://api.groq.com/openai/v1/audio/transcriptions"
+class TranscriptionProvider:
+    def __init__(self, *, use_litellm: bool, api_key: str, base_url: str | None, model: str):
+        self._use_litellm = use_litellm
+        self._api_key = api_key
+        self._model = model
+        if not use_litellm:
+            self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     async def transcribe(self, file_path: str | Path) -> str:
-        """
-        Transcribe an audio file using Groq.
-
-        Args:
-            file_path: Path to the audio file.
-
-        Returns:
-            Transcribed text.
-        """
-        if not self.api_key:
-            logger.warning("Groq API key not configured for transcription")
-            return ""
-
         path = Path(file_path)
         if not path.exists():
             logger.error("Audio file not found: {}", file_path)
             return ""
-
         try:
-            async with httpx.AsyncClient() as client:
-                with open(path, "rb") as f:
-                    files = {
-                        "file": (path.name, f),
-                        "model": (None, "whisper-large-v3"),
-                    }
-                    headers = {
-                        "Authorization": f"Bearer {self.api_key}",
-                    }
-
-                    response = await client.post(
-                        self.api_url,
-                        headers=headers,
-                        files=files,
-                        timeout=60.0
+            with open(path, "rb") as f:
+                if self._use_litellm:
+                    response = await litellm.atranscription(
+                        model=self._model,
+                        file=(path.name, f),
+                        api_key=self._api_key,
                     )
-
-                    response.raise_for_status()
-                    data = response.json()
-                    return data.get("text", "")
-
+                else:
+                    response = await self._client.audio.transcriptions.create(
+                        model=self._model,
+                        file=(path.name, f),
+                    )
+            return response.text
         except Exception as e:
-            logger.error("Groq transcription error: {}", e)
+            logger.error("Transcription error: {}", e)
             return ""
+
+
+def create_transcription_service(config: Config) -> TranscriptionProvider | None:
+    """Create a TranscriptionProvider from config. Returns None if not configured."""
+    provider_name = config.transcription.provider
+    model = config.transcription.model
+
+    if not provider_name or not model:
+        return None
+
+    provider_cfg = getattr(config.providers, provider_name, None)
+    if provider_cfg is None:
+        logger.warning("Transcription disabled: '{}' is not a known provider name", provider_name)
+        return None
+
+    api_key = provider_cfg.api_key
+    if not api_key:
+        logger.warning("Transcription disabled: providers.{}.api_key is not set", provider_name)
+        return None
+
+    from nanobot.providers.registry import find_by_name
+
+    spec = find_by_name(provider_name)
+    use_litellm = spec.supports_litellm_transcription if spec else False
+    base_url = provider_cfg.api_base or (spec.default_api_base if spec else None) or None
+
+    if not use_litellm and not base_url:
+        logger.warning(
+            "Transcription disabled: providers.{}.api_base is not set. "
+            "Set it to the provider's transcription endpoint (e.g. https://api.mistral.ai/v1).",
+            provider_name,
+        )
+        return None
+
+    return TranscriptionProvider(
+        use_litellm=use_litellm,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+    )

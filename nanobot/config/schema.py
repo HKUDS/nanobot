@@ -290,6 +290,7 @@ class ProvidersConfig(Base):
     byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+    mistral: ProviderConfig = Field(default_factory=ProviderConfig)  # Mistral AI
 
 
 class HeartbeatConfig(Base):
@@ -314,6 +315,13 @@ class WebSearchConfig(Base):
     api_key: str = ""
     base_url: str = ""  # SearXNG base URL
     max_results: int = 5
+
+
+class TranscriptionConfig(Base):
+    """Transcription service configuration."""
+
+    provider: str = ""  # Provider name (e.g. "groq", "openai", "mistral")
+    model: str = ""  # Model name for transcription (e.g. "whisper-large-v3")
 
 
 class WebToolsConfig(Base):
@@ -361,6 +369,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
 
     @property
     def workspace_path(self) -> Path:
