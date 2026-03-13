@@ -4,10 +4,12 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from click.exceptions import Exit
 from typer.testing import CliRunner
 
-from nanobot.cli.commands import app
+from nanobot.cli.commands import _make_provider, app
 from nanobot.config.schema import Config
+from nanobot.providers.custom_provider import CustomProvider
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_model
@@ -177,6 +179,48 @@ def test_config_falls_back_to_vllm_when_ollama_not_configured():
 
     assert config.get_provider_name() == "vllm"
     assert config.get_api_base() == "http://localhost:8000"
+
+
+def test_make_provider_uses_custom_provider_for_ollama_and_adds_v1_suffix():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "ollama", "model": "llama3.2"}},
+            "providers": {"ollama": {"apiBase": "http://localhost:11434"}},
+        }
+    )
+
+    provider = _make_provider(config)
+
+    assert isinstance(provider, CustomProvider)
+    assert provider.api_base == "http://localhost:11434/v1"
+    assert provider.api_key == "no-key"
+    assert provider.get_default_model() == "llama3.2"
+
+
+def test_make_provider_keeps_ollama_v1_suffix_when_already_present():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "ollama", "model": "llama3.2"}},
+            "providers": {"ollama": {"apiBase": "http://localhost:11434/v1", "apiKey": "ignored"}},
+        }
+    )
+
+    provider = _make_provider(config)
+
+    assert isinstance(provider, CustomProvider)
+    assert provider.api_base == "http://localhost:11434/v1"
+    assert provider.api_key == "ignored"
+
+
+def test_make_provider_rejects_unknown_explicit_provider():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "does_not_exist", "model": "llama3.2"}},
+        }
+    )
+
+    with pytest.raises(Exit):
+        _make_provider(config)
 
 
 def test_find_by_model_prefers_explicit_prefix_over_generic_codex_keyword():

@@ -265,20 +265,36 @@ def _make_provider(config: Config):
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
+    from nanobot.providers.registry import find_by_name
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
+    spec = find_by_name(provider_name) if provider_name else None
+
+    if config.agents.defaults.provider != "auto" and spec is None:
+        console.print(f"[red]Error: Unknown provider: {config.agents.defaults.provider}[/red]")
+        console.print("Check ~/.nanobot/config.json under agents.defaults.provider")
+        raise typer.Exit(1)
 
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         provider = OpenAICodexProvider(default_model=model)
-    # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
-    elif provider_name == "custom":
+    # Custom/Ollama: direct OpenAI-compatible endpoint, bypasses LiteLLM
+    elif provider_name in {"custom", "ollama"}:
         from nanobot.providers.custom_provider import CustomProvider
+
+        api_base = config.get_api_base(model)
+        if provider_name == "ollama":
+            api_base = (api_base or "http://localhost:11434").rstrip("/")
+            if not api_base.endswith("/v1"):
+                api_base = f"{api_base}/v1"
+        else:
+            api_base = api_base or "http://localhost:8000/v1"
+
         provider = CustomProvider(
-            api_key=p.api_key if p else "no-key",
-            api_base=config.get_api_base(model) or "http://localhost:8000/v1",
+            api_key=p.api_key if p and p.api_key else "no-key",
+            api_base=api_base,
             default_model=model,
         )
     # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
@@ -295,8 +311,6 @@ def _make_provider(config: Config):
         )
     else:
         from nanobot.providers.litellm_provider import LiteLLMProvider
-        from nanobot.providers.registry import find_by_name
-        spec = find_by_name(provider_name)
         if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and (spec.is_oauth or spec.is_local)):
             console.print("[red]Error: No API key configured.[/red]")
             console.print("Set one in ~/.nanobot/config.json under providers section")
