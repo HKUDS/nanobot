@@ -118,6 +118,7 @@ class DingTalkChannel(BaseChannel):
     _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
     _AUDIO_EXTS = {".amr", ".mp3", ".wav", ".ogg", ".m4a", ".aac"}
     _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+    _RECEIVED_ACK_TEXT = "👌"
 
     def __init__(self, config: DingTalkConfig, bus: MessageBus):
         super().__init__(config, bus)
@@ -443,6 +444,24 @@ class DingTalkChannel(BaseChannel):
                 f"[Attachment send failed: {filename}]",
             )
 
+    async def _publish_received_ack(
+        self,
+        chat_id: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        """Emit an immediate visible ack so users know the message was received."""
+        try:
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=self.name,
+                    chat_id=chat_id,
+                    content=self._RECEIVED_ACK_TEXT,
+                    metadata=dict(metadata),
+                )
+            )
+        except Exception as e:
+            logger.debug("Failed to publish DingTalk received ack: {}", e)
+
     async def _on_message(
         self,
         content: str,
@@ -460,15 +479,20 @@ class DingTalkChannel(BaseChannel):
             logger.info("DingTalk inbound: {} from {}", content, sender_name)
             is_group = conversation_type == "2" and conversation_id
             chat_id = f"group:{conversation_id}" if is_group else sender_id
+            metadata = {
+                "sender_name": sender_name,
+                "platform": "dingtalk",
+                "conversation_type": conversation_type,
+            }
+
+            # Send an immediate progress hint before agent processing.
+            await self._publish_received_ack(chat_id=chat_id, metadata=metadata)
+
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=str(content),
-                metadata={
-                    "sender_name": sender_name,
-                    "platform": "dingtalk",
-                    "conversation_type": conversation_type,
-                },
+                metadata=metadata,
             )
         except Exception as e:
             logger.error("Error publishing DingTalk message: {}", e)
