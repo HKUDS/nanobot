@@ -9,6 +9,7 @@ import json_repair
 from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.retry import with_retry
 
 
 class CustomProvider(LLMProvider):
@@ -38,7 +39,7 @@ class CustomProvider(LLMProvider):
         if tools:
             kwargs.update(tools=tools, tool_choice=tool_choice or "auto")
         try:
-            return self._parse(await self._client.chat.completions.create(**kwargs))
+            return self._parse(await with_retry(self._client.chat.completions.create, **kwargs))
         except Exception as e:
             return LLMResponse(content=f"Error: {e}", finish_reason="error")
 
