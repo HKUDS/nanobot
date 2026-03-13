@@ -54,8 +54,9 @@ class LiteLLMProvider(LLMProvider):
         if api_key:
             self._setup_env(api_key, api_base, default_model)
 
-        if api_base:
-            litellm.api_base = api_base
+        # Note: api_base is passed per-request via kwargs["api_base"] in chat(),
+        # so we don't set litellm.api_base globally here. Setting it globally
+        # would cause the last-constructed provider to win for ALL instances.
 
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
