@@ -371,24 +371,29 @@ class AgentLoop:
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            try:
-                if not await self.memory_consolidator.archive_unconsolidated(session):
-                    return OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content="Memory archival failed, session not cleared. Please try again.",
-                    )
-            except Exception:
-                logger.exception("/new archival failed for {}", session.key)
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="Memory archival failed, session not cleared. Please try again.",
-                )
+            # Capture messages before clearing for background archival
+            messages_to_archive = session.messages[session.last_consolidated:]
 
+            # Immediately clear session and return
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
+
+            # Schedule background archival (serialized with normal consolidation via lock)
+            if messages_to_archive:
+
+                async def _archive_in_background():
+                    lock = self.memory_consolidator.get_lock(session.key)
+                    async with lock:
+                        try:
+                            success = await self.memory_consolidator.consolidate_messages(messages_to_archive)
+                            if not success:
+                                logger.warning("/new background archival failed for {}", session.key)
+                        except Exception:
+                            logger.exception("/new background archival error for {}", session.key)
+
+                asyncio.create_task(_archive_in_background())
+
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
         if cmd == "/help":
