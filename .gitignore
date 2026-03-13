@@ -23,4 +23,9 @@ poetry.lock
 botpy.log
 nano.*.save
 data/*
+docs/git_history.md
+docs/rag_anything_logic.md
+.omc/
+rag_storage/
+tests/verify_dual_model_config.py
 
