@@ -111,7 +111,10 @@ def compress_context(
     tail = messages[tail_start:]
 
     # Phase 1: truncate large tool results in middle
-    truncation_note = "(output truncated to save context – re-run tool if needed)"
+    truncation_note = (
+        "(output truncated to save context – use cache_get_slice "
+        "with the cache key to retrieve full data)"
+    )
     for i, m in enumerate(middle):
         if m.get("role") == "tool":
             content = m.get("content", "")
@@ -185,7 +188,10 @@ async def summarize_and_compress(
     tail = messages[tail_start:]
 
     # Phase 1: truncate large tool results in middle
-    truncation_note = "(output truncated to save context – re-run tool if needed)"
+    truncation_note = (
+        "(output truncated to save context – use cache_get_slice "
+        "with the cache key to retrieve full data)"
+    )
     for i, m in enumerate(middle):
         if m.get("role") == "tool":
             content = m.get("content", "")
