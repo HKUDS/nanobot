@@ -25,7 +25,8 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 - `_run_agent_loop()` tool execution now logs with `bind_trace()` and batch timing
 - `_process_message()` emits request-complete audit line with duration and tool count
-- `MetricsCollector` gains request-level metric keys and `record_request()` convenience method
+- Legacy `MetricsCollector` removed — observability now via Langfuse
+- Token consumption tracked per-turn via Langfuse span metadata
 - CI test job now enforces `--cov-fail-under=85`
 - `make check` now includes prompt manifest verification
 

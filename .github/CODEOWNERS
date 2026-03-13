@@ -16,6 +16,7 @@ nanobot/agent/delegation.py     @carlos
 nanobot/agent/tool_executor.py  @carlos
 nanobot/agent/tracing.py        @carlos
 nanobot/agent/prompt_loader.py  @carlos
+nanobot/agent/observability.py  @carlos
 
 # ── Memory subsystem ─────────────────────────────────────────
 nanobot/agent/memory/           @carlos
@@ -38,7 +39,12 @@ nanobot/bus/                    @carlos
 # ── Architecture & governance ─────────────────────────────────
 docs/adr/                       @carlos
 docs/architecture.md            @carlos
+docs/branch-protection.md       @carlos
+docs/feature-flag-governance.md @carlos
 docs/operating-policies.md      @carlos
+docs/refactoring-principles.md  @carlos
+docs/release-checklist.md       @carlos
+docs/test-strategy.md           @carlos
 .github/workflows/              @carlos
 scripts/check_imports.py        @carlos
 scripts/check_prompt_manifest.py @carlos

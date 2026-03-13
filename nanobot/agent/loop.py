@@ -28,7 +28,6 @@ import json
 import time
 from contextlib import AsyncExitStack
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
@@ -39,10 +38,7 @@ from nanobot.agent.context import (
     summarize_and_compress,
 )
 from nanobot.agent.delegation import DelegationDispatcher
-from nanobot.agent.metrics import (
-    MetricsCollector,
-    role_tool_calls_key,
-)
+from nanobot.agent.observability import trace_request, update_current_span
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
@@ -247,16 +243,12 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             role_name=self.role_name,
-            trace_path=self.workspace / "memory" / "routing_trace.jsonl",
         )
         self._dispatcher.tools = self.tools
 
         # Legacy aliases — kept for backward compat with tests
         self._delegation_stack: list[str] = []
         self._scratchpad: Scratchpad | None = None
-
-        # Routing metrics (lazy: only created when routing is enabled)
-        self._routing_metrics: MetricsCollector | None = None
 
         # Extracted helpers (ADR-002)
         self._llm_caller = StreamingLLMCaller(
@@ -275,6 +267,11 @@ class AgentLoop:
             memory_store=self.context.memory,
         )
         self._consolidator = ConsolidationOrchestrator(self.context.memory)
+
+        # Per-turn token accumulators (reset in _run_agent_loop)
+        self._turn_tokens_prompt = 0
+        self._turn_tokens_completion = 0
+        self._turn_llm_calls = 0
 
     # --- Delegation state proxied to _dispatcher ---
 
@@ -309,14 +306,6 @@ class AgentLoop:
     @_active_messages.setter
     def _active_messages(self, value: list[dict[str, Any]] | None) -> None:
         self._dispatcher.active_messages = value
-
-    @property
-    def _trace_path(self) -> Path:
-        return self._dispatcher.trace_path
-
-    @_trace_path.setter
-    def _trace_path(self, value: Path) -> None:
-        self._dispatcher.trace_path = value
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools, filtered by role config."""
@@ -565,6 +554,11 @@ class AgentLoop:
         has_plan = False
         plan_enforced = False
 
+        # Reset per-turn token accumulators
+        self._turn_tokens_prompt = 0
+        self._turn_tokens_completion = 0
+        self._turn_llm_calls = 0
+
         # Reserve ~20% of context window for the model's response
         context_budget = int(self.context_window_tokens * 0.80)
 
@@ -634,6 +628,10 @@ class AgentLoop:
                 active_tools,
                 on_progress,
             )
+            # Accumulate token usage from this LLM call
+            self._turn_llm_calls += 1
+            self._turn_tokens_prompt += response.usage.get("prompt_tokens", 0)
+            self._turn_tokens_completion += response.usage.get("completion_tokens", 0)
 
             # --- Check for LLM-level errors --------------------------------
             if response.finish_reason == "error":
@@ -1060,12 +1058,23 @@ class AgentLoop:
 
                     # Wrap with timeout to prevent infinite processing
                     timeout = self.message_timeout if self.message_timeout > 0 else None
-                    if timeout:
-                        response = await asyncio.wait_for(
-                            self._process_message(msg), timeout=timeout
-                        )
-                    else:
-                        response = await self._process_message(msg)
+                    async with trace_request(
+                        name="request",
+                        input=msg.content[:200],
+                        metadata={
+                            "channel": msg.channel,
+                            "sender": msg.sender_id,
+                            "session_key": msg.session_key,
+                            "model": self.model,
+                            "role": self.role_name,
+                        },
+                    ):
+                        if timeout:
+                            response = await asyncio.wait_for(
+                                self._process_message(msg), timeout=timeout
+                            )
+                        else:
+                            response = await self._process_message(msg)
 
                     if role_applied:
                         self._reset_role_after_turn()
@@ -1138,12 +1147,6 @@ class AgentLoop:
         )
         self._dispatcher.coordinator = self._coordinator
         self._wire_delegate_tools()
-        self._routing_metrics = MetricsCollector(
-            self.workspace / "memory" / "routing_metrics.json",
-            flush_interval_s=30.0,
-        )
-        self._routing_metrics.start()
-        self._dispatcher.routing_metrics = self._routing_metrics
         logger.info(
             "Multi-agent routing enabled with {} roles",
             len(registry),
@@ -1567,9 +1570,20 @@ class AgentLoop:
             on_progress=(on_progress or _bus_progress) if self.config.streaming_enabled else None,
         )
 
-        # Track per-role tool calls
-        if self._routing_metrics and tools_used and self.role_name:
-            self._routing_metrics.record(role_tool_calls_key(self.role_name), len(tools_used))
+        # Annotate the active langfuse span with request metadata
+        update_current_span(
+            metadata={
+                "channel": msg.channel,
+                "sender": msg.sender_id,
+                "model": self.model,
+                "role": self.role_name,
+                "session_key": key,
+                "llm_calls": self._turn_llm_calls,
+                "prompt_tokens": self._turn_tokens_prompt,
+                "completion_tokens": self._turn_tokens_completion,
+                "total_tokens": self._turn_tokens_prompt + self._turn_tokens_completion,
+            },
+        )
 
         if final_content is None:
             final_content = await self._attempt_recovery(msg, all_msgs)
@@ -1585,19 +1599,18 @@ class AgentLoop:
         # --- Request audit line ---
         duration_ms = (time.monotonic() - t0_request) * 1000
         bind_trace().info(
-            "request_complete | {ch}:{cid} | {dur:.0f}ms | model={mdl} | tools={tc} | len={rlen}",
+            "request_complete | {ch}:{cid} | {dur:.0f}ms | model={mdl} | tools={tc} | len={rlen}"
+            " | llm_calls={lc} | prompt_tokens={pt} | completion_tokens={ct}",
             ch=msg.channel,
             cid=msg.chat_id,
             dur=duration_ms,
             mdl=self.model,
             tc=len(tools_used),
             rlen=len(final_content),
+            lc=self._turn_llm_calls,
+            pt=self._turn_tokens_prompt,
+            ct=self._turn_tokens_completion,
         )
-        if self._routing_metrics:
-            self._routing_metrics.record_request(
-                duration_ms=duration_ms,
-                tool_calls=len(tools_used),
-            )
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
@@ -1654,7 +1667,18 @@ class AgentLoop:
         await self._connect_mcp()
         self._ensure_coordinator()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(
-            msg, session_key=session_key, on_progress=on_progress
-        )
+        async with trace_request(
+            name="request",
+            input=content[:200],
+            metadata={
+                "channel": channel,
+                "sender": "user",
+                "session_key": session_key,
+                "model": self.model,
+                "role": self.role_name,
+            },
+        ):
+            response = await self._process_message(
+                msg, session_key=session_key, on_progress=on_progress
+            )
         return response.content if response else ""

@@ -34,16 +34,8 @@ class _FakeStore:
                 "vector_health_state": "healthy",
                 "mem0_add_mode": "history",
             },
-            "metrics": {"retrieval_queries": 1, "retrieval_hits": 1},
-            "kpis": {
-                "retrieval_hit_rate": 1.0,
-                "contradiction_rate_per_100_messages": 0.0,
-                "user_correction_rate_per_100_user_messages": 0.0,
-                "avg_memory_context_tokens": 55.0,
-                "max_memory_context_tokens": 80,
-                "avg_shadow_overlap": 0.0,
-                "history_fallback_ratio": 0.0,
-            },
+            "metrics": {},
+            "kpis": {},
         }
 
     def read_profile(self) -> dict[str, object]:
@@ -200,52 +192,22 @@ def test_memory_inspect_branches(_patched: Config) -> None:
     assert "Top Memories for: hit" in result2.stdout
 
 
-def test_memory_metrics_write_and_delta_errors(_patched: Config, tmp_path: Path) -> None:
+def test_memory_metrics_shows_backend_health(_patched: Config, tmp_path: Path) -> None:
+    result = runner.invoke(app, ["memory", "metrics"])
+    assert result.exit_code == 0
+    assert "Memory Backend Health" in result.stdout
+    assert "Langfuse" in result.stdout
+
+
+def test_memory_metrics_deprecated_flags_ignored(_patched: Config, tmp_path: Path) -> None:
     baseline = tmp_path / "baseline.json"
-    write = runner.invoke(
+    result = runner.invoke(
         app,
         ["memory", "metrics", "--write-baseline", "--baseline-file", str(baseline)],
     )
-    assert write.exit_code == 0
-    assert baseline.exists()
-
-    bad = tmp_path / "bad.json"
-    bad.write_text("not-json", encoding="utf-8")
-    parse_fail = runner.invoke(app, ["memory", "metrics", "--delta", "--baseline-file", str(bad)])
-    assert parse_fail.exit_code == 1
-    assert "Failed to parse baseline" in parse_fail.stdout
-
-    missing = runner.invoke(
-        app, ["memory", "metrics", "--delta", "--baseline-file", str(tmp_path / "missing.json")]
-    )
-    assert missing.exit_code == 1
-    assert "Baseline file not found" in missing.stdout
-
-
-def test_memory_metrics_delta_success(_patched: Config, tmp_path: Path) -> None:
-    baseline = tmp_path / "baseline_ok.json"
-    baseline.write_text(
-        json.dumps(
-            {
-                "metrics": {"retrieval_queries": 0, "retrieval_hits": 0},
-                "kpis": {
-                    "retrieval_hit_rate": 0.0,
-                    "history_fallback_ratio": 0.0,
-                    "avg_memory_context_tokens": 0.0,
-                    "avg_shadow_overlap": 0.0,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    result = runner.invoke(
-        app,
-        ["memory", "metrics", "--delta", "--baseline-file", str(baseline)],
-    )
+    # Deprecated flags are accepted but ignored — command still shows backend health.
     assert result.exit_code == 0
-    assert "Memory Metrics Delta" in result.stdout
-    assert "Memory KPI Delta" in result.stdout
+    assert "Memory Backend Health" in result.stdout
 
 
 def test_memory_rebuild_reindex_compact(_patched: Config) -> None:

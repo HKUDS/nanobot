@@ -36,7 +36,6 @@ nanobot/
 │   ├── scratchpad.py    # Session-scoped JSONL-backed artifact sharing (multi-agent)
 │   ├── skills.py        # Skill discovery and loading (YAML frontmatter in SKILL.md)
 │   ├── subagent.py      # Subagent spawning for parallel tasks
-│   ├── metrics.py       # In-memory metrics with periodic flush
 │   ├── memory/          # Memory subsystem (mem0-first with local fallback + knowledge graph)
 │   │   ├── store.py     # MemoryStore: primary public API
 │   │   ├── retrieval.py # Keyword-based local retrieval (fallback)

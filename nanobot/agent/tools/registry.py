@@ -21,6 +21,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from nanobot.agent.observability import tool_span
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tracing import bind_trace
 from nanobot.errors import ToolExecutionError, ToolNotFoundError, ToolValidationError
@@ -118,80 +119,83 @@ class ToolRegistry:
         """Run validation and execute, wrapping errors."""
         t0 = time.monotonic()
 
-        try:
-            errors = tool.validate_params(params)
-            if errors:
-                validation_err = ToolValidationError(name, errors)
-                bind_trace().debug(
-                    "Tool {} validation_error duration_ms={:.0f}",
-                    name,
-                    (time.monotonic() - t0) * 1000,
-                )
-                return ToolResult.fail(str(validation_err) + self._HINT, error_type="validation")
+        async with tool_span(name=name, input=params):
+            try:
+                errors = tool.validate_params(params)
+                if errors:
+                    validation_err = ToolValidationError(name, errors)
+                    bind_trace().debug(
+                        "Tool {} validation_error duration_ms={:.0f}",
+                        name,
+                        (time.monotonic() - t0) * 1000,
+                    )
+                    return ToolResult.fail(
+                        str(validation_err) + self._HINT, error_type="validation"
+                    )
 
-            raw = await tool.execute(**params)
+                raw = await tool.execute(**params)
 
-            # Normalise into ToolResult (supports legacy str returns)
-            if isinstance(raw, ToolResult):
-                result = raw
-            elif isinstance(raw, str):
-                # Backward compat: detect old-style "Error…" strings.
-                if raw.startswith("Error"):
-                    result = ToolResult.fail(raw)
+                # Normalise into ToolResult (supports legacy str returns)
+                if isinstance(raw, ToolResult):
+                    result = raw
+                elif isinstance(raw, str):
+                    # Backward compat: detect old-style "Error…" strings.
+                    if raw.startswith("Error"):
+                        result = ToolResult.fail(raw)
+                    else:
+                        result = ToolResult.ok(raw)
                 else:
-                    result = ToolResult.ok(raw)
-            else:
-                result = ToolResult.ok(str(raw))
+                    result = ToolResult.ok(str(raw))
 
-            # Append retry hint for failures
-            if not result.success:
-                if not result.output.endswith(self._HINT):
-                    result.output += self._HINT
+                # Append retry hint for failures
+                if not result.success:
+                    if not result.output.endswith(self._HINT):
+                        result.output += self._HINT
 
-            duration_ms = (time.monotonic() - t0) * 1000
-            bind_trace().debug(
-                "Tool {} success={} duration_ms={:.0f}",
-                name,
-                result.success,
-                duration_ms,
-            )
-
-            # Cache large successful results and generate summary
-            if (
-                result.success
-                and self._cache
-                and tool.cacheable
-                and len(result.output) > self._SUMMARY_THRESHOLD
-            ):
-                await self._cache.store_with_summary(
+                duration_ms = (time.monotonic() - t0) * 1000
+                bind_trace().debug(
+                    "Tool {} success={} duration_ms={:.0f}",
                     name,
-                    params,
-                    result,
-                    provider=self._summary_provider,
-                    model=self._summary_model,
+                    result.success,
+                    duration_ms,
                 )
 
-            return result
+                # Cache large successful results and generate summary
+                if (
+                    result.success
+                    and self._cache
+                    and tool.cacheable
+                    and len(result.output) > self._SUMMARY_THRESHOLD
+                ):
+                    await self._cache.store_with_summary(
+                        name,
+                        params,
+                        result,
+                        provider=self._summary_provider,
+                        model=self._summary_model,
+                    )
 
-        except ToolExecutionError as e:
-            duration_ms = (time.monotonic() - t0) * 1000
-            bind_trace().debug(
-                "Tool {} error={} duration_ms={:.0f}",
-                name,
-                e.error_type,
-                duration_ms,
-            )
-            return ToolResult.fail(str(e) + self._HINT, error_type=e.error_type)
-        except Exception as e:  # crash-barrier: user-provided tool execution
-            duration_ms = (time.monotonic() - t0) * 1000
-            bind_trace().debug(
-                "Tool {} error=unknown duration_ms={:.0f}",
-                name,
-                duration_ms,
-            )
-            return ToolResult.fail(
-                f"Error executing {name}: {str(e)}" + self._HINT, error_type="unknown"
-            )
+                return result
+
+            except ToolExecutionError as e:
+                duration_ms = (time.monotonic() - t0) * 1000
+                bind_trace().debug(
+                    "Tool {} error={} duration_ms={:.0f}",
+                    name,
+                    e.error_type,
+                    duration_ms,
+                )
+                return ToolResult.fail(str(e) + self._HINT, error_type=e.error_type)
+            except Exception as e:  # crash-barrier: user-provided tool execution
+                duration_ms = (time.monotonic() - t0) * 1000
+                bind_trace().debug(
+                    "Tool {} error=unknown duration_ms={:.0f}",
+                    name,
+                    duration_ms,
+                )
+                return ToolResult.fail(
+                    f"Error executing {name}: {str(e)}" + self._HINT, error_type="unknown"
+                )
 
     @property
     def tool_names(self) -> list[str]:

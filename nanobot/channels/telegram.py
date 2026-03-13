@@ -490,7 +490,14 @@ class TelegramChannel(BaseChannel):
                         logger.info("Transcribed {}: {}...", media_type, transcription[:50])
                         content_parts.append(f"[transcription: {transcription}]")
                     else:
-                        content_parts.append(f"[{media_type}: {file_path}]")
+                        logger.warning(
+                            "Voice transcription failed for {}, no text returned",
+                            file_path,
+                        )
+                        content_parts.append(
+                            f"[The user sent a {media_type} message but transcription"
+                            " failed. Ask them to type their message instead.]"
+                        )
                 else:
                     content_parts.append(f"[{media_type}: {file_path}]")
 

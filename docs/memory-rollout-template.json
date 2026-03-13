@@ -1,0 +1,15 @@
+{
+  "agents": {
+    "defaults": {
+      "memoryRolloutMode": "enabled",
+      "memoryTypeSeparationEnabled": true,
+      "memoryRouterEnabled": true,
+      "memoryReflectionEnabled": true,
+      "memoryShadowMode": false,
+      "memoryShadowSampleRate": 0.2,
+      "memoryRolloutGateMinRecallAtK": 0.55,
+      "memoryRolloutGateMinPrecisionAtK": 0.25,
+      "memoryRolloutGateMaxAvgMemoryContextTokens": 1400.0
+    }
+  }
+}
