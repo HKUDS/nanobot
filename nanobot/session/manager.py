@@ -211,3 +211,150 @@ class SessionManager:
                 continue
 
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+
+    def export_session(self, key: str, output_path: Path | None = None) -> Path:
+        """
+        Export a session to a JSON file.
+
+        Args:
+            key: Session key (channel:chat_id).
+            output_path: Optional output path. Defaults to workspace/exports/<key>.json
+
+        Returns:
+            Path to the exported file.
+        """
+        session = self.get_or_create(key)
+
+        # Determine output path
+        target_path: Path
+        if output_path is None:
+            exports_dir = ensure_dir(self.workspace / "exports")
+            safe_key = safe_filename(key.replace(":", "_"))
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            target_path = exports_dir / f"{safe_key}_{timestamp}.json"
+        else:
+            target_path = output_path
+
+        export_data = {
+            "version": 1,
+            "exported_at": datetime.now().isoformat(),
+            "session": {
+                "key": session.key,
+                "created_at": session.created_at.isoformat(),
+                "updated_at": session.updated_at.isoformat(),
+                "metadata": session.metadata,
+                "last_consolidated": session.last_consolidated,
+                "messages": session.messages
+            }
+        }
+
+        with open(target_path, "w", encoding="utf-8") as f:
+            json.dump(export_data, f, ensure_ascii=False, indent=2)
+
+        return target_path
+
+    def import_session(self, input_path: Path, target_key: str | None = None) -> Session:
+        """
+        Import a session from a JSON file.
+
+        Args:
+            input_path: Path to the exported JSON file.
+            target_key: Optional new key for the session. Uses original if not provided.
+
+        Returns:
+            The imported session.
+        """
+        with open(input_path, encoding="utf-8") as f:
+            export_data = json.load(f)
+
+        session_data = export_data.get("session", {})
+        key = target_key or session_data.get("key", f"imported:{datetime.now().timestamp()}")
+
+        session = Session(
+            key=key,
+            messages=session_data.get("messages", []),
+            metadata=session_data.get("metadata", {}),
+            last_consolidated=session_data.get("last_consolidated", 0)
+        )
+
+        if "created_at" in session_data:
+            session.created_at = datetime.fromisoformat(session_data["created_at"])
+
+        self.save(session)
+        self._cache[key] = session
+
+        return session
+
+    def search_sessions(self, query: str, case_sensitive: bool = False) -> list[dict[str, Any]]:
+        """
+        Search across all sessions for messages containing the query.
+
+        Args:
+            query: Search string.
+            case_sensitive: Whether to match case.
+
+        Returns:
+            List of results with session key, message, and timestamp.
+        """
+        results = []
+        query_cmp = query if case_sensitive else query.lower()
+
+        for session_info in self.list_sessions():
+            key = session_info["key"]
+            session = self.get_or_create(key)
+
+            for msg in session.messages:
+                content = msg.get("content", "")
+                if not isinstance(content, str):
+                    continue
+
+                content_cmp = content if case_sensitive else content.lower()
+
+                if query_cmp in content_cmp:
+                    results.append({
+                        "session_key": key,
+                        "role": msg.get("role", "unknown"),
+                        "content": content[:200] + "..." if len(content) > 200 else content,
+                        "timestamp": msg.get("timestamp", ""),
+                        "full_message": msg
+                    })
+
+        return sorted(results, key=lambda x: x.get("timestamp", ""), reverse=True)
+
+    def get_session_stats(self, key: str) -> dict[str, Any]:
+        """
+        Get statistics for a session.
+
+        Args:
+            key: Session key.
+
+        Returns:
+            Dictionary with message counts, tool usage, etc.
+        """
+        session = self.get_or_create(key)
+
+        stats = {
+            "key": key,
+            "total_messages": len(session.messages),
+            "user_messages": 0,
+            "assistant_messages": 0,
+            "tool_calls": 0,
+            "tool_results": 0,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "unconsolidated_messages": len(session.messages) - session.last_consolidated
+        }
+
+        for msg in session.messages:
+            role = msg.get("role", "")
+            if role == "user":
+                stats["user_messages"] += 1
+            elif role == "assistant":
+                stats["assistant_messages"] += 1
+
+            if "tool_calls" in msg:
+                stats["tool_calls"] += len(msg["tool_calls"])
+            if "tool_call_id" in msg:
+                stats["tool_results"] += 1
+
+        return stats
