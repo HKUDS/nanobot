@@ -35,6 +35,7 @@ class _FakeXmppClient:
     def __init__(self, jid: str, password: str, **kwargs) -> None:
         self.jid = jid
         self.password = password
+        self._channel = kwargs.get("channel", None)
         self._nickname = kwargs.get("nickname", "nanobot")
         self._rooms = set(kwargs.get("rooms", []))
         self._joined_rooms: set[str] = set()
