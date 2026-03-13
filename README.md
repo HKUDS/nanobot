@@ -229,6 +229,8 @@ Connect nanobot to your favorite chat platform.
 | **Slack** | Bot token + App-Level token |
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
+| **Matrix** | Homeserver + access token |
+| **XMPP** | Jabber ID + password |
 | **Wecom** | Bot ID + Bot Secret |
 
 <details>
@@ -373,7 +375,7 @@ nanobot gateway
 </details>
 
 <details>
-<summary><b>Matrix (Element)</b></summary>
+        <summary><b>Matrix (Element)</b></summary>
 
 Install Matrix dependencies first:
 
@@ -435,6 +437,72 @@ pip install nanobot-ai[matrix]
 ```bash
 nanobot gateway
 ```
+
+</details>
+
+<details>
+<summary><b>XMPP (Jabber)</b></summary>
+
+Supports direct messages and MUC (Multi-User Chat) rooms. Currently text-only.
+
+**1. Create/choose an XMPP account**
+
+- Create or reuse an XMPP account on any compatible server (e.g., `conversations.im`, `disroot.org`, `jabber.org`, or a self-hosted Prosody/ejabberd).
+- Ensure you know your JID (Jabber ID) and password.
+
+**2. Install XMPP dependencies**
+
+```bash
+pip install slixmpp
+```
+
+**3. Configure**
+
+```json
+{
+  "channels": {
+    "xmpp": {
+      "enabled": true,
+      "jid": "bot@example.com",
+      "password": "your-password",
+      "nickname": "nanobot",
+      "rooms": ["room1@conference.example.com", "room2@conference.example.com"],
+      "allowFrom": [],
+      "groupPolicy": "open",
+      "groupAllowFrom": [],
+      "fileTransferEnabled": true,
+      "maxFileSizeMb": 50,
+      "allowedFileTypes": ["image/*", "video/*", "audio/*", "text/*", "application/pdf"]
+    }
+  }
+}
+```
+
+| Option | Description |
+|--------|-------------|
+| `jid` | Bot's Jabber ID (user@server.com). Required. |
+| `password` | Bot account password. Required. |
+| `nickname` | Nickname for MUC rooms (default: `nanobot`). |
+| `rooms` | List of MUC rooms to auto-join. Optional. |
+| `allowFrom` | Allowed JIDs. Empty = allow everyone. |
+| `groupPolicy` | MUC behavior: `open`, `mention`, or `allowlist`. |
+| `groupAllowFrom` | Room JID allowlist when policy is `allowlist`. |
+| `fileTransferEnabled` | Enable XEP-0065 and XEP-0363 file transfers (default: `true`). |
+| `maxFileSizeMb` | Maximum file size in MB to accept (default: `50`). |
+| `allowedFileTypes` | Allowed MIME type patterns (e.g., `["image/*", "video/*"]`). |
+
+> **Group Policy Options:**
+> - `open` — Respond to all messages in rooms
+> - `mention` — Only respond when mentioned (checks for @nickname)
+> - `allowlist` — Only respond in rooms listed in `groupAllowFrom`
+
+**4. Run**
+
+```bash
+nanobot gateway
+```
+
+The bot will auto-join configured rooms and respond to direct messages.
 
 </details>
 

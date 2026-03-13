@@ -211,6 +211,28 @@ class WecomConfig(Base):
     welcome_message: str = ""  # Welcome message for enter_chat event
 
 
+class XmppConfig(Base):
+    """XMPP channel configuration."""
+
+    enabled: bool = False
+    jid: str = ""  # Bot's Jabber ID (user@example.com)
+    password: str = ""
+    server: str = ""  # Optional XMPP server override
+    port: int = 5222
+    use_tls: bool = True
+    nickname: str = "nanobot"
+    rooms: list[str] = Field(default_factory=list)  # MUC rooms to join (e.g. room@conference.example.com)
+    allow_from: list[str] = Field(default_factory=list)  # Allowed JIDs
+    group_policy: Literal["open", "mention", "allowlist"] = "open"
+    group_allow_from: list[str] = Field(default_factory=list)  # Allowed MUC room JIDs
+    # File transfer settings
+    file_transfer_enabled: bool = True  # Enable XEP-0065 and XEP-0363 file transfers
+    max_file_size_mb: int = 50  # Maximum file size in MB to accept
+    allowed_file_types: list[str] = Field(default_factory=lambda: ["image/*", "video/*", "audio/*", "text/*", "application/pdf"])
+    # HTTP File Upload (XEP-0363) URL detection - optional domain pattern
+    # Examples: "upload.example.com" or "*.example.com" for subdomains
+    upload_domain: str = ""  # Domain to match for HTTP File Upload URLs
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -227,6 +249,7 @@ class ChannelsConfig(Base):
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
     wecom: WecomConfig = Field(default_factory=WecomConfig)
+    xmpp: XmppConfig = Field(default_factory=XmppConfig)
 
 
 class AgentDefaults(Base):

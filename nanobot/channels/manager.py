@@ -49,6 +49,17 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("{} channel not available: {}", modname, e)
 
+        # XMPP channel
+        if self.config.channels.xmpp.enabled:
+            try:
+                from nanobot.channels.xmpp import XmppChannel
+                self.channels["xmpp"] = XmppChannel(
+                    self.config.channels.xmpp, self.bus
+                )
+                logger.info("XMPP channel enabled")
+            except ImportError as e:
+                logger.warning("XMPP channel not available: {}", e)
+    
         self._validate_allow_from()
 
     def _validate_allow_from(self) -> None:
