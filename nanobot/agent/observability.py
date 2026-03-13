@@ -57,17 +57,31 @@ def init_langfuse(config: LangfuseConfig) -> None:
         _enabled = True
         logger.info("Langfuse observability initialized (host={})", config.host)
 
-        # Register OTEL callback with litellm so all LLM calls are auto-traced.
-        # Langfuse v4 sets a global OTEL TracerProvider; litellm's "otel" callback
-        # emits OpenTelemetry spans that the provider forwards to Langfuse.
-        try:
-            import litellm
+        # Langfuse v4 auto-instruments litellm via its OTEL TracerProvider —
+        # do NOT also register litellm's own "otel" callback, as that creates
+        # duplicate traces (litellm_request + raw_gen_ai_request).
 
-            if "otel" not in litellm.callbacks:
-                litellm.callbacks.append("otel")
-                logger.debug("Registered litellm OTEL callback for Langfuse")
-        except Exception:  # crash-barrier: litellm callback is optional enhancement
-            logger.opt(exception=True).debug("Failed to register litellm OTEL callback")
+        # Suppress benign warnings from litellm/langfuse loggers.
+        try:
+            import logging
+
+            # litellm warns "Proxy Server is not installed" on first LLM call
+            # when the optional proxy package is absent.
+            class _ProxyFilter(logging.Filter):
+                def filter(self, record: logging.LogRecord) -> bool:
+                    return "Proxy Server is not installed" not in record.getMessage()
+
+            logging.getLogger("LiteLLM").addFilter(_ProxyFilter())
+
+            # Langfuse may warn "No active span in current context" briefly
+            # before the trace_request context manager is entered.
+            class _SpanCtxFilter(logging.Filter):
+                def filter(self, record: logging.LogRecord) -> bool:
+                    return "No active span in current context" not in record.getMessage()
+
+            logging.getLogger("langfuse").addFilter(_SpanCtxFilter())
+        except Exception:  # crash-barrier: filter setup is optional
+            pass
 
     except Exception:  # crash-barrier: langfuse init should never crash the agent
         logger.opt(exception=True).warning("Failed to initialize Langfuse — disabled")

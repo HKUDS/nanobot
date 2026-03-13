@@ -1621,7 +1621,18 @@ class AgentLoop:
         await self._connect_mcp()
         self._ensure_coordinator()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(
-            msg, session_key=session_key, on_progress=on_progress
-        )
+        async with trace_request(
+            name="request",
+            input=content[:200],
+            metadata={
+                "channel": channel,
+                "sender": "user",
+                "session_key": session_key,
+                "model": self.model,
+                "role": self.role_name,
+            },
+        ):
+            response = await self._process_message(
+                msg, session_key=session_key, on_progress=on_progress
+            )
         return response.content if response else ""
