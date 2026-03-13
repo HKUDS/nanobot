@@ -194,6 +194,30 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
     assert resolved == "github_copilot/gpt-5.3-codex"
 
 
+@pytest.mark.parametrize("model,expected", [
+    ("openrouter/free", "openrouter/free"),
+    ("moonshotai/kimi-k2.5:exacto", "openrouter/moonshotai/kimi-k2.5:exacto"),
+    ("anthropic/claude-3", "openrouter/anthropic/claude-3"),
+])
+def test_openrouter_gateway_resolves_models_without_double_prefixing(model, expected):
+    provider = LiteLLMProvider(
+        default_model=model,
+        provider_name="openrouter",
+        api_key="sk-or-test",
+    )
+    assert provider._resolve_model(model) == expected
+
+
+def test_non_openrouter_gateway_does_not_double_prefix_existing_routing_prefix():
+    provider = LiteLLMProvider(
+        default_model="openai/gpt-4o-mini",
+        provider_name="siliconflow",
+        api_key="sk-test",
+    )
+
+    assert provider._resolve_model("openai/gpt-4o-mini") == "openai/gpt-4o-mini"
+
+
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"

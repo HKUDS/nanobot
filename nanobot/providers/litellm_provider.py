@@ -170,6 +170,11 @@ class LiteLLMProvider(LLMProvider):
         return frozenset()
 
     @staticmethod
+    def _is_openrouter_native_alias(model: str) -> bool:
+        """Return True for OpenRouter-native aliases like `openrouter/free`."""
+        return model.startswith("openrouter/") and model.count("/") == 1
+
+    @staticmethod
     def _normalize_tool_call_id(tool_call_id: Any) -> Any:
         """Normalize tool_call_id to a provider-safe 9-char alphanumeric form."""
         if not isinstance(tool_call_id, str):
@@ -248,6 +253,12 @@ class LiteLLMProvider(LLMProvider):
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
+
+        # OpenRouter native IDs like `openrouter/free` collide with LiteLLM's
+        # routing prefix. Pass an explicit provider hint so LiteLLM preserves
+        # the original model ID instead of stripping its leading segment.
+        if self._gateway and self._gateway.name == "openrouter" and self._is_openrouter_native_alias(original_model):
+            kwargs["custom_llm_provider"] = "openrouter"
 
         # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
         self._apply_model_overrides(model, kwargs)
