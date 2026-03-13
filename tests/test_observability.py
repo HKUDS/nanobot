@@ -248,6 +248,122 @@ class TestSpanContextManager:
             metadata={"model": "gpt-4"},
         )
 
+    async def test_swallows_exceptions(self):
+        mock_client = MagicMock()
+        mock_client.start_as_current_observation.side_effect = RuntimeError("fail")
+        observability._client = mock_client
+        observability._enabled = True
+        async with observability.span(name="test") as obs:
+            assert obs is None
+
+
+class TestLoggingFilters:
+    """Test the logging filters installed by init_langfuse."""
+
+    def test_proxy_filter_suppresses_message(self):
+        import logging
+
+        from nanobot.agent.observability import init_langfuse
+
+        mock_lf_cls = MagicMock()
+        cfg = MagicMock(enabled=True, public_key="pk", secret_key="sk", host="http://h")
+        with patch.dict("sys.modules", {"langfuse": MagicMock(Langfuse=mock_lf_cls)}):
+            init_langfuse(cfg)
+
+        litellm_logger = logging.getLogger("LiteLLM")
+        record = logging.LogRecord(
+            name="LiteLLM", level=logging.WARNING, pathname="", lineno=0,
+            msg="Proxy Server is not installed. Skipping OpenTelemetry initialization.",
+            args=(), exc_info=None,
+        )
+        # At least one filter should suppress this record
+        assert not all(f.filter(record) for f in litellm_logger.filters)
+
+    def test_span_ctx_filter_suppresses_message(self):
+        import logging
+
+        from nanobot.agent.observability import init_langfuse
+
+        mock_lf_cls = MagicMock()
+        cfg = MagicMock(enabled=True, public_key="pk", secret_key="sk", host="http://h")
+        with patch.dict("sys.modules", {"langfuse": MagicMock(Langfuse=mock_lf_cls)}):
+            init_langfuse(cfg)
+
+        langfuse_logger = logging.getLogger("langfuse")
+        record = logging.LogRecord(
+            name="langfuse", level=logging.WARNING, pathname="", lineno=0,
+            msg="No active span in current context",
+            args=(), exc_info=None,
+        )
+        assert not all(f.filter(record) for f in langfuse_logger.filters)
+
+    def test_proxy_filter_passes_normal_messages(self):
+        import logging
+
+        from nanobot.agent.observability import init_langfuse
+
+        mock_lf_cls = MagicMock()
+        cfg = MagicMock(enabled=True, public_key="pk", secret_key="sk", host="http://h")
+        with patch.dict("sys.modules", {"langfuse": MagicMock(Langfuse=mock_lf_cls)}):
+            init_langfuse(cfg)
+
+        litellm_logger = logging.getLogger("LiteLLM")
+        record = logging.LogRecord(
+            name="LiteLLM", level=logging.INFO, pathname="", lineno=0,
+            msg="Normal log message", args=(), exc_info=None,
+        )
+        assert all(f.filter(record) for f in litellm_logger.filters)
+
+
+class TestUpdateCurrentSpanAllKwargs:
+    """Cover all optional kwargs paths in update_current_span."""
+
+    def test_all_kwargs(self):
+        mock_client = MagicMock()
+        observability._client = mock_client
+        observability._enabled = True
+        observability.update_current_span(
+            input="in", output="out", metadata={"k": "v"}, name="step", level="WARNING"
+        )
+        mock_client.update_current_span.assert_called_once_with(
+            input="in", output="out", metadata={"k": "v"}, name="step", level="WARNING"
+        )
+
+    def test_empty_kwargs_no_call(self):
+        mock_client = MagicMock()
+        observability._client = mock_client
+        observability._enabled = True
+        observability.update_current_span()
+        mock_client.update_current_span.assert_not_called()
+
+
+class TestObserveDecoratorWhenEnabled:
+    """Cover the observe() path when _enabled is True."""
+
+    def test_observe_delegates_to_langfuse(self):
+        observability._enabled = True
+        mock_lf_observe = MagicMock(return_value=lambda f: f)
+
+        with patch.dict(
+            "sys.modules",
+            {"langfuse": MagicMock(observe=mock_lf_observe)},
+        ):
+            decorator = observability.observe(name="test_op", as_type="span")
+
+        mock_lf_observe.assert_called_once_with(
+            name="test_op", as_type="span", capture_input=None, capture_output=None
+        )
+
+
+class TestToolSpanException:
+    async def test_tool_span_swallows_exceptions(self):
+        mock_client = MagicMock()
+        mock_client.start_as_current_observation.side_effect = RuntimeError("fail")
+        observability._client = mock_client
+        observability._enabled = True
+        async with observability.tool_span(name="broken") as obs:
+            assert obs is None
+
 
 class TestFlush:
     def test_flush_noop_when_no_client(self):
