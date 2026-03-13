@@ -892,6 +892,10 @@ def status():
 provider_app = typer.Typer(help="Manage providers")
 app.add_typer(provider_app, name="provider")
 
+# Service management (Linux systemd)
+from nanobot.cli.service import app as service_app
+app.add_typer(service_app, name="service")
+
 
 _LOGIN_HANDLERS: dict[str, callable] = {}
 
