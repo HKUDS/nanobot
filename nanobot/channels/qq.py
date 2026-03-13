@@ -114,16 +114,16 @@ class QQChannel(BaseChannel):
             if msg_type == "group":
                 await self._client.api.post_group_message(
                     group_openid=msg.chat_id,
-                    msg_type=2,
-                    markdown={"content": msg.content},
+                    msg_type=0,
+                    content=msg.content,
                     msg_id=msg_id,
                     msg_seq=self._msg_seq,
                 )
             else:
                 await self._client.api.post_c2c_message(
                     openid=msg.chat_id,
-                    msg_type=2,
-                    markdown={"content": msg.content},
+                    msg_type=0,
+                    content=msg.content,
                     msg_id=msg_id,
                     msg_seq=self._msg_seq,
                 )

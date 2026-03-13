@@ -62,6 +62,8 @@ class LiteLLMProvider(LLMProvider):
         # Drop unsupported parameters for providers (e.g., gpt-5 rejects some params)
         litellm.drop_params = True
 
+        self._langsmith_enabled = bool(os.getenv("LANGSMITH_API_KEY"))
+
     def _setup_env(self, api_key: str, api_base: str | None, model: str) -> None:
         """Set environment variables based on detected provider."""
         spec = self._gateway or find_by_model(model)
@@ -249,6 +251,9 @@ class LiteLLMProvider(LLMProvider):
 
         # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
         self._apply_model_overrides(model, kwargs)
+
+        if self._langsmith_enabled:
+            kwargs.setdefault("callbacks", []).append("langsmith")
 
         # Pass api_key directly — more reliable than env vars alone
         if self.api_key:
