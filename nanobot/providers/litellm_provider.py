@@ -32,6 +32,12 @@ class LiteLLMProvider(LLMProvider):
     a unified interface.  Provider-specific logic is driven by the registry
     (see providers/registry.py) — no if-elif chains needed here.
     """
+    KIMI_CODING_MODEL_PREFIX = "kimi-coding/"
+    KIMI_CODING_DEFAULT_BASE = "https://api.kimi.com/coding"
+    KIMI_CODING_DEFAULT_MODEL = "k2p5"
+    KIMI_CODING_MODEL_ALIASES = {
+        "kimi-for-coding": "k2p5",
+    }
 
     def __init__(
         self,
@@ -99,6 +105,10 @@ class LiteLLMProvider(LLMProvider):
                 model = f"{prefix}/{model}"
             return model
 
+        if self._is_kimi_coding_model_ref(model):
+            model_id = self._normalize_kimi_coding_model_id(model)
+            return f"anthropic/{model_id}"
+
         # Standard mode: auto-prefix for known providers
         spec = find_by_model(model)
         if spec and spec.litellm_prefix:
@@ -107,6 +117,40 @@ class LiteLLMProvider(LLMProvider):
                 model = f"{spec.litellm_prefix}/{model}"
 
         return model
+
+    @classmethod
+    def _is_kimi_coding_model_ref(cls, model: str | None) -> bool:
+        if not model:
+            return False
+        return model.lower().startswith(cls.KIMI_CODING_MODEL_PREFIX)
+
+    @classmethod
+    def _normalize_kimi_coding_model_id(cls, model: str) -> str:
+        suffix = model.split("/", 1)[1].strip() if "/" in model else model.strip()
+        if not suffix:
+            return cls.KIMI_CODING_DEFAULT_MODEL
+        return cls.KIMI_CODING_MODEL_ALIASES.get(suffix.lower(), suffix)
+
+    @classmethod
+    def _normalize_kimi_coding_api_base(cls, api_base: str) -> str:
+        base = api_base.strip().rstrip("/")
+        if base.endswith("/v1"):
+            base = base[:-3]
+        return base or cls.KIMI_CODING_DEFAULT_BASE
+
+    def _resolve_api_base_for_model(self, raw_model: str | None) -> str | None:
+        if not self._is_kimi_coding_model_ref(raw_model):
+            return self.api_base
+
+        base = (self.api_base or "").strip()
+        if not base:
+            return self.KIMI_CODING_DEFAULT_BASE
+
+        lower = base.lower()
+        if "api.moonshot.cn" in lower or "api.moonshot.ai" in lower:
+            return self.KIMI_CODING_DEFAULT_BASE
+
+        return self._normalize_kimi_coding_api_base(base)
 
     @staticmethod
     def _canonicalize_explicit_prefix(model: str, spec_name: str, canonical_prefix: str) -> str:
@@ -260,8 +304,9 @@ class LiteLLMProvider(LLMProvider):
             kwargs["api_key"] = self.api_key
 
         # Pass api_base for custom endpoints
-        if self.api_base:
-            kwargs["api_base"] = self.api_base
+        resolved_api_base = self._resolve_api_base_for_model(original_model)
+        if resolved_api_base:
+            kwargs["api_base"] = resolved_api_base
 
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
