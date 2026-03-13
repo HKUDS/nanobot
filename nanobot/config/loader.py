@@ -52,6 +52,10 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     """
     Save configuration to file.
 
+    Preserves unknown top-level keys that exist in the current file but
+    are not part of the Config schema (e.g. manually added providers),
+    so round-tripping through Pydantic doesn't silently drop them.
+
     Args:
         config: Configuration to save.
         config_path: Optional path to save to. Uses default if not provided.
@@ -60,6 +64,18 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     data = config.model_dump(by_alias=True)
+
+    # Merge: preserve keys from existing file that Pydantic doesn't know about
+    if path.exists():
+        try:
+            with open(path, encoding="utf-8") as f:
+                existing = json.load(f)
+            if isinstance(existing, dict):
+                # existing keys not in serialized data are preserved
+                merged = {**existing, **data}
+                data = merged
+        except (json.JSONDecodeError, OSError):
+            pass  # file corrupt or unreadable, overwrite entirely
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
