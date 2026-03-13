@@ -1108,6 +1108,22 @@ Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 }
 ```
 
+Use **`allowTools`** to whitelist which tools from an MCP server are registered. When a server exposes many tools, limiting them reduces context size and avoids irrelevant tools affecting the agent. Omit `allowTools` (or leave it empty) to register all tools from that server.
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "my-server": {
+        "command": "npx",
+        "args": ["-y", "some-mcp-server"],
+        "allowTools": ["tool_a", "tool_b", "tool_c"]
+      }
+    }
+  }
+}
+```
+
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
 
