@@ -166,6 +166,7 @@ class LLMProvider(ABC):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request.
@@ -176,6 +177,7 @@ class LLMProvider(ABC):
             model: Model identifier (provider-specific).
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
+            tool_choice: Tool selection strategy ("auto", "required", or specific tool dict).
         
         Returns:
             LLMResponse with content and/or tool calls.
@@ -195,6 +197,7 @@ class LLMProvider(ABC):
         max_tokens: object = _SENTINEL,
         temperature: object = _SENTINEL,
         reasoning_effort: object = _SENTINEL,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
@@ -218,6 +221,7 @@ class LLMProvider(ABC):
                     max_tokens=max_tokens,
                     temperature=temperature,
                     reasoning_effort=reasoning_effort,
+                    tool_choice=tool_choice,
                 )
             except asyncio.CancelledError:
                 raise
@@ -250,6 +254,7 @@ class LLMProvider(ABC):
                 max_tokens=max_tokens,
                 temperature=temperature,
                 reasoning_effort=reasoning_effort,
+                tool_choice=tool_choice,
             )
         except asyncio.CancelledError:
             raise

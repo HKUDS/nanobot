@@ -143,6 +143,35 @@ def test_config_auto_detects_ollama_from_local_api_base():
     assert config.get_api_base() == "http://localhost:11434"
 
 
+def test_config_prefers_ollama_over_vllm_when_both_local_providers_configured():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "llama3.2"}},
+            "providers": {
+                "vllm": {"apiBase": "http://localhost:8000"},
+                "ollama": {"apiBase": "http://localhost:11434"},
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "ollama"
+    assert config.get_api_base() == "http://localhost:11434"
+
+
+def test_config_falls_back_to_vllm_when_ollama_not_configured():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "llama3.2"}},
+            "providers": {
+                "vllm": {"apiBase": "http://localhost:8000"},
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "vllm"
+    assert config.get_api_base() == "http://localhost:8000"
+
+
 def test_find_by_model_prefers_explicit_prefix_over_generic_codex_keyword():
     spec = find_by_model("github-copilot/gpt-5.3-codex")
 

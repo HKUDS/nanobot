@@ -112,14 +112,17 @@ class MemoryStore:
 ## Conversation to Process
 {self._format_messages(messages)}"""
 
+        chat_messages = [
+            {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+            {"role": "user", "content": prompt},
+        ]
+
         try:
             response = await provider.chat_with_retry(
-                messages=[
-                    {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
-                    {"role": "user", "content": prompt},
-                ],
+                messages=chat_messages,
                 tools=_SAVE_MEMORY_TOOL,
                 model=model,
+                tool_choice={"type": "function", "function": {"name": "save_memory"}},
             )
 
             if not response.has_tool_calls:
