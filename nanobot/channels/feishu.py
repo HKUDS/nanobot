@@ -398,13 +398,67 @@ class FeishuChannel(BaseChannel):
         """
         Add a reaction emoji to a message (non-blocking).
 
-        Common emoji types: THUMBSUP, OK, EYES, DONE, OnIt, HEART
+        Common emoji types: THUMBSUP, OK, EYES, DONE, OnIt, HEART, Typing
         """
         if not self._client:
             return
 
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
+
+    def _remove_reaction_sync(self, message_id: str, reaction_id: str) -> None:
+        """Sync helper for removing a reaction by reaction_id."""
+        from lark_oapi.api.im.v1 import DeleteMessageReactionRequest
+        try:
+            request = DeleteMessageReactionRequest.builder() \
+                .message_id(message_id) \
+                .reaction_id(reaction_id) \
+                .build()
+
+            response = self._client.im.v1.message_reaction.delete(request)
+
+            if not response.success():
+                logger.debug("Failed to remove reaction: code={}, msg={}", response.code, response.msg)
+        except Exception as e:
+            logger.debug("Error removing reaction: {}", e)
+
+    async def _add_typing_indicator(self, message_id: str) -> str | None:
+        """
+        Add a typing indicator (Typing emoji reaction) to a message.
+
+        Returns the reaction_id for later removal, or None if failed.
+        """
+        if not self._client:
+            return None
+
+        from lark_oapi.api.im.v1 import CreateMessageReactionRequest, CreateMessageReactionRequestBody, Emoji
+        loop = asyncio.get_running_loop()
+
+        def _add() -> str | None:
+            try:
+                request = CreateMessageReactionRequest.builder() \
+                    .message_id(message_id) \
+                    .request_body(
+                        CreateMessageReactionRequestBody.builder()
+                        .reaction_type(Emoji.builder().emoji_type("Typing").build())
+                        .build()
+                    ).build()
+                response = self._client.im.v1.message_reaction.create(request)
+                if response.success() and response.data:
+                    return response.data.reaction_id
+                return None
+            except Exception as e:
+                logger.debug("Failed to add typing indicator: {}", e)
+                return None
+
+        return await loop.run_in_executor(None, _add)
+
+    async def _remove_typing_indicator(self, message_id: str, reaction_id: str | None) -> None:
+        """Remove the typing indicator reaction from a message."""
+        if not reaction_id or not self._client:
+            return
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._remove_reaction_sync, message_id, reaction_id)
 
     # Regex to match markdown tables (header + separator + data rows)
     _TABLE_RE = re.compile(
@@ -921,6 +975,9 @@ class FeishuChannel(BaseChannel):
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
 
+            # Add typing indicator to show the bot is processing
+            typing_reaction_id = await self._add_typing_indicator(message_id)
+
             # Parse content
             content_parts = []
             media_paths = []
@@ -973,6 +1030,9 @@ class FeishuChannel(BaseChannel):
 
             if not content and not media_paths:
                 return
+
+            # Remove typing indicator before forwarding
+            await self._remove_typing_indicator(message_id, typing_reaction_id)
 
             # Forward to message bus
             reply_to = chat_id if chat_type == "group" else sender_id
