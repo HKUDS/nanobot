@@ -61,12 +61,14 @@ def tool(tmp_path: Path, cache: ToolResultCache) -> ReadSpreadsheetTool:
 
 def _make_per_sheet_cache(rows: list[dict]) -> MagicMock:
     """Create a mock ToolResultCache with per-sheet cache format."""
-    full_output = json.dumps({
-        "headers": list(rows[0].keys()) if rows else [],
-        "rows": rows,
-        "row_count": len(rows),
-        "total_rows": len(rows),
-    })
+    full_output = json.dumps(
+        {
+            "headers": list(rows[0].keys()) if rows else [],
+            "rows": rows,
+            "row_count": len(rows),
+            "total_rows": len(rows),
+        }
+    )
     entry = MagicMock()
     entry.full_output = full_output
     cache = MagicMock()
@@ -93,7 +95,9 @@ async def test_read_all_sheets(tool: ReadSpreadsheetTool, sample_workbook: Path)
 
 
 async def test_read_specific_sheet(
-    tool: ReadSpreadsheetTool, sample_workbook: Path, cache: ToolResultCache,
+    tool: ReadSpreadsheetTool,
+    sample_workbook: Path,
+    cache: ToolResultCache,
 ) -> None:
     result = await tool.execute(path=str(sample_workbook), sheet="Resources")
     assert result.success
@@ -113,7 +117,9 @@ async def test_read_specific_sheet(
 
 
 async def test_column_filter(
-    tool: ReadSpreadsheetTool, sample_workbook: Path, cache: ToolResultCache,
+    tool: ReadSpreadsheetTool,
+    sample_workbook: Path,
+    cache: ToolResultCache,
 ) -> None:
     result = await tool.execute(
         path=str(sample_workbook), sheet="Tasks", columns=["Name", "Status"]
@@ -177,7 +183,9 @@ async def test_backward_compat_alias() -> None:
 
 
 async def test_read_csv_basic(
-    tool: ReadSpreadsheetTool, tmp_path: Path, cache: ToolResultCache,
+    tool: ReadSpreadsheetTool,
+    tmp_path: Path,
+    cache: ToolResultCache,
 ) -> None:
     csv_file = tmp_path / "data.csv"
     csv_file.write_text("Name,Amount,Status\nAlice,100,active\nBob,200,inactive\n")
@@ -197,7 +205,9 @@ async def test_read_csv_basic(
 
 
 async def test_read_csv_semicolon_delimited(
-    tool: ReadSpreadsheetTool, tmp_path: Path, cache: ToolResultCache,
+    tool: ReadSpreadsheetTool,
+    tmp_path: Path,
+    cache: ToolResultCache,
 ) -> None:
     csv_file = tmp_path / "data.csv"
     csv_file.write_text("Name;Amount;Status\nAlice;100;active\nBob;200;inactive\n")
@@ -212,7 +222,9 @@ async def test_read_csv_semicolon_delimited(
 
 
 async def test_read_csv_with_bom(
-    tool: ReadSpreadsheetTool, tmp_path: Path, cache: ToolResultCache,
+    tool: ReadSpreadsheetTool,
+    tmp_path: Path,
+    cache: ToolResultCache,
 ) -> None:
     csv_file = tmp_path / "data.csv"
     csv_file.write_bytes(b"\xef\xbb\xbfName,Value\nA,1\nB,2\n")
@@ -303,12 +315,14 @@ def test_validate_select_only(sql: str, expected_ok: bool) -> None:
 
 @pytest.fixture()
 def sample_cache() -> MagicMock:
-    return _make_per_sheet_cache([
-        {"Name": "Alice", "Department": "Engineering", "Salary": 100000},
-        {"Name": "Bob", "Department": "Engineering", "Salary": 120000},
-        {"Name": "Carol", "Department": "Marketing", "Salary": 90000},
-        {"Name": "Dave", "Department": "Marketing", "Salary": 95000},
-    ])
+    return _make_per_sheet_cache(
+        [
+            {"Name": "Alice", "Department": "Engineering", "Salary": 100000},
+            {"Name": "Bob", "Department": "Engineering", "Salary": 120000},
+            {"Name": "Carol", "Department": "Marketing", "Salary": 90000},
+            {"Name": "Dave", "Department": "Marketing", "Salary": 95000},
+        ]
+    )
 
 
 async def test_query_data_basic_select(sample_cache: MagicMock) -> None:
@@ -373,9 +387,7 @@ async def test_query_data_missing_cache_key() -> None:
 async def test_query_data_missing_sheet(sample_cache: MagicMock) -> None:
     """With per-sheet cache format, sheet param is ignored (key already has one sheet)."""
     tool = QueryDataTool(cache=sample_cache)
-    result = await tool.execute(
-        cache_key="abc123", query="SELECT * FROM data", sheet="Nonexistent"
-    )
+    result = await tool.execute(cache_key="abc123", query="SELECT * FROM data", sheet="Nonexistent")
     # Per-sheet format ignores the sheet param — the entry IS the sheet
     assert result.success
 

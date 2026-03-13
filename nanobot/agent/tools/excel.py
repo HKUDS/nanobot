@@ -157,12 +157,17 @@ class ReadSpreadsheetTool(Tool):
             empty_data: dict[str, Any] = {"headers": [], "rows": [], "total_rows": 0}
             cache_key = self._cache_sheet(str(file_path), sname, empty_data)
             empty_meta = {
-                "headers": [], "row_count": 0, "total_rows": 0, "cache_key": cache_key,
+                "headers": [],
+                "row_count": 0,
+                "total_rows": 0,
+                "cache_key": cache_key,
             }
-            return ToolResult.ok(json.dumps(
-                {"file": file_path.name, "sheets": {sname: empty_meta}},
-                ensure_ascii=False,
-            ))
+            return ToolResult.ok(
+                json.dumps(
+                    {"file": file_path.name, "sheets": {sname: empty_meta}},
+                    ensure_ascii=False,
+                )
+            )
 
         # CSV rows are always strings — convert to native types below
         raw_rows: list[list[Any]] = []
@@ -173,7 +178,11 @@ class ReadSpreadsheetTool(Tool):
                 raw_rows.append([_coerce_csv_value(v) for v in row])
 
         sheet_data = _build_sheet_data(
-            header_row, raw_rows, total, cap, columns,
+            header_row,
+            raw_rows,
+            total,
+            cap,
+            columns,
         )
 
         sname = file_path.stem
@@ -225,11 +234,14 @@ class ReadSpreadsheetTool(Tool):
                 header_row = next(rows_iter, None)
                 if header_row is None:
                     cache_key = self._cache_sheet(
-                        str(file_path), sname,
+                        str(file_path),
+                        sname,
                         {"headers": [], "rows": [], "total_rows": 0},
                     )
                     result["sheets"][sname] = {
-                        "headers": [], "row_count": 0, "total_rows": 0,
+                        "headers": [],
+                        "row_count": 0,
+                        "total_rows": 0,
                         "cache_key": cache_key,
                     }
                     continue
@@ -244,7 +256,11 @@ class ReadSpreadsheetTool(Tool):
                         raw_rows.append(list(row))
 
                 sheet_data = _build_sheet_data(
-                    headers, raw_rows, total, cap, columns,
+                    headers,
+                    raw_rows,
+                    total,
+                    cap,
+                    columns,
                 )
                 cache_key = self._cache_sheet(str(file_path), sname, sheet_data)
                 result["sheets"][sname] = _sheet_meta(sheet_data, cache_key)
@@ -256,23 +272,28 @@ class ReadSpreadsheetTool(Tool):
 
         return ToolResult.ok(json.dumps(result, ensure_ascii=False, default=str))
 
-
     # ------------------------------------------------------------------
     # Per-sheet cache helpers
     # ------------------------------------------------------------------
 
     def _cache_sheet(
-        self, file_path: str, sheet_name: str, sheet_data: dict[str, Any],
+        self,
+        file_path: str,
+        sheet_name: str,
+        sheet_data: dict[str, Any],
     ) -> str:
         """Store a single sheet's data in the cache and return the cache key."""
         if self._cache is None:
             return ""
         full_json = json.dumps(
-            {"headers": sheet_data.get("headers", []),
-             "rows": sheet_data.get("rows", []),
-             "row_count": sheet_data.get("row_count", len(sheet_data.get("rows", []))),
-             "total_rows": sheet_data.get("total_rows", 0)},
-            ensure_ascii=False, default=str,
+            {
+                "headers": sheet_data.get("headers", []),
+                "rows": sheet_data.get("rows", []),
+                "row_count": sheet_data.get("row_count", len(sheet_data.get("rows", []))),
+                "total_rows": sheet_data.get("total_rows", 0),
+            },
+            ensure_ascii=False,
+            default=str,
         )
         return self._cache.store(
             "read_spreadsheet",
@@ -337,9 +358,7 @@ def _build_sheet_data(
     Shared by both the Excel and CSV code paths.  Handles column filtering,
     empty-column stripping, date-allocation collapsing, and empty-row skip.
     """
-    headers = [
-        str(h) if h is not None else f"col_{i}" for i, h in enumerate(raw_headers)
-    ]
+    headers = [str(h) if h is not None else f"col_{i}" for i, h in enumerate(raw_headers)]
 
     # Determine column indices to keep
     if columns:
@@ -353,9 +372,7 @@ def _build_sheet_data(
                 "note": f"None of {columns} matched headers",
             }
         headers = [headers[i] for i in keep_idx]
-        raw_rows = [
-            [vals[i] if i < len(vals) else None for i in keep_idx] for vals in raw_rows
-        ]
+        raw_rows = [[vals[i] if i < len(vals) else None for i in keep_idx] for vals in raw_rows]
     else:
         # Pad short rows to header length
         raw_rows = [
@@ -397,9 +414,7 @@ def _build_sheet_data(
             if sv is not None:
                 record[headers[ci]] = sv
         if alloc_idx:
-            alloc_summary = _summarize_allocations(
-                [(headers[ci], vals[ci]) for ci in alloc_idx]
-            )
+            alloc_summary = _summarize_allocations([(headers[ci], vals[ci]) for ci in alloc_idx])
             if alloc_summary:
                 record["_allocations"] = alloc_summary
         if record:
@@ -578,7 +593,10 @@ def _load_rows_to_duckdb(
     # Write JSON to a temp file and use read_json_auto on the path.
     rows_json = json.dumps(rows, ensure_ascii=False, default=str)
     tmp = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, encoding="utf-8",
+        mode="w",
+        suffix=".json",
+        delete=False,
+        encoding="utf-8",
     )
     try:
         tmp.write(rows_json)
