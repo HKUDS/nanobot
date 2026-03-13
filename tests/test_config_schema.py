@@ -17,11 +17,11 @@ def test_config_with_allowed_dir() -> None:
 
 
 def test_config_from_dict_with_allowed_dir() -> None:
-    """Test config loading from dict with allowedDirs (camelCase)."""
+    """Test config loading from dict with allowedDir (camelCase)."""
     data = {
         "tools": {
             "restrictToWorkspace": True,
-            "allowedDirs": ["~/notes", "/tmp"]
+            "allowedDir": ["~/notes", "/tmp"]
         }
     }
     config = Config(**data)
