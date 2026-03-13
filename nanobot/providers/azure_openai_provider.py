@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from typing import Any
 from urllib.parse import urljoin
@@ -92,7 +93,7 @@ class AzureOpenAIProvider(LLMProvider):
     ) -> dict[str, Any]:
         """Prepare the request payload with Azure OpenAI 2024-10-21 compliance."""
         payload: dict[str, Any] = {
-            "messages": self._sanitize_request_messages(
+            "messages": self._sanitize_messages(
                 self._sanitize_empty_content(messages),
                 _AZURE_MSG_KEYS,
             ),
@@ -110,6 +111,47 @@ class AzureOpenAIProvider(LLMProvider):
             payload["tool_choice"] = tool_choice or "auto"
 
         return payload
+
+    @staticmethod
+    def _normalize_tool_call_id(tool_call_id: Any) -> Any:
+        """Normalize tool call ids to Azure-safe ASCII strings with <=40 chars."""
+        if not isinstance(tool_call_id, str):
+            return tool_call_id
+        if len(tool_call_id) <= 40 and tool_call_id.isascii():
+            return tool_call_id
+        return hashlib.sha1(tool_call_id.encode()).hexdigest()
+
+    @classmethod
+    def _sanitize_messages(
+        cls,
+        messages: list[dict[str, Any]],
+        allowed_keys: frozenset[str],
+    ) -> list[dict[str, Any]]:
+        """Strip unsupported keys and keep tool call ids in sync for Azure."""
+        sanitized = cls._sanitize_request_messages(messages, allowed_keys)
+        id_map: dict[str, str] = {}
+
+        def map_id(value: Any) -> Any:
+            if not isinstance(value, str):
+                return value
+            return id_map.setdefault(value, cls._normalize_tool_call_id(value))
+
+        for clean in sanitized:
+            if isinstance(clean.get("tool_calls"), list):
+                normalized_tool_calls = []
+                for tc in clean["tool_calls"]:
+                    if not isinstance(tc, dict):
+                        normalized_tool_calls.append(tc)
+                        continue
+                    tc_clean = dict(tc)
+                    tc_clean["id"] = map_id(tc_clean.get("id"))
+                    normalized_tool_calls.append(tc_clean)
+                clean["tool_calls"] = normalized_tool_calls
+
+            if "tool_call_id" in clean and clean["tool_call_id"]:
+                clean["tool_call_id"] = map_id(clean["tool_call_id"])
+
+        return sanitized
 
     async def chat(
         self,

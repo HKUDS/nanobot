@@ -150,6 +150,40 @@ def test_prepare_request_payload_sanitizes_messages():
     ]
 
 
+def test_prepare_request_payload_normalizes_long_tool_call_ids():
+    """Test Azure payload shortens long tool call ids and keeps references aligned."""
+    provider = AzureOpenAIProvider(
+        api_key="test-key",
+        api_base="https://test-resource.openai.azure.com",
+        default_model="gpt-4o",
+    )
+
+    long_id = "call_" + ("x" * 78)
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [{
+                "id": long_id,
+                "type": "function",
+                "function": {"name": "x", "arguments": "{}"},
+            }],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": long_id,
+            "name": "x",
+            "content": "ok",
+        },
+    ]
+
+    payload = provider._prepare_request_payload("gpt-5.4", messages)
+    normalized_id = payload["messages"][0]["tool_calls"][0]["id"]
+
+    assert normalized_id != long_id
+    assert len(normalized_id) == 40
+    assert payload["messages"][1]["tool_call_id"] == normalized_id
+
+
 @pytest.mark.asyncio
 async def test_chat_success():
     """Test successful chat request using model as deployment name."""
