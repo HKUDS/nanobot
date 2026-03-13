@@ -1,7 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -344,6 +344,13 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
 
 
+class MemoryPluginConfig(Base):
+    """Memory plugin configuration."""
+
+    provider: str = "filesystem"  # Memory provider type (e.g., "filesystem", "redis")
+    config: dict[str, Any] = Field(default_factory=dict)  # Provider-specific config
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
@@ -361,6 +368,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    memory: MemoryPluginConfig = Field(default_factory=MemoryPluginConfig)
 
     @property
     def workspace_path(self) -> Path:

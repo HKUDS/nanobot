@@ -16,6 +16,7 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
 from nanobot.agent.subagent import SubagentManager
+from nanobot.memory import create_memory_provider, BaseMemoryProvider
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -63,6 +64,9 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        memory_provider: BaseMemoryProvider | None = None,
+        memory_provider_type: str | None = None,
+        memory_provider_config: dict | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -79,7 +83,22 @@ class AgentLoop:
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
-        self.context = ContextBuilder(workspace)
+        # Initialize memory provider
+        if memory_provider is not None:
+            # Use explicitly provided provider instance
+            self._memory_provider = memory_provider
+        elif memory_provider_type:
+            # Create provider from type and config
+            self._memory_provider = create_memory_provider(
+                memory_provider_type,
+                memory_provider_config or {},
+                workspace=workspace,
+            )
+        else:
+            # Default to filesystem provider
+            self._memory_provider = None
+
+        self.context = ContextBuilder(workspace, memory_provider=self._memory_provider)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -108,6 +127,7 @@ class AgentLoop:
             context_window_tokens=context_window_tokens,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
+            memory_provider=self._memory_provider,
         )
         self._register_default_tools()
 

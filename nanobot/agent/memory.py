@@ -1,4 +1,9 @@
-"""Memory system for persistent agent memory."""
+"""Memory system for persistent agent memory.
+
+This module now uses the pluggable memory provider system.
+The MemoryStore class is kept for backward compatibility but delegates
+to a BaseMemoryProvider implementation.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
+from nanobot.memory import create_memory_provider, BaseMemoryProvider, FilesystemMemoryProvider
 from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain
 
 if TYPE_CHECKING:
@@ -73,31 +79,73 @@ def _is_tool_choice_unsupported(content: str | None) -> bool:
 
 
 class MemoryStore:
-    """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
+    """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log).
+    
+    This class is now a thin wrapper around BaseMemoryProvider for backward
+    compatibility. It delegates all operations to the underlying provider.
+    
+    For new code, consider using BaseMemoryProvider directly via the
+    create_memory_provider() factory function.
+    """
 
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
 
-    def __init__(self, workspace: Path):
-        self.memory_dir = ensure_dir(workspace / "memory")
-        self.memory_file = self.memory_dir / "MEMORY.md"
-        self.history_file = self.memory_dir / "HISTORY.md"
+    def __init__(self, workspace: Path, provider: BaseMemoryProvider | None = None):
+        """Initialize memory store.
+        
+        Args:
+            workspace: The workspace path (used for default filesystem provider)
+            provider: Optional memory provider. If not provided, uses FilesystemMemoryProvider.
+        """
+        if provider is None:
+            # Default to filesystem provider for backward compatibility
+            self._provider = FilesystemMemoryProvider({"workspace": str(workspace)})
+        else:
+            self._provider = provider
         self._consecutive_failures = 0
 
+    @property
+    def provider(self) -> BaseMemoryProvider:
+        """Get the underlying memory provider."""
+        return self._provider
+
+    @property
+    def memory_dir(self) -> Path:
+        """Get memory directory (for backward compatibility with filesystem provider)."""
+        if isinstance(self._provider, FilesystemMemoryProvider):
+            return self._provider._memory_dir
+        # For non-filesystem providers, return a dummy path
+        return Path("/dev/null")
+
+    @property
+    def memory_file(self) -> Path:
+        """Get memory file path (for backward compatibility with filesystem provider)."""
+        if isinstance(self._provider, FilesystemMemoryProvider):
+            return self._provider.memory_file
+        return Path("/dev/null")
+
+    @property
+    def history_file(self) -> Path:
+        """Get history file path (for backward compatibility with filesystem provider)."""
+        if isinstance(self._provider, FilesystemMemoryProvider):
+            return self._provider.history_file
+        return Path("/dev/null")
+
     def read_long_term(self) -> str:
-        if self.memory_file.exists():
-            return self.memory_file.read_text(encoding="utf-8")
-        return ""
+        """Read long-term memory content."""
+        return self._provider.read_long_term()
 
     def write_long_term(self, content: str) -> None:
-        self.memory_file.write_text(content, encoding="utf-8")
+        """Write long-term memory content."""
+        self._provider.write_long_term(content)
 
     def append_history(self, entry: str) -> None:
-        with open(self.history_file, "a", encoding="utf-8") as f:
-            f.write(entry.rstrip() + "\n\n")
+        """Append entry to history."""
+        self._provider.append_history(entry)
 
     def get_memory_context(self) -> str:
-        long_term = self.read_long_term()
-        return f"## Long-term Memory\n{long_term}" if long_term else ""
+        """Get formatted memory context."""
+        return self._provider.get_memory_context()
 
     @staticmethod
     def _format_messages(messages: list[dict]) -> str:
@@ -233,8 +281,22 @@ class MemoryConsolidator:
         context_window_tokens: int,
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
+        memory_provider: BaseMemoryProvider | None = None,
     ):
-        self.store = MemoryStore(workspace)
+        """Initialize the memory consolidator.
+        
+        Args:
+            workspace: Workspace path
+            provider: LLM provider for consolidation
+            model: Model name for consolidation
+            sessions: Session manager
+            context_window_tokens: Context window size
+            build_messages: Function to build messages
+            get_tool_definitions: Function to get tool definitions
+            memory_provider: Optional custom memory provider. If not provided,
+                           uses default filesystem provider.
+        """
+        self.store = MemoryStore(workspace, provider=memory_provider)
         self.provider = provider
         self.model = model
         self.sessions = sessions
