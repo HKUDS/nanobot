@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
@@ -94,6 +94,7 @@ class BaseChannel(ABC):
         media: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
+        consumed_callback: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         """
         Handle an incoming message from the chat platform.
@@ -124,6 +125,7 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=metadata or {},
             session_key_override=session_key,
+            consumed_callback=consumed_callback,
         )
 
         await self.bus.publish_inbound(msg)
