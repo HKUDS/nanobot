@@ -221,6 +221,7 @@ class AgentDefaults(Base):
     memory_token_budget: int = 900
     memory_uncertainty_threshold: float = 0.6
     memory_enable_contradiction_check: bool = True
+    memory_conflict_auto_resolve_gap: float = 0.25
     memory_rollout_mode: str = "enabled"  # enabled|shadow|disabled
     memory_type_separation_enabled: bool = True
     memory_router_enabled: bool = True
@@ -281,6 +282,7 @@ class AgentConfig(Base):
     memory_md_token_cap: int = 1500  # max tokens for MEMORY.md injection; 0 = unlimited
     memory_uncertainty_threshold: float = 0.6
     memory_enable_contradiction_check: bool = True
+    memory_conflict_auto_resolve_gap: float = 0.25
     memory_rollout_mode: str = "enabled"
     memory_type_separation_enabled: bool = True
     memory_router_enabled: bool = True
@@ -302,6 +304,9 @@ class AgentConfig(Base):
     # Tool-result truncation
     tool_result_max_chars: int = 2000
     tool_result_context_tokens: int = 500
+
+    # Tool-result cache & summary
+    tool_summary_model: str = ""  # LLM for summarising large tool results; empty = main model
 
     # Planning & verification (Step 1 & 2)
     planning_enabled: bool = True
@@ -359,6 +364,7 @@ class AgentConfig(Base):
             "memory_token_budget": defaults.memory_token_budget,
             "memory_uncertainty_threshold": defaults.memory_uncertainty_threshold,
             "memory_enable_contradiction_check": defaults.memory_enable_contradiction_check,
+            "memory_conflict_auto_resolve_gap": defaults.memory_conflict_auto_resolve_gap,
             "memory_rollout_mode": defaults.memory_rollout_mode,
             "memory_type_separation_enabled": defaults.memory_type_separation_enabled,
             "memory_router_enabled": defaults.memory_router_enabled,

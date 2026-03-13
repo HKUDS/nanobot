@@ -45,6 +45,9 @@ class ToolResult:
 
     # Serialize for the LLM context (backward-compatible string)
     def to_llm_string(self) -> str:
+        if self.metadata.get("cache_key"):
+            summary: str = self.metadata.get("summary", self.output)
+            return summary
         return self.output
 
 
@@ -58,6 +61,11 @@ class Tool(ABC):
 
     # Whether this tool only reads state (used for parallel execution).
     readonly: bool = False
+
+    # Whether results from this tool should be cached and summarised.
+    # Set to False for retrieval tools (cache_get_slice, excel_get_rows, …)
+    # whose purpose is to return raw data from the cache.
+    cacheable: bool = True
 
     _TYPE_MAP: dict[str, type | tuple[type, ...]] = {
         "string": str,

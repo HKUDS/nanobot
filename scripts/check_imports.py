@@ -80,7 +80,7 @@ def check() -> list[str]:
             for lineno, module in _collect_imports(tree):
                 for prefix in forbidden_prefixes:
                     if module == prefix or module.startswith(prefix + "."):
-                        if (str(rel), module) in ALLOWLIST:
+                        if (str(rel).replace("\\", "/"), module) in ALLOWLIST:
                             continue
                         violations.append(f"  {rel}:{lineno}  imports {module}  (forbidden: {prefix})")
     return violations

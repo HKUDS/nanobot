@@ -28,3 +28,4 @@ bridge/node_modules/
 .coverage
 .vscode/
 .ruff_cache/
+.mypy_cache/

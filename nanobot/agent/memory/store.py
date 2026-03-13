@@ -26,7 +26,7 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from loguru import logger
 
@@ -124,6 +124,11 @@ class MemoryStore:
         else:
             self.graph = KnowledgeGraph()  # disabled — all methods return empty
             self.graph.enabled = False
+
+        # Configurable auto-resolve confidence gap threshold.
+        self.conflict_auto_resolve_gap: float = float(
+            self.rollout.get("conflict_auto_resolve_gap", 0.25)
+        )
 
     @staticmethod
     def _utc_now_iso() -> str:
@@ -2166,6 +2171,17 @@ class MemoryStore:
             return "merge"
         return None
 
+    # Language patterns indicating a correction (new value supersedes old).
+    _CORRECTION_MARKERS: ClassVar[tuple[str, ...]] = (
+        "corrected",
+        "changed to",
+        "updated to",
+        "actually",
+        "replaced by",
+        "switched to",
+        "migrated to",
+    )
+
     def _auto_resolution_action(self, conflict: dict[str, Any]) -> str | None:
         source = str(conflict.get("source", "")).strip().lower()
         if source == "live_correction":
@@ -2177,9 +2193,23 @@ class MemoryStore:
         old_conf = self._safe_float(conflict.get("old_confidence"), 0.0)
         new_conf = self._safe_float(conflict.get("new_confidence"), 0.0)
         gap = abs(old_conf - new_conf)
-        if gap < 0.25:
-            return None
-        return "keep_new" if new_conf > old_conf else "keep_old"
+        if gap >= self.conflict_auto_resolve_gap:
+            return "keep_new" if new_conf > old_conf else "keep_old"
+
+        # Temporal recency: when the confidence gap is too narrow, use
+        # timestamps as a tiebreaker — newer facts supersede older ones.
+        old_ts = str(conflict.get("old_last_seen_at", "")).strip()
+        new_ts = str(conflict.get("new_last_seen_at", "")).strip()
+        if old_ts and new_ts and old_ts != new_ts:
+            return "keep_new" if new_ts > old_ts else "keep_old"
+
+        # Correction language: if the *new* value contains correction markers,
+        # treat it as an explicit supersession of the old value.
+        new_text = self._norm_text(str(conflict.get("new", "")))
+        if any(marker in new_text for marker in self._CORRECTION_MARKERS):
+            return "keep_new"
+
+        return None
 
     def auto_resolve_conflicts(self, *, max_items: int = 10) -> dict[str, int]:
         profile = self.read_profile()
@@ -2233,7 +2263,25 @@ class MemoryStore:
         pool.sort(key=lambda c: str(c.get("asked_at", "")))
         return pool[0]
 
-    def ask_user_for_conflict(self, *, include_already_asked: bool = False) -> str | None:
+    def _conflict_relevant_to(self, conflict: dict[str, Any], user_message: str) -> bool:
+        """Return True if the conflict topic overlaps with the user's message."""
+        msg_tokens = self._tokenize(self._norm_text(user_message))
+        if not msg_tokens:
+            return True  # empty message → don't filter
+        old_tokens = self._tokenize(self._norm_text(str(conflict.get("old", ""))))
+        new_tokens = self._tokenize(self._norm_text(str(conflict.get("new", ""))))
+        conflict_tokens = old_tokens | new_tokens
+        if not conflict_tokens:
+            return True
+        overlap = len(msg_tokens & conflict_tokens) / max(len(conflict_tokens), 1)
+        return overlap >= 0.25
+
+    def ask_user_for_conflict(
+        self,
+        *,
+        include_already_asked: bool = False,
+        user_message: str = "",
+    ) -> str | None:
         profile = self.read_profile()
         conflicts = profile.get("conflicts", [])
         if not isinstance(conflicts, list):
@@ -2249,6 +2297,11 @@ class MemoryStore:
                 continue
             if not include_already_asked and item.get("asked_at"):
                 continue
+            # Relevance gate: if the user sent a message, only surface conflicts
+            # whose topic overlaps with the message.  When there is no message
+            # (e.g. interactive session start), skip the gate and show the first.
+            if user_message and not self._conflict_relevant_to(item, user_message):
+                continue
             chosen_idx = idx
             chosen = item
             break
@@ -2262,10 +2315,17 @@ class MemoryStore:
 
         old_value = str(chosen.get("old", "")).strip()
         new_value = str(chosen.get("new", "")).strip()
+
+        # Build richer provenance lines when timestamps are available.
+        old_ts = str(chosen.get("old_last_seen_at", "")).strip()
+        new_ts = str(chosen.get("new_last_seen_at", "")).strip()
+        old_hint = f" (last seen: {old_ts[:10]})" if old_ts else ""
+        new_hint = f" (last seen: {new_ts[:10]})" if new_ts else ""
+
         return (
             "I found a memory conflict and need your choice:\n"
-            f"1. {old_value}\n"
-            f"2. {new_value}\n"
+            f"1. {old_value}{old_hint}\n"
+            f"2. {new_value}{new_hint}\n"
             "Reply with: `keep 1`, `keep 2`, `merge`, or `neither`."
         )
 
@@ -3795,6 +3855,8 @@ class MemoryStore:
                                     "status": self.CONFLICT_STATUS_OPEN,
                                     "old_confidence": old_entry.get("confidence"),
                                     "new_confidence": new_entry.get("confidence"),
+                                    "old_last_seen_at": old_entry.get("last_seen_at", ""),
+                                    "new_last_seen_at": new_entry.get("last_seen_at", ""),
                                 }
                             )
                             conflicts += 1
