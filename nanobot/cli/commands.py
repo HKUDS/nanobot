@@ -168,6 +168,29 @@ async def _print_interactive_response(response: str, render_markdown: bool) -> N
     await run_in_terminal(_write)
 
 
+async def _print_interactive_stream_header() -> None:
+    """Print stream header in interactive mode with prompt_toolkit-safe output."""
+    def _write() -> None:
+        ansi = _render_interactive_ansi(
+            lambda c: (
+                c.print(),
+                c.print(f"[cyan]{__logo__} nanobot[/cyan]"),
+            )
+        )
+        print_formatted_text(ANSI(ansi), end="")
+
+    await run_in_terminal(_write)
+
+
+async def _print_interactive_stream_chunk(text: str) -> None:
+    """Print one stream chunk in interactive mode without auto newline."""
+    def _write() -> None:
+        ansi = _render_interactive_ansi(lambda c: c.print(text, end=""))
+        print_formatted_text(ANSI(ansi), end="")
+
+    await run_in_terminal(_write)
+
+
 def _is_exit_command(command: str) -> bool:
     """Return True when input should end interactive chat."""
     return command.lower() in EXIT_COMMANDS
@@ -403,6 +426,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        stream_output=config.agents.defaults.stream_output,
     )
 
     # Set cron callback (needs agent)
@@ -546,6 +570,11 @@ def agent(
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    stream: bool | None = typer.Option(
+        None,
+        "--stream/--no-stream",
+        help="Stream model output in real time (defaults to config agents.defaults.streamOutput)",
+    ),
 ):
     """Interact with the agent directly."""
     from loguru import logger
@@ -571,6 +600,12 @@ def agent(
     else:
         logger.disable("nanobot")
 
+    stream_enabled = (
+        config.agents.defaults.stream_output
+        if stream is None
+        else stream
+    )
+
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -585,15 +620,28 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        stream_output=stream_enabled,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
     def _thinking_ctx():
-        if logs:
+        if logs or stream_enabled:
             from contextlib import nullcontext
             return nullcontext()
         # Animated spinner is safe to use with prompt_toolkit input handling
         return console.status("[dim]nanobot is thinking...[/dim]", spinner="dots")
+
+    stream_state = {"started": False, "has_text": False, "text": ""}
+
+    def _reset_stream_state() -> None:
+        stream_state["started"] = False
+        stream_state["has_text"] = False
+        stream_state["text"] = ""
+
+    def _finish_stream_line() -> None:
+        if stream_state["started"]:
+            console.print()
+            stream_state["started"] = False
 
     async def _cli_progress(content: str, *, tool_hint: bool = False) -> None:
         ch = agent_loop.channels_config
@@ -601,14 +649,32 @@ def agent(
             return
         if ch and not tool_hint and not ch.send_progress:
             return
+        if stream_enabled and not tool_hint:
+            if not content:
+                return
+            if not stream_state["started"]:
+                console.print()
+                console.print(f"[cyan]{__logo__} nanobot[/cyan]")
+                stream_state["started"] = True
+            stream_state["has_text"] = True
+            stream_state["text"] += content
+            console.print(content, end="")
+            return
+        _finish_stream_line()
         console.print(f"  [dim]↳ {content}[/dim]")
 
     if message:
         # Single message mode — direct call, no bus needed
         async def run_once():
+            _reset_stream_state()
             with _thinking_ctx():
                 response = await agent_loop.process_direct(message, session_id, on_progress=_cli_progress)
-            _print_agent_response(response, render_markdown=markdown)
+            streamed_contains_final = bool(response) and (response in stream_state["text"])
+            if stream_enabled and stream_state["has_text"] and streamed_contains_final:
+                _finish_stream_line()
+                console.print()
+            else:
+                _print_agent_response(response, render_markdown=markdown)
             await agent_loop.close_mcp()
 
         asyncio.run(run_once())
@@ -657,15 +723,23 @@ def agent(
                             elif ch and not is_tool_hint and not ch.send_progress:
                                 pass
                             else:
-                                await _print_interactive_line(msg.content)
-
+                                if stream_enabled and not is_tool_hint and msg.metadata.get("_progress_kind") == "content":
+                                    if not stream_state["started"]:
+                                        await _print_interactive_stream_header()
+                                        stream_state["started"] = True
+                                    stream_state["has_text"] = True
+                                    stream_state["text"] += msg.content or ""
+                                    await _print_interactive_stream_chunk(msg.content or "")
+                                else:
+                                    _finish_stream_line()
+                                    await _print_interactive_line(msg.content)
                         elif not turn_done.is_set():
                             if msg.content:
                                 turn_response.append(msg.content)
                             turn_done.set()
                         elif msg.content:
+                            _finish_stream_line()
                             await _print_interactive_response(msg.content, render_markdown=markdown)
-
                     except asyncio.TimeoutError:
                         continue
                     except asyncio.CancelledError:
@@ -687,6 +761,7 @@ def agent(
                             console.print("\nGoodbye!")
                             break
 
+                        _reset_stream_state()
                         turn_done.clear()
                         turn_response.clear()
 
@@ -700,7 +775,9 @@ def agent(
                         with _thinking_ctx():
                             await turn_done.wait()
 
-                        if turn_response:
+                        _finish_stream_line()
+                        streamed_contains_final = bool(turn_response) and (turn_response[0] in stream_state["text"])
+                        if turn_response and not (stream_enabled and stream_state["has_text"] and streamed_contains_final):
                             _print_agent_response(turn_response[0], render_markdown=markdown)
                     except KeyboardInterrupt:
                         _restore_terminal()

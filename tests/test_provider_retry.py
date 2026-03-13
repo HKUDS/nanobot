@@ -24,6 +24,20 @@ class ScriptedProvider(LLMProvider):
         return "test-model"
 
 
+class ScriptedStreamProvider(ScriptedProvider):
+    async def chat_stream(self, *args, on_text_delta=None, **kwargs) -> LLMResponse:
+        self.calls += 1
+        self.last_kwargs = kwargs
+        response = self._responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        if response.finish_reason != "error" and response.content and on_text_delta:
+            maybe_awaitable = on_text_delta(response.content)
+            if asyncio.iscoroutine(maybe_awaitable):
+                await maybe_awaitable
+        return response
+
+
 @pytest.mark.asyncio
 async def test_chat_with_retry_retries_transient_error_then_succeeds(monkeypatch) -> None:
     provider = ScriptedProvider([
@@ -123,3 +137,44 @@ async def test_chat_with_retry_explicit_override_beats_defaults() -> None:
     assert provider.last_kwargs["temperature"] == 0.9
     assert provider.last_kwargs["max_tokens"] == 9999
     assert provider.last_kwargs["reasoning_effort"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_stream_falls_back_and_emits_full_content() -> None:
+    provider = ScriptedProvider([LLMResponse(content="hello stream")])
+    deltas: list[str] = []
+
+    response = await provider.chat_with_retry_stream(
+        messages=[{"role": "user", "content": "hello"}],
+        on_text_delta=lambda delta: deltas.append(delta),
+    )
+
+    assert response.content == "hello stream"
+    assert deltas == ["hello stream"]
+    assert provider.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_stream_retries_transient_error(monkeypatch) -> None:
+    provider = ScriptedStreamProvider([
+        LLMResponse(content="429 rate limit", finish_reason="error"),
+        LLMResponse(content="ok stream"),
+    ])
+    delays: list[int] = []
+    deltas: list[str] = []
+
+    async def _fake_sleep(delay: int) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry_stream(
+        messages=[{"role": "user", "content": "hello"}],
+        on_text_delta=lambda delta: deltas.append(delta),
+    )
+
+    assert response.finish_reason == "stop"
+    assert response.content == "ok stream"
+    assert provider.calls == 2
+    assert delays == [1]
+    assert deltas == ["ok stream"]

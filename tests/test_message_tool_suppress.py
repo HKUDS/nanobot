@@ -115,6 +115,43 @@ class TestMessageToolSuppressLogic:
             ('read_file("foo.txt")', True),
         ]
 
+    @pytest.mark.asyncio
+    async def test_stream_progress_avoids_duplicate_reasoning_echo(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        loop.stream_output = True
+        tool_call = ToolCallRequest(id="call1", name="read_file", arguments={"path": "foo.txt"})
+        calls = iter([
+            LLMResponse(content="Visible", tool_calls=[tool_call]),
+            LLMResponse(content="Done", tool_calls=[]),
+        ])
+        call_index = {"n": 0}
+
+        async def _chat_stream(*args, on_text_delta=None, **kwargs):
+            response = next(calls)
+            call_index["n"] += 1
+            if on_text_delta and call_index["n"] == 1:
+                await on_text_delta("Vis")
+                await on_text_delta("ible")
+            return response
+
+        loop.provider.chat_with_retry_stream = AsyncMock(side_effect=_chat_stream)
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.tools.execute = AsyncMock(return_value="ok")
+
+        progress: list[tuple[str, bool]] = []
+
+        async def on_progress(content: str, *, tool_hint: bool = False) -> None:
+            progress.append((content, tool_hint))
+
+        final_content, _, _ = await loop._run_agent_loop([], on_progress=on_progress)
+
+        assert final_content == "Done"
+        assert progress == [
+            ("Vis", False),
+            ("ible", False),
+            ('read_file("foo.txt")', True),
+        ]
+
 
 class TestMessageToolTurnTracking:
 
