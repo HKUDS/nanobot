@@ -176,12 +176,117 @@ def get_dashboard_app(state_getter: Callable[[], dict[str, Any] | None]) -> Star
         except OSError:
             return JSONResponse({"error": "read error"}, status_code=500)
 
+    async def api_tool_detail(request: Request) -> JSONResponse:
+        """Return detailed tool information including parameter schema."""
+        state = state_getter()
+        if state is None:
+            return JSONResponse({"error": "not initialized"}, status_code=503)
+
+        name = request.path_params["name"]
+        agent = state.get("agent")
+        if agent is None:
+            return JSONResponse({"error": "no agent"}, status_code=500)
+
+        registry = getattr(agent, "tools", None)
+        if registry is None:
+            return JSONResponse({"error": "no tools"}, status_code=500)
+
+        tool = registry.get(name)
+        if tool is None:
+            return JSONResponse({"error": "tool not found"}, status_code=404)
+
+        return JSONResponse({
+            "name": tool.name,
+            "description": tool.description or "",
+            "parameters": tool.parameters or {},
+        })
+
+    async def api_skill_detail(request: Request) -> JSONResponse:
+        """Return skill content (SKILL.md)."""
+        state = state_getter()
+        if state is None:
+            return JSONResponse({"error": "not initialized"}, status_code=503)
+
+        name = request.path_params["name"]
+        agent = state.get("agent")
+        if agent is None:
+            return JSONResponse({"error": "no agent"}, status_code=500)
+
+        context = getattr(agent, "context", None)
+        if context is None:
+            return JSONResponse({"error": "no context"}, status_code=500)
+
+        skills_loader = getattr(context, "skills", None)
+        if skills_loader is None:
+            return JSONResponse({"error": "no skills"}, status_code=500)
+
+        content = skills_loader.load_skill(name)
+        if content is None:
+            return JSONResponse({"error": "skill not found"}, status_code=404)
+
+        original_size = len(content)
+        truncated = original_size > 102400
+        if truncated:
+            content = content[:102400] + "\n\n... [truncated at 100KB]"
+
+        return JSONResponse({
+            "name": name,
+            "content": content,
+            "truncated": truncated,
+            "size_bytes": original_size,
+        })
+
+    async def api_mcp_detail(request: Request) -> JSONResponse:
+        """Return MCP server details with tool definitions."""
+        state = state_getter()
+        if state is None:
+            return JSONResponse({"error": "not initialized"}, status_code=503)
+
+        server_name = request.path_params["server"]
+        agent = state.get("agent")
+        if agent is None:
+            return JSONResponse({"error": "no agent"}, status_code=500)
+
+        mcp_manager = getattr(agent, "_mcp_manager", None)
+        if mcp_manager is None:
+            return JSONResponse({"error": "no MCP manager"}, status_code=500)
+
+        mcp_servers_cfg: dict = getattr(mcp_manager, "_servers", {})
+        if server_name not in mcp_servers_cfg:
+            return JSONResponse({"error": "server not found"}, status_code=404)
+
+        cfg = mcp_servers_cfg[server_name]
+        mcp_server_status: dict = getattr(mcp_manager, "_status", {})
+        status = mcp_server_status.get(server_name, "not connected")
+
+        registry = getattr(agent, "tools", None)
+        mcp_tool_names = [name for name in registry._tools.keys() if name.startswith("mcp_")] if registry else []
+        prefix = f"mcp_{server_name}_"
+        server_tools = [n[len(prefix):] for n in mcp_tool_names if n.startswith(prefix)]
+
+        transport = "stdio" if getattr(cfg, "command", "") else "http"
+        endpoint = getattr(cfg, "command", "") or getattr(cfg, "url", "")
+
+        return JSONResponse({
+            "server": server_name,
+            "status": status,
+            "connected": status == "connected",
+            "transport": transport,
+            "endpoint": endpoint,
+            "connect_timeout": getattr(cfg, "connect_timeout", 30),
+            "tool_timeout": getattr(cfg, "tool_timeout", 30),
+            "tools": [{"name": t, "description": "", "input_schema": {}} for t in server_tools],
+        })
+
     routes = [
         Route("/health", health),
         Route("/", dashboard_html),
         Route("/api/dashboard", api_dashboard),
         Route("/api/session/{key:path}", api_session_detail),
         Route("/api/memory/{filename}", api_memory_file),
+        Route("/api/tool/{name}", api_tool_detail),
+        Route("/api/skill/{name}", api_skill_detail),
+        Route("/api/mcp/{server}", api_mcp_detail),
         Mount("/static", StaticFiles(directory=str(_TEMPLATES_DIR)), name="static"),
     ]
 
@@ -198,6 +303,7 @@ def _build_dashboard_data(state: dict[str, Any]) -> dict[str, Any]:
         "identity": _build_identity(state),
         "activity": _build_activity(state),
         "tools": _build_tools(state),
+        "skills": _build_skills(state),
         "channels": _build_channels(state),
         "cron": _build_cron(state),
         "system": _build_system(state),
@@ -339,10 +445,16 @@ def _build_tools(state: dict[str, Any]) -> dict[str, Any]:
         return {"builtin": [], "mcp": []}
 
     registry = getattr(agent, "tools", None)
-    tool_names: list[str] = registry.tool_names if registry else []
+    builtin: list[dict[str, Any]] = []
+    if registry:
+        for name, tool in registry._tools.items():
+            if not name.startswith("mcp_"):
+                builtin.append({
+                    "name": name,
+                    "description": tool.description[:200] if tool.description else "",
+                })
 
-    builtin = [n for n in tool_names if not n.startswith("mcp_")]
-    mcp_tool_names = [n for n in tool_names if n.startswith("mcp_")]
+    mcp_tool_names = [name for name in registry._tools.keys() if name.startswith("mcp_")] if registry else []
 
     mcp_manager = getattr(agent, "_mcp_manager", None)
     mcp_servers_cfg: dict = {}
@@ -369,6 +481,7 @@ def _build_tools(state: dict[str, Any]) -> dict[str, Any]:
                 "tools": server_tools,
                 "tool_count": len(server_tools),
                 "tool_timeout": getattr(cfg, "tool_timeout", 30),
+                "connect_timeout": getattr(cfg, "connect_timeout", 30),
             }
         )
 
@@ -384,10 +497,43 @@ def _build_tools(state: dict[str, Any]) -> dict[str, Any]:
                 "tools": orphaned,
                 "tool_count": len(orphaned),
                 "tool_timeout": 30,
+                "connect_timeout": 30,
             }
         )
 
     return {"builtin": builtin, "mcp": mcp}
+
+
+def _build_skills(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build skills list for dashboard."""
+    agent = state.get("agent")
+    if agent is None:
+        return []
+
+    context = getattr(agent, "context", None)
+    if context is None:
+        return []
+
+    skills_loader = getattr(context, "skills", None)
+    if skills_loader is None:
+        return []
+
+    skills_list = skills_loader.list_skills(filter_unavailable=False)
+    result = []
+    for s in skills_list:
+        name = s.get("name", "")
+        meta = skills_loader.get_skill_metadata(name) or {}
+        skill_meta = skills_loader._parse_nanobot_metadata(meta.get("metadata", ""))
+
+        result.append({
+            "name": name,
+            "description": meta.get("description") or skill_meta.get("description") or name,
+            "source": s.get("source", "unknown"),
+            "available": skills_loader._check_requirements(skill_meta),
+            "always": bool(skill_meta.get("always") or meta.get("always")),
+            "path": s.get("path", ""),
+        })
+    return result
 
 
 def _build_channels(state: dict[str, Any]) -> dict[str, Any]:

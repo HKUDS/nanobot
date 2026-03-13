@@ -802,3 +802,288 @@ main { flex: 1; padding: 20px 24px; max-width: 1400px; width: 100%; margin: 0 au
   .act-key { max-width: 160px; }
   #session-drawer { max-height: 85vh; }
 }
+
+/* -- Agent Sheet Grid ------------------------------------------------------ */
+
+.agent-sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 1200px) {
+  .agent-sheet-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+  .agent-sheet-grid { grid-template-columns: 1fr; }
+}
+
+/* -- Item List ------------------------------------------------------------- */
+
+.item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  flex-wrap: wrap;
+}
+
+.item-row.clickable {
+  cursor: pointer;
+  transition: background .12s;
+}
+
+.item-row.clickable:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.item-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+  background: var(--muted);
+}
+
+.item-dot.item-ok { background: var(--green); }
+.item-dot.item-warn { background: var(--yellow); }
+.item-dot.item-err { background: var(--red); }
+
+.item-name {
+  font-weight: 500;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.item-desc {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.item-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-sm);
+  font-family: var(--mono);
+}
+
+/* -- Badge Small ----------------------------------------------------------- */
+
+.badge-small {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+
+.badge-ws { background: var(--accent); color: #fff; }
+.badge-always { background: var(--green); color: #000; }
+
+/* -- Detail Modal ---------------------------------------------------------- */
+
+.modal-large {
+  max-width: 900px;
+  max-height: 85vh;
+}
+
+.modal-subtitle {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 0 20px 10px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+}
+
+/* -- Detail Sections ------------------------------------------------------- */
+
+.detail-section {
+  margin-bottom: 16px;
+}
+
+.detail-label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.detail-value {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.detail-value.code {
+  font-family: var(--mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 24px;
+  margin-bottom: 16px;
+}
+
+.detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* -- Parameters Table ------------------------------------------------------ */
+
+.params-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.params-table th {
+  text-align: left;
+  padding: 8px 10px;
+  background: var(--surface2);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+
+.params-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.param-name {
+  font-family: var(--mono);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.param-type {
+  color: var(--yellow);
+  font-size: 11px;
+}
+
+.param-req {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.param-desc {
+  color: var(--text-sm);
+  font-size: 11px;
+}
+
+/* -- Tool List (in MCP modal) ---------------------------------------------- */
+
+.tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-list-item {
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  transition: background .12s;
+}
+
+.tool-list-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tool-list-name {
+  font-family: var(--mono);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tool-list-desc {
+  color: var(--muted);
+  font-size: 11px;
+  display: block;
+  margin-top: 2px;
+}
+
+/* -- Skill Content --------------------------------------------------------- */
+
+.skill-content {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+  background: transparent;
+}
+
+/* -- Truncated Notice ------------------------------------------------------ */
+
+.truncated-notice {
+  background: rgba(245, 200, 66, 0.15);
+  color: var(--yellow);
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  margin-bottom: 12px;
+  font-family: var(--mono);
+}
+
+/* -- Button Small ---------------------------------------------------------- */
+
+.btn-small {
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-sm);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+
+.btn-small:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* -- Modal JSON View ------------------------------------------------------- */
+
+.modal-json {
+  padding: 16px 20px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-sm);
+  background: var(--bg);
+  overflow-y: auto;
+  flex: 1;
+}

@@ -97,13 +97,14 @@ function render(data) {
   renderHeaderCards(data);
   renderActivity(data.activity || []);
 
-  // System tab (only render if visible to save work, or on first load)
+  // System tab
   renderSystemChannels(data.channels || {});
   renderSystemBus(data.system || {});
-  renderSystemTools(data.tools || {});
   renderSystemCron(data.cron || {});
-  renderSystemMCP(data.tools || {});
-  renderSystemMemory(data.memory || {});
+  renderSystemHeartbeat(data.system || {});
+
+  // Agent Sheet tab
+  renderAgentSheet(data);
 }
 
 // -- Render: Header -----------------------------------------------------------
@@ -236,11 +237,6 @@ function renderSystemBus(sys) {
   var rows = [
     ['Inbound queue', sys.inbound_queue_depth ?? '\u2014', sys.inbound_queue_depth === 0 ? 'dot-ok' : 'dot-warn'],
     ['Outbound queue', sys.outbound_queue_depth ?? '\u2014', sys.outbound_queue_depth === 0 ? 'dot-ok' : 'dot-warn'],
-    ['Heartbeat',
-      sys.heartbeat_enabled
-        ? 'every ' + sys.heartbeat_interval_s + 's'
-        : 'disabled',
-      sys.heartbeat_enabled ? 'dot-ok' : 'dot-off'],
   ];
   el.innerHTML = '<div class="status-grid">' + rows.map(function(r) {
     return '<div class="status-row">' +
@@ -250,19 +246,18 @@ function renderSystemBus(sys) {
   }).join('') + '</div>';
 }
 
-function renderSystemTools(tools) {
-  var builtin = tools.builtin || [];
-  var el = document.getElementById('sys-tools');
-  document.getElementById('tools-count').textContent = builtin.length + ' built-in';
-
-  if (builtin.length === 0) {
-    el.innerHTML = '<div class="empty">None registered</div>';
-    return;
-  }
-  el.innerHTML = '<div class="tool-chips">' +
-    builtin.map(function(n) {
-      return '<span class="tool-chip">' + esc(n) + '</span>';
-    }).join('') + '</div>';
+function renderSystemHeartbeat(sys) {
+  var el = document.getElementById('sys-heartbeat');
+  var rows = [
+    ['Status', sys.heartbeat_enabled ? 'enabled' : 'disabled', sys.heartbeat_enabled ? 'dot-ok' : 'dot-off'],
+    ['Interval', sys.heartbeat_enabled ? sys.heartbeat_interval_s + 's' : '\u2014', ''],
+  ];
+  el.innerHTML = '<div class="status-grid">' + rows.map(function(r) {
+    return '<div class="status-row">' +
+      '<span class="status-label">' + esc(r[0]) + '</span>' +
+      '<span class="status-value ' + r[2] + '">' + esc(r[1]) + '</span>' +
+    '</div>';
+   }).join('') + '</div>';
 }
 
 function renderSystemCron(cron) {
@@ -353,10 +348,108 @@ function renderSystemMemory(mem) {
   }).join('') + '</div>';
 }
 
+// -- Render: Agent Sheet Tab ---------------------------------------------------
+
+function renderAgentSheet(data) {
+  renderSheetSkills(data.skills || []);
+  renderSheetMCP(data.tools?.mcp || []);
+  renderSheetTools(data.tools?.builtin || []);
+  renderSheetMemory(data.memory || {});
+}
+
+function renderSheetSkills(skills) {
+  var el = document.getElementById('sheet-skills');
+  document.getElementById('sheet-skills-count').textContent = skills.length;
+
+  if (skills.length === 0) {
+    el.innerHTML = '<div class="empty">No skills configured</div>';
+    return;
+  }
+
+  el.innerHTML = '<div class="item-list">' + skills.map(function(s) {
+    var availClass = s.available ? 'item-ok' : 'item-warn';
+    var sourceBadge = s.source === 'workspace' ? '<span class="badge-small badge-ws">workspace</span>' : '';
+    var alwaysBadge = s.always ? '<span class="badge-small badge-always">always</span>' : '';
+    return '<div class="item-row clickable" data-skill="' + esc(s.name) + '" onclick="openSkillModal(this)">' +
+      '<span class="item-dot ' + availClass + '"></span>' +
+      '<span class="item-name">' + esc(s.name) + '</span>' +
+      sourceBadge + alwaysBadge +
+      '<span class="item-desc">' + esc(s.description || '') + '</span>' +
+    '</div>';
+  }).join('') + '</div>';
+}
+
+function renderSheetTools(tools) {
+  var el = document.getElementById('sheet-tools');
+  document.getElementById('sheet-tools-count').textContent = tools.length;
+
+  if (tools.length === 0) {
+    el.innerHTML = '<div class="empty">No tools registered</div>';
+    return;
+  }
+
+  el.innerHTML = '<div class="item-list">' + tools.map(function(t) {
+    return '<div class="item-row clickable" data-tool="' + esc(t.name) + '" onclick="openToolModal(this)">' +
+      '<span class="item-name">' + esc(t.name) + '</span>' +
+      '<span class="item-desc">' + esc(t.description || '') + '</span>' +
+    '</div>';
+  }).join('') + '</div>';
+}
+
+function renderSheetMCP(mcpServers) {
+  var el = document.getElementById('sheet-mcp');
+  document.getElementById('sheet-mcp-count').textContent = mcpServers.length;
+
+  if (mcpServers.length === 0) {
+    el.innerHTML = '<div class="empty">No MCP servers configured</div>';
+    return;
+  }
+
+  el.innerHTML = '<div class="item-list">' + mcpServers.map(function(s) {
+    var connClass = s.connected ? 'item-ok' : (s.status === 'failed' ? 'item-err' : 'item-warn');
+    return '<div class="item-row clickable" data-mcp="' + esc(s.server) + '" onclick="openMCPModal(this)">' +
+      '<span class="item-dot ' + connClass + '"></span>' +
+      '<span class="item-name">' + esc(s.server) + '</span>' +
+      '<span class="item-badge">' + esc(s.transport) + '</span>' +
+      '<span class="item-desc">' + s.tool_count + ' tools</span>' +
+    '</div>';
+  }).join('') + '</div>';
+}
+
+function renderSheetMemory(memory) {
+  var el = document.getElementById('sheet-memory');
+
+  if (!memory.available) {
+    el.innerHTML = '<div class="empty">Memory not available</div>';
+    document.getElementById('sheet-memory-count').textContent = '0';
+    return;
+  }
+
+  var files = memory.files || [];
+  document.getElementById('sheet-memory-count').textContent = files.length;
+
+  if (files.length === 0) {
+    el.innerHTML = '<div class="empty">No memory files</div>';
+    return;
+  }
+
+  el.innerHTML = '<div class="item-list">' + files.map(function(f) {
+    return '<div class="item-row clickable" data-file="' + esc(f.name) + '" onclick="openFileModalByName(this.dataset.file)">' +
+      '<span class="item-name">' + esc(f.name) + '</span>' +
+      '<span class="item-desc">' + fmtBytes(f.size_bytes) + '</span>' +
+    '</div>';
+  }).join('') + '</div>';
+}
+
 // -- File Viewer Modal --------------------------------------------------------
 
 async function openFileModal(rowEl) {
   var filename = rowEl.dataset.filename;
+  if (!filename) return;
+  openFileModalByName(filename);
+}
+
+async function openFileModalByName(filename) {
   if (!filename) return;
 
   var overlay = document.getElementById('file-modal');
@@ -385,9 +478,189 @@ async function openFileModal(rowEl) {
 }
 
 function closeFileModal(event) {
-  // If called from overlay click, only close if clicking the overlay itself
   if (event && event.target && !event.target.classList.contains('modal-overlay')) return;
   document.getElementById('file-modal').classList.remove('open');
+}
+
+// -- Detail Modal (Tool/Skill/MCP) ---------------------------------------------
+
+function showDetailModal(title, content) {
+  document.getElementById('detail-modal-title').textContent = title;
+  document.getElementById('detail-modal-badge').textContent = '';
+  document.getElementById('detail-modal-subtitle').textContent = '';
+  document.getElementById('detail-modal-content').innerHTML = content;
+  document.getElementById('detail-modal-json').style.display = 'none';
+  document.getElementById('detail-modal-json-btn').style.display = 'none';
+  document.getElementById('detail-modal').classList.add('open');
+}
+
+function closeDetailModal(event) {
+  if (event && event.target && !event.target.classList.contains('modal-overlay')) return;
+  document.getElementById('detail-modal').classList.remove('open');
+}
+
+async function openToolModal(rowEl) {
+  var name = rowEl.dataset.tool;
+  if (!name) return;
+
+  showDetailModal('Tool: ' + name, '<div class="empty"><span class="spinner"></span> Loading</div>');
+
+  try {
+    var res = await fetch('/api/tool/' + encodeURIComponent(name));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var data = await res.json();
+    renderToolDetail(data);
+  } catch (e) {
+    document.getElementById('detail-modal-content').innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderToolDetail(data) {
+  var content = '<div class="detail-section">' +
+    '<div class="detail-label">Description</div>' +
+    '<div class="detail-value">' + esc(data.description || 'No description') + '</div>' +
+  '</div>';
+
+  var params = data.parameters || {};
+  var props = params.properties || {};
+  var required = params.required || [];
+
+  if (Object.keys(props).length > 0) {
+    content += '<div class="detail-section">' +
+      '<div class="detail-label">Parameters</div>' +
+      '<table class="params-table">' +
+      '<thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>' +
+      '<tbody>';
+
+    for (var key in props) {
+      var p = props[key];
+      var type = p.type || 'any';
+      if (p.enum) type += ' (' + p.enum.join('|') + ')';
+      var desc = p.description || '';
+      content += '<tr>' +
+        '<td class="param-name">' + esc(key) + '</td>' +
+        '<td class="param-type">' + esc(type) + '</td>' +
+        '<td class="param-req">' + (required.indexOf(key) >= 0 ? 'yes' : 'no') + '</td>' +
+        '<td class="param-desc">' + esc(desc) + '</td>' +
+      '</tr>';
+    }
+
+    content += '</tbody></table></div>';
+  } else {
+    content += '<div class="detail-section">' +
+      '<div class="detail-label">Parameters</div>' +
+      '<div class="detail-value muted">No parameters</div>' +
+    '</div>';
+  }
+
+  var jsonEl = document.getElementById('detail-modal-json');
+  jsonEl.textContent = JSON.stringify(data.parameters, null, 2);
+  document.getElementById('detail-modal-json-btn').style.display = 'inline-block';
+
+  document.getElementById('detail-modal-content').innerHTML = content;
+}
+
+async function openSkillModal(rowEl) {
+  var name = rowEl.dataset.skill;
+  if (!name) return;
+
+  showDetailModal('Skill: ' + name, '<div class="empty"><span class="spinner"></span> Loading</div>');
+
+  try {
+    var res = await fetch('/api/skill/' + encodeURIComponent(name));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var data = await res.json();
+    renderSkillDetail(data);
+  } catch (e) {
+    document.getElementById('detail-modal-content').innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderSkillDetail(data) {
+  var truncatedNotice = data.truncated
+    ? '<div class="truncated-notice">Content truncated at 100KB</div>'
+    : '';
+
+  document.getElementById('detail-modal-content').innerHTML =
+    truncatedNotice +
+    '<pre class="skill-content">' + esc(data.content) + '</pre>';
+}
+
+async function openMCPModal(rowEl) {
+  var server = rowEl.dataset.mcp;
+  if (!server) return;
+
+  showDetailModal('MCP Server: ' + server, '<div class="empty"><span class="spinner"></span> Loading</div>');
+
+  try {
+    var res = await fetch('/api/mcp/' + encodeURIComponent(server));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var data = await res.json();
+    renderMCPDetail(data);
+  } catch (e) {
+    document.getElementById('detail-modal-content').innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderMCPDetail(data) {
+  var statusClass = data.status === 'connected' ? 'item-ok' : 'item-warn';
+  var content = '<div class="detail-grid">' +
+    '<div class="detail-row"><span class="detail-label">Status</span>' +
+      '<span class="detail-value"><span class="item-dot ' + statusClass + '"></span> ' + esc(data.status) + '</span></div>' +
+    '<div class="detail-row"><span class="detail-label">Transport</span>' +
+      '<span class="detail-value">' + esc(data.transport) + '</span></div>' +
+    '<div class="detail-row"><span class="detail-label">Endpoint</span>' +
+      '<span class="detail-value code">' + esc(data.endpoint || '-') + '</span></div>' +
+    '<div class="detail-row"><span class="detail-label">Connect Timeout</span>' +
+      '<span class="detail-value">' + data.connect_timeout + 's</span></div>' +
+    '<div class="detail-row"><span class="detail-label">Tool Timeout</span>' +
+      '<span class="detail-value">' + data.tool_timeout + 's</span></div>' +
+    '<div class="detail-row"><span class="detail-label">Loaded</span>' +
+      '<span class="detail-value">' + (data.loaded ? 'yes' : 'no') + '</span></div>' +
+  '</div>';
+
+  var tools = data.tools || [];
+  if (tools.length > 0) {
+    content += '<div class="detail-section">' +
+      '<div class="detail-label">Tools (' + tools.length + ')</div>' +
+      '<div class="tool-list">';
+
+    tools.forEach(function(t) {
+      content += '<div class="tool-list-item clickable" data-server="' + esc(data.server) + '" data-tool="' + esc(t.name) + '" onclick="openMCPToolModal(this)">' +
+        '<span class="tool-list-name">' + esc(t.name) + '</span>' +
+        '<span class="tool-list-desc">' + esc(t.description || '') + '</span>' +
+      '</div>';
+    });
+
+    content += '</div></div>';
+  }
+
+  document.getElementById('detail-modal-content').innerHTML = content;
+}
+
+function openMCPToolModal(rowEl) {
+  var server = rowEl.dataset.server;
+  var tool = rowEl.dataset.tool;
+
+  showDetailModal('MCP Tool: ' + tool, '<div class="empty"><span class="spinner"></span> Loading</div>');
+
+  fetch('/api/mcp/' + encodeURIComponent(server))
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      var toolData = (data.tools || []).find(function(t) { return t.name === tool; });
+      if (toolData) {
+        renderToolDetail({
+          name: tool,
+          description: toolData.description,
+          parameters: toolData.input_schema,
+        });
+      } else {
+        document.getElementById('detail-modal-content').innerHTML = '<div class="empty">Tool not found</div>';
+      }
+    })
+    .catch(function(e) {
+      document.getElementById('detail-modal-content').innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>';
+    });
 }
 
 // -- Session Inspector Drawer -------------------------------------------------
@@ -559,6 +832,22 @@ function stopPolling() {
 document.addEventListener('DOMContentLoaded', function() {
   initTabs();
   document.getElementById('refresh-btn').addEventListener('click', fetchDashboard);
+
+  // JSON Schema toggle for detail modal
+  document.getElementById('detail-modal-json-btn').addEventListener('click', function() {
+    var jsonEl = document.getElementById('detail-modal-json');
+    var contentEl = document.getElementById('detail-modal-content');
+    if (jsonEl.style.display === 'none') {
+      jsonEl.style.display = 'block';
+      contentEl.style.display = 'none';
+      this.textContent = 'Show Table';
+    } else {
+      jsonEl.style.display = 'none';
+      contentEl.style.display = 'block';
+      this.textContent = 'Show JSON Schema';
+    }
+  });
+
   fetchDashboard();
   startPolling();
 

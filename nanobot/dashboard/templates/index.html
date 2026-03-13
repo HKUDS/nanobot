@@ -27,6 +27,7 @@
   <!-- Zone 2: Tabbed Primary View -->
   <nav class="tab-bar">
     <button class="tab active" data-tab="activity">Activity</button>
+    <button class="tab" data-tab="agent-sheet">Agent Sheet</button>
     <button class="tab" data-tab="system">System</button>
   </nav>
 
@@ -36,6 +37,40 @@
     <div class="tab-content active" id="tab-activity">
       <div class="activity-feed" id="activity-feed">
         <div class="empty"><span class="spinner"></span> Loading</div>
+      </div>
+    </div>
+
+    <!-- Agent Sheet Tab -->
+    <div class="tab-content" id="tab-agent-sheet">
+      <div class="agent-sheet-grid">
+        <div class="panel">
+          <div class="panel-header">
+            Skills
+            <span class="panel-count" id="sheet-skills-count"></span>
+          </div>
+          <div class="panel-body" id="sheet-skills"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            MCP Servers
+            <span class="panel-count" id="sheet-mcp-count"></span>
+          </div>
+          <div class="panel-body" id="sheet-mcp"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            Tools
+            <span class="panel-count" id="sheet-tools-count"></span>
+          </div>
+          <div class="panel-body" id="sheet-tools"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            Memory
+            <span class="panel-count" id="sheet-memory-count"></span>
+          </div>
+          <div class="panel-body" id="sheet-memory"></div>
+        </div>
       </div>
     </div>
 
@@ -51,22 +86,12 @@
           <div class="panel-body" id="sys-bus"></div>
         </div>
         <div class="panel">
-          <div class="panel-header">Tools
-            <span class="panel-count" id="tools-count"></span>
-          </div>
-          <div class="panel-body" id="sys-tools"></div>
-        </div>
-        <div class="panel">
           <div class="panel-header">Scheduled Tasks</div>
           <div class="panel-body" id="sys-cron"></div>
         </div>
         <div class="panel">
-          <div class="panel-header">MCP Servers</div>
-          <div class="panel-body" id="sys-mcp"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-header">Memory</div>
-          <div class="panel-body" id="sys-memory"></div>
+          <div class="panel-header">Heartbeat</div>
+          <div class="panel-body" id="sys-heartbeat"></div>
         </div>
       </div>
     </div>
@@ -94,6 +119,21 @@
         <button class="modal-close" onclick="closeFileModal()">Close</button>
       </div>
       <pre id="file-modal-content" class="modal-content"></pre>
+    </div>
+  </div>
+
+  <!-- Detail Modal (Tool/Skill/MCP) -->
+  <div id="detail-modal" class="modal-overlay" onclick="closeDetailModal(event)">
+    <div class="modal modal-large">
+      <div class="modal-header">
+        <span id="detail-modal-title"></span>
+        <span id="detail-modal-badge"></span>
+        <button id="detail-modal-json-btn" class="btn-small" style="display:none">Show JSON Schema</button>
+        <button class="modal-close" onclick="closeDetailModal()">Close</button>
+      </div>
+      <div class="modal-subtitle" id="detail-modal-subtitle"></div>
+      <div id="detail-modal-content" class="modal-content"></div>
+      <pre id="detail-modal-json" class="modal-json" style="display:none"></pre>
     </div>
   </div>
 
