@@ -1,6 +1,7 @@
 """MCP client: connects to MCP servers and wraps their tools as native nanobot tools."""
 
 import asyncio
+import json
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -21,6 +22,40 @@ class MCPToolWrapper(Tool):
         self._description = tool_def.description or tool_def.name
         self._parameters = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._tool_timeout = tool_timeout
+        self._summary_only = True
+        self._idle_rounds = 0
+
+    @property
+    def is_summary_only(self) -> bool:
+        """Whether this tool is currently in summary-only mode."""
+        return self._summary_only
+
+    def promote_to_full(self) -> None:
+        """Promote this tool from summary-only to full schema mode."""
+        self._summary_only = False
+        self._idle_rounds = 0
+
+    def demote_to_summary(self) -> None:
+        """Demote this tool back to summary-only mode."""
+        self._summary_only = True
+        self._idle_rounds = 0
+
+    def mark_used(self) -> None:
+        """Reset the idle counter (tool was just executed)."""
+        self._idle_rounds = 0
+
+    def tick_idle(self) -> None:
+        """Increment the idle counter by one round."""
+        if not self._summary_only:
+            self._idle_rounds += 1
+
+    @property
+    def idle_rounds(self) -> int:
+        return self._idle_rounds
+
+    def get_full_schema_text(self) -> str:
+        """Return the full function schema as a JSON string for informative messages."""
+        return json.dumps(self.to_schema(), indent=2)
 
     @property
     def name(self) -> str:

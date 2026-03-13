@@ -179,3 +179,14 @@ class Tool(ABC):
                 "parameters": self.parameters,
             },
         }
+
+    def to_summary_schema(self) -> dict[str, Any]:
+        """Convert tool to OpenAI function schema with minimal parameters (summary only)."""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
