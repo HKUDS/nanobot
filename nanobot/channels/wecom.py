@@ -37,6 +37,7 @@ class WecomChannel(BaseChannel):
 
     name = "wecom"
     display_name = "WeCom"
+    supports_content_stream_progress = True
 
     def __init__(self, config: WecomConfig, bus: MessageBus):
         super().__init__(config, bus)
@@ -47,6 +48,8 @@ class WecomChannel(BaseChannel):
         self._generate_req_id = None
         # Store frame headers for each chat to enable replies
         self._chat_frames: dict[str, Any] = {}
+        # chat_id -> in-flight stream_id for token-level content streaming
+        self._active_stream_ids: dict[str, str] = {}
 
     async def start(self) -> None:
         """Start the WeCom bot with WebSocket long connection."""
@@ -98,6 +101,7 @@ class WecomChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the WeCom bot."""
         self._running = False
+        self._active_stream_ids.clear()
         if self._client:
             await self._client.disconnect()
         logger.info("WeCom bot stopped")
@@ -336,16 +340,21 @@ class WecomChannel(BaseChannel):
                 logger.warning("No frame found for chat {}, cannot reply", msg.chat_id)
                 return
 
-            # Use streaming reply for better UX
-            stream_id = self._generate_req_id("stream")
+            is_progress = bool((msg.metadata or {}).get("_progress"))
+            progress_kind = (msg.metadata or {}).get("_progress_kind")
 
-            # Send as streaming message with finish=True
-            await self._client.reply_stream(
-                frame,
-                stream_id,
-                content,
-                finish=True,
-            )
+            if is_progress and progress_kind == "content":
+                # Keep one stream_id per chat to append token chunks incrementally.
+                stream_id = self._active_stream_ids.get(msg.chat_id)
+                if not stream_id:
+                    stream_id = self._generate_req_id("stream")
+                    self._active_stream_ids[msg.chat_id] = stream_id
+                await self._client.reply_stream(frame, stream_id, content, finish=False)
+                return
+
+            # Final message: close active content stream if present; otherwise send one-shot stream.
+            stream_id = self._active_stream_ids.pop(msg.chat_id, None) or self._generate_req_id("stream")
+            await self._client.reply_stream(frame, stream_id, content, finish=True)
 
             logger.debug("WeCom message sent to {}", msg.chat_id)
 

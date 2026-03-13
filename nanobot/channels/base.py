@@ -23,6 +23,9 @@ class BaseChannel(ABC):
     name: str = "base"
     display_name: str = "Base"
     transcription_api_key: str = ""
+    # Whether this channel can render token-level text progress ("_progress_kind=content")
+    # without spamming users. Unsupported channels receive only the final response.
+    supports_content_stream_progress: bool = False
 
     def __init__(self, config: Any, bus: MessageBus):
         """

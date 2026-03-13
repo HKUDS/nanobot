@@ -30,6 +30,7 @@ class _FakeUpdater:
 class _FakeBot:
     def __init__(self) -> None:
         self.sent_messages: list[dict] = []
+        self.sent_drafts: list[dict] = []
         self.get_me_calls = 0
 
     async def get_me(self):
@@ -41,6 +42,9 @@ class _FakeBot:
 
     async def send_message(self, **kwargs) -> None:
         self.sent_messages.append(kwargs)
+
+    async def send_message_draft(self, **kwargs) -> None:
+        self.sent_drafts.append(kwargs)
 
     async def send_chat_action(self, **kwargs) -> None:
         pass
@@ -209,6 +213,53 @@ async def test_send_progress_keeps_message_in_topic() -> None:
     )
 
     assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_send_content_progress_uses_draft_not_message() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="hello",
+            metadata={"_progress": True, "_progress_kind": "content"},
+        )
+    )
+
+    assert len(channel._app.bot.sent_drafts) == 1
+    assert channel._app.bot.sent_messages == []
+
+
+@pytest.mark.asyncio
+async def test_final_response_after_content_progress_skips_second_stream_simulation() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="hel",
+            metadata={"_progress": True, "_progress_kind": "content"},
+        )
+    )
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="hello",
+        )
+    )
+
+    # One draft update from progress turn; final turn sends one persisted message.
+    assert len(channel._app.bot.sent_drafts) == 1
+    assert len(channel._app.bot.sent_messages) == 1
+    assert channel._stream_draft_ids == {}
 
 
 @pytest.mark.asyncio
