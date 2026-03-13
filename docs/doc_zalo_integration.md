@@ -9,11 +9,12 @@ The Zalo Channel enables `nanobot` to receive messages from a Zalo Official Acco
 ## 2. Setup Guide
 
 ### prerequisites
-1.  **Zalo OA**: You need an active Official Account.
+1.  **Zalo BOT**: You need an active Official Account and read informations from [bot.zapps.me](https://bot.zapps.me).
 2.  **Zalo Developer App**: Created at [developers.zalo.me](https://developers.zalo.me/).
 3.  **Bot Token**: A static access token from [bot.zaloplatforms.com](https://bot.zaloplatforms.com/).
 4.  **Webhook Secret**: Also from the Zalo Bot Platform settings.
-
+5.  **Python_ZALO_BOT**: Access from [python-zalo-bot](https://pypi.org/project/python-zalo-bot/).
+  
 ### Configuration
 Add the following to your `data/config.json` file:
 

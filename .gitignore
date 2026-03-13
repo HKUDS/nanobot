@@ -29,3 +29,5 @@ docs/rag_anything_logic.md
 rag_storage/
 tests/verify_dual_model_config.py
 uv.lock
+nanobot/agent/tools/rag.py
+scripts/debug_rag_test.py
