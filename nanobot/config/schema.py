@@ -205,6 +205,29 @@ class WecomConfig(Base):
     """WeCom (Enterprise WeChat) AI Bot channel configuration."""
 
     enabled: bool = False
+    homeserver: str = "https://matrix.org"
+    access_token: str = ""
+    user_id: str = ""                       # e.g. @bot:matrix.org
+    device_id: str = ""
+    e2ee_enabled: bool = True               # end-to-end encryption support
+    sync_stop_grace_seconds: int = 2        # graceful sync_forever shutdown timeout
+    max_media_bytes: int = 20 * 1024 * 1024 # inbound + outbound attachment limit
+    allow_from: list[str] = Field(default_factory=list)
+    group_policy: Literal["open", "mention", "allowlist"] = "open"
+    group_allow_from: list[str] = Field(default_factory=list)
+    allow_room_mentions: bool = False
+    
+
+class LuffaConfig(BaseModel):
+    """Configuration for the Luffa bot channel."""
+
+    enabled: bool = False
+
+    # Bot token from robot.luffa.im
+    token: str = ""
+    allow_from: list[str] = Field(default_factory=lambda: ["*"])
+    mode: str = "polling"
+    poll_interval: float = 1.5
     bot_id: str = ""  # Bot ID from WeCom AI Bot platform
     secret: str = ""  # Bot Secret from WeCom AI Bot platform
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
@@ -226,7 +249,11 @@ class ChannelsConfig(Base):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+<<<<<<< main
+    luffa: LuffaConfig = Field(default_factory=LuffaConfig) 
+=======
     wecom: WecomConfig = Field(default_factory=WecomConfig)
+>>>>>>> main
 
 
 class AgentDefaults(Base):
