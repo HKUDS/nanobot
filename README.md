@@ -1284,7 +1284,7 @@ nanobot/
 
 ## 🤝 Contribute & Roadmap
 
-PRs welcome! The codebase is intentionally small and readable. 🤗
+PRs welcome! The codebase is intentionally small and readable. 🤗 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and how to submit a pull request.
 
 **Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 
