@@ -342,7 +342,7 @@ class MCPServerConfig(Base):
     url: str = ""  # HTTP/SSE: endpoint URL
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
     tool_timeout: int = 30  # seconds before a tool call is cancelled
-
+    enabled_tools: list[str] = Field(default_factory=list)  # Only register these tools; empty = all tools
 
 class ToolsConfig(Base):
     """Tools configuration."""
