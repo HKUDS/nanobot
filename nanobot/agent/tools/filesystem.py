@@ -8,25 +8,41 @@ from nanobot.agent.tools.base import Tool
 
 
 def _resolve_path(
-    path: str, workspace: Path | None = None, allowed_dir: Path | None = None
+    path: str, workspace: Path | None = None, allowed_dir: list[Path] | Path | None = None
 ) -> Path:
     """Resolve path against workspace (if relative) and enforce directory restriction."""
     p = Path(path).expanduser()
     if not p.is_absolute() and workspace:
         p = workspace / p
     resolved = p.resolve()
-    if allowed_dir:
-        try:
-            resolved.relative_to(allowed_dir.resolve())
-        except ValueError:
-            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
+
+    # Normalize allowed_dir to a list (supports both single Path and list)
+    allowed_list: list[Path] | None = None
+    if allowed_dir is not None:
+        if isinstance(allowed_dir, Path):
+            allowed_list = [allowed_dir.resolve()]
+        else:
+            allowed_list = [d.resolve() for d in allowed_dir]
+
+    if allowed_list:
+        allowed = False
+        for allowed_directory in allowed_list:
+            try:
+                resolved.relative_to(allowed_directory)
+                allowed = True
+                break
+            except ValueError:
+                continue
+        if not allowed:
+            dirs_str = ", ".join(str(d) for d in allowed_list)
+            raise PermissionError(f"Path {path} is outside allowed directories: {dirs_str}")
     return resolved
 
 
 class _FsTool(Tool):
     """Shared base for filesystem tools — common init and path resolution."""
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
+    def __init__(self, workspace: Path | None = None, allowed_dir: list[Path] | Path | None = None):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
 
@@ -77,13 +93,13 @@ class ReadFileTool(_FsTool):
 
     async def execute(self, path: str, offset: int = 1, limit: int | None = None, **kwargs: Any) -> str:
         try:
-            fp = self._resolve(path)
-            if not fp.exists():
+            file_path = self._resolve(path)
+            if not file_path.exists():
                 return f"Error: File not found: {path}"
-            if not fp.is_file():
+            if not file_path.is_file():
                 return f"Error: Not a file: {path}"
 
-            all_lines = fp.read_text(encoding="utf-8").splitlines()
+            all_lines = file_path.read_text(encoding="utf-8").splitlines()
             total = len(all_lines)
 
             if offset < 1:
@@ -147,10 +163,10 @@ class WriteFileTool(_FsTool):
 
     async def execute(self, path: str, content: str, **kwargs: Any) -> str:
         try:
-            fp = self._resolve(path)
-            fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(content, encoding="utf-8")
-            return f"Successfully wrote {len(content)} bytes to {fp}"
+            file_path = self._resolve(path)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8")
+            return f"Successfully wrote {len(content)} bytes to {file_path}"
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
@@ -223,11 +239,11 @@ class EditFileTool(_FsTool):
         replace_all: bool = False, **kwargs: Any,
     ) -> str:
         try:
-            fp = self._resolve(path)
-            if not fp.exists():
+            file_path = self._resolve(path)
+            if not file_path.exists():
                 return f"Error: File not found: {path}"
 
-            raw = fp.read_bytes()
+            raw = file_path.read_bytes()
             uses_crlf = b"\r\n" in raw
             content = raw.decode("utf-8").replace("\r\n", "\n")
             match, count = _find_match(content, old_text.replace("\r\n", "\n"))
@@ -245,8 +261,8 @@ class EditFileTool(_FsTool):
             if uses_crlf:
                 new_content = new_content.replace("\n", "\r\n")
 
-            fp.write_bytes(new_content.encode("utf-8"))
-            return f"Successfully edited {fp}"
+            file_path.write_bytes(new_content.encode("utf-8"))
+            return f"Successfully edited {file_path}"
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
@@ -325,10 +341,10 @@ class ListDirTool(_FsTool):
         max_entries: int | None = None, **kwargs: Any,
     ) -> str:
         try:
-            dp = self._resolve(path)
-            if not dp.exists():
+            dir_path = self._resolve(path)
+            if not dir_path.exists():
                 return f"Error: Directory not found: {path}"
-            if not dp.is_dir():
+            if not dir_path.is_dir():
                 return f"Error: Not a directory: {path}"
 
             cap = max_entries or self._DEFAULT_MAX
@@ -336,15 +352,15 @@ class ListDirTool(_FsTool):
             total = 0
 
             if recursive:
-                for item in sorted(dp.rglob("*")):
+                for item in sorted(dir_path.rglob("*")):
                     if any(p in self._IGNORE_DIRS for p in item.parts):
                         continue
                     total += 1
                     if len(items) < cap:
-                        rel = item.relative_to(dp)
+                        rel = item.relative_to(dir_path)
                         items.append(f"{rel}/" if item.is_dir() else str(rel))
             else:
-                for item in sorted(dp.iterdir()):
+                for item in sorted(dir_path.iterdir()):
                     if item.name in self._IGNORE_DIRS:
                         continue
                     total += 1

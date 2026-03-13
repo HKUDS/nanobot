@@ -32,6 +32,7 @@ class SubagentManager:
         web_proxy: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        allowed_dir: list[str] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -43,6 +44,7 @@ class SubagentManager:
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.allowed_dir = allowed_dir or []
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
@@ -91,16 +93,22 @@ class SubagentManager:
         try:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
-            allowed_dir = self.workspace if self.restrict_to_workspace else None
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            allowed_dir_list: list[Path] | None = None
+            if self.restrict_to_workspace:
+                allowed_dir_list = [self.workspace.resolve()]
+                for dir_str in self.allowed_dir:
+                    allowed_dir_list.append(Path(dir_str).expanduser().resolve())
+
+            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir_list))
+            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir_list))
+            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir_list))
+            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir_list))
             tools.register(ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
                 path_append=self.exec_config.path_append,
+                allowed_dir=allowed_dir_list,
             ))
             tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
             tools.register(WebFetchTool(proxy=self.web_proxy))

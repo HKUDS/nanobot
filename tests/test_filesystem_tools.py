@@ -1,12 +1,17 @@
 """Tests for enhanced filesystem tools: ReadFileTool, EditFileTool, ListDirTool."""
 
+import tempfile
+from pathlib import Path
+
 import pytest
 
 from nanobot.agent.tools.filesystem import (
     EditFileTool,
     ListDirTool,
     ReadFileTool,
+    WriteFileTool,
     _find_match,
+    _resolve_path,
 )
 
 
@@ -73,6 +78,75 @@ class TestReadFileTool:
         result = await tool.execute(path=str(f))
         assert len(result) <= ReadFileTool._MAX_CHARS + 500  # small margin for footer
         assert "Use offset=" in result
+
+
+# ---------------------------------------------------------------------------
+# WriteFileTool
+# ---------------------------------------------------------------------------
+
+class TestWriteFileTool:
+
+    @pytest.fixture()
+    def tool(self, tmp_path):
+        return WriteFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_basic_write(self, tool, tmp_path):
+        f = tmp_path / "test.txt"
+        result = await tool.execute(path=str(f), content="hello world")
+        assert "Successfully wrote" in result
+        assert f.read_text() == "hello world"
+
+    @pytest.mark.asyncio
+    async def test_creates_parent_directories(self, tool, tmp_path):
+        f = tmp_path / "subdir" / "nested" / "file.txt"
+        result = await tool.execute(path=str(f), content="nested content")
+        assert "Successfully wrote" in result
+        assert f.read_text() == "nested content"
+
+    @pytest.mark.asyncio
+    async def test_overwrites_existing_file(self, tool, tmp_path):
+        f = tmp_path / "overwrite.txt"
+        f.write_text("original content")
+        result = await tool.execute(path=str(f), content="new content")
+        assert "Successfully wrote" in result
+        assert f.read_text() == "new content"
+
+    @pytest.mark.asyncio
+    async def test_empty_content(self, tool, tmp_path):
+        f = tmp_path / "empty.txt"
+        result = await tool.execute(path=str(f), content="")
+        assert "Successfully wrote" in result
+        assert f.read_text() == ""
+
+    @pytest.mark.asyncio
+    async def test_write_with_multiline_content(self, tool, tmp_path):
+        f = tmp_path / "multiline.txt"
+        content = "line 1\nline 2\nline 3"
+        result = await tool.execute(path=str(f), content=content)
+        assert "Successfully wrote" in result
+        assert f.read_text() == content
+
+    @pytest.mark.asyncio
+    async def test_write_with_multiple_allowed_dir(self, tmp_path):
+        """Test WriteFileTool with multiple allowed directories."""
+        with tempfile.TemporaryDirectory() as dir1, tempfile.TemporaryDirectory() as dir2:
+            path1 = Path(dir1).resolve()
+            path2 = Path(dir2).resolve()
+
+            tool = WriteFileTool(workspace=path1, allowed_dir=[path1, path2])
+
+            # Write to workspace
+            file1 = path1 / "test1.txt"
+            result = await tool.execute(str(file1), content="content from dir1")
+            assert "Successfully wrote" in result
+            assert file1.read_text() == "content from dir1"
+
+            # Write to additional allowed dir
+            file2 = path2 / "test2.txt"
+            result = await tool.execute(str(file2), content="content from dir2")
+            assert "Successfully wrote" in result
+            assert file2.read_text() == "content from dir2"
 
 
 # ---------------------------------------------------------------------------
@@ -222,8 +296,9 @@ class TestListDirTool:
     @pytest.mark.asyncio
     async def test_recursive(self, tool, populated_dir):
         result = await tool.execute(path=str(populated_dir), recursive=True)
-        assert "src/main.py" in result
-        assert "src/utils.py" in result
+        # Accept both forward slashes (Unix) and backslashes (Windows)
+        assert "src/main.py" in result or "src\\main.py" in result
+        assert "src/utils.py" in result or "src\\utils.py" in result
         assert "README.md" in result
         # Ignored dirs should not appear
         assert ".git" not in result
@@ -249,3 +324,101 @@ class TestListDirTool:
         result = await tool.execute(path=str(tmp_path / "nope"))
         assert "Error" in result
         assert "not found" in result
+
+
+# ---------------------------------------------------------------------------
+# _resolve_path
+# ---------------------------------------------------------------------------
+
+class TestResolvePath:
+
+    def test_resolve_path_single_allowed_dir(self):
+        """Test backward compatibility with single allowed_dir."""
+        with tempfile.TemporaryDirectory() as workspace:
+            workspace_path = Path(workspace).resolve()
+            test_file = workspace_path / "test.txt"
+            test_file.write_text("hello")
+
+            # Should work with single allowed_dir
+            result = _resolve_path("test.txt", workspace_path, workspace_path)
+            assert result == test_file
+
+            # Should reject path outside
+            with pytest.raises(PermissionError):
+                _resolve_path("/etc/passwd", workspace_path, workspace_path)
+
+    def test_resolve_path_multiple_allowed_dir(self):
+        """Test _resolve_path with multiple allowed directories."""
+        with tempfile.TemporaryDirectory() as dir1, tempfile.TemporaryDirectory() as dir2:
+            path1 = Path(dir1).resolve()
+            path2 = Path(dir2).resolve()
+
+            # Create test files in both directories
+            file1 = path1 / "file1.txt"
+            file1.write_text("content1")
+            file2 = path2 / "file2.txt"
+            file2.write_text("content2")
+
+            allowed_dir = [path1, path2]
+
+            # Should allow paths in first directory
+            result = _resolve_path(str(file1), None, allowed_dir)
+            assert result == file1
+
+            # Should allow paths in second directory
+            result = _resolve_path(str(file2), None, allowed_dir)
+            assert result == file2
+
+            # Should reject path outside both
+            with pytest.raises(PermissionError):
+                _resolve_path("/etc/passwd", None, allowed_dir)
+
+    def test_resolve_path_with_workspace_and_allowed_dir(self):
+        """Test resolving paths with workspace plus additional allowed dirs."""
+        with tempfile.TemporaryDirectory() as workspace, tempfile.TemporaryDirectory() as extra:
+            workspace_path = Path(workspace).resolve()
+            extra_path = Path(extra).resolve()
+
+            workspace_file = workspace_path / "work.txt"
+            workspace_file.write_text("work")
+            extra_file = extra_path / "extra.txt"
+            extra_file.write_text("extra")
+
+            allowed_dir = [workspace_path, extra_path]
+
+            # Relative path resolves against workspace
+            result = _resolve_path("work.txt", workspace_path, allowed_dir)
+            assert result == workspace_file
+
+            # Absolute path to extra dir works
+            result = _resolve_path(str(extra_file), workspace_path, allowed_dir)
+            assert result == extra_file
+
+
+# ---------------------------------------------------------------------------
+# Tools with multiple allowed_dir
+# ---------------------------------------------------------------------------
+
+class TestFileSystemToolsWithAllowedDirs:
+
+    @pytest.mark.asyncio
+    async def test_read_file_with_multiple_allowed_dir(self):
+        """Test ReadFileTool with multiple allowed directories."""
+        with tempfile.TemporaryDirectory() as dir1, tempfile.TemporaryDirectory() as dir2:
+            path1 = Path(dir1).resolve()
+            path2 = Path(dir2).resolve()
+
+            file1 = path1 / "test1.txt"
+            file1.write_text("content from dir1")
+            file2 = path2 / "test2.txt"
+            file2.write_text("content from dir2")
+
+            tool = ReadFileTool(workspace=path1, allowed_dir=[path1, path2])
+
+            # Read from workspace
+            result = await tool.execute(str(file1))
+            assert "content from dir1" in result
+
+            # Read from additional allowed dir
+            result = await tool.execute(str(file2))
+            assert "content from dir2" in result
