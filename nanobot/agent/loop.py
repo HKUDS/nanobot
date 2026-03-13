@@ -373,26 +373,38 @@ class AgentLoop:
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            try:
-                if not await self.memory_consolidator.archive_unconsolidated(session):
-                    return OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content="Memory archival failed, session not cleared. Please try again.",
-                    )
-            except Exception:
-                logger.exception("/new archival failed for {}", session.key)
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="Memory archival failed, session not cleared. Please try again.",
-                )
-
+            # Capture messages before clearing to avoid race with background consolidation
+            messages_to_archive = session.messages[session.last_consolidated:]
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
+
+            # Schedule background consolidation (serialized with normal consolidation via lock)
+            if messages_to_archive:
+                lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
+                self._consolidating.add(session.key)
+
+                async def _archive_and_cleanup():
+                    try:
+                        async with lock:
+                            temp = Session(key=session.key)
+                            temp.messages = list(messages_to_archive)
+                            success = await self._consolidate_memory(temp, archive_all=True)
+                            if not success:
+                                logger.warning("/new consolidation failed for {}, archived messages may be lost", session.key)
+                    except Exception:
+                        logger.exception("/new consolidation error for {}", session.key)
+                    finally:
+                        self._consolidating.discard(session.key)
+                        _t = asyncio.current_task()
+                        if _t is not None:
+                            self._consolidation_tasks.discard(_t)
+
+                _task = asyncio.create_task(_archive_and_cleanup())
+                self._consolidation_tasks.add(_task)
+
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started.")
+                                  content="New session started. Memory consolidation in progress.")
         if cmd == "/help":
             lines = [
                 "🐈 nanobot commands:",
