@@ -1,8 +1,30 @@
 """Tool registry for dynamic tool management."""
 
+import re
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+
+# Patterns that match common secret/token formats in tool output.
+# These are intentionally broad to catch leaked API keys, tokens, and passwords.
+_SECRET_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r'\b(sk-[a-zA-Z0-9_-]{20,})\b'),        # OpenAI-style keys
+    re.compile(r'\b(sk-ant-[a-zA-Z0-9_-]{20,})\b'),     # Anthropic keys
+    re.compile(r'\b(gho_[a-zA-Z0-9]{36,})\b'),           # GitHub OAuth tokens
+    re.compile(r'\b(ghp_[a-zA-Z0-9]{36,})\b'),           # GitHub personal tokens
+    re.compile(r'\b(ghs_[a-zA-Z0-9]{36,})\b'),           # GitHub server tokens
+    re.compile(r'\b(xoxb-[a-zA-Z0-9-]+)\b'),             # Slack bot tokens
+    re.compile(r'\b(xapp-[a-zA-Z0-9-]+)\b'),             # Slack app tokens
+    re.compile(r'\b(AKIA[A-Z0-9]{16})\b'),               # AWS access key IDs
+    re.compile(r'\b(AIza[a-zA-Z0-9_-]{35})\b'),          # Google API keys
+]
+
+
+def _redact_secrets(text: str) -> str:
+    """Replace known secret patterns with [REDACTED] in tool output."""
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub("[REDACTED]", text)
+    return text
 
 
 class ToolRegistry:
@@ -52,8 +74,10 @@ class ToolRegistry:
             if errors:
                 return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _HINT
             result = await tool.execute(**params)
-            if isinstance(result, str) and result.startswith("Error"):
-                return result + _HINT
+            if isinstance(result, str):
+                result = _redact_secrets(result)
+                if result.startswith("Error"):
+                    return result + _HINT
             return result
         except Exception as e:
             return f"Error executing {name}: {str(e)}" + _HINT
