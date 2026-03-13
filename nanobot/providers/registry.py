@@ -145,7 +145,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
-    # VolcEngine (火山引擎): OpenAI-compatible gateway
+
+    # VolcEngine (火山引擎): OpenAI-compatible gateway, pay-per-use models
     ProviderSpec(
         name="volcengine",
         keywords=("volcengine", "volces", "ark"),
@@ -162,6 +163,62 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+
+    # VolcEngine Coding Plan (火山引擎 Coding Plan): same key as volcengine
+    ProviderSpec(
+        name="volcengine_coding_plan",
+        keywords=("volcengine-plan",),
+        env_key="OPENAI_API_KEY",
+        display_name="VolcEngine Coding Plan",
+        litellm_prefix="volcengine",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://ark.cn-beijing.volces.com/api/coding/v3",
+        strip_model_prefix=True,
+        model_overrides=(),
+    ),
+
+    # BytePlus: VolcEngine international, pay-per-use models
+    ProviderSpec(
+        name="byteplus",
+        keywords=("byteplus",),
+        env_key="OPENAI_API_KEY",
+        display_name="BytePlus",
+        litellm_prefix="volcengine",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="bytepluses",
+        default_api_base="https://ark.ap-southeast.bytepluses.com/api/v3",
+        strip_model_prefix=True,
+        model_overrides=(),
+    ),
+
+    # BytePlus Coding Plan: same key as byteplus
+    ProviderSpec(
+        name="byteplus_coding_plan",
+        keywords=("byteplus-plan",),
+        env_key="OPENAI_API_KEY",
+        display_name="BytePlus Coding Plan",
+        litellm_prefix="volcengine",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://ark.ap-southeast.bytepluses.com/api/coding/v3",
+        strip_model_prefix=True,
+        model_overrides=(),
+    ),
+
+
     # === Standard providers (matched by model-name keywords) ===============
     # Anthropic: LiteLLM recognizes "claude-*" natively, no prefix needed.
     ProviderSpec(
@@ -357,6 +414,23 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_key_prefix="",
         detect_by_base_keyword="",
         default_api_base="",  # user must provide in config
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
+    # === Ollama (local, OpenAI-compatible) ===================================
+    ProviderSpec(
+        name="ollama",
+        keywords=("ollama", "nemotron"),
+        env_key="OLLAMA_API_KEY",
+        display_name="Ollama",
+        litellm_prefix="ollama_chat",  # model → ollama_chat/model
+        skip_prefixes=("ollama/", "ollama_chat/"),
+        env_extras=(),
+        is_gateway=False,
+        is_local=True,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="11434",
+        default_api_base="http://localhost:11434",
         strip_model_prefix=False,
         model_overrides=(),
     ),
