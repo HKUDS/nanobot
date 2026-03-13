@@ -418,6 +418,11 @@ class AgentLoop:
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
+            ch = self.channels_config
+            if ch and tool_hint and not ch.send_tool_hints:
+                return
+            if ch and not tool_hint and not ch.send_progress:
+                return
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             meta["_tool_hint"] = tool_hint
