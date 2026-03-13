@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from difflib import SequenceMatcher
 import re
 import time
 import unicodedata
+from typing import Any
 
 from loguru import logger
 from telegram import BotCommand, ReplyParameters, Update
@@ -73,7 +75,7 @@ def _markdown_to_telegram_html(text: str) -> str:
     # 1. Extract and protect code blocks (preserve content from other processing)
     code_blocks: list[str] = []
 
-    def save_code_block(m: re.Match) -> str:
+    def save_code_block(m: re.Match[str]) -> str:
         code_blocks.append(m.group(1))
         return f"\x00CB{len(code_blocks) - 1}\x00"
 
@@ -103,7 +105,7 @@ def _markdown_to_telegram_html(text: str) -> str:
     # 2. Extract and protect inline code
     inline_codes: list[str] = []
 
-    def save_inline_code(m: re.Match) -> str:
+    def save_inline_code(m: re.Match[str]) -> str:
         inline_codes.append(m.group(1))
         return f"\x00IC{len(inline_codes) - 1}\x00"
 
@@ -169,6 +171,12 @@ class TelegramChannel(BaseChannel):
         BotCommand("agents", "List available/current agents"),
         BotCommand("set_agent", "Switch agent"),
     ]
+    # Channel 侧聚合空闲时间：超过该时间未收到同批次消息就触发 flush
+    _OUTBOUND_BATCH_IDLE_SECONDS = 2.0
+    # final 去重时的相似度阈值
+    _FINAL_DEDUP_SIMILARITY = 0.8
+    # final 去重时的文本截断起点
+    _FINAL_DEDUP_TRUNCATE_LEN = 2048
 
     def __init__(
         self,
@@ -179,12 +187,15 @@ class TelegramChannel(BaseChannel):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
-        self._app: Application | None = None
+        self._app: Any | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
-        self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
-        self._media_group_buffers: dict[str, dict] = {}
-        self._media_group_tasks: dict[str, asyncio.Task] = {}
+        self._typing_tasks: dict[str, asyncio.Task[Any]] = {}  # chat_id -> typing loop task
+        self._media_group_buffers: dict[str, dict[str, Any]] = {}
+        self._media_group_tasks: dict[str, asyncio.Task[Any]] = {}
         self._message_threads: dict[tuple[str, int], int] = {}
+        # outbound 聚合状态：按 (chat_id, turn_id) 维护当前批次缓冲和本轮已发送文本
+        self._outbound_states: dict[tuple[int, int], dict[str, Any]] = {}
+        self._outbound_locks: dict[tuple[int, int], asyncio.Lock] = {}
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -231,20 +242,21 @@ class TelegramChannel(BaseChannel):
             Application.builder().token(self.config.token).request(req).get_updates_request(req)
         )
         self._app = builder.build()
-        self._app.add_error_handler(self._on_error)
+        app = self._app
+        app.add_error_handler(self._on_error)
 
         # Add command handlers
-        self._app.add_handler(CommandHandler("start", self._on_start))
-        self._app.add_handler(CommandHandler("new", self._forward_command))
-        self._app.add_handler(CommandHandler("stop", self._forward_command))
-        self._app.add_handler(CommandHandler("models", self._forward_command))
-        self._app.add_handler(CommandHandler("set_model", self._forward_command))
-        self._app.add_handler(CommandHandler("agents", self._forward_command))
-        self._app.add_handler(CommandHandler("set_agent", self._forward_command))
-        self._app.add_handler(CommandHandler("help", self._on_help))
+        app.add_handler(CommandHandler("start", self._on_start))
+        app.add_handler(CommandHandler("new", self._forward_command))
+        app.add_handler(CommandHandler("stop", self._forward_command))
+        app.add_handler(CommandHandler("models", self._forward_command))
+        app.add_handler(CommandHandler("set_model", self._forward_command))
+        app.add_handler(CommandHandler("agents", self._forward_command))
+        app.add_handler(CommandHandler("set_agent", self._forward_command))
+        app.add_handler(CommandHandler("help", self._on_help))
 
         # Add message handler for text, photos, voice, documents
-        self._app.add_handler(
+        app.add_handler(
             MessageHandler(
                 (
                     filters.TEXT
@@ -261,21 +273,26 @@ class TelegramChannel(BaseChannel):
         logger.info("Starting Telegram bot (polling mode)...")
 
         # Initialize and start polling
-        await self._app.initialize()
-        await self._app.start()
+        await app.initialize()
+        await app.start()
 
         # Get bot info and register command menu
-        bot_info = await self._app.bot.get_me()
+        bot_info = await app.bot.get_me()
         logger.info("Telegram bot @{} connected", bot_info.username)
 
         try:
-            await self._app.bot.set_my_commands(self.BOT_COMMANDS)
+            await app.bot.set_my_commands(self.BOT_COMMANDS)
             logger.debug("Telegram bot commands registered")
         except Exception as e:
             logger.warning("Failed to register bot commands: {}", e)
 
         # Start polling (this runs until stopped)
-        await self._app.updater.start_polling(
+        updater = app.updater
+        if updater is None:
+            logger.error("Telegram updater is unavailable")
+            return
+        assert updater is not None
+        await updater.start_polling(
             allowed_updates=["message"],
             drop_pending_updates=True,  # Ignore old messages on startup
         )
@@ -296,12 +313,22 @@ class TelegramChannel(BaseChannel):
             task.cancel()
         self._media_group_tasks.clear()
         self._media_group_buffers.clear()
+        for state in self._outbound_states.values():
+            task = state.get("deadman_task")
+            if task and not task.done():
+                task.cancel()
+        self._outbound_states.clear()
+        self._outbound_locks.clear()
 
         if self._app:
+            app = self._app
             logger.info("Stopping Telegram bot...")
-            await self._app.updater.stop()
-            await self._app.stop()
-            await self._app.shutdown()
+            updater = app.updater
+            if updater is not None:
+                assert updater is not None
+                await updater.stop()
+            await app.stop()
+            await app.shutdown()
             self._app = None
 
     @staticmethod
@@ -316,15 +343,36 @@ class TelegramChannel(BaseChannel):
             return "audio"
         return "document"
 
+    @staticmethod
+    def _preview_text(text: str, *, limit: int = 120) -> str:
+        normalized = (text or "").replace("\r", " ").replace("\n", "\\n")
+        if len(normalized) > limit:
+            return f"{normalized[:limit]}..."
+        return normalized
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
         if not self._app:
             logger.warning("Telegram bot not running")
             return
 
-        # Only stop typing indicator for final responses
-        if not msg.metadata.get("_progress", False):
-            self._stop_typing(msg.chat_id)
+        logger.debug(
+            "[OB-TG] stage=recv chat={} kind={} chars={} msg_id={} preview='{}'",
+            msg.chat_id,
+            "tool_hint"
+            if bool((msg.metadata or {}).get("_tool_hint"))
+            else "progress"
+            if bool((msg.metadata or {}).get("_progress"))
+            else "final",
+            len(msg.content or ""),
+            (msg.metadata or {}).get("message_id"),
+            self._preview_text(msg.content or ""),
+        )
+
+        app = self._app
+        if app is None:
+            logger.warning("Telegram bot not running")
+            return
 
         try:
             chat_id = int(msg.chat_id)
@@ -351,10 +399,10 @@ class TelegramChannel(BaseChannel):
             try:
                 media_type = self._get_media_type(media_path)
                 sender = {
-                    "photo": self._app.bot.send_photo,
-                    "voice": self._app.bot.send_voice,
-                    "audio": self._app.bot.send_audio,
-                }.get(media_type, self._app.bot.send_document)
+                    "photo": app.bot.send_photo,
+                    "voice": app.bot.send_voice,
+                    "audio": app.bot.send_audio,
+                }.get(media_type, app.bot.send_document)
                 param = (
                     "photo"
                     if media_type == "photo"
@@ -372,7 +420,7 @@ class TelegramChannel(BaseChannel):
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
                 logger.error("Failed to send media {}: {}", media_path, e)
-                await self._app.bot.send_message(
+                await app.bot.send_message(
                     chat_id=chat_id,
                     text=f"[Failed to send: {filename}]",
                     reply_parameters=reply_params,
@@ -381,71 +429,296 @@ class TelegramChannel(BaseChannel):
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
-            is_progress = msg.metadata.get("_progress", False)
+            kind = self._classify_outbound_kind(msg)
+            turn_id = self._extract_turn_id(chat_id, msg.metadata)
+            key = (chat_id, turn_id)
+            if kind == "final":
+                self._stop_typing(msg.chat_id)
+                await self._handle_final_outbound(
+                    key,
+                    msg.content,
+                    reply_params=reply_params,
+                    thread_kwargs=thread_kwargs,
+                )
+            else:
+                await self._buffer_non_final_outbound(
+                    key,
+                    kind,
+                    msg.content,
+                    reply_params=reply_params,
+                    thread_kwargs=thread_kwargs,
+                )
 
-            for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                # Final response: simulate streaming via draft, then persist
-                if not is_progress:
-                    await self._send_with_streaming(chat_id, chunk, reply_params, thread_kwargs)
-                else:
-                    await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
+    @staticmethod
+    def _classify_outbound_kind(msg: OutboundMessage) -> str:
+        if not bool(msg.metadata.get("_progress")):
+            return "final"
+        if bool(msg.metadata.get("_tool_hint")):
+            return "tool_hint"
+        return "progress"
+
+    def _extract_turn_id(self, chat_id: int, metadata: dict[str, Any]) -> int:
+        raw = metadata.get("message_id")
+        if raw is not None:
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                pass
+        # 缺少 message_id 时退化为时间戳 turn，避免不同轮次互相污染
+        return int(time.time() * 1000) % (2**31)
+
+    def _get_or_create_outbound_state(
+        self,
+        key: tuple[int, int],
+        *,
+        reply_params: Any,
+        thread_kwargs: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        state = self._outbound_states.get(key)
+        if state is None:
+            state = {
+                "pending_kind": None,
+                "pending_text": "",
+                "sent_text": "",
+                "reply_params": reply_params,
+                "thread_kwargs": thread_kwargs,
+                "deadman_task": None,
+            }
+            self._outbound_states[key] = state
+        else:
+            state["reply_params"] = reply_params
+            state["thread_kwargs"] = thread_kwargs
+        return state
+
+    def _get_outbound_lock(self, key: tuple[int, int]) -> asyncio.Lock:
+        lock = self._outbound_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._outbound_locks[key] = lock
+        return lock
+
+    async def _buffer_non_final_outbound(
+        self,
+        key: tuple[int, int],
+        kind: str,
+        text: str,
+        *,
+        reply_params: Any,
+        thread_kwargs: dict[str, Any] | None,
+    ) -> None:
+        lock = self._get_outbound_lock(key)
+        async with lock:
+            state = self._get_or_create_outbound_state(
+                key,
+                reply_params=reply_params,
+                thread_kwargs=thread_kwargs,
+            )
+            pending_kind = state.get("pending_kind")
+            if pending_kind and pending_kind != kind:
+                await self._flush_outbound_state_locked(key, reason="kind_switch")
+                state = self._get_or_create_outbound_state(
+                    key,
+                    reply_params=reply_params,
+                    thread_kwargs=thread_kwargs,
+                )
+            pending = state.get("pending_text", "")
+            if pending and kind == "tool_hint":
+                pending = f"{pending}\n{text}"
+            else:
+                pending = f"{pending}{text}"
+            state["pending_text"] = pending
+            state["pending_kind"] = kind
+            self._schedule_outbound_deadman(key)
+
+    async def _handle_final_outbound(
+        self,
+        key: tuple[int, int],
+        final_text: str,
+        *,
+        reply_params: Any,
+        thread_kwargs: dict[str, Any] | None,
+    ) -> None:
+        lock = self._get_outbound_lock(key)
+        async with lock:
+            state = self._get_or_create_outbound_state(
+                key,
+                reply_params=reply_params,
+                thread_kwargs=thread_kwargs,
+            )
+            task = state.get("deadman_task")
+            if task and not task.done():
+                task.cancel()
+            state["deadman_task"] = None
+
+            await self._flush_outbound_state_locked(key, reason="before_final")
+            state = self._outbound_states.get(key)
+            sent_text = ""
+            if state is not None:
+                sent_text = state.get("sent_text", "")
+
+            if not self._is_duplicate_final(final_text, sent_text):
+                await self._send_text_chunks(
+                    key[0],
+                    final_text,
+                    reply_params=reply_params,
+                    thread_kwargs=thread_kwargs,
+                    stage="final_send",
+                )
+            self._outbound_states.pop(key, None)
+            self._outbound_locks.pop(key, None)
+
+    def _schedule_outbound_deadman(self, key: tuple[int, int]) -> None:
+        state = self._outbound_states.get(key)
+        if state is None:
+            return
+        old = state.get("deadman_task")
+        if old and not old.done():
+            old.cancel()
+        state["deadman_task"] = asyncio.create_task(self._outbound_deadman_flush(key))
+
+    async def _outbound_deadman_flush(self, key: tuple[int, int]) -> None:
+        try:
+            await asyncio.sleep(self._OUTBOUND_BATCH_IDLE_SECONDS)
+            lock = self._get_outbound_lock(key)
+            async with lock:
+                await self._flush_outbound_state_locked(key, reason="idle_timeout")
+        except asyncio.CancelledError:
+            pass
+
+    async def _flush_outbound_state(self, key: tuple[int, int], *, reason: str) -> None:
+        lock = self._get_outbound_lock(key)
+        async with lock:
+            await self._flush_outbound_state_locked(key, reason=reason)
+
+    async def _flush_outbound_state_locked(self, key: tuple[int, int], *, reason: str) -> None:
+        state = self._outbound_states.get(key)
+        if state is None:
+            return
+        text = state.get("pending_text", "")
+        if not text:
+            return
+        logger.debug(
+            "[OB-TG] stage=batch_flush chat={} turn={} reason={} kind={} chars={} preview='{}'",
+            key[0],
+            key[1],
+            reason,
+            state.get("pending_kind"),
+            len(text),
+            self._preview_text(text),
+        )
+        ok = await self._send_text_chunks(
+            key[0],
+            text,
+            reply_params=state.get("reply_params"),
+            thread_kwargs=state.get("thread_kwargs"),
+            stage="batch_send",
+        )
+        if ok:
+            sent_text = f"{state.get('sent_text', '')}{text}"
+            if len(sent_text) > 20000:
+                sent_text = sent_text[-20000:]
+            state["sent_text"] = sent_text
+        state["pending_text"] = ""
+        state["pending_kind"] = None
+
+    @staticmethod
+    def _normalize_for_compare(text: str) -> str:
+        return (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+    def _truncate_for_final_compare(self, text: str) -> str:
+        normalized = self._normalize_for_compare(text)
+        if len(normalized) <= self._FINAL_DEDUP_TRUNCATE_LEN:
+            return normalized
+        delimiters = {",", "，", ".", "。", "\n"}
+        for idx in range(self._FINAL_DEDUP_TRUNCATE_LEN, len(normalized)):
+            if normalized[idx] in delimiters:
+                return normalized[: idx + 1]
+        return normalized[: self._FINAL_DEDUP_TRUNCATE_LEN]
+
+    def _is_duplicate_final(self, final_text: str, sent_text: str) -> bool:
+        if not sent_text.strip():
+            return False
+        if final_text and len(final_text) > len(sent_text):
+            return False
+        final_cmp = self._truncate_for_final_compare(final_text)
+        sent_cmp = self._truncate_for_final_compare(sent_text)
+        if not final_cmp or not sent_cmp:
+            return False
+        if final_cmp == sent_cmp:
+            return True
+        ratio = SequenceMatcher(a=final_cmp, b=sent_cmp).ratio()
+        return ratio >= self._FINAL_DEDUP_SIMILARITY
+
+    async def _send_text_chunks(
+        self,
+        chat_id: int,
+        text: str,
+        *,
+        reply_params: Any,
+        thread_kwargs: dict[str, Any] | None,
+        stage: str,
+    ) -> bool:
+        chunks = split_message(text, TELEGRAM_MAX_MESSAGE_LEN)
+        all_ok = True
+        for chunk in chunks:
+            logger.debug(
+                "[OB-TG] stage={} chat={} chars={} preview='{}'",
+                stage,
+                chat_id,
+                len(chunk),
+                self._preview_text(chunk),
+            )
+            ok = await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
+            all_ok = all_ok and ok
+        return all_ok
 
     async def _send_text(
         self,
         chat_id: int,
         text: str,
         reply_params=None,
-        thread_kwargs: dict | None = None,
-    ) -> None:
+        thread_kwargs: dict[str, Any] | None = None,
+    ) -> bool:
         """Send a plain text message with HTML fallback."""
+        app = self._app
+        if app is None:
+            logger.warning("Telegram bot not running")
+            return False
         try:
             html = _markdown_to_telegram_html(text)
-            await self._app.bot.send_message(
+            logger.debug(
+                "[OB-TG] stage=send_message chat={} chars={} preview='{}'",
+                chat_id,
+                len(text),
+                self._preview_text(text),
+            )
+            await app.bot.send_message(
                 chat_id=chat_id,
                 text=html,
                 parse_mode="HTML",
                 reply_parameters=reply_params,
                 **(thread_kwargs or {}),
             )
+            return True
         except Exception as e:
             logger.warning("HTML parse failed, falling back to plain text: {}", e)
             try:
-                await self._app.bot.send_message(
+                logger.debug(
+                    "[OB-TG] stage=send_message_plain chat={} chars={} preview='{}'",
+                    chat_id,
+                    len(text),
+                    self._preview_text(text),
+                )
+                await app.bot.send_message(
                     chat_id=chat_id,
                     text=text,
                     reply_parameters=reply_params,
                     **(thread_kwargs or {}),
                 )
+                return True
             except Exception as e2:
                 logger.error("Error sending Telegram message: {}", e2)
-
-    async def _send_with_streaming(
-        self,
-        chat_id: int,
-        text: str,
-        reply_params=None,
-        thread_kwargs: dict | None = None,
-    ) -> None:
-        """Simulate streaming via send_message_draft, then persist with send_message."""
-        draft_id = int(time.time() * 1000) % (2**31)
-        try:
-            step = max(len(text) // 8, 40)
-            for i in range(step, len(text), step):
-                await self._app.bot.send_message_draft(
-                    chat_id=chat_id,
-                    draft_id=draft_id,
-                    text=text[:i],
-                )
-                await asyncio.sleep(0.04)
-            await self._app.bot.send_message_draft(
-                chat_id=chat_id,
-                draft_id=draft_id,
-                text=text,
-            )
-            await asyncio.sleep(0.15)
-        except Exception:
-            pass
-        await self._send_text(chat_id, text, reply_params, thread_kwargs)
+                return False
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -489,7 +762,7 @@ class TelegramChannel(BaseChannel):
         return f"telegram:{message.chat_id}:topic:{message_thread_id}"
 
     @staticmethod
-    def _build_message_metadata(message, user) -> dict:
+    def _build_message_metadata(message, user) -> dict[str, Any]:
         """Build common Telegram inbound metadata payload."""
         return {
             "message_id": message.message_id,
@@ -521,7 +794,7 @@ class TelegramChannel(BaseChannel):
         await self._handle_message(
             sender_id=self._sender_id(user),
             chat_id=str(message.chat_id),
-            content=message.text,
+            content=message.text or "",
             metadata=self._build_message_metadata(message, user),
             session_key=self._derive_topic_session_key(message),
         )
@@ -552,7 +825,7 @@ class TelegramChannel(BaseChannel):
 
         # Handle media files
         media_file = None
-        media_type = None
+        media_type = "file"
 
         if message.photo:
             media_file = message.photo[-1]  # Largest photo

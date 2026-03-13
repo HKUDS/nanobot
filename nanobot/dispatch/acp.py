@@ -49,7 +49,142 @@ class _SessionCapabilities:
         self.current_agent: str | None = None
 
 
+class _ProgressCoalescer:
+    """
+    进度聚合器：用于将 ACP 传来的细碎文本 chunk 聚合成较大的块再下发。
+
+    设计思路：
+    - ACP 的 session_update 会频繁发送文本片段（如 "我" -> "我先" -> "我先把"），
+      如果每个片段都直接发到 Telegram，会导致逐字刷屏。
+    - 此聚合器缓存文本，满足以下任一条件时才真正下发：
+      1) 累计超过 max_chars（默认1024字符）
+      2) 收到 tool_hint（工具提示）时先 flush 缓存的文本
+      3) 超过 idle_flush_seconds（默认3秒）没有新内容
+      4) 会话结束（finalize）时强制 flush
+
+    防重复机制：
+    - ACP 有时会发送"全量前缀"（如 "我先" 包含 "我"），
+      _merge_text 会智能去重，避免 "我我先先把把" 这样的重复。
+    """
+
+    def __init__(
+        self,
+        *,
+        publish: Callable[..., Awaitable[None]],
+        max_chars: int,
+        idle_flush_seconds: float,
+    ) -> None:
+        self._publish = publish  # 下发函数，将聚合后的文本发送到 MessageBus
+        self._max_chars = max_chars  # 触发下发的最大字符数阈值
+        self._idle_flush_seconds = idle_flush_seconds  # 空闲超时时间（秒）
+        self._merged = ""  # 当前累计的完整文本（去重后）
+        self._sent_prefix = ""  # 已经下发过的文本前缀
+        self._lock = asyncio.Lock()  # 并发锁，保证状态一致性
+        self._watchdog: asyncio.Task[Any] | None = None  # 空闲超时监控任务
+
+    @staticmethod
+    def _merge_text(current: str, chunk: str) -> str:
+        """
+        智能合并文本片段，处理 ACP 的"全量前缀"重复问题。
+
+        场景：ACP 可能先传 "我"，再传 "我先"（包含之前的 "我"）
+        - 如果 chunk 以 current 开头（如 current="我", chunk="我先"），直接用 chunk
+        - 如果 current 以 chunk 结尾（如 current="我先", chunk="先"），保持 current
+        - 否则是真正的增量，追加到 current
+
+        这样可以避免 "我我先先把把目录" 这样的重复文本。
+        """
+        if not chunk:
+            return current
+        if not current:
+            return chunk
+        if chunk.startswith(current):
+            return chunk
+        if current.endswith(chunk):
+            return current
+        return current + chunk
+
+    def _pending_text(self) -> str:
+        """
+        计算尚未下发的文本增量。
+
+        思路：
+        - _merged 是累计的完整文本
+        - _sent_prefix 是已经下发过的部分
+        - 两者的差值就是需要新下发的内容
+
+        例如：
+        - _merged="我先把目录"，_sent_prefix="我先把"
+        - 返回 "目录"（只需下发新增部分）
+        """
+        if not self._merged:
+            return ""
+        if self._merged.startswith(self._sent_prefix):
+            return self._merged[len(self._sent_prefix) :]
+        return self._merged
+
+    def _reset_watchdog_locked(self) -> None:
+        if self._watchdog and not self._watchdog.done():
+            self._watchdog.cancel()
+        self._watchdog = asyncio.create_task(self._watchdog_loop())
+
+    async def _watchdog_loop(self) -> None:
+        try:
+            await asyncio.sleep(self._idle_flush_seconds)
+            await self.flush(reason="idle_timeout")
+        except asyncio.CancelledError:
+            pass
+
+    async def add_text(self, chunk: str) -> None:
+        async with self._lock:
+            self._merged = self._merge_text(self._merged, chunk)
+            pending = self._pending_text()
+            if not pending:
+                return
+            self._reset_watchdog_locked()
+            if len(pending) >= self._max_chars:
+                await self._flush_locked(reason="size_limit")
+
+    async def emit_tool_hint(self, content: str) -> None:
+        async with self._lock:
+            await self._flush_locked(reason="tool_hint")
+            if content:
+                await self._publish(content, tool_hint=True)
+
+    async def flush(self, *, reason: str) -> None:
+        async with self._lock:
+            await self._flush_locked(reason=reason)
+
+    async def _flush_locked(self, *, reason: str) -> None:
+        """
+        真正执行下发操作（必须在持有 _lock 时调用）。
+
+        关键逻辑：
+        1. 计算待下发的文本（_pending_text）
+        2. 更新 _sent_prefix 标记已下发部分
+        3. 取消 watchdog，但避免取消当前正在执行的任务自己（防止 idle timeout 时自己取消自己）
+        4. 调用 _publish 下发到 MessageBus
+
+        参数 reason：记录触发原因（tool_hint/size_limit/idle_timeout/finalize/acp_error），用于日志调试
+        """
+        pending = self._pending_text()
+        if not pending:
+            return
+        self._sent_prefix = self._merged
+        # 关键：判断 watchdog 是否是当前任务自己，避免自己取消自己
+        watchdog = self._watchdog
+        current = asyncio.current_task()
+        if watchdog and watchdog is not current and not watchdog.done():
+            watchdog.cancel()
+        self._watchdog = None
+        logger.debug("ACP progress flush reason={} chars={}", reason, len(pending))
+        await self._publish(pending, tool_hint=False)
+
+
 class ACPDispatcher:
+    _PROGRESS_BUFFER_MAX_CHARS = 4096
+    _PROGRESS_IDLE_FLUSH_SECONDS = 3.0
+
     _HELP_TEXT = (
         "🐈 nanobot commands:\n"
         "/new — Start a new conversation\n"
@@ -105,6 +240,15 @@ class ACPDispatcher:
         cmd = parts[0].lower()
         arg = parts[1].strip() if len(parts) > 1 else ""
         return cmd, arg
+
+    @staticmethod
+    def _preview_text(text: str, *, limit: int = 160) -> str:
+        if not text:
+            return ""
+        normalized = text.replace("\r", " ").replace("\n", "\\n")
+        if len(normalized) > limit:
+            return f"{normalized[:limit]}..."
+        return normalized
 
     def _update_caps_from_session_payload(self, session_id: str, payload: Any) -> None:
         caps = self._session_caps.setdefault(session_id, _SessionCapabilities())
@@ -391,29 +535,15 @@ class ACPDispatcher:
         try:
             from acp import text_block
 
-            content_esc = content.encode("unicode_escape", "ignore").decode("ascii")
-            if len(content_esc) > 320:
-                content_esc = f"{content_esc[:320]}..."
-            logger.debug(
-                "ACP prompt input session_key={} session_id={} chars={} content_esc='{}'",
-                session_key,
-                session_id,
-                len(content),
-                content_esc,
-            )
-
             try:
                 await self._conn.prompt(prompt=[text_block(content)], session_id=session_id)
             except Exception as exc:
-                partial_esc = state.final().encode("unicode_escape", "ignore").decode("ascii")
-                if len(partial_esc) > 320:
-                    partial_esc = f"{partial_esc[:320]}..."
                 logger.warning(
-                    "ACP prompt failed session_key={} session_id={} partial_chars={} partial_esc='{}'",
+                    "ACP prompt failed session_key={} session_id={} partial_chars={} preview='{}'",
                     session_key,
                     session_id,
                     len(state.final()),
-                    partial_esc,
+                    self._preview_text(state.final()),
                 )
                 raise _ACPDispatchError(partial_response=state.final()) from exc
             return state.final()
@@ -528,30 +658,57 @@ class ACPDispatcher:
             if msg.channel not in {"cli", "system"} and msg.chat_id:
                 self.last_target = (msg.channel, msg.chat_id)
 
-            content_esc = msg.content.encode("unicode_escape", "ignore").decode("ascii")
-            if len(content_esc) > 320:
-                content_esc = f"{content_esc[:320]}..."
-            logger.debug(
-                "ACP dispatch inbound channel={} sender={} chat={} session_key={} chars={} metadata_keys={} content_esc='{}'",
-                msg.channel,
-                msg.sender_id,
-                msg.chat_id,
-                key,
-                len(msg.content),
-                sorted((msg.metadata or {}).keys()),
-                content_esc,
-            )
-
             lock = self._process_locks.setdefault(key, asyncio.Lock())
             async with lock:
+
+                async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
+                    meta = dict(msg.metadata or {})
+                    meta["_progress"] = True
+                    meta["_tool_hint"] = tool_hint
+                    logger.debug(
+                        "[OB-ACP-PUB] kind={} channel={} chat={} session={} chars={} preview='{}'",
+                        "tool_hint" if tool_hint else "progress",
+                        msg.channel,
+                        msg.chat_id,
+                        key,
+                        len(content),
+                        self._preview_text(content),
+                    )
+                    await self.bus.publish_outbound(
+                        OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content=content,
+                            metadata=meta,
+                        )
+                    )
+
+                coalescer = _ProgressCoalescer(
+                    publish=_bus_progress,
+                    max_chars=self._PROGRESS_BUFFER_MAX_CHARS,
+                    idle_flush_seconds=self._PROGRESS_IDLE_FLUSH_SECONDS,
+                )
+
+                # 包装回调：区分文本进度和工具提示，分别交给聚合器处理
+                async def _coalesced_progress(content: str, *, tool_hint: bool = False) -> None:
+                    if tool_hint:
+                        await coalescer.emit_tool_hint(content)
+                        return
+                    await coalescer.add_text(content)
+
                 try:
                     response = await self.process_direct(
                         msg.content,
                         session_key=key,
                         channel=msg.channel,
                         chat_id=msg.chat_id,
+                        on_progress=_coalesced_progress,
                     )
+                    # 会话正常结束，强制 flush 剩余缓存的文本
+                    await coalescer.flush(reason="finalize")
                 except _ACPDispatchError as exc:
+                    # ACP 调用出错，先 flush 已缓存的内容，让用户看到部分结果
+                    await coalescer.flush(reason="acp_error")
                     partial = exc.partial_response.strip()
                     if partial:
                         partial_esc = partial.encode("unicode_escape", "ignore").decode("ascii")
@@ -575,6 +732,14 @@ class ACPDispatcher:
                         )
                         return
                     raise
+            logger.debug(
+                "[OB-ACP-PUB] kind=final channel={} chat={} session={} chars={} preview='{}'",
+                msg.channel,
+                msg.chat_id,
+                key,
+                len(response),
+                self._preview_text(response),
+            )
             await self.bus.publish_outbound(
                 OutboundMessage(
                     channel=msg.channel,

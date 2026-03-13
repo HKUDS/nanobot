@@ -222,7 +222,10 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: config_file.parent / "cron")
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
-    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
+    monkeypatch.setattr(
+        "nanobot.bus.queue.MessageBus",
+        lambda: type("_Bus", (), {"close": lambda self: None})(),
+    )
     monkeypatch.setattr("nanobot.cron.service.CronService", lambda _store: object())
 
     class _FakeRuntime:

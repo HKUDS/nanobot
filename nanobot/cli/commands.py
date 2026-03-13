@@ -353,6 +353,11 @@ def gateway(
     ),
 ):
     """Start the nanobot gateway."""
+    from datetime import datetime
+    from pathlib import Path
+
+    from loguru import logger
+
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
     from nanobot.config.paths import get_cron_dir
@@ -383,6 +388,24 @@ def gateway(
         import logging
 
         logging.basicConfig(level=logging.DEBUG)
+
+    # 可选文件日志：当设置 NANOBOT_GATEWAY_LOG_DIR 时，每次 gateway 启动都会写独立日志文件。
+    # 这样做可以避免终端日志过长难以复制的问题，便于端到端排查。
+    log_dir_raw = os.getenv("NANOBOT_GATEWAY_LOG_DIR", "").strip()
+    if log_dir_raw:
+        log_dir = Path(log_dir_raw).expanduser()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        log_file = log_dir / f"gateway-{stamp}.log"
+        logger.add(
+            str(log_file),
+            level="DEBUG",
+            encoding="utf-8",
+            enqueue=True,
+            backtrace=False,
+            diagnose=False,
+        )
+        console.print(f"[cyan]Gateway logs -> {log_file}[/cyan]")
 
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
 
@@ -546,6 +569,7 @@ def gateway(
             console.print("\nShutting down...")
         finally:
             await runtime.close()
+            bus.close()
             heartbeat.stop()
             cron.stop()
             runtime.stop()
@@ -642,12 +666,15 @@ def agent(
     if message:
         # Single message mode — direct call, no bus needed
         async def run_once():
-            with _thinking_ctx():
-                response = await runtime.process_direct(
-                    message, session_id, on_progress=_cli_progress
-                )
-            _print_agent_response(response, render_markdown=markdown)
-            await runtime.close()
+            try:
+                with _thinking_ctx():
+                    response = await runtime.process_direct(
+                        message, session_id, on_progress=_cli_progress
+                    )
+                _print_agent_response(response, render_markdown=markdown)
+            finally:
+                await runtime.close()
+                bus.close()
 
         asyncio.run(run_once())
     else:
@@ -748,6 +775,7 @@ def agent(
                 outbound_task.cancel()
                 await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
                 await runtime.close()
+                bus.close()
 
         asyncio.run(run_interactive())
 

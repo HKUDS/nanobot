@@ -347,6 +347,8 @@ class DispatchConfig(Base):
 
     backend: Literal["native", "acp"] = "native"
     acp: ACPBackendConfig = Field(default_factory=ACPBackendConfig)
+    # 调试审计开关：记录 MessageBus 的 inbound/outbound 原始消息到工作目录 jsonl（默认关闭）
+    inbound_outbound_log_enabled: bool = False
 
 
 class Config(BaseSettings):

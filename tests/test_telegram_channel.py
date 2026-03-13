@@ -1,4 +1,6 @@
+import asyncio
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -26,7 +28,8 @@ class _FakeUpdater:
 
 class _FakeBot:
     def __init__(self) -> None:
-        self.sent_messages: list[dict] = []
+        self.sent_messages: list[dict[str, Any]] = []
+        self.commands: list[Any] = []
 
     async def get_me(self):
         return SimpleNamespace(username="nanobot_test")
@@ -132,7 +135,9 @@ def test_get_extension_falls_back_to_original_filename() -> None:
 
 
 def test_is_allowed_accepts_legacy_telegram_id_username_formats() -> None:
-    channel = TelegramChannel(TelegramConfig(allow_from=["12345", "alice", "67890|bob"]), MessageBus())
+    channel = TelegramChannel(
+        TelegramConfig(allow_from=["12345", "alice", "67890|bob"]), MessageBus()
+    )
 
     assert channel.is_allowed("12345|carol") is True
     assert channel.is_allowed("99999|alice") is True
@@ -151,15 +156,17 @@ async def test_send_progress_keeps_message_in_topic() -> None:
     config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
     channel = TelegramChannel(config, MessageBus())
     channel._app = _FakeApp(lambda: None)
+    channel._OUTBOUND_BATCH_IDLE_SECONDS = 0.02
 
     await channel.send(
         OutboundMessage(
             channel="telegram",
             chat_id="123",
             content="hello",
-            metadata={"_progress": True, "message_thread_id": 42},
+            metadata={"_progress": True, "message_id": 9, "message_thread_id": 42},
         )
     )
+    await asyncio.sleep(0.08)
 
     assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
 
@@ -182,3 +189,141 @@ async def test_send_reply_infers_topic_from_message_id_cache() -> None:
 
     assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
     assert channel._app.bot.sent_messages[0]["reply_parameters"].message_id == 10
+
+
+@pytest.mark.asyncio
+async def test_progress_draft_appends_incremental_chunks() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+    channel._OUTBOUND_BATCH_IDLE_SECONDS = 0.02
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="我先",
+            metadata={"_progress": True, "message_id": 21},
+        )
+    )
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="把目录",
+            metadata={"_progress": True, "message_id": 21},
+        )
+    )
+    await asyncio.sleep(0.08)
+
+    assert channel._app.bot.sent_messages[-1]["text"] == "我先把目录"
+
+
+@pytest.mark.asyncio
+async def test_progress_draft_deadman_persists_when_idle(monkeypatch) -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+    monkeypatch.setattr(channel, "_OUTBOUND_BATCH_IDLE_SECONDS", 0.02)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="阶段进度A",
+            metadata={"_progress": True, "message_id": 31},
+        )
+    )
+
+    await asyncio.sleep(0.08)
+
+    assert channel._app.bot.sent_messages
+    assert "阶段进度A" in channel._app.bot.sent_messages[-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_kind_switch_flushes_previous_batch_immediately() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+    channel._OUTBOUND_BATCH_IDLE_SECONDS = 10.0
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="阶段A",
+            metadata={"_progress": True, "_tool_hint": False, "message_id": 77},
+        )
+    )
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="read_file",
+            metadata={"_progress": True, "_tool_hint": True, "message_id": 77},
+        )
+    )
+
+    assert channel._app.bot.sent_messages[0]["text"] == "阶段A"
+
+
+@pytest.mark.asyncio
+async def test_final_is_skipped_when_similar_to_sent_progress() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+    channel._OUTBOUND_BATCH_IDLE_SECONDS = 0.02
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="先扫描目录，再输出结构说明。",
+            metadata={"_progress": True, "message_id": 88},
+        )
+    )
+    await asyncio.sleep(0.08)
+    before = len(channel._app.bot.sent_messages)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="先扫描目录，再输出结构说明。",
+            metadata={"message_id": 88},
+        )
+    )
+
+    assert len(channel._app.bot.sent_messages) == before
+
+
+@pytest.mark.asyncio
+async def test_final_not_skipped_when_longer_than_sent_progress() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+    channel._OUTBOUND_BATCH_IDLE_SECONDS = 0.02
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="先扫描目录，再输出结构说明。",
+            metadata={"_progress": True, "message_id": 99},
+        )
+    )
+    await asyncio.sleep(0.08)
+    before = len(channel._app.bot.sent_messages)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="先扫描目录，再输出结构说明。最后补充风险评估。",
+            metadata={"message_id": 99},
+        )
+    )
+
+    assert len(channel._app.bot.sent_messages) == before + 1
+    assert "风险评估" in channel._app.bot.sent_messages[-1]["text"]

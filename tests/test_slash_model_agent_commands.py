@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -10,7 +11,7 @@ import pytest
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ACPBackendConfig
-from nanobot.dispatch.acp import ACPDispatcher, _SessionCapabilities
+from nanobot.dispatch.acp import ACPDispatcher, _ProgressCoalescer, _SessionCapabilities
 
 
 def _make_loop():
@@ -127,6 +128,12 @@ class _DummyACPConnWithSession(_DummyACPConn):
         return SimpleNamespace(session_id="sess-new")
 
 
+class _DummyACPConnPromptOnly:
+    async def prompt(self, prompt, session_id):
+        del prompt, session_id
+        return None
+
+
 def _make_acp_dispatcher() -> tuple[ACPDispatcher, MessageBus, _DummyACPConn]:
     bus = MessageBus()
     conn = _DummyACPConn()
@@ -218,3 +225,135 @@ async def test_acp_new_session_applies_configured_default_model_and_agent() -> N
     assert conn.mode_calls == [("sess-new", "build")]
     assert dispatcher._session_caps["sess-new"].current_model == "anthropic/claude-sonnet-4"
     assert dispatcher._session_caps["sess-new"].current_agent == "build"
+
+
+@pytest.mark.asyncio
+async def test_acp_dispatch_forwards_progress_into_bus_outbound() -> None:
+    bus = MessageBus()
+    dispatcher = ACPDispatcher(
+        bus=bus,
+        workspace=Path("/tmp"),
+        acp_config=ACPBackendConfig(),
+    )
+    dispatcher._conn = cast(Any, _DummyACPConnPromptOnly())
+
+    async def _ensure_session(session_key: str) -> str:
+        del session_key
+        return "sess-1"
+
+    async def _fake_process_direct(
+        content: str,
+        session_key: str,
+        channel: str,
+        chat_id: str,
+        on_progress=None,
+    ) -> str:
+        del content, session_key, channel, chat_id
+        assert on_progress is not None
+        await on_progress("phase-1")
+        await on_progress("tool-call", tool_hint=True)
+        return "final-answer"
+
+    cast(Any, dispatcher)._ensure_session = _ensure_session
+    cast(Any, dispatcher).process_direct = _fake_process_direct
+
+    await dispatcher._dispatch(
+        InboundMessage(
+            channel="telegram",
+            sender_id="user",
+            chat_id="123",
+            content="hello",
+            metadata={"message_id": 7},
+        )
+    )
+
+    out_1 = await bus.consume_outbound()
+    out_2 = await bus.consume_outbound()
+    out_3 = await bus.consume_outbound()
+
+    assert out_1.content == "phase-1"
+    assert out_1.metadata["_progress"] is True
+    assert out_1.metadata["_tool_hint"] is False
+    assert out_1.metadata["message_id"] == 7
+
+    assert out_2.content == "tool-call"
+    assert out_2.metadata["_progress"] is True
+    assert out_2.metadata["_tool_hint"] is True
+    assert out_2.metadata["message_id"] == 7
+
+    assert out_3.content == "final-answer"
+    assert out_3.metadata["message_id"] == 7
+    assert "_progress" not in out_3.metadata
+
+
+@pytest.mark.asyncio
+async def test_acp_dispatch_coalesces_text_progress_until_tool_hint() -> None:
+    bus = MessageBus()
+    dispatcher = ACPDispatcher(
+        bus=bus,
+        workspace=Path("/tmp"),
+        acp_config=ACPBackendConfig(),
+    )
+    dispatcher._conn = cast(Any, _DummyACPConnPromptOnly())
+
+    async def _ensure_session(session_key: str) -> str:
+        del session_key
+        return "sess-1"
+
+    async def _fake_process_direct(
+        content: str,
+        session_key: str,
+        channel: str,
+        chat_id: str,
+        on_progress=None,
+    ) -> str:
+        del content, session_key, channel, chat_id
+        assert on_progress is not None
+        await on_progress("我")
+        await on_progress("我先")
+        await on_progress("我先把")
+        await on_progress('read_file("nanobot")', tool_hint=True)
+        return "final-answer"
+
+    cast(Any, dispatcher)._ensure_session = _ensure_session
+    cast(Any, dispatcher).process_direct = _fake_process_direct
+
+    await dispatcher._dispatch(
+        InboundMessage(
+            channel="telegram",
+            sender_id="user",
+            chat_id="123",
+            content="hello",
+            metadata={"message_id": 11},
+        )
+    )
+
+    out_1 = await bus.consume_outbound()
+    out_2 = await bus.consume_outbound()
+    out_3 = await bus.consume_outbound()
+
+    assert out_1.content == "我先把"
+    assert out_1.metadata["_progress"] is True
+    assert out_1.metadata["_tool_hint"] is False
+    assert out_1.metadata["message_id"] == 11
+
+    assert out_2.content == 'read_file("nanobot")'
+    assert out_2.metadata["_progress"] is True
+    assert out_2.metadata["_tool_hint"] is True
+
+    assert out_3.content == "final-answer"
+    assert "_progress" not in out_3.metadata
+
+
+@pytest.mark.asyncio
+async def test_progress_coalescer_idle_timeout_flushes_text() -> None:
+    emitted: list[tuple[str, bool]] = []
+
+    async def _publish(content: str, *, tool_hint: bool = False) -> None:
+        emitted.append((content, tool_hint))
+
+    coalescer = _ProgressCoalescer(publish=_publish, max_chars=1024, idle_flush_seconds=0.02)
+    await coalescer.add_text("abc")
+    await asyncio.sleep(0.06)
+
+    assert emitted == [("abc", False)]
