@@ -11,7 +11,6 @@ from nanobot.session.manager import Session, SessionManager
 MEMORY_WINDOW = 50
 KEEP_COUNT = MEMORY_WINDOW // 2  # 25
 
-
 def create_session_with_messages(key: str, count: int, role: str = "user") -> Session:
     """Create a session and add the specified number of messages.
 
