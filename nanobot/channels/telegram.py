@@ -8,10 +8,11 @@ import time
 import unicodedata
 
 from loguru import logger
-from telegram import BotCommand, ReplyParameters, Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import BotCommand, ReplyParameters, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler, CallbackContext
 from telegram.request import HTTPXRequest
 
+from nanobot.config.loader import get_config_path, load_config, save_config
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -162,6 +163,7 @@ class TelegramChannel(BaseChannel):
     BOT_COMMANDS = [
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
+        BotCommand("models", "Manage conversation models"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("help", "Show available commands"),
         BotCommand("restart", "Restart the bot"),
@@ -221,6 +223,7 @@ class TelegramChannel(BaseChannel):
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
+        self._app.add_handler(CommandHandler("models", self._on_models))
         self._app.add_handler(CommandHandler("stop", self._forward_command))
         self._app.add_handler(CommandHandler("restart", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
@@ -233,7 +236,8 @@ class TelegramChannel(BaseChannel):
                 self._on_message
             )
         )
-
+        # Callbacks for inline buttons (e.g. model management)
+        self._app.add_handler(CallbackQueryHandler(self._on_model_callback))
         logger.info("Starting Telegram bot (polling mode)...")
 
         # Initialize and start polling
@@ -254,7 +258,7 @@ class TelegramChannel(BaseChannel):
 
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
-            allowed_updates=["message"],
+            allowed_updates=["message", "callback_query"],
             drop_pending_updates=True  # Ignore old messages on startup
         )
 
@@ -433,6 +437,7 @@ class TelegramChannel(BaseChannel):
         await update.message.reply_text(
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
+            "/models — Manage conversation models\n"
             "/stop — Stop the current task\n"
             "/help — Show available commands"
         )
@@ -618,6 +623,42 @@ class TelegramChannel(BaseChannel):
             metadata=self._build_message_metadata(message, user),
             session_key=self._derive_topic_session_key(message),
         )
+    async def _on_model_callback(self, update: Update, context: CallbackContext) -> None:
+        """Handle model management callbacks."""
+        logger.debug("Model management callback: {}".format(update.callback_query.data if update.callback_query else "No callback data"))
+        if not update.callback_query:
+            return
+
+        # Handle button callback for model management
+        provider = update.callback_query.data.replace("_provider", "")
+        save_config(Config := load_config(get_config_path()), get_config_path())  # Reload config to ensure latest
+        if provider in Config.providers.model_dump() and Config.providers.model_dump()[provider]["api_key"] != "":
+            # Toggle model selection for this provider
+            current_model = Config.agents.defaults.model
+            new_model = provider if current_model != provider else None
+            Config.agents.defaults.model = new_model
+            save_config(Config, get_config_path())
+            await update.callback_query.answer(text=f"Model set to {new_model or 'None'}")
+            await self._on_models(update, context)  # Refresh the model management menu
+        else:
+            await update.callback_query.answer(text="Provider not configured", show_alert=True)
+
+    async def _on_models(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /models command for managing the models."""
+
+        if not update.message or not update.effective_user:
+            return
+
+        config = load_config(get_config_path())
+        # get only the providers with api keys configured
+        providers = [provider for provider in config.providers.model_dump().keys() if config.providers.model_dump()[provider]["api_key"] != ""]
+        await update.message.reply_text(
+            "Current Model: {}"
+            "\nChoose a provider to switch to:".format(config.agents.defaults.model or "Unknown"),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(provider.replace("_", " ").title(), callback_data=provider + "_provider")]
+                for provider in providers]
+        ))
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
