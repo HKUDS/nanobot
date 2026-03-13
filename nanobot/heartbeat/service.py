@@ -153,9 +153,15 @@ class HeartbeatService:
                 logger.info("Heartbeat: OK (nothing to report)")
                 return
 
+            taskmessage = tasks + "\n\n**IMPORTANT NOTICE:** If there is nothing material to report, reply only with <SILENT_OK>."
+
             logger.info("Heartbeat: tasks found, executing...")
             if self.on_execute:
-                response = await self.on_execute(tasks)
+                response = await self.on_execute(taskmessage)
+
+                if response and "<SILENT_OK>" in response:
+                    logger.info("Heartbeat: OK (silenced by agent)")
+                    return
                 if response and self.on_notify:
                     logger.info("Heartbeat: completed, delivering response")
                     await self.on_notify(response)
