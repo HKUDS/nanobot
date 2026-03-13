@@ -60,11 +60,13 @@ async def stream_agent_response(
     """
     text_queue: asyncio.Queue[str | None] = asyncio.Queue()
     tool_calls_active: dict[str, str] = {}  # toolCallId -> toolName
+    streamed_text_len = 0  # track how much text we've already emitted
 
     async def on_progress(
         content: str, *, tool_hint: bool = False, streaming: bool = False
     ) -> None:
         """Callback invoked by AgentLoop during processing."""
+        nonlocal streamed_text_len
         if tool_hint:
             # Try to parse as tool invocation hint
             parsed = _parse_tool_hint(content)
@@ -82,12 +84,15 @@ async def stream_agent_response(
                 # Unknown tool hint format — emit as text
                 await text_queue.put(f'0:"{_escape_text(content)}"\n')
         else:
-            # Regular text content — emit as text tokens
-            if content:
-                await text_queue.put(f'0:"{_escape_text(content)}"\n')
+            # Regular text content — emit only the new delta
+            if content and len(content) > streamed_text_len:
+                delta = content[streamed_text_len:]
+                streamed_text_len = len(content)
+                await text_queue.put(f'0:"{_escape_text(delta)}"\n')
 
     async def _run_agent():
         """Run the agent and signal completion."""
+        nonlocal streamed_text_len
         try:
             result = await agent_loop.process_direct(
                 content,
@@ -96,9 +101,8 @@ async def stream_agent_response(
                 chat_id=session_key.split(":", 1)[-1] if ":" in session_key else "default",
                 on_progress=on_progress,
             )
-            # If the agent returned content that wasn't streamed via on_progress,
-            # emit it as a final text chunk
-            if result:
+            # Emit final result only if nothing was streamed via on_progress
+            if result and streamed_text_len == 0:
                 await text_queue.put(f'0:"{_escape_text(result)}"\n')
         finally:
             await text_queue.put(None)  # Signal completion

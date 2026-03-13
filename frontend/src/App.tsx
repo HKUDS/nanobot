@@ -1,11 +1,88 @@
-import { useState } from "react";
-import { Thread } from "@/components/thread";
-import { ThreadList } from "@/components/thread-list";
+import { useState, type FC } from "react";
+import { MenuIcon, PanelLeftIcon } from "lucide-react";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { useDataStreamRuntime } from "@assistant-ui/react-data-stream";
+import { Thread } from "@/components/thread";
+import { ThreadList } from "@/components/thread-list";
+import { TooltipIconButton } from "@/components/tooltip-icon-button";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { cn } from "@/lib/utils";
+
+const Logo: FC = () => {
+  return (
+    <div className="flex items-center gap-2 px-2 font-medium text-sm">
+      <span className="text-xl">🤖</span>
+      <span className="text-foreground/90">Nanobot</span>
+    </div>
+  );
+};
+
+const Sidebar: FC<{ collapsed?: boolean }> = ({ collapsed }) => {
+  return (
+    <aside
+      className={cn(
+        "flex h-full flex-col bg-muted/30 transition-all duration-200",
+        collapsed ? "w-0 overflow-hidden opacity-0" : "w-65 opacity-100",
+      )}
+    >
+      <div className="flex h-14 shrink-0 items-center px-4">
+        <Logo />
+      </div>
+      <div className="flex-1 overflow-y-auto p-3">
+        <ThreadList />
+      </div>
+    </aside>
+  );
+};
+
+const MobileSidebar: FC = () => {
+  return (
+    <Sheet>
+      <SheetTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-9 shrink-0 md:hidden"
+        >
+          <MenuIcon className="size-4" />
+          <span className="sr-only">Toggle menu</span>
+        </Button>
+      </SheetTrigger>
+      <SheetContent side="left" className="w-70 p-0">
+        <div className="flex h-14 items-center px-4">
+          <Logo />
+        </div>
+        <div className="p-3">
+          <ThreadList />
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+};
+
+const Header: FC<{
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+}> = ({ sidebarCollapsed, onToggleSidebar }) => {
+  return (
+    <header className="flex h-14 shrink-0 items-center gap-2 px-4">
+      <MobileSidebar />
+      <TooltipIconButton
+        variant="ghost"
+        tooltip={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+        side="bottom"
+        onClick={onToggleSidebar}
+        className="hidden size-9 md:flex"
+      >
+        <PanelLeftIcon className="size-4" />
+      </TooltipIconButton>
+    </header>
+  );
+};
 
 export default function App() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const runtime = useDataStreamRuntime({
     api: "/api/chat",
     protocol: "data-stream",
@@ -13,36 +90,19 @@ export default function App() {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <div className="flex h-screen bg-background text-foreground">
-        {/* Sidebar */}
-        {sidebarOpen && (
-          <aside className="w-64 border-r border-border bg-sidebar-background flex flex-col shrink-0">
-            <div className="p-3 border-b border-border flex items-center gap-2">
-              <span className="text-xl">🤖</span>
-              <h1 className="text-lg font-semibold">Nanobot</h1>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2">
-              <ThreadList />
-            </div>
-          </aside>
-        )}
-
-        {/* Main chat area */}
-        <main className="flex-1 flex flex-col min-w-0">
-          <header className="border-b border-border px-4 py-2 flex items-center shrink-0">
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="mr-3 p-1 rounded hover:bg-accent text-muted-foreground"
-              title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-            >
-              {sidebarOpen ? "◀" : "▶"}
-            </button>
-            <span className="text-sm text-muted-foreground">Chat</span>
-          </header>
-          <div className="flex-1 min-h-0">
+      <div className="flex h-screen w-full bg-background">
+        <div className="hidden md:block">
+          <Sidebar collapsed={sidebarCollapsed} />
+        </div>
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <Header
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+          />
+          <main className="flex-1 overflow-hidden">
             <Thread />
-          </div>
-        </main>
+          </main>
+        </div>
       </div>
     </AssistantRuntimeProvider>
   );
