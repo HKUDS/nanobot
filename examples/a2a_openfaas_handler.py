@@ -66,6 +66,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.a2a import A2AChannel
 from nanobot.config.loader import load_config
+from nanobot.config.paths import get_data_dir
 from nanobot.cron.service import CronService
 from nanobot.dashboard import get_dashboard_app
 from nanobot.heartbeat.service import HeartbeatService
@@ -104,17 +105,11 @@ async def get_state() -> dict[str, Any]:
 
         session_manager = SessionManager(config.workspace_path)
 
-        # Create channel manager — handles A2A channel creation, outbound
-        # dispatch, and progress-message filtering (send_tool_hints /
-        # send_progress config flags).  This replaces the manual A2AChannel
-        # instantiation and custom _dispatch_outbound() that previously
-        # duplicated logic from ChannelManager._dispatch_outbound().
-        channels = ChannelManager(config, bus)
-        a2a_channel = channels.get_channel("a2a")
-        if not isinstance(a2a_channel, A2AChannel):
-            raise RuntimeError("A2A channel not initialised — is channels.a2a.enabled set?")
+        # Create cron service first (callback set after agent creation)
+        cron_store_path = get_data_dir() / "cron" / "jobs.json"
+        cron = CronService(cron_store_path)
 
-        # Create provider and agent (mirror _make_provider logic from cli/commands.py)
+        # Create provider (mirror _make_provider logic from cli/commands.py)
         model = config.agents.defaults.model
         provider_name = config.get_provider_name(model)
         provider_config = config.get_provider(model)
@@ -133,47 +128,73 @@ async def get_state() -> dict[str, Any]:
                 extra_headers=provider_config.extra_headers if provider_config else None,
                 provider_name=provider_name,
             )
+
+        # Create agent with all config (matching CLI run command)
         agent = AgentLoop(
             bus=bus,
             provider=provider,
             workspace=config.workspace_path,
             model=config.agents.defaults.model,
-            max_iterations=config.agents.defaults.max_tool_iterations,
+            name=config.name,
             temperature=config.agents.defaults.temperature,
             max_tokens=config.agents.defaults.max_tokens,
+            max_iterations=config.agents.defaults.max_tool_iterations,
             memory_window=config.agents.defaults.memory_window,
             reasoning_effort=config.agents.defaults.reasoning_effort,
+            brave_api_key=config.tools.web.search.api_key or None,
+            web_proxy=config.tools.web.proxy or None,
+            exec_config=config.tools.exec,
+            cron_service=cron,
+            restrict_to_workspace=config.tools.restrict_to_workspace,
             session_manager=session_manager,
             channels_config=config.channels,
             suppress_builtin_skills=config.agents.defaults.suppress_builtin_skills or None,
             mcp_servers=config.tools.mcp_servers,
         )
 
-        # Create cron service
-        cron_store_path = config.workspace_path / "cron.db"
-        cron = CronService(cron_store_path)
-
+        # Set cron callback (needs agent)
         async def on_cron_job(job: Any) -> str:
             """Execute cron job through the agent."""
+            from nanobot.agent.tools.message import MessageTool
+
+            reminder_note = (
+                "[Scheduled Task] Timer finished.\n\n"
+                f"Task '{job.name}' has been triggered.\n"
+                f"Scheduled instruction: {job.payload.message}"
+            )
+
             response = await agent.process_direct(
-                job.payload.message,
+                reminder_note,
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "a2a",
                 chat_id=job.payload.to or "cron",
             )
-            if job.payload.deliver and job.payload.to:
+
+            message_tool = agent.tools.get("message")
+            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+                return response
+
+            if job.payload.deliver and job.payload.to and response:
                 from nanobot.bus.events import OutboundMessage
 
                 await bus.publish_outbound(
                     OutboundMessage(
                         channel=job.payload.channel or "a2a",
                         chat_id=job.payload.to,
-                        content=response or "",
+                        content=response,
                     )
                 )
             return response
 
         cron.on_job = on_cron_job
+
+        # Create channel manager — handles A2A channel creation, outbound
+        # dispatch, and progress-message filtering (send_tool_hints /
+        # send_progress config flags).
+        channels = ChannelManager(config, bus)
+        a2a_channel = channels.get_channel("a2a")
+        if not isinstance(a2a_channel, A2AChannel):
+            raise RuntimeError("A2A channel not initialised — is channels.a2a.enabled set?")
 
         # Create heartbeat service
         async def on_heartbeat_execute(tasks: str) -> str:
