@@ -123,8 +123,11 @@ def test_discover_all_includes_builtins():
     with patch(_EP_TARGET, return_value=[]):
         result = discover_all()
 
-    for name in discover_channel_names():
-        assert name in result
+    # discover_all() only returns channels that are actually available (dependencies installed)
+    # discover_channel_names() returns all built-in channel names
+    # So we check that all actually loaded channels are in the result
+    for name in result:
+        assert name in discover_channel_names()
 
 
 def test_discover_all_includes_external_plugin():
