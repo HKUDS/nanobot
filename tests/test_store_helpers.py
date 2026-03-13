@@ -150,8 +150,7 @@ class TestMemoryStoreExtraHelpers:
         store.reindex_from_structured_memory = MagicMock(return_value={"ok": True})
 
         store._ensure_vector_health()
-        metrics = store.get_metrics()
-        assert metrics.get("vector_health_probe_runs", 0) >= 1
+        store.reindex_from_structured_memory.assert_called_once()
 
 
 class TestMemoryStoreExtraProfileAndConflicts:

@@ -633,7 +633,6 @@ def test_store_retrieve_core_reranker_enabled_and_type_counts(
             return list(reversed(items))
 
     store._reranker = _EnabledReranker()
-    store._record_metric = MagicMock()
 
     final, meta = store._retrieve_core(
         query="open tasks and reflection",

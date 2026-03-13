@@ -1,7 +1,5 @@
 {
   "min_recall_at_k": 0.90,
   "min_precision_at_k": 0.80,
-  "min_retrieval_hit_rate": 1.0,
-  "max_contradiction_rate_per_100_messages": 5.0,
-  "notes": "CI baseline for BM25 + topic fallback retrieval over 24 seed events (25 cases)."
+  "notes": "CI baseline for BM25 + topic fallback retrieval over 24 seed events (25 cases). Counter-based KPIs (retrieval_hit_rate, contradiction_rate) removed — now tracked via Langfuse."
 }

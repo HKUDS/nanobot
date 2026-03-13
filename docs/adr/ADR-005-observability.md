@@ -13,7 +13,7 @@ Accepted
 Current observability in Nanobot:
 
 - **Logging**: loguru with unstructured string formatting across all modules.
-- **Metrics**: `MetricsCollector` — in-memory counters flushed to `metrics.json` every 60s.
+- **Metrics**: Legacy `MetricsCollector` removed — observability now via Langfuse.
 - **Tracing**: None. No correlation IDs, no spans, no distributed tracing.
 
 For a professional agent framework, we need to answer questions like:
@@ -46,10 +46,12 @@ When the need arises for distributed tracing or integration with external observ
 platforms (Grafana, Datadog, etc.), introduce OpenTelemetry spans. This is explicitly
 deferred to avoid premature complexity.
 
-### MetricsCollector
+### MetricsCollector — Removed
 
-Retain the existing `MetricsCollector` for in-process counters. It is lightweight and
-sufficient for current needs.
+The legacy `MetricsCollector` (in-memory counters flushed to `metrics.json`) has been
+removed.  All observability counters are now captured via **Langfuse** (OTEL callback
+for litellm, plus explicit span metadata for token consumption).  The `metrics.json`
+file is no longer written.
 
 ## Consequences
 
@@ -68,5 +70,5 @@ sufficient for current needs.
 
 ### Neutral
 
-- MetricsCollector continues flushing to disk — no change.
+- MetricsCollector removed; Langfuse is the single observability backend.
 - OpenTelemetry decision deferred, not rejected.

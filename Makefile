@@ -1,4 +1,4 @@
-.PHONY: install install-all test test-verbose test-cov lint format typecheck check ci import-check prompt-check memory-eval clean pre-commit-install
+.PHONY: install install-all test test-verbose test-cov lint format typecheck check ci import-check prompt-check memory-eval live-eval clean pre-commit-install
 
 PYTHON ?= python3
 
@@ -50,6 +50,9 @@ memory-eval:
 		--history-file artifacts/memory_eval_history.json \
 		--summary-file artifacts/memory_eval_summary.md \
 		--strict
+
+live-eval:
+	$(PYTHON) scripts/eval_agent_live.py
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

@@ -4,7 +4,6 @@ Covers:
 - In-memory routing trace entries for classify / delegate / cycle block
 - Trace entry structure and fields
 - Per-role invocation tracking via trace
-- CLI routing trace / metrics commands (legacy file reading)
 """
 
 from __future__ import annotations
@@ -15,11 +14,6 @@ from typing import Any
 import pytest
 
 from nanobot.agent.coordinator import Coordinator, build_default_registry
-from nanobot.agent.metrics import (
-    MetricsCollector,
-    role_invocations_key,
-    role_tool_calls_key,
-)
 from nanobot.agent.tools.delegate import _CycleError
 from nanobot.config.schema import AgentConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
@@ -75,16 +69,8 @@ def _make_loop(tmp_path: Path, provider: LLMProvider | None = None):
 
 
 # ---------------------------------------------------------------------------
-# Metric key helpers
+# Metric key helpers were here — removed with MetricsCollector (now in Langfuse)
 # ---------------------------------------------------------------------------
-
-
-class TestMetricKeyHelpers:
-    def test_role_invocations_key(self) -> None:
-        assert role_invocations_key("code") == "role_invocations:code"
-
-    def test_role_tool_calls_key(self) -> None:
-        assert role_tool_calls_key("research") == "role_tool_calls:research"
 
 
 # ---------------------------------------------------------------------------
@@ -198,32 +184,3 @@ class TestDispatchRecordsTrace:
         trace = loop.get_routing_trace()
         blocked = [t for t in trace if t["event"] == "delegate_cycle_blocked"]
         assert len(blocked) == 1
-
-
-# ---------------------------------------------------------------------------
-# MetricsCollector flush (kept for memory subsystem)
-# ---------------------------------------------------------------------------
-
-
-class TestMetricsFlush:
-    async def test_flush_persists_to_json(self, tmp_path: Path) -> None:
-        import json
-
-        path = tmp_path / "metrics.json"
-        mc = MetricsCollector(path)
-        mc.record("some_counter", 5)
-        mc.record("another_counter", 2)
-        await mc.flush()
-
-        data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["some_counter"] == 5
-        assert data["another_counter"] == 2
-
-    async def test_snapshot_returns_all_counters(self, tmp_path: Path) -> None:
-        path = tmp_path / "metrics.json"
-        mc = MetricsCollector(path)
-        mc.record("a", 1)
-        mc.record("b", 3)
-        snap = mc.snapshot()
-        assert snap["a"] == 1
-        assert snap["b"] == 3

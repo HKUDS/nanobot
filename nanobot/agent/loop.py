@@ -253,6 +253,11 @@ class AgentLoop:
         )
         self._consolidator = ConsolidationOrchestrator(self.context.memory)
 
+        # Per-turn token accumulators (reset in _run_agent_loop)
+        self._turn_tokens_prompt = 0
+        self._turn_tokens_completion = 0
+        self._turn_llm_calls = 0
+
     # --- Delegation state proxied to _dispatcher ---
 
     @property
@@ -505,6 +510,11 @@ class AgentLoop:
         has_plan = False
         plan_enforced = False
 
+        # Reset per-turn token accumulators
+        self._turn_tokens_prompt = 0
+        self._turn_tokens_completion = 0
+        self._turn_llm_calls = 0
+
         # Reserve ~20% of context window for the model's response
         context_budget = int(self.context_window_tokens * 0.80)
 
@@ -573,6 +583,11 @@ class AgentLoop:
                 active_tools,
                 on_progress,
             )
+            # Accumulate token usage from this LLM call
+            self._turn_llm_calls += 1
+            self._turn_tokens_prompt += response.usage.get("prompt_tokens", 0)
+            self._turn_tokens_completion += response.usage.get("completion_tokens", 0)
+
             # --- Check for LLM-level errors --------------------------------
             if response.finish_reason == "error":
                 consecutive_errors += 1
@@ -1521,6 +1536,10 @@ class AgentLoop:
                 "model": self.model,
                 "role": self.role_name,
                 "session_key": key,
+                "llm_calls": self._turn_llm_calls,
+                "prompt_tokens": self._turn_tokens_prompt,
+                "completion_tokens": self._turn_tokens_completion,
+                "total_tokens": self._turn_tokens_prompt + self._turn_tokens_completion,
             },
         )
 
@@ -1538,13 +1557,17 @@ class AgentLoop:
         # --- Request audit line ---
         duration_ms = (time.monotonic() - t0_request) * 1000
         bind_trace().info(
-            "request_complete | {ch}:{cid} | {dur:.0f}ms | model={mdl} | tools={tc} | len={rlen}",
+            "request_complete | {ch}:{cid} | {dur:.0f}ms | model={mdl} | tools={tc} | len={rlen}"
+            " | llm_calls={lc} | prompt_tokens={pt} | completion_tokens={ct}",
             ch=msg.channel,
             cid=msg.chat_id,
             dur=duration_ms,
             mdl=self.model,
             tc=len(tools_used),
             rlen=len(final_content),
+            lc=self._turn_llm_calls,
+            pt=self._turn_tokens_prompt,
+            ct=self._turn_tokens_completion,
         )
 
         self._save_turn(session, all_msgs, 1 + len(history))

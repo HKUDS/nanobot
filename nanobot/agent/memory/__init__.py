@@ -19,7 +19,7 @@ Architecture
   converts raw conversation turns into structured memory events.
 - **persistence.py** — ``MemoryPersistence``: low-level I/O for
   ``events.jsonl`` (append-only), ``profile.json``, ``MEMORY.md``, and
-  ``metrics.json``.
+  ``HISTORY.md``.
 - **mem0_adapter.py** — ``_Mem0Adapter``: wraps the mem0 SDK with health
   checks and automatic fallback.
 - **reranker.py** — ``CrossEncoderReranker``: optional cross-encoder

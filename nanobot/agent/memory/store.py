@@ -85,7 +85,6 @@ class MemoryStore:
         self.history_file = self.persistence.history_file
         self.events_file = self.persistence.events_file
         self.profile_file = self.persistence.profile_file
-        self.metrics_file = self.persistence.metrics_file
         self.index_dir: Path = self.memory_dir / "index"
         self.retriever = _Mem0RuntimeInfo()
         self.extractor = MemoryExtractor(
@@ -102,16 +101,6 @@ class MemoryStore:
             add_debug=bool(self.rollout.get("mem0_add_debug", False)),
             verify_write=bool(self.rollout.get("mem0_verify_write", True)),
             force_infer_true=bool(self.rollout.get("mem0_force_infer_true", False)),
-        )
-
-        # In-memory metrics collector — must be initialised before
-        # _ensure_vector_health() which records metrics.
-        from nanobot.agent.metrics import MetricsCollector
-
-        self._metrics = MetricsCollector(
-            self.metrics_file,
-            flush_interval_s=60.0,
-            defaults=self._default_metrics(),
         )
 
         self._ensure_vector_health()
@@ -872,112 +861,6 @@ class MemoryStore:
         writes.append((summary, merged))
         return writes
 
-    def _load_metrics(self) -> dict[str, Any]:
-        return self._metrics.snapshot()
-
-    @classmethod
-    def _default_metrics(cls) -> dict[str, int | str]:
-        """Default/initial counters for a fresh metrics file."""
-        return {
-            "consolidations": 0,
-            "events_extracted": 0,
-            "extraction_source_llm": 0,
-            "extraction_source_heuristic": 0,
-            "extraction_events_preference": 0,
-            "extraction_events_fact": 0,
-            "extraction_events_task": 0,
-            "extraction_events_decision": 0,
-            "extraction_events_constraint": 0,
-            "extraction_events_relationship": 0,
-            "event_dedup_merges": 0,
-            "semantic_supersessions": 0,
-            "retrieval_queries": 0,
-            "retrieval_hits": 0,
-            "retrieval_candidates": 0,
-            "retrieval_returned": 0,
-            "retrieval_filtered_out": 0,
-            "retrieval_intent_fact_lookup": 0,
-            "retrieval_intent_debug_history": 0,
-            "retrieval_intent_planning": 0,
-            "retrieval_intent_reflection": 0,
-            "retrieval_intent_constraints_lookup": 0,
-            "retrieval_intent_conflict_review": 0,
-            "retrieval_intent_rollout_status": 0,
-            "retrieval_returned_semantic": 0,
-            "retrieval_returned_episodic": 0,
-            "retrieval_returned_reflection": 0,
-            "retrieval_returned_unknown": 0,
-            "retrieval_shadow_runs": 0,
-            "retrieval_shadow_overlap_count": 0,
-            "retrieval_shadow_overlap_sum": 0,
-            "retrieval_source_vector_count": 0,
-            "retrieval_source_get_all_count": 0,
-            "retrieval_source_history_count": 0,
-            "retrieval_rejected_blob_count": 0,
-            "vector_health_degraded_count": 0,
-            "vector_health_probe_runs": 0,
-            "vector_health_probe_vector_rows": 0,
-            "vector_health_probe_vector_points": 0,
-            "vector_health_probe_history_rows": 0,
-            "reindex_runs": 0,
-            "reindex_written": 0,
-            "reindex_failed": 0,
-            "mem0_add_mode_counts_infer_true": 0,
-            "mem0_add_mode_counts_default_signature": 0,
-            "mem0_add_mode_counts_infer_false_fallback": 0,
-            "mem0_add_mode_counts_infer_true_local_fallback": 0,
-            "mem0_add_mode_counts_default_signature_local_fallback": 0,
-            "mem0_add_mode_counts_infer_false_local_fallback": 0,
-            "index_updates": 0,
-            "conflicts_detected": 0,
-            "messages_processed": 0,
-            "user_messages_processed": 0,
-            "user_corrections": 0,
-            "profile_updates_applied": 0,
-            "memory_writes_total": 0,
-            "memory_writes_semantic": 0,
-            "memory_writes_episodic": 0,
-            "memory_writes_reflection": 0,
-            "memory_writes_dual": 0,
-            "memory_write_failures": 0,
-            "reflection_downgraded_no_evidence": 0,
-            "reflection_filtered_non_reflection_intent": 0,
-            "reflection_filtered_no_evidence": 0,
-            "memory_context_calls": 0,
-            "memory_context_tokens_total": 0,
-            "memory_context_tokens_max": 0,
-            "memory_context_tokens_long_term_total": 0,
-            "memory_context_tokens_profile_total": 0,
-            "memory_context_tokens_semantic_total": 0,
-            "memory_context_tokens_episodic_total": 0,
-            "memory_context_tokens_reflection_total": 0,
-            "memory_context_intent_fact_lookup": 0,
-            "memory_context_intent_debug_history": 0,
-            "memory_context_intent_planning": 0,
-            "memory_context_intent_reflection": 0,
-            "memory_context_intent_constraints_lookup": 0,
-            "memory_context_intent_conflict_review": 0,
-            "memory_context_intent_rollout_status": 0,
-        }
-
-    def _record_metric(self, key: str, delta: int = 1) -> None:
-        self._metrics.record(key, delta)
-
-    def _persist_metrics(self, metrics: dict[str, Any]) -> None:
-        """Sync-update the in-memory collector and mark dirty.
-
-        For backward compatibility with callers that build a full dict and
-        pass it in.  The MetricsCollector will flush to disk on its own
-        schedule.
-        """
-        self._metrics.set_fields(metrics)
-
-    def _record_metrics(self, deltas: dict[str, int]) -> None:
-        self._metrics.record_many(deltas)
-
-    def _set_metric_fields(self, fields: dict[str, Any]) -> None:
-        self._metrics.set_fields(fields)
-
     @staticmethod
     def _looks_blob_like_summary(summary: str) -> bool:
         text = str(summary or "").strip()
@@ -1148,9 +1031,6 @@ class MemoryStore:
     ) -> dict[str, Any]:
         if not self.mem0.enabled:
             result = {"ok": False, "reason": "mem0_disabled", "written": 0, "failed": 0}
-            self._set_metric_fields(
-                {"last_reindex_at": self._utc_now_iso(), "last_reindex_result": result}
-            )
             return result
 
         reset_result: dict[str, Any] = {
@@ -1176,9 +1056,6 @@ class MemoryStore:
                     "events_indexed": 0,
                     "reset": reset_result,
                 }
-                self._set_metric_fields(
-                    {"last_reindex_at": self._utc_now_iso(), "last_reindex_result": result}
-                )
                 return result
 
         profile = self.read_profile()
@@ -1291,23 +1168,6 @@ class MemoryStore:
             "mem0_add_mode": str(self.mem0.last_add_mode),
             "flush_applied": flushed,
         }
-        self._record_metrics(
-            {
-                "reindex_runs": 1,
-                "reindex_written": written,
-                "reindex_failed": failed,
-                "reindex_events_compacted": int(
-                    compaction_stats.get("before", len(events))
-                    - compaction_stats.get("after", len(events))
-                ),
-            }
-        )
-        self._set_metric_fields(
-            {
-                "last_reindex_at": self._utc_now_iso(),
-                "last_reindex_result": result,
-            }
-        )
         return result
 
     def seed_structured_corpus(self, *, profile_path: Path, events_path: Path) -> dict[str, Any]:
@@ -1370,83 +1230,19 @@ class MemoryStore:
         # Explicit probe requested in rollout plan.
         _probe_result = self.mem0.search("__health__", top_k=1, allow_history_fallback=False)
         degraded = history_rows > 0 and vector_rows == 0 and vector_points == 0
-        self._record_metrics(
-            {
-                "vector_health_probe_runs": 1,
-                "vector_health_probe_vector_rows": vector_rows,
-                "vector_health_probe_vector_points": vector_points,
-                "vector_health_probe_history_rows": history_rows,
-            }
-        )
-        self._set_metric_fields(
-            {
-                "vector_health_last_checked_at": self._utc_now_iso(),
-                "vector_health_last_state": {
-                    "vector_rows": vector_rows,
-                    "vector_points": vector_points,
-                    "history_rows": history_rows,
-                    "degraded": degraded,
-                },
-            }
-        )
         if not degraded:
             return
-        self._record_metric("vector_health_degraded_count", 1)
         if not bool(self.rollout.get("memory_auto_reindex_on_empty_vector", True)):
             return
-        metrics = self._load_metrics()
-        last_reason = str(metrics.get("last_reindex_reason", ""))
-        if last_reason == "vector_health_degraded":
-            return
-        result = self.reindex_from_structured_memory()
-        if not bool(result.get("ok")):
-            self._set_metric_fields({"vector_health_hard_degraded": True})
-        self._set_metric_fields(
-            {
-                "last_reindex_reason": "vector_health_degraded",
-                "last_reindex_result": result,
-            }
-        )
-
-    def _record_mem0_write_metric(self, memory_type: str, *, dual: bool = False) -> None:
-        normalized = str(memory_type or "").strip().lower()
-        deltas: dict[str, int] = {"memory_writes_total": 1}
-        if normalized == "semantic":
-            deltas["memory_writes_semantic"] = 1
-        elif normalized == "reflection":
-            deltas["memory_writes_reflection"] = 1
-        else:
-            deltas["memory_writes_episodic"] = 1
-        if dual:
-            deltas["memory_writes_dual"] = 1
-        self._record_metrics(deltas)
-        add_mode = str(self.mem0.last_add_mode or "").strip()
-        if add_mode:
-            self._record_metric(f"mem0_add_mode_counts_{add_mode}", 1)
-            self._set_metric_fields({"mem0_last_add_mode": add_mode})
-
-    def get_metrics(self) -> dict[str, Any]:
-        return self._load_metrics()
+        self.reindex_from_structured_memory()
 
     def get_observability_report(self) -> dict[str, Any]:
-        metrics = self.get_metrics()
-        retrieval_queries = max(int(metrics.get("retrieval_queries", 0)), 0)
-        retrieval_hits = max(int(metrics.get("retrieval_hits", 0)), 0)
-        messages_processed = max(int(metrics.get("messages_processed", 0)), 0)
-        user_messages_processed = max(int(metrics.get("user_messages_processed", 0)), 0)
-        user_corrections = max(int(metrics.get("user_corrections", 0)), 0)
-        conflicts_detected = max(int(metrics.get("conflicts_detected", 0)), 0)
-        memory_context_calls = max(int(metrics.get("memory_context_calls", 0)), 0)
-        memory_context_tokens_total = max(int(metrics.get("memory_context_tokens_total", 0)), 0)
-        memory_context_tokens_max = max(int(metrics.get("memory_context_tokens_max", 0)), 0)
-        retrieval_shadow_overlap_count = max(
-            int(metrics.get("retrieval_shadow_overlap_count", 0)), 0
-        )
-        retrieval_shadow_overlap_sum = max(int(metrics.get("retrieval_shadow_overlap_sum", 0)), 0)
-        source_vector = max(int(metrics.get("retrieval_source_vector_count", 0)), 0)
-        source_get_all = max(int(metrics.get("retrieval_source_get_all_count", 0)), 0)
-        source_history = max(int(metrics.get("retrieval_source_history_count", 0)), 0)
-        source_total = max(source_vector + source_get_all + source_history, 0)
+        """Return backend health and rollout status.
+
+        Legacy per-counter metrics have been removed in favour of Langfuse.
+        The ``metrics`` and ``kpis`` keys are kept empty for backward
+        compatibility with callers that destructure the return value.
+        """
         vector_points_count = self._vector_points_count()
         mem0_get_all_count = len(self._mem0_get_all_rows(limit=500))
         history_rows_count = self._history_row_count()
@@ -1456,45 +1252,9 @@ class MemoryStore:
             else "healthy"
         )
 
-        retrieval_hit_rate = (retrieval_hits / retrieval_queries) if retrieval_queries else 0.0
-        contradiction_rate_per_100 = (
-            (conflicts_detected * 100.0 / messages_processed) if messages_processed else 0.0
-        )
-        user_correction_rate_per_100 = (
-            (user_corrections * 100.0 / user_messages_processed) if user_messages_processed else 0.0
-        )
-        avg_memory_context_tokens = (
-            (memory_context_tokens_total / memory_context_calls) if memory_context_calls else 0.0
-        )
-        avg_shadow_overlap = (
-            (retrieval_shadow_overlap_sum / 1000.0) / retrieval_shadow_overlap_count
-            if retrieval_shadow_overlap_count
-            else 0.0
-        )
-        history_fallback_ratio = (source_history / source_total) if source_total else 0.0
-
-        # Extraction KPIs
-        extraction_llm = max(int(metrics.get("extraction_source_llm", 0)), 0)
-        extraction_heuristic = max(int(metrics.get("extraction_source_heuristic", 0)), 0)
-        extraction_total = extraction_llm + extraction_heuristic
-        heuristic_fallback_rate = (
-            (extraction_heuristic / extraction_total) if extraction_total else 0.0
-        )
-
         return {
-            "metrics": metrics,
-            "kpis": {
-                "retrieval_hit_rate": round(retrieval_hit_rate, 4),
-                "contradiction_rate_per_100_messages": round(contradiction_rate_per_100, 4),
-                "user_correction_rate_per_100_user_messages": round(
-                    user_correction_rate_per_100, 4
-                ),
-                "avg_memory_context_tokens": round(avg_memory_context_tokens, 2),
-                "max_memory_context_tokens": memory_context_tokens_max,
-                "avg_shadow_overlap": round(avg_shadow_overlap, 4),
-                "history_fallback_ratio": round(history_fallback_ratio, 4),
-                "heuristic_fallback_rate": round(heuristic_fallback_rate, 4),
-            },
+            "metrics": {},
+            "kpis": {},
             "backend": {
                 "mem0_enabled": self.mem0.enabled,
                 "mem0_mode": self.mem0.mode,
@@ -1502,7 +1262,6 @@ class MemoryStore:
                 "mem0_get_all_count": mem0_get_all_count,
                 "history_rows_count": history_rows_count,
                 "vector_health_state": vector_health_state,
-                "mem0_add_mode": str(metrics.get("mem0_last_add_mode", "")),
             },
             "rollout": self.get_rollout_status(),
         }
@@ -2181,24 +1940,10 @@ class MemoryStore:
             return 0
 
         self.persistence.write_jsonl(self.events_file, existing_events)
-        if merged > 0:
-            self._record_metric("event_dedup_merges", merged)
-        if superseded > 0:
-            self._record_metric("semantic_supersessions", superseded)
 
         if written > 0 and self.mem0.enabled:
-            write_totals = {
-                "memory_writes_total": 0,
-                "memory_writes_semantic": 0,
-                "memory_writes_episodic": 0,
-                "memory_writes_reflection": 0,
-                "memory_writes_dual": 0,
-                "memory_write_failures": 0,
-                "reflection_downgraded_no_evidence": 0,
-            }
             for event in appended_events:
                 plan = self._event_mem0_write_plan(event)
-                dual_recorded = False
                 for text, metadata in plan:
                     clean_text = self._sanitize_mem0_text(
                         text,
@@ -2207,25 +1952,7 @@ class MemoryStore:
                     if not clean_text:
                         continue
                     clean_metadata = self._sanitize_mem0_metadata(metadata)
-                    if bool(metadata.get("reflection_safety_downgraded")):
-                        write_totals["reflection_downgraded_no_evidence"] += 1
-                    mem0_ok = self.mem0.add_text(clean_text, metadata=clean_metadata)
-                    if not mem0_ok:
-                        write_totals["memory_write_failures"] += 1
-                        continue
-                    write_totals["memory_writes_total"] += 1
-                    memory_type = str(clean_metadata.get("memory_type", "")).strip().lower()
-                    if memory_type == "semantic":
-                        write_totals["memory_writes_semantic"] += 1
-                    elif memory_type == "reflection":
-                        write_totals["memory_writes_reflection"] += 1
-                    else:
-                        write_totals["memory_writes_episodic"] += 1
-                    if len(plan) > 1 and not dual_recorded:
-                        write_totals["memory_writes_dual"] += 1
-                        dual_recorded = True
-            if write_totals["memory_writes_total"] > 0 or write_totals["memory_write_failures"] > 0:
-                self._record_metrics(write_totals)
+                    self.mem0.add_text(clean_text, metadata=clean_metadata)
         bind_trace().debug(
             "memory_append | written={} | merged={} | superseded={} | {:.0f}ms",
             written,
@@ -2258,8 +1985,6 @@ class MemoryStore:
                 await self.graph.ingest_event_triples(event_id, parsed, timestamp=timestamp)
                 total += len(parsed)
 
-        if total > 0:
-            self._record_metric("graph_triples_ingested", total)
         return total
 
     def read_profile(self) -> dict[str, Any]:
@@ -2679,8 +2404,7 @@ class MemoryStore:
                     else False
                 )
                 if mem0_ok:
-                    self._record_mem0_write_metric("semantic")
-                result["mem0_operation"] = "add_new"
+                    result["mem0_operation"] = "add_new"
             values = _remove_value(values, old_value)
             new_entry = self._meta_entry(profile, key, new_value)
             self._touch_meta_entry(
@@ -2928,10 +2652,6 @@ class MemoryStore:
                 item["score"] = base_score + type_boost + stability_boost + g_boost
             candidates.sort(key=lambda x: x.get("score", 0.0), reverse=True)
             results = candidates[:top_k]
-            self._record_metric("retrieval_queries", 1)
-            if results:
-                self._record_metric("retrieval_hits", 1)
-            self._record_metric("retrieval_candidates", len(results))
             bind_trace().debug(
                 "Memory retrieve source=bm25 results={} duration_ms={:.0f}",
                 len(results),
@@ -2959,12 +2679,6 @@ class MemoryStore:
             type_separation_enabled=type_separation_enabled,
             reflection_enabled=reflection_enabled,
         )
-        self._record_metric("retrieval_queries", 1)
-        self._record_metric(f"retrieval_intent_{stats['intent']}", 1)
-        self._record_metric("retrieval_candidates", int(stats["retrieved_count"]))
-        if int(stats["retrieved_count"]) > 0:
-            self._record_metric("retrieval_hits", 1)
-        self._record_metrics(stats["counts"])
 
         shadow_enabled = bool(self.rollout.get("memory_shadow_mode", False))
         shadow_rate = float(self.rollout.get("memory_shadow_sample_rate", 0.2) or 0.0)
@@ -2989,18 +2703,10 @@ class MemoryStore:
                     for item in shadow_final
                     if str(item.get("id", "")).strip()
                 ]
-                overlap = 0.0
                 if primary_ids or shadow_ids:
-                    overlap = len(set(primary_ids) & set(shadow_ids)) / max(
+                    _overlap = len(set(primary_ids) & set(shadow_ids)) / max(
                         len(set(primary_ids) | set(shadow_ids)), 1
                     )
-                self._record_metrics(
-                    {
-                        "retrieval_shadow_runs": 1,
-                        "retrieval_shadow_overlap_count": 1,
-                        "retrieval_shadow_overlap_sum": int(round(overlap * 1000)),
-                    }
-                )
         bind_trace().debug(
             "Memory retrieve source=mem0 results={} intent={} duration_ms={:.0f}",
             len(final),
@@ -3352,7 +3058,6 @@ class MemoryStore:
         if reranker_mode in ("enabled", "shadow") and adjusted and self._reranker.available:
             if reranker_mode == "enabled":
                 adjusted = self._reranker.rerank(query, adjusted)
-                self._record_metric("reranker_runs", 1)
             else:
                 # Shadow: compute re-ranked order but keep heuristic order.
                 import copy
@@ -3361,14 +3066,7 @@ class MemoryStore:
                 shadow_items = self._reranker.rerank(query, shadow_items)
                 heuristic_ids = [str(it.get("id", "")) for it in adjusted]
                 reranked_ids = [str(it.get("id", "")) for it in shadow_items]
-                delta = self._reranker.compute_rank_delta(heuristic_ids, reranked_ids)
-                self._record_metrics(
-                    {
-                        "reranker_shadow_runs": 1,
-                        "reranker_shadow_rank_delta_sum": int(round(delta * 1000)),
-                        "reranker_shadow_rank_delta_count": 1,
-                    }
-                )
+                _delta = self._reranker.compute_rank_delta(heuristic_ids, reranked_ids)
 
         adjusted.sort(key=lambda item: item.get("score", 0.0), reverse=True)
         final = adjusted[: max(1, top_k)]
@@ -4022,28 +3720,6 @@ class MemoryStore:
                 + "\n- ... (memory context truncated to token budget)"
             )
 
-        est_tokens = max(1, len(text) // 4) if text else 0
-        self._metrics.record_many(
-            {
-                "memory_context_calls": 1,
-                "memory_context_tokens_total": est_tokens,
-                "memory_context_tokens_long_term_total": self._estimate_tokens(long_term_text),
-                "memory_context_tokens_profile_total": self._estimate_tokens(
-                    "\n".join(fitted_profile_lines)
-                ),
-                "memory_context_tokens_semantic_total": self._estimate_tokens(
-                    "\n".join(semantic_lines)
-                ),
-                "memory_context_tokens_episodic_total": self._estimate_tokens(
-                    "\n".join(episodic_lines)
-                ),
-                "memory_context_tokens_reflection_total": self._estimate_tokens(
-                    "\n".join(reflection_lines if include_reflection else [])
-                ),
-                f"memory_context_intent_{intent}": 1,
-            }
-        )
-        self._metrics.set_max("memory_context_tokens_max", est_tokens)
         return text
 
     def _conflict_pair(self, old_value: str, new_value: str) -> bool:
@@ -4137,10 +3813,6 @@ class MemoryStore:
 
             profile[key] = values
 
-        if conflicts > 0:
-            self._record_metric("conflicts_detected", conflicts)
-        if added > 0:
-            self._record_metric("profile_updates_applied", added)
         return added, conflicts, touched
 
     def _has_open_conflict(
@@ -4200,8 +3872,6 @@ class MemoryStore:
         fact_corrections = self.extractor.extract_explicit_fact_corrections(text)
         if not preference_corrections and not fact_corrections:
             return {"applied": 0, "conflicts": 0, "events": 0, "needs_user": 0, "question": None}
-
-        self._record_metric("user_corrections", len(preference_corrections) + len(fact_corrections))
 
         profile = self.read_profile()
         profile.setdefault("conflicts", [])
@@ -4318,13 +3988,6 @@ class MemoryStore:
         self.write_profile(profile)
 
         events_written = self.append_events(events)
-        if events_written > 0:
-            self._record_metric("events_extracted", events_written)
-
-        if applied > 0:
-            self._record_metric("profile_updates_applied", applied)
-        if conflicts > 0:
-            self._record_metric("conflicts_detected", conflicts)
 
         needs_user = 0
         question: str | None = None
@@ -4351,17 +4014,11 @@ class MemoryStore:
             )
             correction_text = self._sanitize_mem0_text(text, allow_archival=False)
             correction_meta = self._sanitize_mem0_metadata(correction_meta)
-            if (
+            if correction_text:
                 self.mem0.add_text(
                     correction_text,
                     metadata=correction_meta,
                 )
-                if correction_text
-                else False
-            ):
-                self._record_mem0_write_metric(str(correction_meta.get("memory_type", "episodic")))
-            else:
-                self._record_metric("memory_write_failures", 1)
 
         # Keep LLM-managed MEMORY.md content stable; snapshot can be generated on-demand.
         self.rebuild_memory_snapshot(write=False)
@@ -4525,17 +4182,6 @@ class MemoryStore:
 ## Conversation to Process
 {chr(10).join(lines)}"""
 
-    def _record_consolidation_input_metrics(self, old_messages: list[dict[str, Any]]) -> None:
-        user_messages = [m for m in old_messages if str(m.get("role", "")).lower() == "user"]
-        user_corrections = self.extractor.count_user_corrections(old_messages)
-        self._record_metrics(
-            {
-                "messages_processed": len(old_messages),
-                "user_messages_processed": len(user_messages),
-                "user_corrections": user_corrections,
-            }
-        )
-
     def _apply_save_memory_tool_result(self, *, args: dict[str, Any], current_memory: str) -> None:
         if entry := args.get("history_entry"):
             if not isinstance(entry, str):
@@ -4551,10 +4197,6 @@ class MemoryStore:
         self, session: Session, *, archive_all: bool, keep_count: int
     ) -> None:
         session.last_consolidated = 0 if archive_all else len(session.messages) - keep_count
-        self._record_metric("consolidations", 1)
-        # Flush metrics to disk at this natural checkpoint
-        self._metrics.flush_sync()
-        logger.debug("Memory KPI snapshot: {}", self.get_observability_report().get("kpis", {}))
         logger.info(
             "Memory consolidation done: {} messages, last_consolidated={}",
             len(session.messages),
@@ -4592,8 +4234,6 @@ class MemoryStore:
         prompt = self._build_consolidation_prompt(current_memory, lines)
 
         try:
-            self._record_consolidation_input_metrics(old_messages)
-
             response = await provider.chat(
                 messages=[
                     {
@@ -4638,17 +4278,8 @@ class MemoryStore:
             if events_written > 0 or profile_added > 0 or profile_touched > 0:
                 profile["last_verified_at"] = self._utc_now_iso()
                 self.write_profile(profile)
-                self._record_metric("events_extracted", events_written)
 
             # Track extraction source and per-type distribution
-            source = self.extractor.last_extraction_source
-            if source:
-                self._record_metric(f"extraction_source_{source}", 1)
-            for evt in events:
-                etype = str(evt.get("type", "fact"))
-                key = f"extraction_events_{etype}"
-                if key in self._default_metrics():
-                    self._record_metric(key, 1)
 
             if profile_added > 0:
                 self.auto_resolve_conflicts(max_items=10)
@@ -4700,19 +4331,11 @@ class MemoryStore:
                     )
                     clean_content = self._sanitize_mem0_text(content, allow_archival=False)
                     turn_meta = self._sanitize_mem0_metadata(turn_meta)
-                    if (
+                    if clean_content:
                         self.mem0.add_text(
                             clean_content,
                             metadata=turn_meta,
                         )
-                        if clean_content
-                        else False
-                    ):
-                        self._record_mem0_write_metric(
-                            str(turn_meta.get("memory_type", "episodic"))
-                        )
-                    else:
-                        self._record_metric("memory_write_failures", 1)
 
             self._finalize_consolidation(
                 session,

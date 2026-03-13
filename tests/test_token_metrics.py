@@ -102,6 +102,8 @@ class TestTokenFlowEndToEnd:
 
         assert result is not None
         assert "42" in result.content
+        assert loop._turn_tokens_prompt == 350
+        assert loop._turn_tokens_completion == 25
 
     async def test_multi_iteration_with_usage(self, tmp_path: Path) -> None:
         """Tool calls cause multiple LLM calls; usage should not crash."""
@@ -130,6 +132,9 @@ class TestTokenFlowEndToEnd:
         result = await loop._process_message(_make_inbound("Read test.txt"))
 
         assert result is not None
+        # Two LLM calls: tokens should accumulate
+        assert loop._turn_tokens_prompt == 1000
+        assert loop._turn_tokens_completion == 50
 
     async def test_missing_usage_graceful(self, tmp_path: Path) -> None:
         """When LLM response has empty usage dict, loop should not crash."""
@@ -142,3 +147,5 @@ class TestTokenFlowEndToEnd:
         result = await loop._process_message(_make_inbound("Hi"))
 
         assert result is not None
+        assert loop._turn_tokens_prompt == 0
+        assert loop._turn_tokens_completion == 0

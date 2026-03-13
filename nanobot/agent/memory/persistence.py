@@ -1,13 +1,12 @@
 """Low-level persistence for memory files and JSON payloads.
 
 ``MemoryPersistence`` owns all direct file I/O for the memory subsystem.
-It manages five files under ``<workspace>/memory/``:
+It manages four files under ``<workspace>/memory/``:
 
 - ``events.jsonl`` — append-only structured events (one JSON object per line)
 - ``profile.json`` — current user profile state (facts, preferences)
 - ``MEMORY.md``    — active knowledge snapshot injected into system prompts
 - ``HISTORY.md``   — human-readable event log
-- ``metrics.json`` — memory quality metrics (counters, timestamps)
 
 All reads/writes are synchronous (file sizes are small).  Callers should
 not bypass this class to touch memory files directly.
@@ -31,7 +30,6 @@ class MemoryPersistence:
         self.history_file = self.memory_dir / "HISTORY.md"
         self.events_file = self.memory_dir / "events.jsonl"
         self.profile_file = self.memory_dir / "profile.json"
-        self.metrics_file = self.memory_dir / "metrics.json"
 
     @staticmethod
     def read_json(path: Path) -> dict[str, Any] | list[Any] | None:

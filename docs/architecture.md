@@ -47,7 +47,7 @@ Each module has a clear responsibility, a public API, and boundaries it must not
 | `scratchpad.py` | Session-scoped JSONL artifact sharing | `Scratchpad.write()`, `.read()` | `channels/`, `providers/` |
 | `skills.py` | Skill discovery and YAML frontmatter loading | `SkillsLoader.load()` | `channels/`, `providers/` |
 | `subagent.py` | Subagent spawning for parallel tasks | `spawn_subagent()` | `channels/` |
-| `metrics.py` | In-memory counters with periodic disk flush | `MetricsCollector.record()`, `.flush()` | `channels/`, `providers/` |
+| _(removed)_ | Legacy `MetricsCollector` removed — observability now via Langfuse | — | — |
 
 ### `agent/memory/` — Memory Subsystem
 
@@ -217,6 +217,6 @@ These imports **must never exist** (enforced by `scripts/check_imports.py` in CI
 
 - **Correlation IDs**: `request_id`, `session_id`, `agent_id` via `TraceContext` (contextvars)
 - **Structured logs**: `bind_trace()` prefills log events with correlation IDs
-- **Metrics**: `MetricsCollector` flushes to `metrics.json` every 60s
+- **Metrics**: Observability counters captured via Langfuse (legacy `MetricsCollector` removed)
 - **Request audit**: Each completed request emits `request_complete` log with duration, tool count
 - **JSON log sink**: Optional via `config.log.json_file` (loguru serialize mode, 10MB rotation)

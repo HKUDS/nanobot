@@ -58,9 +58,8 @@
   API keys are set, workspace is writable) before starting the agent loop.
   Fail fast with actionable error messages. Target: `cli/commands.py`.
 
-- [ ] **Metrics dashboard**: Export metrics in Prometheus exposition format (or
-  provide a `/metrics` endpoint) for external monitoring.
-  Target: `agent/metrics.py`.
+- [x] **Metrics dashboard**: Legacy `MetricsCollector` removed. Observability
+  now captured via Langfuse. Use the Langfuse dashboard for metrics.
 
 - [ ] **Audit log**: Append-only log of all tool executions with timestamps,
   arguments, and results. Separate from conversation logs.

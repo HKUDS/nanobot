@@ -18,7 +18,6 @@ nanobot/
 │   ├── context.py       # Prompt assembly, token budgeting, 3-phase context compression
 │   ├── skills.py        # Skill discovery: loads YAML frontmatter from SKILL.md files
 │   ├── subagent.py      # Subagent spawning for parallel task delegation
-│   ├── metrics.py       # In-memory counters flushed periodically to disk
 │   ├── memory/          # Memory subsystem (mem0-first with local fallback)
 │   │   ├── store.py     # MemoryStore — primary public API for all memory operations
 │   │   ├── retrieval.py # Local keyword-based retrieval (fallback when mem0 unavailable)

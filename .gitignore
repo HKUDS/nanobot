@@ -27,3 +27,4 @@ node_modules/
 bridge/node_modules/
 .coverage
 .vscode/
+.ruff_cache/

@@ -77,7 +77,7 @@ Allowlist mode (`shell_mode = "allowlist"`) restricts to an explicit set of safe
 | `log.json_file` | `""` | Path to JSON log file sink |
 
 All log events include correlation IDs (`request_id`, `session_id`, `agent_id`) via
-`TraceContext`. Metrics are flushed to `metrics.json` every 60 seconds.
+`TraceContext`. Observability metrics are captured via Langfuse.
 
 ## Verification Modes
 
