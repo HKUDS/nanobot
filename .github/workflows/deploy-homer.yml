@@ -3,6 +3,7 @@ name: Deploy to Homer VPS
 on:
   push:
     branches: [homer-patches]
+  workflow_dispatch:
 
 jobs:
   deploy:
