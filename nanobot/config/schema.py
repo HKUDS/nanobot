@@ -264,7 +264,6 @@ class ProviderConfig(Base):
     api_base: str | None = None
     extra_body: dict[str, Any] | None = None  # Forwarded to request body (provider-specific)
     extra_headers: dict[str, str] | None = None  # Real HTTP headers (e.g. APP-Code for AiHubMix)
-    plugin_options: dict[str, Any] | None = None  # Deprecated compatibility field for plugins
 
 
 class ProvidersConfig(Base):

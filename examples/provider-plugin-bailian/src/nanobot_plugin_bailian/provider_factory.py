@@ -18,70 +18,13 @@ _DEFAULT_API_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 _MODEL_PREFIX = "dashscope/"
 
 
-def _parse_bool(raw: str | None) -> bool | None:
-    if raw is None:
-        return None
-    text = raw.strip().lower()
-    if text in {"1", "true", "yes", "on"}:
-        return True
-    if text in {"0", "false", "no", "off"}:
-        return False
-    return None
-
-
 def _extract_extra_body(
     provider_extra_body: dict[str, Any] | None,
-    plugin_options: dict[str, Any] | None,
     extra_headers: dict[str, str] | None,
 ) -> tuple[dict[str, Any], dict[str, str]]:
-    """Build DashScope extra_body from plugin options.
-
-        Preferred config path:
-            providers.plugins.aliyun_bailian.extraBody
-
-        Backward compatibility paths:
-            - providers.plugins.aliyun_bailian.pluginOptions
-            - reserved keys in extraHeaders
-
-    Backward compatibility:
-      Old reserved keys in extraHeaders are still accepted.
-    """
-    options = plugin_options or {}
+    """Build DashScope extra_body from standard plugin config fields."""
     extra_body: dict[str, Any] = dict(provider_extra_body or {})
-    if isinstance(options.get("enableThinking"), bool):
-        extra_body["enable_thinking"] = options["enableThinking"]
-    if isinstance(options.get("enableSearch"), bool):
-        extra_body["enable_search"] = options["enableSearch"]
-    if isinstance(options.get("extraBody"), dict):
-        extra_body.update(options["extraBody"])
-
-    # Keep extraHeaders strictly for real HTTP headers, but keep backward
-    # compatibility for previous reserved-key style.
-    if not extra_headers:
-        return extra_body, {}
-
-    passthrough_headers: dict[str, str] = {}
-    for key, value in extra_headers.items():
-        k = key.lower()
-        if k == "x-bailian-enable-thinking":
-            parsed = _parse_bool(value)
-            if parsed is not None:
-                extra_body["enable_thinking"] = parsed
-            continue
-        if k == "x-bailian-enable-search":
-            parsed = _parse_bool(value)
-            if parsed is not None:
-                extra_body["enable_search"] = parsed
-            continue
-        if k == "x-bailian-extra-body":
-            try:
-                payload = json.loads(value)
-                if isinstance(payload, dict):
-                    extra_body.update(payload)
-            except Exception:
-                pass
-            continue
-        passthrough_headers[key] = value
+    passthrough_headers = dict(extra_headers or {})
     return extra_body, passthrough_headers
 
 
@@ -186,7 +129,6 @@ def create_provider(*, config, model, provider_name, provider_config):
     api_base = provider_config.api_base or _DEFAULT_API_BASE
     extra_body, passthrough_headers = _extract_extra_body(
         provider_config.extra_body,
-        provider_config.plugin_options,
         provider_config.extra_headers,
     )
     return BaiLianPluginProvider(

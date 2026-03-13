@@ -9,7 +9,7 @@ It demonstrates how to provide Alibaba Cloud BaiLian (DashScope) from an externa
 Compared with nanobot core provider config, this plugin shows a custom capability:
 
 - Use provider-level `extraBody` directly (transparent passthrough)
-- Still support compatibility mapping for older plugin config styles
+- Demonstrate Qwen3.5 multimodal understanding (image + text) on BaiLian OpenAI-compatible API
 
 This means you can extend provider behavior in a plugin without adding new fields to nanobot core schema.
 
@@ -61,7 +61,7 @@ Merge this into `~/.nanobot/config.json`:
   "agents": {
     "defaults": {
       "provider": "aliyun_bailian",
-      "model": "qwen3-max"
+      "model": "qwen3.5-plus"
     }
   }
 }
@@ -73,22 +73,47 @@ Primary option:
 
 `extraHeaders` is only for real HTTP headers.
 
-Backward compatibility:
-
-- Old plugin fields are still supported:
-  - `pluginOptions.enableThinking`
-  - `pluginOptions.enableSearch`
-  - `pluginOptions.extraBody`
-- Old reserved keys in `extraHeaders` are still supported:
-  - `X-BaiLian-Enable-Thinking`
-  - `X-BaiLian-Enable-Search`
-  - `X-BaiLian-Extra-Body`
-
 ## Verify
 
 ```bash
 nanobot status
 nanobot agent -m "hello"
+```
+
+## Qwen3.5 multimodal example (image understanding)
+
+This plugin targets BaiLian OpenAI-compatible API. You can also verify multimodal capability directly with the OpenAI SDK:
+
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI(
+  api_key=os.getenv("DASHSCOPE_API_KEY"),
+  # US region: https://dashscope-us.aliyuncs.com/compatible-mode/v1
+  # Singapore region: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+  base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+)
+
+completion = client.chat.completions.create(
+  model="qwen3.5-plus",
+  messages=[
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20241022/emyrja/dog_and_girl.jpeg"
+          },
+        },
+        {"type": "text", "text": "What scene is depicted in this image?"},
+      ],
+    },
+  ],
+)
+
+print(completion.choices[0].message.content)
 ```
 
 ## Notes
