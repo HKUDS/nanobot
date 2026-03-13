@@ -556,6 +556,83 @@ def gateway(
 
 
 # ============================================================================
+# Web UI
+# ============================================================================
+
+
+@app.command()
+def ui(
+    port: int = typer.Option(8000, "--port", "-p", help="Web UI port"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """Start the nanobot web UI (FastAPI + assistant-ui)."""
+    try:
+        import uvicorn  # noqa: F401
+    except ImportError:
+        console.print(
+            "[red]Error: Web UI requires extra dependencies.[/red]\n"
+            "Install with: pip install nanobot-ai[web]"
+        )
+        raise typer.Exit(1)
+
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.loader import get_data_dir, load_config
+    from nanobot.cron.service import CronService
+    from nanobot.session.manager import SessionManager
+    from nanobot.web.app import create_app
+
+    if verbose:
+        import logging
+
+        logging.basicConfig(level=logging.DEBUG)
+
+    console.print(f"{__logo__} Starting nanobot web UI on http://{host}:{port}")
+
+    config = load_config()
+    bus = MessageBus()
+    provider = _make_provider(config)
+    session_manager = SessionManager(config.workspace_path)
+
+    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    cron = CronService(cron_store_path)
+
+    agent_loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        config=_make_agent_config(config),
+        brave_api_key=config.tools.web.search.api_key or None,
+        exec_config=config.tools.exec,
+        cron_service=cron,
+        session_manager=session_manager,
+        mcp_servers=config.tools.mcp_servers,
+        channels_config=config.channels,
+        routing_config=config.agents.routing,
+    )
+
+    # Check for built frontend static files
+    frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
+    app = create_app(
+        agent_loop,
+        session_manager,
+        static_dir=frontend_dist if frontend_dist.is_dir() else None,
+    )
+
+    console.print(f"[green]✓[/green] Agent initialized (model: {agent_loop.model})")
+    if frontend_dist.is_dir():
+        console.print(f"[green]✓[/green] Serving frontend from {frontend_dist}")
+    else:
+        console.print("[yellow]ℹ[/yellow] No built frontend found — API-only mode")
+        console.print("  Run frontend dev server: cd frontend && npm run dev")
+
+    import uvicorn
+
+    uvicorn.run(app, host=host, port=port, log_level="info" if verbose else "warning")
+
+
+# ============================================================================
 # Agent Commands
 # ============================================================================
 

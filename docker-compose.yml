@@ -50,5 +50,22 @@ services:
     stdin_open: true
     tty: true
 
+  nanobot-ui:
+    <<: *common-config
+    container_name: nanobot-ui
+    command: ["ui", "--host", "0.0.0.0", "--port", "8000"]
+    profiles:
+      - ui
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
 volumes:
   neo4j-data:
