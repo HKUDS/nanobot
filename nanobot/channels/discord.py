@@ -1,13 +1,22 @@
-"""Discord channel implementation using Discord Gateway websocket."""
+"""Discord channel implementation using Discord Gateway websocket.
+
+Uses industry-standard packages for reliability patterns:
+- tenacity: Retry logic with exponential backoff
+- pybreaker: Circuit breaker pattern
+"""
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Any
 
 import httpx
+import pybreaker
+import tenacity
 import websockets
 from loguru import logger
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -19,6 +28,26 @@ from nanobot.utils.helpers import split_message
 DISCORD_API_BASE = "https://discord.com/api/v10"
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
+MAX_RECONNECT_ATTEMPTS = 5
+RECONNECT_BACKOFF_BASE = 5  # seconds
+RECONNECT_BACKOFF_MAX = 60  # seconds
+
+
+# Global circuit breaker for message sending
+_message_breaker = pybreaker.CircuitBreaker(
+    fail_max=5,
+    reset_timeout=60,
+    success_threshold=2,
+    name='discord_message'
+)
+
+# Global circuit breaker for gateway connection
+_gateway_breaker = pybreaker.CircuitBreaker(
+    fail_max=3,
+    reset_timeout=30,
+    success_threshold=1,
+    name='discord_gateway'
+)
 
 
 class DiscordChannel(BaseChannel):
@@ -36,9 +65,11 @@ class DiscordChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
         self._bot_user_id: str | None = None
+        # Error recovery state
+        self._reconnect_attempts = 0
 
     async def start(self) -> None:
-        """Start the Discord gateway connection."""
+        """Start the Discord gateway connection with exponential backoff."""
         if not self.config.token:
             logger.error("Discord bot token not configured")
             return
@@ -49,16 +80,39 @@ class DiscordChannel(BaseChannel):
         while self._running:
             try:
                 logger.info("Connecting to Discord gateway...")
-                async with websockets.connect(self.config.gateway_url) as ws:
+                async with websockets.connect(
+                    self.config.gateway_url,
+                    close_timeout=10,
+                    ping_timeout=30,
+                    ping_interval=45,
+                ) as ws:
                     self._ws = ws
+                    self._reconnect_attempts = 0
+                    self._gateway_circuit.reset()
                     await self._gateway_loop()
             except asyncio.CancelledError:
                 break
+            except (websockets.ConnectionClosed, websockets.WebSocketException) as e:
+                self._gateway_circuit.record_failure()
+                logger.warning("Discord gateway connection error: {}", e)
             except Exception as e:
+                self._gateway_circuit.record_failure()
                 logger.warning("Discord gateway error: {}", e)
-                if self._running:
-                    logger.info("Reconnecting to Discord gateway in 5 seconds...")
-                    await asyncio.sleep(5)
+            
+            if self._running:
+                # Exponential backoff with max limit
+                if self._reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
+                    logger.error("Max reconnection attempts reached, stopping")
+                    break
+                
+                backoff = min(
+                    RECONNECT_BACKOFF_BASE * (2 ** self._reconnect_attempts),
+                    RECONNECT_BACKOFF_MAX
+                )
+                self._reconnect_attempts += 1
+                logger.info("Reconnecting to Discord gateway in {}s (attempt {})", 
+                          backoff, self._reconnect_attempts)
+                await asyncio.sleep(backoff)
 
     async def stop(self) -> None:
         """Stop the Discord channel."""
@@ -77,9 +131,14 @@ class DiscordChannel(BaseChannel):
             self._http = None
 
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Discord REST API, including file attachments."""
+        """Send a message through Discord REST API with error handling."""
         if not self._http:
-            logger.warning("Discord HTTP client not initialized")
+            logger.error("Discord HTTP client not initialized")
+            return
+        
+        # Check circuit breaker
+        if _message_breaker.current_state == 'open':
+            logger.warning("Message sending blocked by circuit breaker")
             return
 
         url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
@@ -116,30 +175,59 @@ class DiscordChannel(BaseChannel):
 
                 if not await self._send_payload(url, headers, payload):
                     break  # Abort remaining chunks on failure
+                    
+        except Exception as e:
+            logger.error("Failed to send message: {}", e)
         finally:
             await self._stop_typing(msg.chat_id)
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((httpx.TimeoutException, httpx.ConnectError))
+    )
     async def _send_payload(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
     ) -> bool:
         """Send a single Discord API payload with retry on rate-limit. Returns True on success."""
-        for attempt in range(3):
-            try:
-                response = await self._http.post(url, headers=headers, json=payload)
-                if response.status_code == 429:
-                    data = response.json()
-                    retry_after = float(data.get("retry_after", 1.0))
-                    logger.warning("Discord rate limited, retrying in {}s", retry_after)
-                    await asyncio.sleep(retry_after)
-                    continue
-                response.raise_for_status()
-                return True
-            except Exception as e:
-                if attempt == 2:
-                    logger.error("Error sending Discord message: {}", e)
-                else:
-                    await asyncio.sleep(1)
-        return False
+        try:
+            response = await self._http.post(url, headers=headers, json=payload)
+            
+            # Handle specific HTTP status codes
+            if response.status_code == 429:
+                # Rate limited - respect Discord's retry_after
+                data = response.json()
+                retry_after = float(data.get("retry_after", 1.0))
+                logger.warning("Discord rate limited, retrying in {}s", retry_after)
+                await asyncio.sleep(retry_after)
+                raise httpx.TimeoutException("Rate limited")  # Trigger retry
+            elif response.status_code == 403:
+                logger.error("Discord API 403 Forbidden - bot lacks permissions")
+                raise httpx.HTTPStatusError("403 Forbidden", request=response.request, response=response)
+            elif response.status_code == 404:
+                logger.error("Discord API 404 Not Found - invalid channel or message")
+                raise httpx.HTTPStatusError("404 Not Found", request=response.request, response=response)
+            elif response.status_code >= 500:
+                # Server error - let tenacity retry
+                logger.warning("Discord API {} server error, retrying", response.status_code)
+                raise httpx.ConnectError(f"Server error {response.status_code}")
+            elif response.status_code >= 400:
+                # Other client errors
+                logger.error("Discord API error {}: {}", response.status_code, response.text)
+                raise httpx.HTTPStatusError(f"Client error {response.status_code}", request=response.request, response=response)
+                
+            response.raise_for_status()
+            return True
+            
+        except (httpx.TimeoutException, httpx.ConnectError):
+            # Let tenacity handle retry
+            raise
+        except httpx.HTTPStatusError:
+            # Don't retry HTTP errors
+            return False
+        except Exception as e:
+            logger.error("Unexpected error sending Discord message: {}", e)
+            return False
 
     async def _send_file(
         self,
@@ -150,10 +238,13 @@ class DiscordChannel(BaseChannel):
     ) -> bool:
         """Send a file attachment via Discord REST API using multipart/form-data."""
         path = Path(file_path)
+        
+        # Validate file exists
         if not path.is_file():
             logger.warning("Discord file not found, skipping: {}", file_path)
             return False
 
+        # Validate file size
         if path.stat().st_size > MAX_ATTACHMENT_BYTES:
             logger.warning("Discord file too large (>20MB), skipping: {}", path.name)
             return False
@@ -173,31 +264,61 @@ class DiscordChannel(BaseChannel):
                     response = await self._http.post(
                         url, headers=headers, files=files, data=data
                     )
+                    
+                # Handle specific HTTP status codes
                 if response.status_code == 429:
                     resp_data = response.json()
                     retry_after = float(resp_data.get("retry_after", 1.0))
                     logger.warning("Discord rate limited, retrying in {}s", retry_after)
                     await asyncio.sleep(retry_after)
                     continue
+                elif response.status_code == 403:
+                    logger.error("Discord API 403 Forbidden - bot lacks permissions for file upload")
+                    self._message_circuit.record_failure()
+                    return False
+                elif response.status_code == 404:
+                    logger.error("Discord API 404 Not Found - invalid channel for file upload")
+                    self._message_circuit.record_failure()
+                    return False
+                elif response.status_code >= 500:
+                    logger.warning("Discord API {} server error, retrying", response.status_code)
+                    await asyncio.sleep(1)
+                    continue
+                    
                 response.raise_for_status()
                 logger.info("Discord file sent: {}", path.name)
                 return True
+                
+            except FileNotFoundError as e:
+                logger.error("File not found for upload: {}", path.name)
+                return False
+            except httpx.TimeoutException as e:
+                logger.warning("Discord file upload timeout (attempt {}): {}", attempt + 1, path.name)
+                if attempt < 2:
+                    await asyncio.sleep(1)
+            except httpx.RequestError as e:
+                logger.error("Discord file upload request error: {}", e)
+                self._message_circuit.record_failure()
+                return False
             except Exception as e:
                 if attempt == 2:
                     logger.error("Error sending Discord file {}: {}", path.name, e)
+                    self._message_circuit.record_failure()
                 else:
                     await asyncio.sleep(1)
+                    
+        self._message_circuit.record_failure()
         return False
 
     async def _gateway_loop(self) -> None:
-        """Main gateway loop: identify, heartbeat, dispatch events."""
+        """Main gateway loop: identify, heartbeat, dispatch events with error handling."""
         if not self._ws:
             return
 
         async for raw in self._ws:
             try:
                 data = json.loads(raw)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
                 logger.warning("Invalid JSON from Discord gateway: {}", raw[:100])
                 continue
 
@@ -219,9 +340,13 @@ class DiscordChannel(BaseChannel):
                 # Capture bot user ID for mention detection
                 user_data = payload.get("user") or {}
                 self._bot_user_id = user_data.get("id")
+                self._gateway_circuit.record_success()
                 logger.info("Discord bot connected as user {}", self._bot_user_id)
             elif op == 0 and event_type == "MESSAGE_CREATE":
-                await self._handle_message_create(payload)
+                try:
+                    await self._handle_message_create(payload)
+                except Exception as e:
+                    logger.error("Error handling MESSAGE_CREATE: {}", e)
             elif op == 7:
                 # RECONNECT: exit loop to reconnect
                 logger.info("Discord gateway requested reconnect")
@@ -229,7 +354,12 @@ class DiscordChannel(BaseChannel):
             elif op == 9:
                 # INVALID_SESSION: reconnect
                 logger.warning("Discord gateway invalid session")
+                self._gateway_circuit.record_failure()
                 break
+            elif op == 6:
+                # RESUME: session resumed
+                logger.info("Discord gateway session resumed")
+                self._gateway_circuit.record_success()
 
     async def _identify(self) -> None:
         """Send IDENTIFY payload."""
@@ -251,7 +381,7 @@ class DiscordChannel(BaseChannel):
         await self._ws.send(json.dumps(identify))
 
     async def _start_heartbeat(self, interval_s: float) -> None:
-        """Start or restart the heartbeat loop."""
+        """Start or restart the heartbeat loop with error handling."""
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
 
@@ -260,8 +390,16 @@ class DiscordChannel(BaseChannel):
                 payload = {"op": 1, "d": self._seq}
                 try:
                     await self._ws.send(json.dumps(payload))
+                    self._gateway_circuit.record_success()
+                except websockets.ConnectionClosed as e:
+                    logger.warning("Discord heartbeat connection closed: {}", e)
+                    self._gateway_circuit.record_failure()
+                    break
+                except asyncio.CancelledError:
+                    break
                 except Exception as e:
                     logger.warning("Discord heartbeat failed: {}", e)
+                    self._gateway_circuit.record_failure()
                     break
                 await asyncio.sleep(interval_s)
 
@@ -310,11 +448,20 @@ class DiscordChannel(BaseChannel):
                 file_path.write_bytes(resp.content)
                 media_paths.append(str(file_path))
                 content_parts.append(f"[attachment: {file_path}]")
-            except Exception as e:
-                logger.warning("Failed to download Discord attachment: {}", e)
+            except httpx.TimeoutException as e:
+                logger.warning("Timeout downloading Discord attachment {}: {}", filename, e)
+                content_parts.append(f"[attachment: {filename} - timeout]")
+            except httpx.RequestError as e:
+                logger.warning("Failed to download Discord attachment {}: {}", filename, e)
                 content_parts.append(f"[attachment: {filename} - download failed]")
+            except Exception as e:
+                logger.warning("Unexpected error downloading attachment {}: {}", filename, e)
+                content_parts.append(f"[attachment: {filename} - error]")
 
-        reply_to = (payload.get("referenced_message") or {}).get("id")
+        reply_to = (payload.get("message_reference") or {}).get("message_id")
+        # NOTE: Discord does NOT have thread_id field on Message objects
+        # Thread context is from channel_id pointing to thread channel
+        # Per: https://discord.com/developers/docs/topics/threads
 
         await self._start_typing(channel_id)
 
@@ -327,6 +474,7 @@ class DiscordChannel(BaseChannel):
                 "message_id": str(payload.get("id", "")),
                 "guild_id": guild_id,
                 "reply_to": reply_to,
+                # NOTE: No thread_id - Discord uses channel_id for thread context
             },
         )
 
