@@ -115,20 +115,25 @@ class ChannelManager:
                     timeout=1.0
                 )
 
+                channel = self.channels.get(msg.channel)
+                if not channel:
+                    logger.warning("Unknown channel: {}", msg.channel)
+                    continue
+
                 if msg.metadata.get("_progress"):
                     if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
                         continue
                     if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
                         continue
+                    # Token-level stream chunks need channel-side adaptation to avoid
+                    # posting one message per token on platforms without edit/draft APIs.
+                    if msg.metadata.get("_progress_kind") == "content" and not channel.supports_content_stream_progress:
+                        continue
 
-                channel = self.channels.get(msg.channel)
-                if channel:
-                    try:
-                        await channel.send(msg)
-                    except Exception as e:
-                        logger.error("Error sending to {}: {}", msg.channel, e)
-                else:
-                    logger.warning("Unknown channel: {}", msg.channel)
+                try:
+                    await channel.send(msg)
+                except Exception as e:
+                    logger.error("Error sending to {}: {}", msg.channel, e)
 
             except asyncio.TimeoutError:
                 continue

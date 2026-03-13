@@ -157,6 +157,7 @@ class TelegramChannel(BaseChannel):
 
     name = "telegram"
     display_name = "Telegram"
+    supports_content_stream_progress = True
 
     # Commands registered with Telegram's command menu
     BOT_COMMANDS = [
@@ -176,6 +177,7 @@ class TelegramChannel(BaseChannel):
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
         self._message_threads: dict[tuple[str, int], int] = {}
+        self._stream_draft_ids: dict[tuple[str, int | None], int] = {}
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
 
@@ -274,6 +276,7 @@ class TelegramChannel(BaseChannel):
             task.cancel()
         self._media_group_tasks.clear()
         self._media_group_buffers.clear()
+        self._stream_draft_ids.clear()
 
         if self._app:
             logger.info("Stopping Telegram bot...")
@@ -294,14 +297,48 @@ class TelegramChannel(BaseChannel):
             return "audio"
         return "document"
 
+    @staticmethod
+    def _stream_key(chat_id: str, message_thread_id: int | None) -> tuple[str, int | None]:
+        """Build the in-memory key for draft streaming state."""
+        return chat_id, message_thread_id
+
+    async def _send_draft_progress(
+        self,
+        chat_id: int,
+        text: str,
+        key: tuple[str, int | None],
+        thread_kwargs: dict | None = None,
+    ) -> None:
+        """Update or create a Telegram draft for token-level stream progress."""
+        draft_id = self._stream_draft_ids.get(key)
+        if draft_id is None:
+            draft_id = int(time.time() * 1000) % (2**31)
+            self._stream_draft_ids[key] = draft_id
+
+        try:
+            await self._app.bot.send_message_draft(
+                chat_id=chat_id,
+                draft_id=draft_id,
+                text=text,
+                **(thread_kwargs or {}),
+            )
+        except Exception as e:
+            # Some Telegram clients/bots may not support draft updates in all contexts.
+            # Keep final response delivery reliable by falling back to final-only message.
+            logger.debug("Telegram draft streaming failed: {}", e)
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
         if not self._app:
             logger.warning("Telegram bot not running")
             return
 
+        metadata = msg.metadata or {}
+        is_progress = metadata.get("_progress", False)
+        progress_kind = metadata.get("_progress_kind")
+
         # Only stop typing indicator for final responses
-        if not msg.metadata.get("_progress", False):
+        if not is_progress:
             self._stop_typing(msg.chat_id)
 
         try:
@@ -309,10 +346,11 @@ class TelegramChannel(BaseChannel):
         except ValueError:
             logger.error("Invalid chat_id: {}", msg.chat_id)
             return
-        reply_to_message_id = msg.metadata.get("message_id")
-        message_thread_id = msg.metadata.get("message_thread_id")
+        reply_to_message_id = metadata.get("message_id")
+        message_thread_id = metadata.get("message_thread_id")
         if message_thread_id is None and reply_to_message_id is not None:
             message_thread_id = self._message_threads.get((msg.chat_id, reply_to_message_id))
+        stream_key = self._stream_key(msg.chat_id, message_thread_id)
         thread_kwargs = {}
         if message_thread_id is not None:
             thread_kwargs["message_thread_id"] = message_thread_id
@@ -324,6 +362,12 @@ class TelegramChannel(BaseChannel):
                     message_id=reply_to_message_id,
                     allow_sending_without_reply=True
                 )
+
+        # Token-level text stream uses draft updates to avoid per-token message spam.
+        if is_progress and progress_kind == "content":
+            if msg.content and msg.content != "[empty message]":
+                await self._send_draft_progress(chat_id, msg.content, stream_key, thread_kwargs)
+            return
 
         # Send media files
         for media_path in (msg.media or []):
@@ -354,14 +398,22 @@ class TelegramChannel(BaseChannel):
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
-            is_progress = msg.metadata.get("_progress", False)
+            has_live_stream = stream_key in self._stream_draft_ids
 
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
                 # Final response: simulate streaming via draft, then persist
                 if not is_progress:
-                    await self._send_with_streaming(chat_id, chunk, reply_params, thread_kwargs)
+                    # If token stream draft already ran, send final text directly
+                    # to avoid a second simulated stream pass.
+                    if has_live_stream:
+                        await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
+                    else:
+                        await self._send_with_streaming(chat_id, chunk, reply_params, thread_kwargs)
                 else:
                     await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
+
+        if not is_progress:
+            self._stream_draft_ids.pop(stream_key, None)
 
     async def _send_text(
         self,

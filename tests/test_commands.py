@@ -249,6 +249,24 @@ def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_
     mock_agent_runtime["print_response"].assert_called_once_with("mock-response", render_markdown=True)
 
 
+def test_agent_stream_option_overrides_config_default(mock_agent_runtime):
+    mock_agent_runtime["config"].agents.defaults.stream_output = False
+
+    result = runner.invoke(app, ["agent", "-m", "hello", "--stream"])
+
+    assert result.exit_code == 0
+    assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["stream_output"] is True
+
+
+def test_agent_no_stream_option_overrides_config_default(mock_agent_runtime):
+    mock_agent_runtime["config"].agents.defaults.stream_output = True
+
+    result = runner.invoke(app, ["agent", "-m", "hello", "--no-stream"])
+
+    assert result.exit_code == 0
+    assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["stream_output"] is False
+
+
 def test_agent_uses_explicit_config_path(mock_agent_runtime, tmp_path: Path):
     config_path = tmp_path / "agent-config.json"
     config_path.write_text("{}")

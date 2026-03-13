@@ -63,6 +63,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        stream_output: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -77,6 +78,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.stream_output = stream_output
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -191,16 +193,32 @@ class AgentLoop:
 
             tool_defs = self.tools.get_definitions()
 
-            response = await self.provider.chat_with_retry(
-                messages=messages,
-                tools=tool_defs,
-                model=self.model,
-            )
+            streamed_text_parts: list[str] = []
+            if self.stream_output and on_progress:
+                async def _on_text_delta(delta: str) -> None:
+                    if not delta:
+                        return
+                    streamed_text_parts.append(delta)
+                    await on_progress(delta)
+
+                response = await self.provider.chat_with_retry_stream(
+                    messages=messages,
+                    tools=tool_defs,
+                    model=self.model,
+                    on_text_delta=_on_text_delta,
+                )
+            else:
+                response = await self.provider.chat_with_retry(
+                    messages=messages,
+                    tools=tool_defs,
+                    model=self.model,
+                )
 
             if response.has_tool_calls:
                 if on_progress:
                     thought = self._strip_think(response.content)
-                    if thought:
+                    # In streaming mode, non-tool progress already contains model text deltas.
+                    if thought and not streamed_text_parts:
                         await on_progress(thought)
                     await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
@@ -421,6 +439,9 @@ class AgentLoop:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             meta["_tool_hint"] = tool_hint
+            meta["_progress_kind"] = (
+                "tool_hint" if tool_hint else ("content" if self.stream_output else "reasoning")
+            )
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))

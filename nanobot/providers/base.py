@@ -1,10 +1,11 @@
 """Base LLM provider interface."""
 
 import asyncio
+import inspect
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
@@ -255,6 +256,120 @@ class LLMProvider(ABC):
                 temperature=temperature,
                 reasoning_effort=reasoning_effort,
                 tool_choice=tool_choice,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            return LLMResponse(
+                content=f"Error calling LLM: {exc}",
+                finish_reason="error",
+            )
+
+    async def _emit_text_delta(
+        self,
+        on_text_delta: Callable[[str], Awaitable[None] | None] | None,
+        text: str | None,
+    ) -> None:
+        """Emit one streaming text delta to callback."""
+        if not on_text_delta or not text:
+            return
+        maybe_awaitable = on_text_delta(text)
+        if inspect.isawaitable(maybe_awaitable):
+            await maybe_awaitable
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        on_text_delta: Callable[[str], Awaitable[None] | None] | None = None,
+    ) -> LLMResponse:
+        """Stream chat response when supported, else fall back to non-streaming chat.
+
+        The default implementation calls ``chat()`` and emits one full-content delta.
+        Providers with native streaming should override this method.
+        """
+        response = await self.chat(
+            messages=messages,
+            tools=tools,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+            tool_choice=tool_choice,
+        )
+        if response.finish_reason != "error":
+            await self._emit_text_delta(on_text_delta, response.content)
+        return response
+
+    async def chat_with_retry_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: object = _SENTINEL,
+        temperature: object = _SENTINEL,
+        reasoning_effort: object = _SENTINEL,
+        tool_choice: str | dict[str, Any] | None = None,
+        on_text_delta: Callable[[str], Awaitable[None] | None] | None = None,
+    ) -> LLMResponse:
+        """Call chat_stream() with retry on transient provider failures."""
+        if max_tokens is self._SENTINEL:
+            max_tokens = self.generation.max_tokens
+        if temperature is self._SENTINEL:
+            temperature = self.generation.temperature
+        if reasoning_effort is self._SENTINEL:
+            reasoning_effort = self.generation.reasoning_effort
+
+        for attempt, delay in enumerate(self._CHAT_RETRY_DELAYS, start=1):
+            try:
+                response = await self.chat_stream(
+                    messages=messages,
+                    tools=tools,
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    reasoning_effort=reasoning_effort,
+                    tool_choice=tool_choice,
+                    on_text_delta=on_text_delta,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                response = LLMResponse(
+                    content=f"Error calling LLM: {exc}",
+                    finish_reason="error",
+                )
+
+            if response.finish_reason != "error":
+                return response
+            if not self._is_transient_error(response.content):
+                return response
+
+            err = (response.content or "").lower()
+            logger.warning(
+                "LLM transient streaming error (attempt {}/{}), retrying in {}s: {}",
+                attempt,
+                len(self._CHAT_RETRY_DELAYS),
+                delay,
+                err[:120],
+            )
+            await asyncio.sleep(delay)
+
+        try:
+            return await self.chat_stream(
+                messages=messages,
+                tools=tools,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+                tool_choice=tool_choice,
+                on_text_delta=on_text_delta,
             )
         except asyncio.CancelledError:
             raise

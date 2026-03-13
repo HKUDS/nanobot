@@ -1,10 +1,11 @@
 """LiteLLM provider implementation for multi-provider support."""
 
 import hashlib
+import json
 import os
 import secrets
 import string
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import json_repair
 import litellm
@@ -206,6 +207,79 @@ class LiteLLMProvider(LLMProvider):
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
         return sanitized
 
+    @staticmethod
+    def _field(obj: Any, key: str, default: Any = None) -> Any:
+        """Read key from dict/object without assuming one concrete type."""
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+    @classmethod
+    def _usage_from_obj(cls, usage_obj: Any) -> dict[str, int]:
+        """Normalize usage payload from dict/object shape."""
+        if not usage_obj:
+            return {}
+        prompt_tokens = cls._field(usage_obj, "prompt_tokens", 0) or 0
+        completion_tokens = cls._field(usage_obj, "completion_tokens", 0) or 0
+        total_tokens = cls._field(usage_obj, "total_tokens", 0) or 0
+        return {
+            "prompt_tokens": int(prompt_tokens),
+            "completion_tokens": int(completion_tokens),
+            "total_tokens": int(total_tokens),
+        }
+
+    def _build_request_kwargs(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        model: str | None,
+        max_tokens: int,
+        temperature: float,
+        reasoning_effort: str | None,
+        tool_choice: str | dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Build request kwargs shared by normal and streaming calls."""
+        original_model = model or self.default_model
+        resolved_model = self._resolve_model(original_model)
+        extra_msg_keys = self._extra_msg_keys(original_model, resolved_model)
+
+        if self._supports_cache_control(original_model):
+            messages, tools = self._apply_cache_control(messages, tools)
+
+        kwargs: dict[str, Any] = {
+            "model": resolved_model,
+            "messages": self._sanitize_messages(
+                self._sanitize_empty_content(messages), extra_keys=extra_msg_keys
+            ),
+            "max_tokens": max(1, max_tokens),
+            "temperature": temperature,
+        }
+
+        # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
+        self._apply_model_overrides(resolved_model, kwargs)
+
+        # Pass api_key directly — more reliable than env vars alone
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+
+        # Pass api_base for custom endpoints
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+
+        # Pass extra headers (e.g. APP-Code for AiHubMix)
+        if self.extra_headers:
+            kwargs["extra_headers"] = self.extra_headers
+
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
+            kwargs["drop_params"] = True
+
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = tool_choice or "auto"
+
+        return kwargs
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -229,52 +303,162 @@ class LiteLLMProvider(LLMProvider):
         Returns:
             LLMResponse with content and/or tool calls.
         """
-        original_model = model or self.default_model
-        model = self._resolve_model(original_model)
-        extra_msg_keys = self._extra_msg_keys(original_model, model)
-
-        if self._supports_cache_control(original_model):
-            messages, tools = self._apply_cache_control(messages, tools)
-
-        # Clamp max_tokens to at least 1 — negative or zero values cause
-        # LiteLLM to reject the request with "max_tokens must be at least 1".
-        max_tokens = max(1, max_tokens)
-
-        kwargs: dict[str, Any] = {
-            "model": model,
-            "messages": self._sanitize_messages(self._sanitize_empty_content(messages), extra_keys=extra_msg_keys),
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-
-        # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
-        self._apply_model_overrides(model, kwargs)
-
-        # Pass api_key directly — more reliable than env vars alone
-        if self.api_key:
-            kwargs["api_key"] = self.api_key
-
-        # Pass api_base for custom endpoints
-        if self.api_base:
-            kwargs["api_base"] = self.api_base
-
-        # Pass extra headers (e.g. APP-Code for AiHubMix)
-        if self.extra_headers:
-            kwargs["extra_headers"] = self.extra_headers
-        
-        if reasoning_effort:
-            kwargs["reasoning_effort"] = reasoning_effort
-            kwargs["drop_params"] = True
-        
-        if tools:
-            kwargs["tools"] = tools
-            kwargs["tool_choice"] = tool_choice or "auto"
+        kwargs = self._build_request_kwargs(
+            messages=messages,
+            tools=tools,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+            tool_choice=tool_choice,
+        )
 
         try:
             response = await acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
             # Return error as content for graceful handling
+            return LLMResponse(
+                content=f"Error calling LLM: {str(e)}",
+                finish_reason="error",
+            )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        on_text_delta: Callable[[str], Awaitable[None] | None] | None = None,
+    ) -> LLMResponse:
+        """Send a streaming chat completion request via LiteLLM."""
+        kwargs = self._build_request_kwargs(
+            messages=messages,
+            tools=tools,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+            tool_choice=tool_choice,
+        )
+        kwargs["stream"] = True
+
+        try:
+            stream = await acompletion(**kwargs)
+            content_parts: list[str] = []
+            reasoning_parts: list[str] = []
+            thinking_blocks: list[dict] = []
+            tool_call_buffers: dict[int, dict[str, str]] = {}
+            usage: dict[str, int] = {}
+            finish_reason = "stop"
+
+            async def _consume_chunk(chunk: Any) -> None:
+                nonlocal usage, finish_reason
+                usage_update = self._usage_from_obj(self._field(chunk, "usage"))
+                if usage_update:
+                    usage = usage_update
+
+                choices = self._field(chunk, "choices", []) or []
+                for choice in choices:
+                    candidate_finish = self._field(choice, "finish_reason")
+                    if candidate_finish:
+                        finish_reason = candidate_finish
+
+                    delta = self._field(choice, "delta") or self._field(choice, "message")
+                    if not delta:
+                        continue
+
+                    text_delta = self._field(delta, "content")
+                    if isinstance(text_delta, str) and text_delta:
+                        content_parts.append(text_delta)
+                        await self._emit_text_delta(on_text_delta, text_delta)
+                    elif isinstance(text_delta, list):
+                        for item in text_delta:
+                            text_piece = None
+                            if isinstance(item, str):
+                                text_piece = item
+                            elif isinstance(item, dict):
+                                if item.get("type") in {"text", "output_text", "input_text"}:
+                                    text_piece = item.get("text")
+                            else:
+                                text_piece = getattr(item, "text", None)
+                            if isinstance(text_piece, str) and text_piece:
+                                content_parts.append(text_piece)
+                                await self._emit_text_delta(on_text_delta, text_piece)
+
+                    reasoning_delta = self._field(delta, "reasoning_content")
+                    if isinstance(reasoning_delta, str) and reasoning_delta:
+                        reasoning_parts.append(reasoning_delta)
+
+                    tb_delta = self._field(delta, "thinking_blocks")
+                    if isinstance(tb_delta, list) and tb_delta:
+                        for block in tb_delta:
+                            if isinstance(block, dict):
+                                thinking_blocks.append(block)
+
+                    for tc in self._field(delta, "tool_calls", []) or []:
+                        idx = self._field(tc, "index", 0)
+                        try:
+                            idx = int(idx)
+                        except (TypeError, ValueError):
+                            idx = 0
+
+                        buf = tool_call_buffers.setdefault(
+                            idx, {"id": "", "name": "", "arguments": ""}
+                        )
+                        tc_id = self._field(tc, "id", "")
+                        if isinstance(tc_id, str) and tc_id:
+                            buf["id"] = tc_id
+
+                        fn = self._field(tc, "function", {}) or {}
+                        fn_name = self._field(fn, "name", "")
+                        if isinstance(fn_name, str) and fn_name:
+                            buf["name"] = fn_name
+
+                        fn_args = self._field(fn, "arguments", "")
+                        if isinstance(fn_args, str) and fn_args:
+                            buf["arguments"] += fn_args
+                        elif isinstance(fn_args, (dict, list)):
+                            buf["arguments"] = json.dumps(fn_args, ensure_ascii=False)
+
+            if hasattr(stream, "__aiter__"):
+                async for chunk in stream:
+                    await _consume_chunk(chunk)
+            else:
+                for chunk in stream:
+                    await _consume_chunk(chunk)
+
+            tool_calls: list[ToolCallRequest] = []
+            for idx in sorted(tool_call_buffers):
+                payload = tool_call_buffers[idx]
+                args_raw = payload.get("arguments", "") or "{}"
+                if isinstance(args_raw, str):
+                    try:
+                        args = json_repair.loads(args_raw)
+                    except Exception:
+                        args = {"raw": args_raw}
+                else:
+                    args = args_raw if isinstance(args_raw, dict) else {"raw": args_raw}
+                tool_calls.append(
+                    ToolCallRequest(
+                        id=_short_tool_id(),
+                        name=payload.get("name") or "unknown_tool",
+                        arguments=args,
+                    )
+                )
+
+            return LLMResponse(
+                content=("".join(content_parts) or None),
+                tool_calls=tool_calls,
+                finish_reason=finish_reason or "stop",
+                usage=usage,
+                reasoning_content=("".join(reasoning_parts) or None),
+                thinking_blocks=thinking_blocks or None,
+            )
+        except Exception as e:
             return LLMResponse(
                 content=f"Error calling LLM: {str(e)}",
                 finish_reason="error",
