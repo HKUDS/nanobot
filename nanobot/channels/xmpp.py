@@ -41,12 +41,14 @@ class XmppClient(ClientXMPP):
         self,
         jid: str,
         password: str,
+        channel: XmppChannel,
         nickname: str = "nanobot",
         rooms: list[str] | None = None,
         file_transfer_enabled = True
     ):
         super().__init__(jid, password)
         self._nickname = nickname
+        self._channel = channel
         self._rooms = set(rooms or [])
         self._joined_rooms: set[str] = set()
         self._running = False
@@ -354,6 +356,7 @@ class XmppChannel(BaseChannel):
         client = self._client_provider(
             jid=config.jid,
             password=config.password,
+            channel=self,
             nickname=getattr(config, "nickname", "nanobot"),
             rooms=rooms,
             file_transfer_enabled=getattr(config, "file_transfer_enabled", True)
