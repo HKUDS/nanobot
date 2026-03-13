@@ -827,8 +827,11 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 <details>
 <summary><b>Custom Provider (Any OpenAI-compatible API)</b></summary>
 
-Connects directly to any OpenAI-compatible endpoint — LM Studio, llama.cpp, Together AI, Fireworks, Azure OpenAI, or any self-hosted server. Bypasses LiteLLM; model name is passed as-is.
+Use the `custom` provicder to connect directly to any OpenAI-compatible endpoint — LM Studio, llama.cpp, Together AI, Fireworks, Azure OpenAI, or any self-hosted server. Bypasses LiteLLM; model name is passed as-is. 
 
+Note that if you expect to use things like tool calling, you probably *Don't* want to bypass LiteLLM, so you can alternatively set your provider key to `openai` or `anthropic` (whichever API your custom service speaks) and then still provide your own `apiBase` URL.
+
+### OK if you don't care about tool-calling via LiteLLM:
 ```json
 {
   "providers": {
@@ -845,6 +848,23 @@ Connects directly to any OpenAI-compatible endpoint — LM Studio, llama.cpp, To
 }
 ```
 
+### LiteLLM will handle your Tool-calling model:
+
+```json
+{
+  "providers": {
+    "openai": {
+      "apiKey": "your-api-key",
+      "apiBase": "https://api.some-openapi-compatible-provider.com/v1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "your-tool-calling-model-name"
+    }
+  }
+}
+```
 > For local servers that don't require a key, set `apiKey` to any non-empty string (e.g. `"no-key"`).
 
 </details>
