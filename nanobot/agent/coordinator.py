@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from nanobot.agent.observability import span as langfuse_span
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.registry import AgentRegistry
 from nanobot.config.schema import AgentRoleConfig
@@ -158,48 +159,56 @@ class Coordinator:
         user_prompt = self._build_classify_prompt(message)
 
         t0 = time.monotonic()
-        try:
-            response = await self._provider.chat(
-                messages=[
-                    {"role": "system", "content": prompts.get("classify")},
-                    {"role": "user", "content": user_prompt},
-                ],
-                tools=None,
-                model=model,
-                temperature=0.0,
-                max_tokens=128,
-            )
-            raw = (response.content or "").strip()
-            parsed_role, confidence, needs_orchestration, relevant_roles = self._parse_response(raw)
-            role_name = parsed_role if parsed_role in self._registry else self._default_role
-
-            # Orchestration override: route to "pm" when the classifier
-            # judges the task needs multi-agent coordination.
-            if (
-                role_name not in ("pm", "general")
-                and "pm" in self._registry
-                and (needs_orchestration or len(relevant_roles) >= 2)
-            ):
-                logger.info(
-                    "Orchestration override: {} → pm (needs_orchestration={}, relevant_roles={})",
-                    role_name,
-                    needs_orchestration,
-                    relevant_roles,
+        async with langfuse_span(
+            name="classify",
+            input=message[:200],
+            metadata={"model": model},
+        ):
+            try:
+                response = await self._provider.chat(
+                    messages=[
+                        {"role": "system", "content": prompts.get("classify")},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    tools=None,
+                    model=model,
+                    temperature=0.0,
+                    max_tokens=128,
                 )
-                role_name = "pm"
+                raw = (response.content or "").strip()
+                parsed_role, confidence, needs_orchestration, relevant_roles = self._parse_response(
+                    raw
+                )
+                role_name = parsed_role if parsed_role in self._registry else self._default_role
 
-            latency_ms = (time.monotonic() - t0) * 1000
-            logger.info(
-                "Coordinator classified → {} (confidence={:.2f}, latency={:.0f}ms, raw: {})",
-                role_name,
-                confidence,
-                latency_ms,
-                raw,
-            )
-            return role_name, confidence
-        except Exception:  # crash-barrier: LLM-based classification
-            logger.warning("Coordinator classification failed, using default role")
-            return self._default_role, 0.0
+                # Orchestration override: route to "pm" when the classifier
+                # judges the task needs multi-agent coordination.
+                if (
+                    role_name not in ("pm", "general")
+                    and "pm" in self._registry
+                    and (needs_orchestration or len(relevant_roles) >= 2)
+                ):
+                    logger.info(
+                        "Orchestration override: {} → pm "
+                        "(needs_orchestration={}, relevant_roles={})",
+                        role_name,
+                        needs_orchestration,
+                        relevant_roles,
+                    )
+                    role_name = "pm"
+
+                latency_ms = (time.monotonic() - t0) * 1000
+                logger.info(
+                    "Coordinator classified → {} (confidence={:.2f}, latency={:.0f}ms, raw: {})",
+                    role_name,
+                    confidence,
+                    latency_ms,
+                    raw,
+                )
+                return role_name, confidence
+            except Exception:  # crash-barrier: LLM-based classification
+                logger.warning("Coordinator classification failed, using default role")
+                return self._default_role, 0.0
 
     def _parse_response(self, raw: str) -> tuple[str, float, bool, list[str]]:
         """Extract classification fields from the classifier's raw response.

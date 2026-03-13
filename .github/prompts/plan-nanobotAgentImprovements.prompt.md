@@ -55,7 +55,7 @@ This file contains 7+ distinct responsibilities and is the #1 maintainability ri
 | `memory/profile.py` | Profile CRUD, contradiction detection, conflict resolution | ~400 |
 | `memory/evaluation.py` | Eval framework, recall/precision computation, report generation | ~300 |
 | `memory/rollout.py` | Feature flags, shadow mode, gate evaluation | ~300 |
-| `memory/metrics.py` | `_record_metric`, metrics I/O (see step 9) | ~200 |
+| _(removed)_ | Legacy `MetricsCollector` removed — now in Langfuse | — |
 | `memory/types.py` | Shared dataclasses, enums, constants | ~150 |
 
 - Maintain the public API surface (`MemoryStore.retrieve()`, `MemoryStore.consolidate()`, `get_memory_context()`) via re-exports from `memory/__init__.py`.
@@ -93,13 +93,10 @@ The agent has no mechanism to learn from explicit user feedback.
 
 ### Tier 3 — Reliability & Robustness
 
-**9. Replace file-based metrics with in-memory counters**
+**9. ~~Replace file-based metrics with in-memory counters~~ (DONE — removed entirely)**
 
-Every `_record_metric()` call in memory.py reads the full `metrics.json`, updates counters, and writes it back. No locking. This causes race conditions under concurrent access and unnecessary I/O.
-
-- Replace with an in-memory `Counter` / dict flushed to disk periodically (every 60s or on graceful shutdown).
-- Use `asyncio.Lock` for async safety.
-- Keep the JSON file as the persistence format but batch writes.
+Legacy `MetricsCollector` and `metrics.json` have been removed.  All observability
+counters are now captured via Langfuse.
 
 **10. Add integration tests for the core agent loop**
 

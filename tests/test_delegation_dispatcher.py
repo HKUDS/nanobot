@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +27,6 @@ def _make_dispatcher(tmp_path: Path, **overrides: Any) -> DelegationDispatcher:
         brave_api_key=None,
         exec_config=None,
         role_name="main",
-        trace_path=tmp_path / "trace.jsonl",
     )
     defaults.update(overrides)
     return DelegationDispatcher(**defaults)  # type: ignore[arg-type]
@@ -70,13 +68,11 @@ class TestRecordRouteTrace:
         assert entry["confidence"] == 0.9
         assert entry["latency_ms"] == 42.5
 
-    def test_writes_jsonl_file(self, tmp_path: Path):
-        trace_path = tmp_path / "traces" / "routing.jsonl"
-        d = _make_dispatcher(tmp_path, trace_path=trace_path)
+    def test_writes_to_in_memory_trace(self, tmp_path: Path):
+        d = _make_dispatcher(tmp_path)
         d.record_route_trace("delegate", role="code")
-        assert trace_path.exists()
-        data = json.loads(trace_path.read_text().strip())
-        assert data["event"] == "delegate"
+        assert len(d.routing_trace) == 1
+        assert d.routing_trace[0]["event"] == "delegate"
 
     def test_tools_used_recorded(self, tmp_path: Path):
         d = _make_dispatcher(tmp_path)

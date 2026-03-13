@@ -1,34 +1,19 @@
-"""Tests for routing metrics counters, trace persistence, and CLI commands.
+"""Tests for routing trace recording and in-memory trace access.
 
 Covers:
-- Metric counter increments on classify / delegate / cycle block
-- Latency recording (sum + max)
-- Per-role invocation and tool-call counters
-- Trace JSONL file persistence
-- CLI routing trace / metrics commands
+- In-memory routing trace entries for classify / delegate / cycle block
+- Trace entry structure and fields
+- Per-role invocation tracking via trace
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from nanobot.agent.coordinator import Coordinator, build_default_registry
-from nanobot.agent.metrics import (
-    DELEGATION_LATENCY_MAX_MS,
-    DELEGATION_LATENCY_SUM_MS,
-    ROUTING_CLASSIFICATIONS,
-    ROUTING_CLASSIFY_LATENCY_MAX_MS,
-    ROUTING_CLASSIFY_LATENCY_SUM_MS,
-    ROUTING_CYCLES_BLOCKED,
-    ROUTING_DELEGATIONS,
-    MetricsCollector,
-    role_invocations_key,
-    role_tool_calls_key,
-)
 from nanobot.agent.tools.delegate import _CycleError
 from nanobot.config.schema import AgentConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
@@ -67,7 +52,7 @@ def _make_agent_config(tmp_path: Path, **overrides: Any) -> AgentConfig:
 
 
 def _make_loop(tmp_path: Path, provider: LLMProvider | None = None):
-    """Create an AgentLoop with coordinator and routing metrics wired up."""
+    """Create an AgentLoop with coordinator wired up."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
@@ -80,191 +65,114 @@ def _make_loop(tmp_path: Path, provider: LLMProvider | None = None):
     loop._dispatcher.coordinator = loop._coordinator
     loop._wire_delegate_tools()
 
-    # Set up routing metrics (normally done in run())
-    loop._routing_metrics = MetricsCollector(
-        tmp_path / "memory" / "routing_metrics.json",
-        flush_interval_s=300.0,
-    )
-    loop._dispatcher.routing_metrics = loop._routing_metrics
-    loop._trace_path = tmp_path / "memory" / "routing_trace.jsonl"
     return loop
 
 
 # ---------------------------------------------------------------------------
-# Metric key helpers
+# Metric key helpers were here — removed with MetricsCollector (now in Langfuse)
 # ---------------------------------------------------------------------------
 
 
-class TestMetricKeyHelpers:
-    def test_role_invocations_key(self) -> None:
-        assert role_invocations_key("code") == "role_invocations:code"
-
-    def test_role_tool_calls_key(self) -> None:
-        assert role_tool_calls_key("research") == "role_tool_calls:research"
-
-
 # ---------------------------------------------------------------------------
-# Counter increments
+# In-memory trace recording
 # ---------------------------------------------------------------------------
 
 
-class TestRoutingMetricCounters:
-    async def test_route_increments_classification_counter(self, tmp_path: Path) -> None:
+class TestRoutingTraceRecording:
+    async def test_route_records_trace_entry(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        assert loop._routing_metrics is not None
-
         loop._record_route_trace("route", role="code", confidence=0.9, latency_ms=42.5)
-        assert loop._routing_metrics.get(ROUTING_CLASSIFICATIONS) == 1
-
         loop._record_route_trace("route", role="research", confidence=0.8, latency_ms=30.0)
-        assert loop._routing_metrics.get(ROUTING_CLASSIFICATIONS) == 2
 
-    async def test_delegate_increments_delegation_counter(self, tmp_path: Path) -> None:
+        trace = loop.get_routing_trace()
+        assert len(trace) == 2
+        assert trace[0]["event"] == "route"
+        assert trace[0]["role"] == "code"
+        assert trace[0]["confidence"] == 0.9
+        assert trace[1]["role"] == "research"
+
+    async def test_delegate_records_trace_entry(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        assert loop._routing_metrics is not None
-
         loop._record_route_trace("delegate", role="research", from_role="code", depth=1)
-        assert loop._routing_metrics.get(ROUTING_DELEGATIONS) == 1
 
-    async def test_cycle_blocked_increments_counter(self, tmp_path: Path) -> None:
+        trace = loop.get_routing_trace()
+        assert len(trace) == 1
+        assert trace[0]["event"] == "delegate"
+        assert trace[0]["from_role"] == "code"
+        assert trace[0]["depth"] == 1
+
+    async def test_cycle_blocked_records_trace_entry(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        assert loop._routing_metrics is not None
-
         loop._record_route_trace(
             "delegate_cycle_blocked", role="code", from_role="code", success=False
         )
-        assert loop._routing_metrics.get(ROUTING_CYCLES_BLOCKED) == 1
+
+        trace = loop.get_routing_trace()
+        assert len(trace) == 1
+        assert trace[0]["event"] == "delegate_cycle_blocked"
+        assert trace[0]["success"] is False
 
     async def test_delegate_complete_records_latency(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        assert loop._routing_metrics is not None
-
         loop._record_route_trace("delegate_complete", role="code", latency_ms=150.0)
         loop._record_route_trace("delegate_complete", role="code", latency_ms=200.0)
-        assert loop._routing_metrics.get(DELEGATION_LATENCY_SUM_MS) == 350
-        assert loop._routing_metrics.get(DELEGATION_LATENCY_MAX_MS) == 200.0
 
+        trace = loop.get_routing_trace()
+        assert len(trace) == 2
+        assert trace[0]["latency_ms"] == 150.0
+        assert trace[1]["latency_ms"] == 200.0
 
-# ---------------------------------------------------------------------------
-# Latency recording
-# ---------------------------------------------------------------------------
-
-
-class TestLatencyMetrics:
-    async def test_classify_latency_sum_and_max(self, tmp_path: Path) -> None:
+    async def test_trace_entry_has_timestamp(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        assert loop._routing_metrics is not None
+        loop._record_route_trace("route", role="code")
 
-        loop._record_route_trace("route", role="code", latency_ms=50.0)
-        loop._record_route_trace("route", role="research", latency_ms=80.0)
-
-        assert loop._routing_metrics.get(ROUTING_CLASSIFY_LATENCY_SUM_MS) == 130
-        assert loop._routing_metrics.get(ROUTING_CLASSIFY_LATENCY_MAX_MS) == 80.0
-
-    async def test_delegation_latency_sum_and_max(self, tmp_path: Path) -> None:
-        loop = _make_loop(tmp_path)
-        assert loop._routing_metrics is not None
-
-        loop._record_route_trace("delegate_complete", role="code", latency_ms=100.0)
-        loop._record_route_trace("delegate_complete", role="research", latency_ms=250.0)
-        loop._record_route_trace("delegate_complete", role="writing", latency_ms=75.0)
-
-        assert loop._routing_metrics.get(DELEGATION_LATENCY_SUM_MS) == 425
-        assert loop._routing_metrics.get(DELEGATION_LATENCY_MAX_MS) == 250.0
+        trace = loop.get_routing_trace()
+        assert "timestamp" in trace[0]
+        assert len(trace[0]["timestamp"]) > 0
 
 
 # ---------------------------------------------------------------------------
-# Per-role counters
+# Per-role counters via trace
 # ---------------------------------------------------------------------------
 
 
-class TestPerRoleCounters:
-    async def test_role_invocations_tracked_per_role(self, tmp_path: Path) -> None:
+class TestPerRoleTracking:
+    async def test_role_invocations_tracked_via_trace(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        assert loop._routing_metrics is not None
 
         loop._record_route_trace("route", role="code")
         loop._record_route_trace("route", role="code")
         loop._record_route_trace("route", role="research")
 
-        assert loop._routing_metrics.get(role_invocations_key("code")) == 2
-        assert loop._routing_metrics.get(role_invocations_key("research")) == 1
-        assert loop._routing_metrics.get(role_invocations_key("writing")) == 0
+        trace = loop.get_routing_trace()
+        code_routes = [t for t in trace if t["event"] == "route" and t["role"] == "code"]
+        research_routes = [t for t in trace if t["event"] == "route" and t["role"] == "research"]
+        assert len(code_routes) == 2
+        assert len(research_routes) == 1
 
 
 # ---------------------------------------------------------------------------
-# Trace JSONL persistence
+# Dispatch integration records trace
 # ---------------------------------------------------------------------------
 
 
-class TestTracePersistence:
-    async def test_trace_written_to_jsonl(self, tmp_path: Path) -> None:
-        loop = _make_loop(tmp_path)
-        trace_path = loop._trace_path
-
-        loop._record_route_trace("route", role="code", confidence=0.95, latency_ms=40.0)
-        loop._record_route_trace("delegate", role="research", from_role="code")
-
-        assert trace_path.exists()
-        lines = trace_path.read_text(encoding="utf-8").strip().splitlines()
-        assert len(lines) == 2
-
-        entry0 = json.loads(lines[0])
-        assert entry0["event"] == "route"
-        assert entry0["role"] == "code"
-        assert entry0["confidence"] == 0.95
-
-        entry1 = json.loads(lines[1])
-        assert entry1["event"] == "delegate"
-        assert entry1["from_role"] == "code"
-
-    async def test_trace_appends_not_overwrites(self, tmp_path: Path) -> None:
-        loop = _make_loop(tmp_path)
-
-        loop._record_route_trace("route", role="code")
-        loop._record_route_trace("route", role="research")
-        loop._record_route_trace("route", role="writing")
-
-        lines = loop._trace_path.read_text(encoding="utf-8").strip().splitlines()
-        assert len(lines) == 3
-
-    async def test_trace_survives_io_error(self, tmp_path: Path) -> None:
-        """If trace file path is broken, recording still works (in-memory)."""
-        loop = _make_loop(tmp_path)
-        loop._trace_path = Path("/nonexistent/dir/trace.jsonl")
-
-        # Should not raise
-        loop._record_route_trace("route", role="code")
-        assert len(loop._routing_trace) == 1
-
-
-# ---------------------------------------------------------------------------
-# Dispatch integration records metrics
-# ---------------------------------------------------------------------------
-
-
-class TestDispatchRecordsMetrics:
+class TestDispatchRecordsTrace:
     async def test_dispatch_records_delegate_and_complete(self, tmp_path: Path) -> None:
         """_dispatch_delegation records delegate + delegate_complete events."""
         loop = _make_loop(tmp_path, FakeProvider(["delegation result"]))
-        assert loop._routing_metrics is not None
 
         await loop._dispatch_delegation("code", "write some code", None)
 
-        assert loop._routing_metrics.get(ROUTING_DELEGATIONS) == 1
-        # Latency sum may be 0 for very fast fake providers; just check
-        # that the delegate_complete trace was recorded
         trace = loop.get_routing_trace()
         complete_events = [t for t in trace if t["event"] == "delegate_complete"]
         assert len(complete_events) == 1
         assert complete_events[0]["success"] is True
 
-    async def test_cycle_block_records_metric(self, tmp_path: Path) -> None:
-        """Cycle detection records routing_cycles_blocked."""
+    async def test_cycle_block_records_trace(self, tmp_path: Path) -> None:
+        """Cycle detection records delegate_cycle_blocked in trace."""
         from nanobot.agent.loop import _delegation_ancestry
 
         loop = _make_loop(tmp_path)
-        assert loop._routing_metrics is not None
 
         token = _delegation_ancestry.set(("code",))
         try:
@@ -273,31 +181,6 @@ class TestDispatchRecordsMetrics:
         finally:
             _delegation_ancestry.reset(token)
 
-        assert loop._routing_metrics.get(ROUTING_CYCLES_BLOCKED) == 1
-
-
-# ---------------------------------------------------------------------------
-# MetricsCollector flush
-# ---------------------------------------------------------------------------
-
-
-class TestMetricsFlush:
-    async def test_flush_persists_to_json(self, tmp_path: Path) -> None:
-        path = tmp_path / "metrics.json"
-        mc = MetricsCollector(path)
-        mc.record(ROUTING_CLASSIFICATIONS, 5)
-        mc.record(ROUTING_DELEGATIONS, 2)
-        await mc.flush()
-
-        data = json.loads(path.read_text(encoding="utf-8"))
-        assert data[ROUTING_CLASSIFICATIONS] == 5
-        assert data[ROUTING_DELEGATIONS] == 2
-
-    async def test_snapshot_returns_all_counters(self, tmp_path: Path) -> None:
-        path = tmp_path / "metrics.json"
-        mc = MetricsCollector(path)
-        mc.record("a", 1)
-        mc.record("b", 3)
-        snap = mc.snapshot()
-        assert snap["a"] == 1
-        assert snap["b"] == 3
+        trace = loop.get_routing_trace()
+        blocked = [t for t in trace if t["event"] == "delegate_cycle_blocked"]
+        assert len(blocked) == 1

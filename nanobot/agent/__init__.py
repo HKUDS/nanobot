@@ -6,6 +6,8 @@ from nanobot.agent.coordinator import Coordinator
 from nanobot.agent.delegation import DelegationDispatcher
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.observability import init_langfuse
+from nanobot.agent.observability import shutdown as shutdown_langfuse
 from nanobot.agent.prompt_loader import PromptLoader
 from nanobot.agent.registry import AgentRegistry
 from nanobot.agent.scratchpad import Scratchpad
@@ -28,4 +30,6 @@ __all__ = [
     "SkillsLoader",
     "StreamingLLMCaller",
     "ToolExecutor",
+    "init_langfuse",
+    "shutdown_langfuse",
 ]

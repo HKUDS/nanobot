@@ -12,7 +12,6 @@ always: true
 - `memory/HISTORY.md` — Append-only event log. NOT loaded into context. Search it with grep.
 - `memory/events.jsonl` — Structured episodic events used for retrieval ranking.
 - `memory/profile.json` — Canonical profile facts (`preferences`, `stable_facts`, etc.).
-- `memory/metrics.json` — Memory observability counters.
 
 ## Search Past Events
 

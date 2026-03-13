@@ -15,7 +15,6 @@ Extracted per ADR-002 to keep AgentLoop focused on orchestration.
 from __future__ import annotations
 
 import contextvars
-import json as _json
 import re
 import time
 from datetime import datetime
@@ -24,17 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nanobot.agent.metrics import (
-    DELEGATION_LATENCY_MAX_MS,
-    DELEGATION_LATENCY_SUM_MS,
-    ROUTING_CLASSIFICATIONS,
-    ROUTING_CLASSIFY_LATENCY_MAX_MS,
-    ROUTING_CLASSIFY_LATENCY_SUM_MS,
-    ROUTING_CYCLES_BLOCKED,
-    ROUTING_DELEGATIONS,
-    MetricsCollector,
-    role_invocations_key,
-)
+from nanobot.agent.observability import span as langfuse_span
 from nanobot.agent.subagent import run_tool_loop
 from nanobot.agent.tools.base import ToolResult  # noqa: F401 — re-export for tests
 from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool, _CycleError
@@ -159,7 +148,6 @@ class DelegationDispatcher:
         brave_api_key: str | None,
         exec_config: ExecToolConfig,
         role_name: str,
-        trace_path: Path,
     ) -> None:
         self.provider = provider
         self.workspace = workspace
@@ -171,7 +159,6 @@ class DelegationDispatcher:
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config
         self.role_name = role_name
-        self.trace_path = trace_path
 
         # Mutable per-session state
         self.delegation_count: int = 0
@@ -180,7 +167,6 @@ class DelegationDispatcher:
 
         # Set by AgentLoop after construction
         self.coordinator: Coordinator | None = None
-        self.routing_metrics: MetricsCollector | None = None
         self.scratchpad: Scratchpad | None = None
         self.active_messages: list[dict[str, Any]] | None = None
         self.tools: ToolExecutor | None = None  # for wire_delegate_tools
@@ -231,31 +217,6 @@ class DelegationDispatcher:
             entry["tools_used"] = tools_used
             entry["tools_used_count"] = len(tools_used)
         self.routing_trace.append(entry)
-
-        # Persist to JSONL trace file
-        try:
-            self.trace_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.trace_path.open("a", encoding="utf-8") as f:
-                f.write(_json.dumps(entry, default=str) + "\n")
-        except OSError:
-            pass  # best-effort trace persistence
-
-        # Record counters
-        m = self.routing_metrics
-        if m is None:
-            return
-        if event == "route":
-            m.record(ROUTING_CLASSIFICATIONS)
-            m.record(ROUTING_CLASSIFY_LATENCY_SUM_MS, int(latency_ms))
-            m.set_max(ROUTING_CLASSIFY_LATENCY_MAX_MS, latency_ms)
-            m.record(role_invocations_key(role))
-        elif event == "delegate":
-            m.record(ROUTING_DELEGATIONS)
-        elif event == "delegate_cycle_blocked":
-            m.record(ROUTING_CYCLES_BLOCKED)
-        elif event == "delegate_complete":
-            m.record(DELEGATION_LATENCY_SUM_MS, int(latency_ms))
-            m.set_max(DELEGATION_LATENCY_MAX_MS, latency_ms)
 
     def get_routing_trace(self) -> list[dict[str, Any]]:
         """Return a copy of the routing trace."""
@@ -588,7 +549,16 @@ class DelegationDispatcher:
         self.delegation_count += 1
         token = _delegation_ancestry.set((*ancestry, role.name))
         try:
-            result, used_tools = await self.execute_delegated_agent(role, task, context)
+            async with langfuse_span(
+                name="delegate",
+                input=task[:200],
+                metadata={
+                    "target_role": role.name,
+                    "from_role": from_role,
+                    "depth": depth,
+                },
+            ):
+                result, used_tools = await self.execute_delegated_agent(role, task, context)
             latency_ms = (time.monotonic() - t0) * 1000
             self.record_route_trace(
                 "delegate_complete",

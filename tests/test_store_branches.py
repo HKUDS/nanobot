@@ -145,9 +145,10 @@ class TestVectorHealthBranches:
         store._vector_points_count = MagicMock(return_value=0)
         store._history_row_count = MagicMock(return_value=10)
 
+        store.reindex_from_structured_memory = MagicMock()  # type: ignore[method-assign]
+
         store._ensure_vector_health()
-        metrics = store.get_metrics()
-        assert metrics.get("vector_health_degraded_count", 0) >= 1
+        store.reindex_from_structured_memory.assert_not_called()
 
 
 class TestConsolidationHelpers:

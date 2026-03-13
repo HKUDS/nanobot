@@ -95,11 +95,6 @@ def test_append_events_records_type_metrics_with_dual_write(tmp_path: Path) -> N
     )
 
     assert written == 2
-    metrics = store.get_metrics()
-    assert metrics["memory_writes_total"] >= 3
-    assert metrics["memory_writes_semantic"] >= 2
-    assert metrics["memory_writes_episodic"] >= 1
-    assert metrics["memory_writes_dual"] >= 1
 
 
 def test_retrieve_records_candidates_and_type_counts(tmp_path: Path) -> None:
@@ -134,12 +129,6 @@ def test_retrieve_records_candidates_and_type_counts(tmp_path: Path) -> None:
     # Phase 4 candidate expansion should query a larger pool.
     _, kwargs = store.mem0.search.call_args
     assert kwargs["top_k"] == 6
-    metrics = store.get_metrics()
-    assert metrics["retrieval_candidates"] >= 2
-    assert metrics["retrieval_returned"] >= 2
-    assert metrics["retrieval_returned_semantic"] >= 1
-    assert metrics["retrieval_returned_episodic"] >= 1
-    assert metrics["retrieval_intent_fact_lookup"] >= 1
 
 
 def test_retrieve_debug_history_prefers_episodic(tmp_path: Path) -> None:
@@ -172,8 +161,6 @@ def test_retrieve_debug_history_prefers_episodic(tmp_path: Path) -> None:
 
     assert len(rows) == 1
     assert rows[0]["memory_type"] == "episodic"
-    metrics = store.get_metrics()
-    assert metrics["retrieval_intent_debug_history"] >= 1
 
 
 def test_get_memory_context_fact_lookup_includes_episodic_softly(tmp_path: Path) -> None:
@@ -207,8 +194,6 @@ def test_get_memory_context_fact_lookup_includes_episodic_softly(tmp_path: Path)
     assert "Carlos prefers CLI tools." in context
     # Episodic section now has a small weight (0.05) for fact_lookup,
     # so it may appear if budget allows.
-    metrics = store.get_metrics()
-    assert metrics["memory_context_intent_fact_lookup"] >= 1
 
 
 def test_get_memory_context_debug_includes_episodic(tmp_path: Path) -> None:
@@ -238,8 +223,6 @@ def test_get_memory_context_debug_includes_episodic(tmp_path: Path) -> None:
 
     assert "## Relevant Episodic Memories" in context
     assert "Deploy failed yesterday due to port conflict." in context
-    metrics = store.get_metrics()
-    assert metrics["memory_context_intent_debug_history"] >= 1
 
 
 def test_get_memory_context_reflection_includes_reflection_section(tmp_path: Path) -> None:
@@ -262,8 +245,6 @@ def test_get_memory_context_reflection_includes_reflection_section(tmp_path: Pat
 
     assert "## Relevant Reflection Memories" in context
     assert "Reflection: incidents are usually caused by stale config drift." in context
-    metrics = store.get_metrics()
-    assert metrics["memory_context_intent_reflection"] >= 1
 
 
 def test_semantic_supersession_marks_lineage(tmp_path: Path) -> None:
@@ -301,8 +282,6 @@ def test_semantic_supersession_marks_lineage(tmp_path: Path) -> None:
     assert old["status"] == "superseded"
     assert old["superseded_by_event_id"] == "sem-new"
     assert new["supersedes_event_id"] == "sem-old"
-    metrics = store.get_metrics()
-    assert metrics["semantic_supersessions"] >= 1
 
 
 def test_recent_unresolved_respects_resolved_status_after_merge(tmp_path: Path) -> None:
@@ -356,8 +335,6 @@ def test_reflection_without_evidence_downgrades_to_episodic(tmp_path: Path) -> N
 
     _, kwargs = store.mem0.add_text.call_args
     assert kwargs["metadata"]["memory_type"] == "episodic"
-    metrics = store.get_metrics()
-    assert metrics["reflection_downgraded_no_evidence"] >= 1
 
 
 def test_retrieve_filters_reflection_for_non_reflection_intent(tmp_path: Path) -> None:
@@ -385,8 +362,6 @@ def test_retrieve_filters_reflection_for_non_reflection_intent(tmp_path: Path) -
 
     rows = store.retrieve("user preferences", top_k=2)
     assert all(item["memory_type"] != "reflection" for item in rows)
-    metrics = store.get_metrics()
-    assert metrics["reflection_filtered_non_reflection_intent"] >= 1
 
 
 def test_retrieve_reflection_intent_filters_ungrounded_reflection(tmp_path: Path) -> None:
@@ -416,8 +391,6 @@ def test_retrieve_reflection_intent_filters_ungrounded_reflection(tmp_path: Path
     rows = store.retrieve("reflect on lessons learned", top_k=2)
     assert any(item["id"] == "r2" for item in rows)
     assert all(item["id"] != "r1" for item in rows)
-    metrics = store.get_metrics()
-    assert metrics["reflection_filtered_no_evidence"] >= 1
 
 
 def test_rollout_disabled_turns_off_router_expansion(tmp_path: Path) -> None:
@@ -446,9 +419,6 @@ def test_shadow_mode_records_overlap_metrics(tmp_path: Path) -> None:
 
     rows = store.retrieve("query", top_k=2)
     assert len(rows) == 2
-    metrics = store.get_metrics()
-    assert metrics["retrieval_shadow_runs"] >= 1
-    assert metrics["retrieval_shadow_overlap_count"] >= 1
 
 
 def test_evaluate_rollout_gates_returns_checks(tmp_path: Path) -> None:
@@ -582,9 +552,7 @@ def test_vector_health_marks_degraded_when_history_exists_but_no_vectors(tmp_pat
 
     store._ensure_vector_health()
 
-    metrics = store.get_metrics()
-    assert metrics["vector_health_degraded_count"] >= 1
-    assert metrics.get("vector_health_hard_degraded") is True
+    store.reindex_from_structured_memory.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

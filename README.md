@@ -1059,7 +1059,6 @@ nanobot/
 ├── agent/          # 🧠 Core agent logic
 │   ├── loop.py     #    Agent loop (plan→act→observe→reflect)
 │   ├── context.py  #    Prompt builder + summarization compressor
-│   ├── metrics.py  #    In-memory metrics collector
 │   ├── skills.py   #    Skills loader + custom tool discovery
 │   ├── subagent.py #    Background task execution
 │   ├── memory/     #    Persistent memory (decomposed package)

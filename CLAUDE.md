@@ -44,7 +44,6 @@ nanobot/
 │   ├── context.py       # Prompt assembly + token budgeting
 │   ├── skills.py        # Skill discovery and loading
 │   ├── subagent.py      # Subagent spawning
-│   ├── metrics.py       # In-memory metrics
 │   ├── memory/          # Memory subsystem
 │   │   ├── store.py     # MemoryStore — primary public API (mem0-first with local fallback)
 │   │   ├── retrieval.py # Local keyword retrieval (fallback when mem0 unavailable)

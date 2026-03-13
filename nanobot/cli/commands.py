@@ -267,11 +267,6 @@ def _create_workspace_templates(workspace: Path):
         profile_file.write_text("{}", encoding="utf-8")
         console.print("  [dim]Created memory/profile.json[/dim]")
 
-    metrics_file = memory_dir / "metrics.json"
-    if not metrics_file.exists():
-        metrics_file.write_text("{}", encoding="utf-8")
-        console.print("  [dim]Created memory/metrics.json[/dim]")
-
     (workspace / "skills").mkdir(exist_ok=True)
 
 
@@ -416,6 +411,11 @@ def gateway(
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
 
     config = load_config()
+
+    # Initialize langfuse observability (auto-instruments litellm via OTEL)
+    from nanobot.agent.observability import init_langfuse
+
+    init_langfuse(config.langfuse)
 
     # Apply structured logging config
     from loguru import logger as _gw_logger2
@@ -662,6 +662,11 @@ def agent(
     from nanobot.cron.service import CronService
 
     config = load_config()
+
+    # Initialize langfuse observability (auto-instruments litellm via OTEL)
+    from nanobot.agent.observability import init_langfuse
+
+    init_langfuse(config.langfuse)
 
     bus = MessageBus()
     provider = _make_provider(config)
@@ -1189,6 +1194,12 @@ def cron_run(
     logger.disable("nanobot")
 
     config = load_config()
+
+    # Initialize langfuse observability (auto-instruments litellm via OTEL)
+    from nanobot.agent.observability import init_langfuse
+
+    init_langfuse(config.langfuse)
+
     provider = _make_provider(config)
     bus = MessageBus()
     agent_loop = AgentLoop(
@@ -1242,7 +1253,12 @@ app.add_typer(routing_app, name="routing")
 def routing_trace(
     last: int = typer.Option(20, "--last", "-n", help="Number of recent trace entries to show"),
 ):
-    """Show the last N routing decisions from the trace log."""
+    """Show the last N routing decisions from the trace log.
+
+    Routing traces are now captured by Langfuse.  Use the Langfuse dashboard
+    for full trace exploration.  This command reads any legacy JSONL trace
+    file that may still exist on disk.
+    """
     import json
 
     from nanobot.config.loader import load_config
@@ -1250,7 +1266,11 @@ def routing_trace(
     config = load_config()
     trace_path = config.workspace_path / "memory" / "routing_trace.jsonl"
     if not trace_path.exists():
-        console.print("[dim]No routing trace found. Is multi-agent routing enabled?[/dim]")
+        console.print(
+            "[dim]No legacy routing trace found.[/dim]\n"
+            "[dim]Routing traces are now captured by Langfuse — "
+            "check the Langfuse dashboard.[/dim]"
+        )
         raise typer.Exit(0)
 
     entries: list[dict] = []
@@ -1268,7 +1288,7 @@ def routing_trace(
         raise typer.Exit(0)
 
     recent = entries[-last:]
-    table = Table(title=f"Routing Trace (last {len(recent)} of {len(entries)})")
+    table = Table(title=f"Routing Trace (last {len(recent)} of {len(entries)}) [legacy]")
     table.add_column("Time", style="dim", max_width=19)
     table.add_column("Event", style="cyan")
     table.add_column("Role", style="green")
@@ -1292,11 +1312,20 @@ def routing_trace(
             str(e.get("message", ""))[:40],
         )
     console.print(table)
+    console.print(
+        "\n[dim]Note: New routing traces are captured by Langfuse. "
+        "This shows legacy on-disk data only.[/dim]"
+    )
 
 
 @routing_app.command("metrics")
 def routing_metrics_cmd():
-    """Show routing metrics (classifications, delegations, latencies)."""
+    """Show routing metrics (classifications, delegations, latencies).
+
+    Routing metrics are now captured by Langfuse.  Use the Langfuse dashboard
+    for real-time metrics.  This command reads any legacy metrics JSON file
+    that may still exist on disk.
+    """
     import json
 
     from nanobot.config.loader import load_config
@@ -1304,7 +1333,11 @@ def routing_metrics_cmd():
     config = load_config()
     metrics_path = config.workspace_path / "memory" / "routing_metrics.json"
     if not metrics_path.exists():
-        console.print("[dim]No routing metrics found. Is multi-agent routing enabled?[/dim]")
+        console.print(
+            "[dim]No legacy routing metrics found.[/dim]\n"
+            "[dim]Routing metrics are now captured by Langfuse — "
+            "check the Langfuse dashboard.[/dim]"
+        )
         raise typer.Exit(0)
 
     try:
@@ -1313,7 +1346,7 @@ def routing_metrics_cmd():
         console.print(f"[red]Failed to read metrics:[/red] {exc}")
         raise typer.Exit(1)
 
-    table = Table(title="Routing Metrics")
+    table = Table(title="Routing Metrics [legacy]")
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="green", justify="right")
 
@@ -1354,6 +1387,11 @@ def routing_metrics_cmd():
             role_table.add_row(role_name, str(invocations), str(tool_calls))
         console.print(role_table)
 
+    console.print(
+        "\n[dim]Note: New routing metrics are captured by Langfuse. "
+        "This shows legacy on-disk data only.[/dim]"
+    )
+
 
 # ============================================================================
 # Status Commands
@@ -1392,7 +1430,7 @@ def memory_inspect(
     query: str = typer.Option("", "--query", "-q", help="Optional retrieval query"),
     top_k: int = typer.Option(6, "--top-k", "-k", help="Top-k memories to display"),
 ):
-    """Inspect memory profile, metrics, and retrieval results."""
+    """Inspect memory backend health, profile, and retrieval results."""
     from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
 
@@ -1403,8 +1441,6 @@ def memory_inspect(
     )
 
     observability = store.get_observability_report()
-    metrics = observability.get("metrics", {})
-    kpis = observability.get("kpis", {})
     backend = observability.get("backend", {}) if isinstance(observability, dict) else {}
     profile = store.read_profile()
     report = store.verify_memory()
@@ -1418,49 +1454,14 @@ def memory_inspect(
     console.print(f"mem0 get_all count: [cyan]{backend.get('mem0_get_all_count', 0)}[/cyan]")
     console.print(f"history rows: [cyan]{backend.get('history_rows_count', 0)}[/cyan]")
     console.print(f"vector health: [cyan]{backend.get('vector_health_state', 'unknown')}[/cyan]")
-    console.print(f"mem0 add mode: [cyan]{backend.get('mem0_add_mode', '')}[/cyan]")
     console.print(f"Events: [green]{len(events)}[/green]")
     console.print(f"Profile items: [green]{report['profile_items']}[/green]")
     console.print(f"Open conflicts: [yellow]{report['open_conflicts']}[/yellow]")
-    console.print(f"Stale events: [yellow]{report['stale_events']}[/yellow]\n")
-
-    table = Table(title="Memory Metrics")
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", style="green")
-    for key in (
-        "consolidations",
-        "messages_processed",
-        "user_messages_processed",
-        "user_corrections",
-        "events_extracted",
-        "event_dedup_merges",
-        "profile_updates_applied",
-        "retrieval_queries",
-        "retrieval_hits",
-        "conflicts_detected",
-        "memory_context_calls",
-        "memory_context_tokens_total",
-        "memory_context_tokens_max",
-        "last_updated",
-    ):
-        table.add_row(key, str(metrics.get(key, 0)))
-    console.print(table)
-
-    kpi_table = Table(title="Memory KPIs")
-    kpi_table.add_column("KPI", style="cyan")
-    kpi_table.add_column("Value", style="green")
-    kpi_table.add_row("retrieval_hit_rate", str(kpis.get("retrieval_hit_rate", 0.0)))
-    kpi_table.add_row(
-        "contradiction_rate_per_100_messages",
-        str(kpis.get("contradiction_rate_per_100_messages", 0.0)),
+    console.print(f"Stale events: [yellow]{report['stale_events']}[/yellow]")
+    console.print(
+        "\n[dim]Per-counter metrics have been removed. "
+        "Use Langfuse for detailed observability.[/dim]"
     )
-    kpi_table.add_row(
-        "user_correction_rate_per_100_user_messages",
-        str(kpis.get("user_correction_rate_per_100_user_messages", 0.0)),
-    )
-    kpi_table.add_row("avg_memory_context_tokens", str(kpis.get("avg_memory_context_tokens", 0.0)))
-    kpi_table.add_row("max_memory_context_tokens", str(kpis.get("max_memory_context_tokens", 0)))
-    console.print(kpi_table)
 
     if query.strip():
         retrieved = store.retrieve(
@@ -1496,16 +1497,13 @@ def memory_inspect(
 
 @memory_app.command("metrics")
 def memory_metrics(
-    delta: bool = typer.Option(False, "--delta", help="Show metric deltas vs baseline snapshot"),
+    delta: bool = typer.Option(False, "--delta", help="(deprecated) Previously showed deltas"),
     write_baseline: bool = typer.Option(
-        False, "--write-baseline", help="Write current metrics snapshot as baseline"
+        False, "--write-baseline", help="(deprecated) Previously wrote baselines"
     ),
-    baseline_file: str = typer.Option("", "--baseline-file", help="Optional baseline JSON path"),
+    baseline_file: str = typer.Option("", "--baseline-file", help="(deprecated)"),
 ):
-    """Show memory metrics and optional deltas against a saved baseline snapshot."""
-    import json
-    from datetime import datetime, timezone
-
+    """Show memory backend health. Per-counter metrics now live in Langfuse."""
     from nanobot.agent.memory import MemoryStore
     from nanobot.config.loader import load_config
 
@@ -1515,109 +1513,25 @@ def memory_metrics(
         rollout_overrides=_memory_rollout_overrides(config),
     )
     observability = store.get_observability_report()
-    metrics = observability.get("metrics", {}) if isinstance(observability, dict) else {}
-    kpis = observability.get("kpis", {}) if isinstance(observability, dict) else {}
-    baseline_path = (
-        Path(baseline_file).expanduser()
-        if baseline_file
-        else (config.workspace_path / "memory" / "reports" / "metrics_baseline.json")
-    )
+    backend = observability.get("backend", {}) if isinstance(observability, dict) else {}
 
-    if write_baseline:
-        baseline_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "metrics": metrics,
-            "kpis": kpis,
-        }
-        baseline_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        console.print(f"[green]✓[/green] Wrote baseline snapshot: {baseline_path}")
-
-    if delta:
-        if not baseline_path.exists():
-            console.print(f"[red]Baseline file not found:[/red] {baseline_path}")
-            console.print("[dim]Run with --write-baseline first.[/dim]")
-            raise typer.Exit(1)
-        try:
-            payload = json.loads(baseline_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, FileNotFoundError, UnicodeDecodeError) as exc:
-            console.print(f"[red]Failed to parse baseline file:[/red] {exc}")
-            raise typer.Exit(1)
-        baseline_metrics = payload.get("metrics", {}) if isinstance(payload, dict) else {}
-        baseline_kpis = payload.get("kpis", {}) if isinstance(payload, dict) else {}
-
-        keys = (
-            "retrieval_queries",
-            "retrieval_hits",
-            "retrieval_candidates",
-            "retrieval_returned",
-            "retrieval_source_vector_count",
-            "retrieval_source_get_all_count",
-            "retrieval_source_history_count",
-            "retrieval_rejected_blob_count",
-            "conflicts_detected",
-            "user_corrections",
-            "events_extracted",
-            "event_dedup_merges",
-            "profile_updates_applied",
-            "memory_context_calls",
-            "memory_context_tokens_total",
-        )
-        table = Table(title="Memory Metrics Delta")
-        table.add_column("Metric", style="cyan")
-        table.add_column("Baseline", style="yellow")
-        table.add_column("Current", style="green")
-        table.add_column("Delta", style="magenta")
-        for key in keys:
-            baseline_value = int(baseline_metrics.get(key, 0) or 0)
-            current_value = int(metrics.get(key, 0) or 0)
-            delta_value = current_value - baseline_value
-            table.add_row(key, str(baseline_value), str(current_value), f"{delta_value:+d}")
-        console.print(table)
-
-        kpi_table = Table(title="Memory KPI Delta")
-        kpi_table.add_column("KPI", style="cyan")
-        kpi_table.add_column("Baseline", style="yellow")
-        kpi_table.add_column("Current", style="green")
-        kpi_table.add_column("Delta", style="magenta")
-        for key in (
-            "retrieval_hit_rate",
-            "history_fallback_ratio",
-            "avg_memory_context_tokens",
-            "avg_shadow_overlap",
-        ):
-            baseline_value = float(baseline_kpis.get(key, 0.0) or 0.0)  # type: ignore[assignment]
-            current_value = float(kpis.get(key, 0.0) or 0.0)  # type: ignore[assignment]
-            delta_value = current_value - baseline_value
-            kpi_table.add_row(
-                key, f"{baseline_value:.4f}", f"{current_value:.4f}", f"{delta_value:+.4f}"
-            )
-        console.print(kpi_table)
-        console.print(f"[dim]Baseline file: {baseline_path}[/dim]")
-        return
-
-    table = Table(title="Memory Metrics (Current)")
-    table.add_column("Metric", style="cyan")
+    table = Table(title="Memory Backend Health")
+    table.add_column("Key", style="cyan")
     table.add_column("Value", style="green")
     for key in (
-        "retrieval_queries",
-        "retrieval_hits",
-        "retrieval_candidates",
-        "retrieval_returned",
-        "retrieval_source_vector_count",
-        "retrieval_source_get_all_count",
-        "retrieval_source_history_count",
-        "retrieval_rejected_blob_count",
-        "events_extracted",
-        "event_dedup_merges",
-        "profile_updates_applied",
-        "conflicts_detected",
-        "user_corrections",
+        "mem0_enabled",
+        "mem0_mode",
+        "vector_points_count",
+        "mem0_get_all_count",
+        "history_rows_count",
+        "vector_health_state",
     ):
-        table.add_row(key, str(metrics.get(key, 0)))
+        table.add_row(key, str(backend.get(key, "")))
     console.print(table)
+    console.print(
+        "\n[dim]Per-counter metrics have been removed. "
+        "Use Langfuse for detailed observability.[/dim]"
+    )
 
 
 @memory_app.command("rebuild")
@@ -1862,7 +1776,6 @@ def memory_eval(
     obs = store.get_observability_report()
     rollout_gate = store.evaluate_rollout_gates(evaluation, obs)
     eval_summary = evaluation.get("summary", {})
-    kpis = obs.get("kpis", {})
 
     table = Table(title="Memory Evaluation")
     table.add_column("Metric", style="cyan")
@@ -1870,17 +1783,6 @@ def memory_eval(
     table.add_row("cases", str(evaluation.get("cases", 0)))
     table.add_row("recall_at_k", str(eval_summary.get("recall_at_k", 0.0)))
     table.add_row("precision_at_k", str(eval_summary.get("precision_at_k", 0.0)))
-    table.add_row("retrieval_hit_rate", str(kpis.get("retrieval_hit_rate", 0.0)))
-    table.add_row(
-        "contradiction_rate_per_100_messages",
-        str(kpis.get("contradiction_rate_per_100_messages", 0.0)),
-    )
-    table.add_row(
-        "user_correction_rate_per_100_user_messages",
-        str(kpis.get("user_correction_rate_per_100_user_messages", 0.0)),
-    )
-    table.add_row("avg_memory_context_tokens", str(kpis.get("avg_memory_context_tokens", 0.0)))
-    table.add_row("avg_shadow_overlap", str(kpis.get("avg_shadow_overlap", 0.0)))
     table.add_row("rollout_gate_passed", str(rollout_gate.get("passed", False)))
     console.print(table)
 
