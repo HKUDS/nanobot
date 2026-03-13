@@ -414,6 +414,7 @@ def gateway(
             "[Scheduled Task] Timer finished.\n\n"
             f"Task '{job.name}' has been triggered.\n"
             f"Scheduled instruction: {job.payload.message}"
+            "**IMPORTANT NOTICE:** If there is nothing material to report, reply only with <SILENT_OK>."
         )
 
         # Prevent the agent from scheduling new cron jobs during execution
@@ -436,7 +437,7 @@ def gateway(
         if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
             return response
 
-        if job.payload.deliver and job.payload.to and response:
+        if job.payload.deliver and job.payload.to and response and "<SILENT_OK>" not in response:
             from nanobot.bus.events import OutboundMessage
             await bus.publish_outbound(OutboundMessage(
                 channel=job.payload.channel or "cli",
