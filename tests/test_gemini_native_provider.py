@@ -180,3 +180,206 @@ def test_convert_messages_consecutive_tool_results_merged():
     assert len(contents) == 1
     assert contents[0]["role"] == "user"
     assert len(contents[0]["parts"]) == 2
+
+
+def test_convert_tools_basic():
+    """OpenAI tool defs convert to Gemini FunctionDeclaration dicts."""
+    from nanobot.providers.gemini_native_provider import GeminiNativeProvider
+
+    provider = GeminiNativeProvider(
+        api_key="k", api_base="http://localhost:8045", default_model="gemini-3-flash"
+    )
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Get weather for a city",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            },
+        }
+    ]
+    result = provider._convert_tools(tools)
+    assert result is not None
+    assert len(result) == 1
+    decls = result[0]["function_declarations"]
+    assert len(decls) == 1
+    assert decls[0]["name"] == "get_weather"
+    assert decls[0]["description"] == "Get weather for a city"
+    assert decls[0]["parameters_json_schema"]["type"] == "object"
+
+
+def test_convert_tools_none():
+    """None tools input returns None."""
+    from nanobot.providers.gemini_native_provider import GeminiNativeProvider
+
+    provider = GeminiNativeProvider(
+        api_key="k", api_base="http://localhost:8045", default_model="gemini-3-flash"
+    )
+    assert provider._convert_tools(None) is None
+    assert provider._convert_tools([]) is None
+
+
+def test_convert_tool_choice_auto():
+    from nanobot.providers.gemini_native_provider import GeminiNativeProvider
+
+    provider = GeminiNativeProvider(
+        api_key="k", api_base="http://localhost:8045", default_model="gemini-3-flash"
+    )
+    result = provider._convert_tool_choice("auto")
+    assert result["function_calling_config"]["mode"] == "AUTO"
+
+
+def test_convert_tool_choice_required():
+    from nanobot.providers.gemini_native_provider import GeminiNativeProvider
+
+    provider = GeminiNativeProvider(
+        api_key="k", api_base="http://localhost:8045", default_model="gemini-3-flash"
+    )
+    result = provider._convert_tool_choice("required")
+    assert result["function_calling_config"]["mode"] == "ANY"
+
+
+def test_convert_tool_choice_specific_function():
+    from nanobot.providers.gemini_native_provider import GeminiNativeProvider
+
+    provider = GeminiNativeProvider(
+        api_key="k", api_base="http://localhost:8045", default_model="gemini-3-flash"
+    )
+    result = provider._convert_tool_choice(
+        {"type": "function", "function": {"name": "get_weather"}}
+    )
+    assert result["function_calling_config"]["mode"] == "ANY"
+    assert result["function_calling_config"]["allowed_function_names"] == ["get_weather"]
+
+
+def test_convert_tool_choice_none_string():
+    from nanobot.providers.gemini_native_provider import GeminiNativeProvider
+
+    provider = GeminiNativeProvider(
+        api_key="k", api_base="http://localhost:8045", default_model="gemini-3-flash"
+    )
+    result = provider._convert_tool_choice("none")
+    assert result["function_calling_config"]["mode"] == "NONE"
+
+
+def test_parse_response_text_only():
+    """Parse a simple text response."""
+    from nanobot.providers.gemini_native_provider import GeminiNativeProvider
+
+    provider = GeminiNativeProvider(
+        api_key="k", api_base="http://localhost:8045", default_model="gemini-3-flash"
+    )
+
+    # Mock response structure
+    mock_part = MagicMock()
+    mock_part.text = "Hello world"
+    mock_part.function_call = None
+
+    mock_content = MagicMock()
+    mock_content.parts = [mock_part]
+
+    mock_candidate = MagicMock()
+    mock_candidate.content = mock_content
+
+    mock_usage = MagicMock()
+    mock_usage.prompt_token_count = 10
+    mock_usage.candidates_token_count = 5
+    mock_usage.total_token_count = 15
+
+    mock_response = MagicMock()
+    mock_response.candidates = [mock_candidate]
+    mock_response.usage_metadata = mock_usage
+
+    result = provider._parse_response(mock_response)
+    assert result.content == "Hello world"
+    assert result.finish_reason == "stop"
+    assert len(result.tool_calls) == 0
+    assert result.usage["prompt_tokens"] == 10
+    assert result.usage["completion_tokens"] == 5
+    assert result.usage["total_tokens"] == 15
+
+
+def test_parse_response_with_function_call():
+    """Parse a response with function calls."""
+    from nanobot.providers.gemini_native_provider import GeminiNativeProvider
+
+    provider = GeminiNativeProvider(
+        api_key="k", api_base="http://localhost:8045", default_model="gemini-3-flash"
+    )
+
+    mock_fc = MagicMock()
+    mock_fc.name = "get_weather"
+    mock_fc.args = {"city": "Tokyo"}
+
+    mock_part = MagicMock()
+    mock_part.text = None
+    mock_part.function_call = mock_fc
+
+    mock_content = MagicMock()
+    mock_content.parts = [mock_part]
+
+    mock_candidate = MagicMock()
+    mock_candidate.content = mock_content
+
+    mock_response = MagicMock()
+    mock_response.candidates = [mock_candidate]
+    mock_response.usage_metadata = None
+
+    result = provider._parse_response(mock_response)
+    assert result.content is None
+    assert result.finish_reason == "tool_calls"
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].name == "get_weather"
+    assert result.tool_calls[0].arguments == {"city": "Tokyo"}
+    assert len(result.tool_calls[0].id) == 9
+    # Verify the name map was populated
+    tc_id = result.tool_calls[0].id
+    assert provider._tool_call_name_map[tc_id] == "get_weather"
+
+
+def test_parse_response_no_candidates():
+    """Parse response with no candidates returns text attr."""
+    from nanobot.providers.gemini_native_provider import GeminiNativeProvider
+
+    provider = GeminiNativeProvider(
+        api_key="k", api_base="http://localhost:8045", default_model="gemini-3-flash"
+    )
+
+    mock_response = MagicMock()
+    mock_response.candidates = []
+    mock_response.text = "fallback text"
+
+    result = provider._parse_response(mock_response)
+    assert result.content == "fallback text"
+    assert result.finish_reason == "stop"
+
+
+def test_parse_response_no_usage():
+    """Parse response with missing usage_metadata returns empty usage dict."""
+    from nanobot.providers.gemini_native_provider import GeminiNativeProvider
+
+    provider = GeminiNativeProvider(
+        api_key="k", api_base="http://localhost:8045", default_model="gemini-3-flash"
+    )
+
+    mock_part = MagicMock()
+    mock_part.text = "hi"
+    mock_part.function_call = None
+
+    mock_content = MagicMock()
+    mock_content.parts = [mock_part]
+
+    mock_candidate = MagicMock()
+    mock_candidate.content = mock_content
+
+    mock_response = MagicMock()
+    mock_response.candidates = [mock_candidate]
+    mock_response.usage_metadata = None
+
+    result = provider._parse_response(mock_response)
+    assert result.usage == {}
