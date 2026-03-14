@@ -22,7 +22,6 @@ class UsageLogger:
 
     def __init__(self, log_dir: Path) -> None:
         self._log_dir = log_dir / "logs"
-        self._log_dir.mkdir(parents=True, exist_ok=True)
         self._path = self._log_dir / self._FILENAME
 
     def log(
@@ -49,6 +48,8 @@ class UsageLogger:
             record["provider"] = provider
 
         try:
+            if not self._log_dir.exists():
+                self._log_dir.mkdir(parents=True, exist_ok=True)
             with self._path.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(record, ensure_ascii=False) + "\n")
         except OSError:

@@ -206,6 +206,7 @@ class AgentLoop:
                     model=self.model,
                     usage=response.usage,
                     session_id=session_key,
+                    provider=type(self.provider).__name__,
                 )
 
             if response.has_tool_calls:
