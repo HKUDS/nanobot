@@ -139,6 +139,8 @@ class HeartbeatService:
 
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
+        from nanobot.utils.evaluator import evaluate_response
+
         content = self._read_heartbeat_file()
         if not content:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
@@ -153,18 +155,19 @@ class HeartbeatService:
                 logger.info("Heartbeat: OK (nothing to report)")
                 return
 
-            taskmessage = tasks + "\n\n**IMPORTANT NOTICE:** If there is nothing material to report, reply only with <SILENT_OK>."
-
             logger.info("Heartbeat: tasks found, executing...")
             if self.on_execute:
-                response = await self.on_execute(taskmessage)
+                response = await self.on_execute(tasks)
 
-                if response and "<SILENT_OK>" in response:
-                    logger.info("Heartbeat: OK (silenced by agent)")
-                    return
-                if response and self.on_notify:
-                    logger.info("Heartbeat: completed, delivering response")
-                    await self.on_notify(response)
+                if response:
+                    should_notify = await evaluate_response(
+                        response, tasks, self.provider, self.model,
+                    )
+                    if should_notify and self.on_notify:
+                        logger.info("Heartbeat: completed, delivering response")
+                        await self.on_notify(response)
+                    else:
+                        logger.info("Heartbeat: silenced by post-run evaluation")
         except Exception:
             logger.exception("Heartbeat execution failed")
 
