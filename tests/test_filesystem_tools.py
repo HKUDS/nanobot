@@ -222,8 +222,10 @@ class TestListDirTool:
     @pytest.mark.asyncio
     async def test_recursive(self, tool, populated_dir):
         result = await tool.execute(path=str(populated_dir), recursive=True)
-        assert "src/main.py" in result
-        assert "src/utils.py" in result
+        # Normalize path separators for cross-platform compatibility
+        normalized = result.replace("\\", "/")
+        assert "src/main.py" in normalized
+        assert "src/utils.py" in normalized
         assert "README.md" in result
         # Ignored dirs should not appear
         assert ".git" not in result

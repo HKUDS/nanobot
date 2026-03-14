@@ -8,7 +8,7 @@ import pytest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram import TELEGRAM_REPLY_CONTEXT_MAX_LEN, TelegramChannel
-from nanobot.config.schema import TelegramConfig
+from nanobot.channels.telegram import TelegramConfig
 
 
 class _FakeHTTPXRequest:

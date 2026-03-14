@@ -12,7 +12,7 @@ from nanobot.channels.matrix import (
     TYPING_NOTICE_TIMEOUT_MS,
     MatrixChannel,
 )
-from nanobot.config.schema import MatrixConfig
+from nanobot.channels.matrix import MatrixConfig
 
 _ROOM_SEND_UNSET = object()
 
