@@ -211,6 +211,22 @@ class WecomConfig(Base):
     welcome_message: str = ""  # Welcome message for enter_chat event
 
 
+class WecomAppConfig(Base):
+    """WeCom (Enterprise WeChat) App channel configuration (webhook-based)."""
+
+    enabled: bool = False
+    token: str = ""  # Token from WeCom admin console
+    aes_key: str = ""  # AES Key from WeCom admin console
+    corp_id: str = ""  # Corp ID from WeCom account
+    secret: str = ""
+    agentid : str = ""
+    host: str = "0.0.0.0"  # Server host
+    port: int = 18791  # Server port
+    path: str = "/wecom_app"  # Callback path
+    allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
+    welcome_message: str = ""  # Welcome message for add_to_chat event
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels."""
 
@@ -227,6 +243,7 @@ class ChannelsConfig(Base):
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
     wecom: WecomConfig = Field(default_factory=WecomConfig)
+    wecom_app: WecomAppConfig = Field(default_factory=WecomAppConfig)
 
 
 class AgentDefaults(Base):

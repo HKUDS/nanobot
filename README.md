@@ -228,6 +228,7 @@ Connect nanobot to your favorite chat platform.
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
 | **Wecom** | Bot ID + Bot Secret |
+| **Wecom App** | Corp ID + Agent ID + Secret + Token + AES Key |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -736,6 +737,77 @@ Go to the WeCom admin console → Intelligent Robot → Create Robot → select 
 ```bash
 nanobot gateway
 ```
+
+</details>
+
+<details>
+<summary><b>Wecom App (企业微信应用)</b></summary>
+
+> Uses **webhook callback** mode — requires a publicly accessible server or port forwarding.
+>
+> Different from WeCom (WebSocket mode). Choose based on your network environment.
+
+**1. Install the optional dependency**
+
+```bash
+pip install nanobot-ai[wecom]
+```
+
+**2. Create a WeCom AI Bot**
+
+Go to the WeCom admin console → My Apps → Create App → Enable **API** mode. Copy the following credentials:
+- **Corp ID** (from the admin console)
+- **Agent ID** (from the app)
+- **Secret** (from the app)
+- **Token** (you set this when configuring the webhook)
+- **AES Key** (you set this when configuring the webhook)
+
+**3. Configure the callback URL**
+
+In the WeCom app configuration:
+- Set callback URL to: `http://<your-server>:<port>/wecom_app`
+- Set the Token and AES Key to match your config
+
+**4. Configure**
+
+```json
+{
+  "channels": {
+    "wecom_app": {
+      "enabled": true,
+      "corp_id": "your_corp_id",
+      "agentid": "your_agent_id",
+      "secret": "your_secret",
+      "token": "your_token",
+      "aes_key": "your_aes_key",
+      "host": "0.0.0.0",
+      "port": 18791,
+      "path": "/wecom_app",
+      "allowFrom": ["your_user_id"]
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `host` | `0.0.0.0` | Server bind address |
+| `port` | `18791` | Server listen port (must match WeCom callback URL) |
+| `path` | `/wecom_app` | Callback path |
+| `token` | - | Verification token from WeCom admin |
+| `aes_key` | - | AES key from WeCom admin |
+| `corp_id` | - | Your WeCom Corp ID |
+| `agentid` | - | Your WeCom App Agent ID |
+| `secret` | - | Your WeCom App Secret |
+| `welcome_message` | - | Message sent when user enters the chat |
+
+**5. Run**
+
+```bash
+nanobot gateway
+```
+
+> **Note**: Wecom App requires the callback URL to be accessible from WeCom servers. If you're running locally, use port forwarding (e.g., ngrok, cloudflare tunnel) or deploy on a public server.
 
 </details>
 
