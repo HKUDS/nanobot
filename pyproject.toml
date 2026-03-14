@@ -45,6 +45,9 @@ dependencies = [
     "mem0ai>=0.1.115,<1.0.0",
     "langfuse>=4.0.0,<5.0.0",
     "duckdb>=1.0.0,<2.0.0",
+    "fastapi>=0.115.0,<1.0.0",
+    "uvicorn[standard]>=0.32.0,<1.0.0",
+    "sse-starlette>=2.0.0,<3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -62,12 +65,6 @@ graph = [
 
 pptx = [
     "python-pptx>=1.0.0,<2.0.0",
-]
-
-web = [
-    "fastapi>=0.115.0,<1.0.0",
-    "uvicorn[standard]>=0.32.0,<1.0.0",
-    "sse-starlette>=2.0.0,<3.0.0",
 ]
 
 dev = [
