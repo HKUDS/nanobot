@@ -84,9 +84,9 @@ def handle_model_command(command_text: str) -> str:
     try:
         if len(command_parts) == 2:
             shortcut = _shortcut_selections(config).get(_normalize_shortcut(command_parts[1]))
-            selection = shortcut or _selection_from_full_model(command_parts[1])
+            selection = shortcut or _selection_from_full_model(config, command_parts[1])
         else:
-            selection = _selection_from_provider_and_model(command_parts[1], command_parts[2])
+            selection = _selection_from_provider_and_model(config, command_parts[1], command_parts[2])
     except ModelCommandError as exc:
         return str(exc)
 
@@ -235,7 +235,7 @@ def _shortcut_selections(config: Config) -> dict[str, ModelSelection]:
     shortcuts: dict[str, ModelSelection] = {}
     for option in list_switchable_models(config):
         provider_raw, model = option.split(" ", 1)
-        selection = _selection_from_provider_and_model(provider_raw, model)
+        selection = _selection_from_provider_and_model(config, provider_raw, model)
         alias = _shortcut_alias(selection)
         if alias and alias not in shortcuts:
             shortcuts[alias] = selection
@@ -254,7 +254,7 @@ def _shortcut_alias(selection: ModelSelection) -> str | None:
     return None
 
 
-def _minimax_shortcut_selection(config: Config) -> ModelSelection | None:
+def _minimax_shortcut_selection(config: Config, model_name: str | None = None) -> ModelSelection | None:
     anthropic_config = getattr(config.providers, "anthropic", None)
     if not anthropic_config or not anthropic_config.api_key or not anthropic_config.api_base:
         return None
@@ -263,11 +263,11 @@ def _minimax_shortcut_selection(config: Config) -> ModelSelection | None:
     spec = find_by_name("anthropic")
     if spec is None:
         return None
-    model_name = _preferred_minimax_model(config)
+    normalized_model = model_name or _preferred_minimax_model(config)
     return ModelSelection(
         provider=spec,
-        config_model=f"anthropic/{model_name}",
-        display_model=f"anthropic/{model_name}",
+        config_model=f"anthropic/{normalized_model}",
+        display_model=f"anthropic/{normalized_model}",
     )
 
 
@@ -388,7 +388,10 @@ def _unique_strings(values) -> list[str]:
     return output
 
 
-def _selection_from_full_model(model: str) -> ModelSelection:
+def _selection_from_full_model(config: Config, model: str) -> ModelSelection:
+    minimax_compat = _minimax_compat_selection(config, model)
+    if minimax_compat is not None:
+        return minimax_compat
     spec = _infer_provider_from_model(model)
     if not spec:
         raise ModelCommandError(
@@ -397,11 +400,26 @@ def _selection_from_full_model(model: str) -> ModelSelection:
     return _build_selection(spec, model)
 
 
-def _selection_from_provider_and_model(provider: str, model: str) -> ModelSelection:
+def _selection_from_provider_and_model(config: Config, provider: str, model: str) -> ModelSelection:
+    minimax_compat = _minimax_compat_selection(config, f"{provider}/{model}")
+    if minimax_compat is not None:
+        return minimax_compat
     spec = find_by_name(_normalize_provider_name(provider))
     if not spec:
         raise ModelCommandError(f"Unknown provider `{provider}`.")
     return _build_selection(spec, model)
+
+
+def _minimax_compat_selection(config: Config, model: str) -> ModelSelection | None:
+    normalized_model = model.strip()
+    if not normalized_model or "/" not in normalized_model:
+        return None
+    prefix, remainder = normalized_model.split("/", 1)
+    if _normalize_provider_name(prefix) != "minimax":
+        return None
+    if not remainder:
+        return None
+    return _minimax_shortcut_selection(config, remainder)
 
 
 def _build_selection(spec: ProviderSpec, model: str) -> ModelSelection:

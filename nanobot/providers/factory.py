@@ -4,9 +4,34 @@ from __future__ import annotations
 
 from nanobot.config.schema import Config
 
+MINIMAX_ANTHROPIC_BASE_KEYWORD = "api.minimaxi.com/anthropic"
+
 
 class ProviderConfigurationError(ValueError):
     """Raised when the configured provider cannot be constructed safely."""
+
+
+def _resolve_minimax_compatible_provider(
+    config: Config,
+    provider_name: str | None,
+    provider_config,
+    model: str,
+) -> tuple[str | None, object | None, str, str | None]:
+    if provider_name != "minimax":
+        return provider_name, provider_config, model, None
+    if provider_config and provider_config.api_key:
+        return provider_name, provider_config, model, None
+    if "minimax" not in model.lower():
+        return provider_name, provider_config, model, None
+
+    anthropic_config = getattr(config.providers, "anthropic", None)
+    if not anthropic_config or not anthropic_config.api_key or not anthropic_config.api_base:
+        return provider_name, provider_config, model, None
+    if MINIMAX_ANTHROPIC_BASE_KEYWORD not in anthropic_config.api_base:
+        return provider_name, provider_config, model, None
+
+    compat_model = model.split("/", 1)[1] if "/" in model else model
+    return "anthropic", anthropic_config, f"anthropic/{compat_model}", anthropic_config.api_base
 
 
 def create_provider(config: Config):
@@ -21,6 +46,12 @@ def create_provider(config: Config):
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
     provider_config = config.get_provider(model)
+    provider_name, provider_config, model, api_base_override = _resolve_minimax_compatible_provider(
+        config,
+        provider_name,
+        provider_config,
+        model,
+    )
 
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         provider = OpenAICodexProvider(default_model=model)
@@ -31,7 +62,7 @@ def create_provider(config: Config):
             raise ProviderConfigurationError("`providers.custom.apiKey` is missing.")
         provider = CustomProvider(
             api_key=provider_config.api_key,
-            api_base=config.get_api_base(model) or provider_config.api_base,
+            api_base=api_base_override or config.get_api_base(model) or provider_config.api_base,
             default_model=model,
         )
     elif provider_name == "azure_openai":
@@ -57,7 +88,7 @@ def create_provider(config: Config):
                 )
         provider = LiteLLMProvider(
             api_key=provider_config.api_key if provider_config else None,
-            api_base=config.get_api_base(model),
+            api_base=api_base_override or config.get_api_base(model),
             default_model=model,
             extra_headers=provider_config.extra_headers if provider_config else None,
             provider_name=provider_name,
