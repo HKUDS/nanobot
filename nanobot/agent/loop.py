@@ -242,8 +242,10 @@ class AgentLoop:
                 # When the model returns empty content after executing tool calls,
                 # it likely finished the task but forgot to synthesize a response.
                 # Retry up to _MAX_SYNTHESIS_RETRIES times so it gets a chance to
-                # produce a summary instead of falling through to the
-                # "I've completed processing" fallback.
+                # Thinking models (e.g. Qwen3) sometimes emit only a <think> block
+                # which gets stripped to None. Append an explicit user nudge so the
+                # model knows it must produce a visible text response.
+                # Retry up to _MAX_SYNTHESIS_RETRIES times before giving up.
                 # Fixes: https://github.com/HKUDS/nanobot/issues/235
                 #        https://github.com/HKUDS/nanobot/issues/640
                 if clean is None and tools_used and synthesis_retries < _MAX_SYNTHESIS_RETRIES:
@@ -254,11 +256,11 @@ class AgentLoop:
                         synthesis_retries,
                         _MAX_SYNTHESIS_RETRIES,
                     )
-                    messages = self.context.add_assistant_message(
-                        messages,
-                        "",
-                        reasoning_content=response.reasoning_content,
-                        thinking_blocks=response.thinking_blocks,
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": "Please summarize the results in a clear response.",
+                        }
                     )
                     continue
                 messages = self.context.add_assistant_message(
