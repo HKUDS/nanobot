@@ -371,7 +371,17 @@ class AgentLoop:
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
-        key = session_key or msg.session_key
+        # When history_policy is "chats", group guild/group channels into
+        # a shared session keyed by guild_id so cross-channel context is
+        # available (but filtered to prioritise the current channel).
+        chats_policy = (
+            self.channels_config.history_policy == "chats" if self.channels_config else False
+        )
+        guild_id = (msg.metadata or {}).get("guild_id")
+        if chats_policy and guild_id and not session_key:
+            key = f"{msg.channel}:guild:{guild_id}"
+        else:
+            key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
 
         # Slash commands
@@ -415,7 +425,10 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=0)
+        if chats_policy and guild_id:
+            history = session.get_history_by_channel(msg.chat_id, max_messages=0)
+        else:
+            history = session.get_history(max_messages=0)
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
@@ -438,7 +451,8 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        tag_channel = msg.chat_id if chats_policy and guild_id else None
+        self._save_turn(session, all_msgs, 1 + len(history), channel_id=tag_channel)
         self.sessions.save(session)
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
@@ -452,8 +466,16 @@ class AgentLoop:
             metadata=msg.metadata or {},
         )
 
-    def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
-        """Save new-turn messages into session, truncating large tool results."""
+    def _save_turn(
+        self, session: Session, messages: list[dict], skip: int,
+        channel_id: str | None = None,
+    ) -> None:
+        """Save new-turn messages into session, truncating large tool results.
+
+        When *channel_id* is provided (history_policy="chats" mode), each
+        persisted message is tagged with ``_channel_id`` so that
+        :meth:`Session.get_history_by_channel` can filter by source channel.
+        """
         from datetime import datetime
         for m in messages[skip:]:
             entry = dict(m)
@@ -484,6 +506,8 @@ class AgentLoop:
                         continue
                     entry["content"] = filtered
             entry.setdefault("timestamp", datetime.now().isoformat())
+            if channel_id:
+                entry["_channel_id"] = channel_id
             session.messages.append(entry)
         session.updated_at = datetime.now()
 

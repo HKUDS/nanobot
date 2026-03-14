@@ -63,11 +63,100 @@ class Session:
             out.append(entry)
         return out
 
+    def get_history_by_channel(self, channel_id: str, max_messages: int = 500) -> list[dict[str, Any]]:
+        """Return history prioritising messages from *channel_id*.
+
+        Messages that originated in *channel_id* (tagged via ``_channel_id``)
+        are included in full.  Consecutive runs of messages from other channels
+        are compacted into a brief summary so the LLM stays on-topic while
+        retaining cross-channel awareness.
+
+        Tool-call chains are kept intact by grouping messages into "turns"
+        (each starting with a user message).
+        """
+        unconsolidated = self.messages[self.last_consolidated:]
+        sliced = unconsolidated[-max_messages:]
+
+        # Drop leading non-user messages to avoid orphaned tool_result blocks
+        for i, m in enumerate(sliced):
+            if m.get("role") == "user":
+                sliced = sliced[i:]
+                break
+
+        # ── Group messages into turns (user msg → assistant/tool responses) ──
+        turns: list[tuple[str | None, list[dict[str, Any]]]] = []
+        current_turn: list[dict[str, Any]] = []
+        current_ch: str | None = None
+
+        for m in sliced:
+            if m.get("role") == "user":
+                if current_turn:
+                    turns.append((current_ch, current_turn))
+                current_turn = [m]
+                current_ch = m.get("_channel_id")
+            else:
+                current_turn.append(m)
+        if current_turn:
+            turns.append((current_ch, current_turn))
+
+        # ── Build output with full turns for current channel, summaries for others ──
+        out: list[dict[str, Any]] = []
+        cross_buffer: list[tuple[str | None, list[dict[str, Any]]]] = []
+
+        def _flush_cross() -> None:
+            if not cross_buffer:
+                return
+            summary = _summarize_cross_channel_turns(cross_buffer)
+            out.append({"role": "user", "content": summary})
+            cross_buffer.clear()
+
+        for turn_ch, turn_msgs in turns:
+            if turn_ch is None or turn_ch == channel_id:
+                _flush_cross()
+                for m in turn_msgs:
+                    entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
+                    for k in ("tool_calls", "tool_call_id", "name"):
+                        if k in m:
+                            entry[k] = m[k]
+                    out.append(entry)
+            else:
+                cross_buffer.append((turn_ch, turn_msgs))
+
+        _flush_cross()
+        return out
+
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
         self.messages = []
         self.last_consolidated = 0
         self.updated_at = datetime.now()
+
+
+def _summarize_cross_channel_turns(
+    turns: list[tuple[str | None, list[dict[str, Any]]]],
+) -> str:
+    """Compact consecutive cross-channel turns into a brief summary string.
+
+    Groups messages by source channel and keeps only the last few user/assistant
+    snippets per channel so the LLM retains awareness without context bloat.
+    """
+    by_channel: dict[str, list[str]] = {}
+    for ch, msgs in turns:
+        label = ch or "unknown"
+        for m in msgs:
+            content = m.get("content", "")
+            if not content or m.get("role") not in ("user", "assistant"):
+                continue
+            snippet = content[:120] + "…" if len(content) > 120 else content
+            by_channel.setdefault(label, []).append(f"[{m['role']}]: {snippet}")
+
+    parts = ["[Cross-channel context — other channel activity]"]
+    for ch, snippets in by_channel.items():
+        parts.append(f"  #{ch} ({len(snippets)} message(s)):")
+        # Keep only the last 3 snippets per channel to limit size
+        for s in snippets[-3:]:
+            parts.append(f"    {s}")
+    return "\n".join(parts)
 
 
 class SessionManager:
