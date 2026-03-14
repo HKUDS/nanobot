@@ -162,6 +162,7 @@ class TelegramChannel(BaseChannel):
     BOT_COMMANDS = [
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
+        BotCommand("provider", "Show or change the configured provider"),
         BotCommand("model", "Show or change the configured model"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("help", "Show available commands"),
@@ -506,6 +507,7 @@ class TelegramChannel(BaseChannel):
         await update.message.reply_text(
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
+            "/provider — Show or change the configured provider\n"
             "/model — Show or change the configured model\n"
             "/stop — Stop the current task\n"
             "/help — Show available commands"

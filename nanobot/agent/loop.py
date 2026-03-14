@@ -393,6 +393,7 @@ class AgentLoop:
             lines = [
                 "🐈 nanobot commands:",
                 "/new — Start a new conversation",
+                "/provider — Show or change the configured provider",
                 "/model — Show or change the configured model",
                 "/stop — Stop the current task",
                 "/restart — Restart the bot",
@@ -400,6 +401,14 @@ class AgentLoop:
             ]
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
+            )
+        if cmd == "/provider" or cmd.startswith("/provider "):
+            from nanobot.model_management import handle_provider_command
+
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=handle_provider_command(msg.content),
             )
         if cmd == "/model" or cmd.startswith("/model "):
             from nanobot.model_management import handle_model_command

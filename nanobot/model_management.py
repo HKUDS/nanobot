@@ -11,7 +11,7 @@ import httpx
 from nanobot.config.loader import get_config_path, load_config, save_config
 from nanobot.config.schema import Config
 from nanobot.providers.factory import ProviderConfigurationError, create_provider
-from nanobot.providers.registry import ProviderSpec, find_by_name
+from nanobot.providers.registry import PROVIDERS, ProviderSpec, find_by_name
 
 OPENAI_COMPATIBLE_PROVIDERS = frozenset(
     {
@@ -42,11 +42,16 @@ HOSTED_PROVIDER_BASES = {
 }
 
 DISCOVERY_TIMEOUT = 3.0
-USAGE_TEXT = (
+MODEL_USAGE_TEXT = (
     "Usage:\n"
     "- /model\n"
     "- /model <model>\n"
     "- /model <current-provider> <model>"
+)
+PROVIDER_USAGE_TEXT = (
+    "Usage:\n"
+    "- /provider\n"
+    "- /provider <provider>"
 )
 
 
@@ -62,6 +67,42 @@ class ModelCommandError(ValueError):
     """Raised when `/model` parsing or validation fails."""
 
 
+def handle_provider_command(command_text: str) -> str:
+    """Handle `/provider` by switching to a configured provider and its first discovered model."""
+    config_path = get_config_path()
+    config = load_config(config_path)
+
+    try:
+        command_parts = shlex.split(command_text)
+    except ValueError:
+        return f"Invalid command syntax.\n{PROVIDER_USAGE_TEXT}"
+
+    if len(command_parts) == 1:
+        return format_provider_status(config, config_path)
+
+    if len(command_parts) != 2:
+        return PROVIDER_USAGE_TEXT
+
+    try:
+        selection = _provider_selection(config, command_parts[1])
+        _validate_selection(config, config_path, selection)
+    except ModelCommandError as exc:
+        return str(exc)
+
+    candidate = config.model_copy(deep=True)
+    candidate.agents.defaults.provider = selection.provider.name
+    candidate.agents.defaults.model = selection.config_model
+    save_config(candidate, config_path)
+
+    return (
+        "Saved provider configuration.\n"
+        f"Config file: {config_path}\n"
+        f"Provider: {selection.provider.name}\n"
+        f"Model: {selection.config_model}\n"
+        "Restart nanobot to apply."
+    )
+
+
 def handle_model_command(command_text: str) -> str:
     """Handle `/model` using the current configured provider only."""
     config_path = get_config_path()
@@ -70,13 +111,13 @@ def handle_model_command(command_text: str) -> str:
     try:
         command_parts = shlex.split(command_text)
     except ValueError:
-        return f"Invalid command syntax.\n{USAGE_TEXT}"
+        return f"Invalid command syntax.\n{MODEL_USAGE_TEXT}"
 
     if len(command_parts) == 1:
         return format_model_status(config, config_path)
 
     if len(command_parts) not in {2, 3}:
-        return USAGE_TEXT
+        return MODEL_USAGE_TEXT
 
     try:
         current_spec = _current_provider_spec(config)
@@ -97,6 +138,34 @@ def handle_model_command(command_text: str) -> str:
         f"Model: {selection.config_model}\n"
         "Restart nanobot to apply."
     )
+
+
+def format_provider_status(config: Config, config_path: Path) -> str:
+    """Return the current provider and configured providers that can be switched to."""
+    try:
+        current_spec = _current_provider_spec(config)
+    except ModelCommandError as exc:
+        return str(exc)
+
+    lines = [
+        "Provider Configuration",
+        f"Config file: {config_path}",
+        f"Current provider: {current_spec.name}",
+        f"Current model: {config.agents.defaults.model}",
+        "",
+        "Available providers:",
+    ]
+
+    available_specs = _available_provider_specs(config, current_spec)
+    if not available_specs:
+        lines.append("- No configured providers are available.")
+        return "\n".join(lines)
+
+    for spec in available_specs:
+        provider_url = _provider_api_base(config, spec) or "(not configured)"
+        lines.append(f"- /provider {spec.name} ({provider_url})")
+
+    return "\n".join(lines)
 
 
 def format_model_status(config: Config, config_path: Path) -> str:
@@ -179,6 +248,21 @@ def _selection_from_command(
     return _build_selection(current_spec, command_parts[2])
 
 
+def _provider_selection(config: Config, provider: str) -> ModelSelection:
+    spec = find_by_name(_normalize_provider_name(provider))
+    if spec is None:
+        raise ModelCommandError(f"Unknown provider `{provider}`.")
+    if not _is_provider_available(config, spec):
+        raise ModelCommandError(f"Provider `{spec.name}` is not configured for use.")
+
+    models = discover_models_for_provider(config, spec)
+    if not models:
+        raise ModelCommandError(
+            f"No models discovered for `{spec.name}`. Check its apiKey/apiBase and try again."
+        )
+    return _build_selection(spec, models[0])
+
+
 def _build_selection(spec: ProviderSpec, model: str) -> ModelSelection:
     normalized_model = model.strip()
     if not normalized_model:
@@ -213,12 +297,47 @@ def _validate_selection(config: Config, config_path: Path, selection: ModelSelec
         raise ModelCommandError(f"Cannot save model.\nReason: {exc}") from exc
 
 
+def _available_provider_specs(config: Config, current_spec: ProviderSpec) -> list[ProviderSpec]:
+    return [spec for spec in PROVIDERS if spec == current_spec or _is_provider_available(config, spec)]
+
+
 def _current_provider_spec(config: Config) -> ProviderSpec:
     provider_name = config.get_provider_name(config.agents.defaults.model) or config.agents.defaults.provider
     spec = find_by_name(provider_name) if provider_name else None
     if spec is None:
         raise ModelCommandError("Current model does not resolve to a known provider.")
     return spec
+
+
+def _is_provider_available(config: Config, spec: ProviderSpec) -> bool:
+    current_spec = _current_provider_spec(config)
+    if current_spec.name == spec.name:
+        return True
+
+    provider_config = getattr(config.providers, spec.name, None)
+    if provider_config is None:
+        return False
+    if spec.name in {"custom", "azure_openai"}:
+        return bool(provider_config.api_key and provider_config.api_base)
+    if spec.is_oauth:
+        return _oauth_provider_available(spec)
+    if spec.is_local:
+        return bool(provider_config.api_base)
+    if spec.is_gateway:
+        return bool(provider_config.api_key)
+    return bool(provider_config.api_key)
+
+
+def _oauth_provider_available(spec: ProviderSpec) -> bool:
+    if spec.name == "openai_codex":
+        try:
+            from oauth_cli_kit import get_token
+
+            token = get_token()
+            return bool(token and getattr(token, "access", None))
+        except Exception:
+            return False
+    return False
 
 
 def _provider_api_base(config: Config, spec: ProviderSpec) -> str | None:
