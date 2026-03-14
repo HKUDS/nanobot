@@ -242,7 +242,9 @@ class FeishuConfig(Base):
     verification_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
     react_emoji: str = "THUMBSUP"
-    group_policy: Literal["open", "mention"] = "mention"
+    group_policy: Literal["open", "mention", "allowlist"] = "mention"  # "allowlist" restricts to specific group chat_ids
+    group_allow_from: list[str] = Field(default_factory=list)  # Allowed group chat_ids (for allowlist policy)
+    bot_names: dict[str, str] = Field(default_factory=dict)  # Maps bot open_id or app_id to readable names in HISTORY.md
 
 
 class FeishuChannel(BaseChannel):
@@ -274,6 +276,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._bot_open_id: str | None = None  # Bot's own open_id for mention detection
 
     @staticmethod
     def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
@@ -301,6 +304,10 @@ class FeishuChannel(BaseChannel):
             .app_secret(self.config.app_secret) \
             .log_level(lark.LogLevel.INFO) \
             .build()
+
+        # Fetch bot's own open_id for precise mention detection in group chats
+        await self._fetch_bot_info()
+
         builder = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
             self.config.verification_token or "",
@@ -382,16 +389,50 @@ class FeishuChannel(BaseChannel):
             mid = getattr(mention, "id", None)
             if not mid:
                 continue
-            # Bot mentions have no user_id (None or "") but a valid open_id
+            # Prefer precise open_id match when available
+            if self._bot_open_id and getattr(mid, "open_id", None) == self._bot_open_id:
+                return True
+            # Fallback: bot mentions have no user_id but a valid open_id
             if not getattr(mid, "user_id", None) and (getattr(mid, "open_id", None) or "").startswith("ou_"):
                 return True
         return False
 
-    def _is_group_message_for_bot(self, message: Any) -> bool:
-        """Allow group messages when policy is open or bot is @mentioned."""
-        if self.config.group_policy == "open":
+    def _is_group_message_for_bot(self, message: Any, chat_id: str = "") -> bool:
+        """Allow group messages based on group_policy."""
+        policy = self.config.group_policy
+        if policy == "open":
             return True
+        if policy == "allowlist":
+            return chat_id in self.config.group_allow_from
+        # default: "mention"
         return self._is_bot_mentioned(message)
+
+    async def _fetch_bot_info(self) -> None:
+        """Fetch the bot's own open_id via Feishu API for precise mention detection."""
+        try:
+            loop = asyncio.get_running_loop()
+
+            def _get_bot_info():
+                import lark_oapi as lark
+                req = lark.BaseRequest()
+                req.http_method = lark.HttpMethod.GET
+                req.uri = "/open-apis/bot/v3/info"
+                req.token_types = {lark.AccessTokenType.TENANT}
+                return self._client.request(req)
+
+            response = await loop.run_in_executor(None, _get_bot_info)
+            if response.success():
+                import json as _json
+                data = _json.loads(response.raw.content)
+                self._bot_open_id = data.get("bot", {}).get("open_id")
+                if self._bot_open_id:
+                    logger.info("Feishu bot open_id: {}", self._bot_open_id)
+                else:
+                    logger.warning("Bot info response missing open_id: {}", data)
+            else:
+                logger.warning("Failed to fetch bot info: code={}, msg={}", response.code, response.msg)
+        except Exception as e:
+            logger.warning("Could not fetch bot info (mention detection may not work): {}", e)
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
@@ -934,8 +975,8 @@ class FeishuChannel(BaseChannel):
             chat_type = message.chat_type
             msg_type = message.message_type
 
-            if chat_type == "group" and not self._is_group_message_for_bot(message):
-                logger.debug("Feishu: skipping group message (not mentioned)")
+            if chat_type == "group" and not self._is_group_message_for_bot(message, chat_id):
+                logger.debug("Feishu: skipping group message (policy={}, chat={})", self.config.group_policy, chat_id)
                 return
 
             # Add reaction
