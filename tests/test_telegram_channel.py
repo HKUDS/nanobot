@@ -22,9 +22,17 @@ class _FakeHTTPXRequest:
 class _FakeUpdater:
     def __init__(self, on_start_polling) -> None:
         self._on_start_polling = on_start_polling
+        self.running = False
+        self.start_polling_calls: list[dict] = []
+        self._Updater__polling_task = None
 
     async def start_polling(self, **kwargs) -> None:
+        self.running = True
+        self.start_polling_calls.append(kwargs)
         self._on_start_polling()
+
+    async def stop(self) -> None:
+        self.running = False
 
 
 class _FakeBot:
@@ -69,6 +77,12 @@ class _FakeApp:
         pass
 
     async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    async def shutdown(self) -> None:
         pass
 
 
@@ -155,6 +169,44 @@ async def test_start_uses_request_proxy_without_builder_proxy(monkeypatch) -> No
     assert _FakeHTTPXRequest.instances[0].kwargs["proxy"] == config.proxy
     assert builder.request_value is _FakeHTTPXRequest.instances[0]
     assert builder.get_updates_request_value is _FakeHTTPXRequest.instances[0]
+    assert app.updater.start_polling_calls[0]["drop_pending_updates"] is False
+
+
+class _DoneTask:
+    def __init__(self, exc: Exception | None = None) -> None:
+        self._exc = exc
+
+    def done(self) -> bool:
+        return True
+
+    def exception(self):
+        return self._exc
+
+
+def test_polling_is_healthy_requires_running_task() -> None:
+    updater = _FakeUpdater(lambda: None)
+
+    assert TelegramChannel._polling_is_healthy(updater) is False
+
+    updater.running = True
+    updater._Updater__polling_task = SimpleNamespace(done=lambda: False)
+    assert TelegramChannel._polling_is_healthy(updater) is True
+
+    updater._Updater__polling_task = _DoneTask()
+    assert TelegramChannel._polling_is_healthy(updater) is False
+
+
+@pytest.mark.asyncio
+async def test_restart_polling_if_needed_restarts_dead_polling_task() -> None:
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]), MessageBus())
+    channel._app = _FakeApp(lambda: None)
+    channel._app.updater.running = True
+    channel._app.updater._Updater__polling_task = _DoneTask(RuntimeError("polling died"))
+
+    await channel._restart_polling_if_needed()
+
+    assert len(channel._app.updater.start_polling_calls) == 1
+    assert channel._app.updater.start_polling_calls[0]["drop_pending_updates"] is False
 
 
 def test_derive_topic_session_key_uses_thread_id() -> None:

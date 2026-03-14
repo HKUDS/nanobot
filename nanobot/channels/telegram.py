@@ -178,6 +178,8 @@ class TelegramChannel(BaseChannel):
         self._message_threads: dict[tuple[str, int], int] = {}
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
+        self._polling_watchdog_task: asyncio.Task | None = None
+        self._polling_restart_lock = asyncio.Lock()
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -255,8 +257,11 @@ class TelegramChannel(BaseChannel):
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
             allowed_updates=["message"],
-            drop_pending_updates=True  # Ignore old messages on startup
+            drop_pending_updates=False,
+            error_callback=self._on_polling_error,
         )
+        if self._running:
+            self._polling_watchdog_task = asyncio.create_task(self._polling_watchdog_loop())
 
         # Keep running until stopped
         while self._running:
@@ -274,6 +279,9 @@ class TelegramChannel(BaseChannel):
             task.cancel()
         self._media_group_tasks.clear()
         self._media_group_buffers.clear()
+        if self._polling_watchdog_task and not self._polling_watchdog_task.done():
+            self._polling_watchdog_task.cancel()
+        self._polling_watchdog_task = None
 
         if self._app:
             logger.info("Stopping Telegram bot...")
@@ -281,6 +289,69 @@ class TelegramChannel(BaseChannel):
             await self._app.stop()
             await self._app.shutdown()
             self._app = None
+
+    @staticmethod
+    def _polling_task(updater) -> asyncio.Task | None:
+        """Return the python-telegram-bot polling task when available."""
+        return getattr(updater, "_Updater__polling_task", None)
+
+    @classmethod
+    def _polling_is_healthy(cls, updater) -> bool:
+        """Treat polling as healthy only while the updater is running and task is alive."""
+        if updater is None or not getattr(updater, "running", False):
+            return False
+        polling_task = cls._polling_task(updater)
+        return polling_task is None or not polling_task.done()
+
+    async def _restart_polling_if_needed(self) -> None:
+        """Recover from a dead polling loop without restarting the whole gateway."""
+        if not self._app:
+            return
+
+        updater = self._app.updater
+        if self._polling_is_healthy(updater):
+            return
+
+        async with self._polling_restart_lock:
+            if not self._app:
+                return
+            updater = self._app.updater
+            if self._polling_is_healthy(updater):
+                return
+
+            polling_task = self._polling_task(updater)
+            if polling_task and polling_task.done():
+                try:
+                    exc = polling_task.exception()
+                except asyncio.CancelledError:
+                    exc = "cancelled"
+                if exc:
+                    logger.warning("Telegram polling task ended unexpectedly: {}", exc)
+                else:
+                    logger.warning("Telegram polling task ended unexpectedly without an exception")
+            else:
+                logger.warning("Telegram updater is no longer running; restarting polling")
+
+            if getattr(updater, "running", False):
+                await updater.stop()
+
+            await updater.start_polling(
+                allowed_updates=["message"],
+                drop_pending_updates=False,
+                error_callback=self._on_polling_error,
+            )
+            logger.info("Telegram polling restarted")
+
+    async def _polling_watchdog_loop(self) -> None:
+        """Periodically verify long polling is still alive."""
+        try:
+            while self._running:
+                await asyncio.sleep(5)
+                await self._restart_polling_if_needed()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error("Telegram polling watchdog failed: {}", e)
 
     @staticmethod
     def _get_media_type(path: str) -> str:
@@ -748,6 +819,11 @@ class TelegramChannel(BaseChannel):
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
         logger.error("Telegram error: {}", context.error)
+
+    @staticmethod
+    def _on_polling_error(error) -> None:
+        """Log getUpdates polling errors from python-telegram-bot."""
+        logger.error("Telegram polling error: {}", error)
 
     def _get_extension(
         self,
