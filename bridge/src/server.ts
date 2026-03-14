@@ -7,9 +7,12 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { WhatsAppClient, InboundMessage } from './whatsapp.js';
 
 interface SendCommand {
-  type: 'send';
+  type: 'send' | 'send_media';
   to: string;
-  text: string;
+  text?: string;
+  media_path?: string;
+  media_type?: 'image' | 'audio' | 'video' | 'document';
+  caption?: string;
 }
 
 interface BridgeMessage {
@@ -93,8 +96,12 @@ export class BridgeServer {
   }
 
   private async handleCommand(cmd: SendCommand): Promise<void> {
-    if (cmd.type === 'send' && this.wa) {
-      await this.wa.sendMessage(cmd.to, cmd.text);
+    if (!this.wa) return;
+    
+    if (cmd.type === 'send') {
+      await this.wa.sendMessage(cmd.to, cmd.text || '');
+    } else if (cmd.type === 'send_media' && cmd.media_path) {
+      await this.wa.sendMedia(cmd.to, cmd.media_path, cmd.media_type || 'document', cmd.caption);
     }
   }
 
