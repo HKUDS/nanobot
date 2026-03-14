@@ -463,9 +463,23 @@ def gateway(
                     status=500,
                 )
 
+        async def handle_sync_scopes(request):
+            body = await request.json()
+            google_scopes = body.get("google_scopes", [])
+            x_scopes = body.get("x_scopes", [])
+            try:
+                agent.sync_scoped_tools(google_scopes, x_scopes)
+                return web.json_response({"success": True})
+            except Exception as e:
+                return web.json_response(
+                    {"success": False, "error": str(e)},
+                    status=500,
+                )
+
         web_app = web.Application(middlewares=[auth_middleware])
         web_app.router.add_post("/agent/run", handle_agent_run)
         web_app.router.add_post("/agent/execute-tool", handle_execute_tool)
+        web_app.router.add_post("/agent/sync-scopes", handle_sync_scopes)
         runner = web.AppRunner(web_app)
         await runner.setup()
         await web.TCPSite(runner, "0.0.0.0", port).start()

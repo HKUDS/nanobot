@@ -51,3 +51,22 @@ async def post(url: str, payload: dict[str, Any], timeout: float = 30) -> str:
 
     detail = data.get("detail") or data.get("error") or json.dumps(data)
     return f"Error (HTTP {resp.status_code}): {detail}"
+
+
+async def fetch_scopes(timeout: float = 10) -> tuple[list[str], list[str]]:
+    """Fetch the OAuth scopes granted for this bot's owner.
+
+    Returns (google_scopes, x_scopes).  Raises on network or HTTP errors
+    so the caller can decide how to handle a failure.
+    """
+    coordinator_url = os.environ.get("COORDINATOR_URL", "")
+    bot_id = os.environ.get("BOT_ID", "")
+    if not coordinator_url or not bot_id:
+        return [], []
+
+    url = f"{coordinator_url}/internal/scopes"
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.get(url, params={"bot_id": bot_id}, headers=auth_headers())
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("google_scopes", []), data.get("x_scopes", [])

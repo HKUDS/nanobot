@@ -20,78 +20,6 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.types import AgentResponse, PendingAction
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
-from nanobot.agent.tools.google import (
-    GmailSendTool,
-    GmailListTool,
-    GmailGetTool,
-    GmailSearchTool,
-    GmailReplyTool,
-    GmailTrashTool,
-    GmailCreateDraftTool,
-    GmailListLabelsTool,
-    GoogleCalendarCreateEventTool,
-    GoogleCalendarListEventsTool,
-    GoogleCalendarGetEventTool,
-    GoogleCalendarUpdateEventTool,
-    GoogleCalendarDeleteEventTool,
-    GoogleCalendarListCalendarsTool,
-    GoogleDriveUploadTool,
-    GoogleDriveListTool,
-    GoogleDriveGetTool,
-    GoogleDriveDownloadTool,
-    GoogleDriveCreateFolderTool,
-    GoogleDriveDeleteTool,
-    GoogleDriveShareTool,
-    GoogleDriveSearchTool,
-    GoogleDocsCreateTool,
-    GoogleDocsGetTool,
-    GoogleDocsAppendTool,
-    GoogleDocsInsertTool,
-    GoogleSheetsCreateTool,
-    GoogleSheetsGetTool,
-    GoogleSheetsReadRangeTool,
-    GoogleSheetsWriteRangeTool,
-    GoogleSheetsAppendRowsTool,
-    GoogleSheetsClearRangeTool,
-    GoogleContactsListTool,
-    GoogleContactsGetTool,
-    GoogleContactsCreateTool,
-    GoogleContactsUpdateTool,
-    GoogleContactsDeleteTool,
-    GoogleContactsSearchTool,
-)
-from nanobot.agent.tools.x import (
-    XPostTweetTool,
-    XDeleteTweetTool,
-    XGetTweetTool,
-    XSearchTweetsTool,
-    XGetUserTweetsTool,
-    XGetUserMentionsTool,
-    XLikeTweetTool,
-    XUnlikeTweetTool,
-    XGetLikedTweetsTool,
-    XRetweetTool,
-    XUndoRetweetTool,
-    XGetMeTool,
-    XGetUserByIdTool,
-    XGetUserByUsernameTool,
-    XFollowUserTool,
-    XUnfollowUserTool,
-    XGetFollowersTool,
-    XGetFollowingTool,
-    XGetBookmarksTool,
-    XBookmarkTweetTool,
-    XRemoveBookmarkTool,
-    XCreateListTool,
-    XDeleteListTool,
-    XGetListTool,
-    XGetOwnedListsTool,
-    XAddListMemberTool,
-    XRemoveListMemberTool,
-    XSendDmTool,
-    XGetDmEventsTool,
-    XGetDmConversationTool,
-)
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
@@ -179,6 +107,7 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
+        self._scopes_fetched = False
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
@@ -187,7 +116,7 @@ class AgentLoop:
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
-        """Register the default set of tools."""
+        """Register the default (non-scoped) set of tools."""
         allowed_dir = self.workspace if self.restrict_to_workspace else None
         for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
@@ -200,91 +129,58 @@ class AgentLoop:
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
-        if os.environ.get("BOT_ID") and os.environ.get("COORDINATOR_URL"):
-            # Gmail
-            self.tools.register(GmailSendTool())
-            self.tools.register(GmailListTool())
-            self.tools.register(GmailGetTool())
-            self.tools.register(GmailSearchTool())
-            self.tools.register(GmailReplyTool())
-            self.tools.register(GmailTrashTool())
-            self.tools.register(GmailCreateDraftTool())
-            self.tools.register(GmailListLabelsTool())
-            # Calendar
-            self.tools.register(GoogleCalendarCreateEventTool())
-            self.tools.register(GoogleCalendarListEventsTool())
-            self.tools.register(GoogleCalendarGetEventTool())
-            self.tools.register(GoogleCalendarUpdateEventTool())
-            self.tools.register(GoogleCalendarDeleteEventTool())
-            self.tools.register(GoogleCalendarListCalendarsTool())
-            # Drive
-            self.tools.register(GoogleDriveUploadTool())
-            self.tools.register(GoogleDriveListTool())
-            self.tools.register(GoogleDriveGetTool())
-            self.tools.register(GoogleDriveDownloadTool())
-            self.tools.register(GoogleDriveCreateFolderTool())
-            self.tools.register(GoogleDriveDeleteTool())
-            self.tools.register(GoogleDriveShareTool())
-            self.tools.register(GoogleDriveSearchTool())
-            # Docs
-            self.tools.register(GoogleDocsCreateTool())
-            self.tools.register(GoogleDocsGetTool())
-            self.tools.register(GoogleDocsAppendTool())
-            self.tools.register(GoogleDocsInsertTool())
-            # Sheets
-            self.tools.register(GoogleSheetsCreateTool())
-            self.tools.register(GoogleSheetsGetTool())
-            self.tools.register(GoogleSheetsReadRangeTool())
-            self.tools.register(GoogleSheetsWriteRangeTool())
-            self.tools.register(GoogleSheetsAppendRowsTool())
-            self.tools.register(GoogleSheetsClearRangeTool())
-            # Contacts
-            self.tools.register(GoogleContactsListTool())
-            self.tools.register(GoogleContactsGetTool())
-            self.tools.register(GoogleContactsCreateTool())
-            self.tools.register(GoogleContactsUpdateTool())
-            self.tools.register(GoogleContactsDeleteTool())
-            self.tools.register(GoogleContactsSearchTool())
-            # X — Tweets
-            self.tools.register(XPostTweetTool())
-            self.tools.register(XDeleteTweetTool())
-            self.tools.register(XGetTweetTool())
-            self.tools.register(XSearchTweetsTool())
-            self.tools.register(XGetUserTweetsTool())
-            self.tools.register(XGetUserMentionsTool())
-            # X — Likes
-            self.tools.register(XLikeTweetTool())
-            self.tools.register(XUnlikeTweetTool())
-            self.tools.register(XGetLikedTweetsTool())
-            # X — Retweets
-            self.tools.register(XRetweetTool())
-            self.tools.register(XUndoRetweetTool())
-            # X — Users
-            self.tools.register(XGetMeTool())
-            self.tools.register(XGetUserByIdTool())
-            self.tools.register(XGetUserByUsernameTool())
-            # X — Follows
-            self.tools.register(XFollowUserTool())
-            self.tools.register(XUnfollowUserTool())
-            self.tools.register(XGetFollowersTool())
-            self.tools.register(XGetFollowingTool())
-            # X — Bookmarks
-            self.tools.register(XGetBookmarksTool())
-            self.tools.register(XBookmarkTweetTool())
-            self.tools.register(XRemoveBookmarkTool())
-            # X — Lists
-            self.tools.register(XCreateListTool())
-            self.tools.register(XDeleteListTool())
-            self.tools.register(XGetListTool())
-            self.tools.register(XGetOwnedListsTool())
-            self.tools.register(XAddListMemberTool())
-            self.tools.register(XRemoveListMemberTool())
-            # X — DMs
-            self.tools.register(XSendDmTool())
-            self.tools.register(XGetDmEventsTool())
-            self.tools.register(XGetDmConversationTool())
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+    def sync_scoped_tools(
+        self,
+        google_scopes: list[str] | None = None,
+        x_scopes: list[str] | None = None,
+    ) -> None:
+        """Register/deregister Google and X tools based on granted OAuth scopes.
+
+        Computes the desired set of tools from the scope mapping, diffs against
+        currently-registered scoped tools, and applies the minimal changes.
+        """
+        from nanobot.agent.tools.scope_registry import (
+            ALL_SCOPED_TOOL_NAMES,
+            get_tools_for_scopes,
+        )
+
+        desired = get_tools_for_scopes(google_scopes, x_scopes)
+        current_scoped = {
+            name for name in self.tools.tool_names if name in ALL_SCOPED_TOOL_NAMES
+        }
+
+        to_add = set(desired.keys()) - current_scoped
+        to_remove = current_scoped - set(desired.keys())
+
+        for name in to_remove:
+            self.tools.unregister(name)
+        if to_remove:
+            logger.info("Deregistered {} scoped tool(s): {}", len(to_remove), ", ".join(sorted(to_remove)))
+
+        for name in to_add:
+            self.tools.register(desired[name]())
+        if to_add:
+            logger.info("Registered {} scoped tool(s): {}", len(to_add), ", ".join(sorted(to_add)))
+
+        if not to_add and not to_remove:
+            logger.debug("Scoped tools unchanged ({} active)", len(current_scoped))
+
+    async def _fetch_and_sync_scopes(self) -> None:
+        """Fetch current OAuth scopes from the coordinator and sync tools (once)."""
+        if self._scopes_fetched:
+            return
+        if not os.environ.get("BOT_ID") or not os.environ.get("COORDINATOR_URL"):
+            return
+        try:
+            from nanobot.coordinator.client import fetch_scopes
+            google_scopes, x_scopes = await fetch_scopes()
+            self.sync_scoped_tools(google_scopes, x_scopes)
+            self._scopes_fetched = True
+        except Exception as e:
+            logger.warning("Failed to fetch scopes from coordinator (tools will be added when scopes arrive): {}", e)
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -448,6 +344,7 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
+        await self._fetch_and_sync_scopes()
         await self._connect_mcp()
         logger.info("Agent loop started")
 
@@ -690,6 +587,7 @@ class AgentLoop:
         """Process a message directly (for CLI, HTTP gateway, or cron usage)."""
         self._confirmation_supported = confirmation_supported
         self._pending_actions = []
+        await self._fetch_and_sync_scopes()
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
