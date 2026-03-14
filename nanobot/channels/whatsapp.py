@@ -3,7 +3,9 @@
 import asyncio
 import json
 import mimetypes
+import re
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -102,35 +104,28 @@ class WhatsAppChannel(BaseChannel):
             return
 
         try:
-            # Parse media tags from content
-            import re
-            media_pattern = r'\[(image|file|video|audio):\s*([^\]]+)\]'
-            media_matches = re.findall(media_pattern, msg.content or '')
-            
-            if media_matches:
-                # Extract caption (remove media tags from text)
+            if msg.media:
+                # Send media messages with optional caption
                 caption = msg.content or ''
-                for media_type, media_path in media_matches:
-                    caption = caption.replace(f'[{media_type}: {media_path}]', '').strip()
                 
                 # Send first media with caption
                 payload = {
                     "type": "send",
                     "to": msg.chat_id,
                     "text": caption,
-                    "media_path": media_matches[0][1].strip(),
-                    "media_type": media_matches[0][0]
+                    "media_path": msg.media[0],
+                    "media_type": self._detect_media_type(msg.media[0])
                 }
                 await self._ws.send(json.dumps(payload, ensure_ascii=False))
                 
                 # Send additional media without caption
-                for media_type, media_path in media_matches[1:]:
+                for media_path in msg.media[1:]:
                     payload = {
                         "type": "send",
                         "to": msg.chat_id,
                         "text": "",
-                        "media_path": media_path.strip(),
-                        "media_type": media_type
+                        "media_path": media_path,
+                        "media_type": self._detect_media_type(media_path)
                     }
                     await self._ws.send(json.dumps(payload, ensure_ascii=False))
             else:
@@ -143,6 +138,18 @@ class WhatsAppChannel(BaseChannel):
                 await self._ws.send(json.dumps(payload, ensure_ascii=False))
         except Exception as e:
             logger.error("Error sending WhatsApp message: {}", e)
+    
+    def _detect_media_type(self, path: str) -> str:
+        """Detect media type from file extension."""
+        ext = Path(path).suffix.lower()
+        if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
+            return 'image'
+        elif ext in ['.mp3', '.wav', '.ogg', '.m4a', '.aac']:
+            return 'audio'
+        elif ext in ['.mp4', '.mov', '.avi', '.webm', '.mkv']:
+            return 'video'
+        else:
+            return 'document'
 
     async def _handle_bridge_message(self, raw: str) -> None:
         """Handle a message from the bridge."""

@@ -98,7 +98,7 @@ export class BridgeServer {
     if (!this.wa) return;
     
     // Unified send method (text or media)
-    await this.wa.sendMessage(cmd.to, cmd.text || '', cmd.media_path, cmd.media_type);
+    await this.wa.sendMessage(cmd.to, cmd.text || '', cmd.media_path, cmd.media_type || undefined);
   }
 
   private broadcast(msg: BridgeMessage): void {

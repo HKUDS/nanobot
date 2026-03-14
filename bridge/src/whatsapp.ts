@@ -230,7 +230,7 @@ export class WhatsAppClient {
     to: string,
     text: string,
     mediaPath?: string,
-    mediaType?: 'image' | 'audio' | 'video' | 'document'
+    mediaType?: string
   ): Promise<void> {
     if (!this.sock) {
       throw new Error('Not connected');
