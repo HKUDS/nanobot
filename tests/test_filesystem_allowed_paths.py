@@ -5,7 +5,7 @@ from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 
 class TestFilesystemAllowedPaths:
     @pytest.mark.asyncio
-    async def test_read_file_allows_extra_allowed_dir(self, tmp_path):
+    async def test_read_file_allows_extra_allowed_path(self, tmp_path):
         extra_dir = tmp_path / "allowed-extra"
         extra_dir.mkdir()
         sample = extra_dir / "sample.txt"
