@@ -385,6 +385,29 @@ def _print_deprecated_memory_window_notice(config: Config) -> None:
         )
 
 
+def _with_background_ok_instruction(prompt: str, ok_signal: str) -> str:
+    """Tell the agent how to indicate success-without-user-output for background runs."""
+    return (
+        f"{prompt}\n\n"
+        "If the work completes successfully and there is nothing user-facing to report, "
+        f"reply with {ok_signal} exactly."
+    )
+
+
+def _should_publish_background_response(
+    response: str | None,
+    *,
+    ok_signal: str,
+    send_ok_signal_messages: bool,
+) -> bool:
+    """Return True when a background response should be published outbound."""
+    if not response:
+        return False
+    if response.strip() == ok_signal and not send_ok_signal_messages:
+        return False
+    return True
+
+
 # ============================================================================
 # Gateway / Server
 # ============================================================================
@@ -414,6 +437,8 @@ def gateway(
     config = _load_runtime_config(config, workspace)
     _print_deprecated_memory_window_notice(config)
     port = port if port is not None else config.gateway.port
+    hb_cfg = config.gateway.heartbeat
+    cron_cfg = config.gateway.cron
 
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     sync_workspace_templates(config.workspace_path)
@@ -455,6 +480,7 @@ def gateway(
             f"Task '{job.name}' has been triggered.\n"
             f"Scheduled instruction: {job.payload.message}"
         )
+        reminder_note = _with_background_ok_instruction(reminder_note, cron_cfg.ok_signal)
 
         cron_tool = agent.tools.get("cron")
         cron_token = None
@@ -475,7 +501,15 @@ def gateway(
         if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
             return response
 
-        if job.payload.deliver and job.payload.to and response:
+        if (
+            job.payload.deliver
+            and job.payload.to
+            and _should_publish_background_response(
+                response,
+                ok_signal=cron_cfg.ok_signal,
+                send_ok_signal_messages=cron_cfg.send_ok_signal_messages,
+            )
+        ):
             should_notify = await evaluate_response(
                 response, job.payload.message, provider, agent.model,
             )
@@ -512,12 +546,13 @@ def gateway(
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
+        heartbeat_prompt = _with_background_ok_instruction(tasks, hb_cfg.ok_signal)
 
         async def _silent(*_args, **_kwargs):
             pass
 
         return await agent.process_direct(
-            tasks,
+            heartbeat_prompt,
             session_key="heartbeat",
             channel=channel,
             chat_id=chat_id,
@@ -530,9 +565,14 @@ def gateway(
         channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
             return  # No external channel available to deliver to
+        if not _should_publish_background_response(
+            response,
+            ok_signal=hb_cfg.ok_signal,
+            send_ok_signal_messages=hb_cfg.send_ok_signal_messages,
+        ):
+            return
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
 
-    hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
         provider=provider,

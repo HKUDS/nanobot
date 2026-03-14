@@ -95,6 +95,15 @@ class HeartbeatConfig(Base):
 
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
+    ok_signal: str = "HEARTBEAT_OK"
+    send_ok_signal_messages: bool = True
+
+
+class CronConfig(Base):
+    """Cron delivery configuration."""
+
+    ok_signal: str = "CRON_OK"
+    send_ok_signal_messages: bool = True
 
 
 class GatewayConfig(Base):
@@ -103,6 +112,7 @@ class GatewayConfig(Base):
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    cron: CronConfig = Field(default_factory=CronConfig)
 
 
 class WebSearchConfig(Base):
