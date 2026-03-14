@@ -6,34 +6,47 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
+
 from nanobot.config.loader import get_config_path, load_config, save_config
 from nanobot.config.schema import Config
 from nanobot.providers.factory import ProviderConfigurationError, create_provider
 from nanobot.providers.registry import ProviderSpec, find_by_model, find_by_name, PROVIDERS
 
-MODEL_CATALOG: dict[str, tuple[str, ...]] = {
-    "anthropic": ("claude-sonnet-4-5", "claude-opus-4-5"),
-    "openai": ("gpt-4o", "gpt-4o-mini", "gpt-5"),
-    "gemini": ("gemini-2.5-pro", "gemini-2.5-flash"),
-    "deepseek": ("deepseek-chat", "deepseek-reasoner"),
-    "groq": ("llama-3.3-70b-versatile", "mixtral-8x7b-32768"),
-    "dashscope": ("qwen-max", "qwen-plus"),
-    "moonshot": ("kimi-k2.5", "moonshot-v1-8k"),
-    "zhipu": ("glm-4-plus", "glm-4-air"),
-    "minimax": ("MiniMax-M1", "MiniMax-Text-01"),
-    "openrouter": ("anthropic/claude-sonnet-4-5", "openai/gpt-4o"),
-    "aihubmix": ("gpt-4o", "claude-sonnet-4-5"),
-    "siliconflow": ("Qwen/Qwen2.5-72B-Instruct", "deepseek-ai/DeepSeek-V3"),
-    "volcengine": ("doubao-1-5-pro-32k-250115",),
-    "openai_codex": ("openai-codex/gpt-5.1-codex",),
-    "github_copilot": ("github-copilot/gpt-4o", "github-copilot/claude-sonnet-4"),
-    "ollama": ("llama3.2", "qwen2.5-coder:7b"),
-}
-
 MODEL_PREFIX_ALIASES = {
     "openai_codex": "openai-codex",
     "github_copilot": "github-copilot",
 }
+
+OPENAI_COMPATIBLE_PROVIDERS = frozenset(
+    {
+        "custom",
+        "openai",
+        "openrouter",
+        "deepseek",
+        "groq",
+        "minimax",
+        "aihubmix",
+        "siliconflow",
+        "volcengine",
+        "dashscope",
+        "moonshot",
+        "zhipu",
+        "vllm",
+    }
+)
+
+HOSTED_PROVIDER_BASES = {
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+    "groq": "https://api.groq.com/openai/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta",
+    "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "zhipu": "https://open.bigmodel.cn/api/paas/v4",
+}
+
+DISCOVERY_TIMEOUT = 3.0
 
 
 @dataclass(frozen=True)
@@ -131,7 +144,7 @@ def format_model_status(config: Config, config_path: Path) -> str:
 def list_switchable_models(config: Config) -> list[str]:
     """List all switchable `/model <provider> <model>` options for usable providers."""
     current_provider_name = config.get_provider_name(config.agents.defaults.model) or config.agents.defaults.provider
-    current_display_model = _display_model_for_provider(
+    current_option_model = _option_model_for_provider(
         find_by_name(current_provider_name) if current_provider_name else None,
         config.agents.defaults.model,
     )
@@ -140,13 +153,50 @@ def list_switchable_models(config: Config) -> list[str]:
     for spec in PROVIDERS:
         if not _is_provider_available(config, spec):
             continue
-        models = list(MODEL_CATALOG.get(spec.name, ()))
-        if current_provider_name == spec.name and current_display_model:
-            if current_display_model not in models:
-                models.insert(0, current_display_model)
+        models = [
+            _option_model_for_provider(spec, model)
+            for model in discover_models_for_provider(config, spec)
+        ]
+        models = [model for model in models if model]
+        if current_provider_name == spec.name and current_option_model:
+            if current_option_model not in models:
+                models.insert(0, current_option_model)
+        if not models:
+            continue
         for model in models:
             options.append(f"{spec.name.replace('_', '-')} {model}")
     return options
+
+
+def discover_models_for_provider(config: Config, spec: ProviderSpec) -> list[str]:
+    """Return dynamically discovered models for one provider."""
+    provider_config = getattr(config.providers, spec.name, None)
+    if provider_config is None:
+        return []
+
+    try:
+        if spec.name == "ollama":
+            return _discover_ollama_models(_provider_api_base(config, spec))
+        if spec.name == "anthropic":
+            return _discover_anthropic_models(
+                _provider_api_base(config, spec),
+                provider_config.api_key,
+            )
+        if spec.name == "gemini":
+            return _discover_gemini_models(
+                _provider_api_base(config, spec),
+                provider_config.api_key,
+            )
+        if spec.name in OPENAI_COMPATIBLE_PROVIDERS:
+            return _discover_openai_compatible_models(
+                _provider_api_base(config, spec),
+                provider_config.api_key,
+                provider_config.extra_headers or {},
+            )
+    except Exception:
+        return []
+
+    return []
 
 
 def _direct_examples(options: list[str]) -> list[str]:
@@ -159,6 +209,115 @@ def _direct_examples(options: list[str]) -> list[str]:
             continue
         direct.append(f"{provider_raw}/{model}")
     return direct[:8]
+
+
+def _provider_api_base(config: Config, spec: ProviderSpec) -> str | None:
+    provider_config = getattr(config.providers, spec.name, None)
+    if provider_config and provider_config.api_base:
+        return provider_config.api_base.rstrip("/")
+    if spec.default_api_base:
+        return spec.default_api_base.rstrip("/")
+    default_base = HOSTED_PROVIDER_BASES.get(spec.name)
+    return default_base.rstrip("/") if default_base else None
+
+
+def _discover_openai_compatible_models(
+    api_base: str | None,
+    api_key: str | None,
+    extra_headers: dict[str, str],
+) -> list[str]:
+    if not api_base:
+        return []
+
+    headers = {"Accept": "application/json", **extra_headers}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    with httpx.Client(timeout=DISCOVERY_TIMEOUT, follow_redirects=True) as client:
+        response = client.get(f"{api_base.rstrip('/')}/models", headers=headers)
+        if response.status_code >= 400:
+            return []
+        payload = response.json()
+
+    items = payload.get("data") or payload.get("models") or []
+    return _unique_strings(item.get("id") or item.get("name") for item in items if isinstance(item, dict))
+
+
+def _discover_ollama_models(api_base: str | None) -> list[str]:
+    if not api_base:
+        return []
+
+    with httpx.Client(timeout=DISCOVERY_TIMEOUT, follow_redirects=True) as client:
+        response = client.get(f"{api_base.rstrip('/')}/api/tags")
+        if response.status_code >= 400:
+            return []
+        payload = response.json()
+
+    items = payload.get("models") or []
+    return _unique_strings(item.get("name") for item in items if isinstance(item, dict))
+
+
+def _discover_anthropic_models(api_base: str | None, api_key: str | None) -> list[str]:
+    if not api_base or not api_key:
+        return []
+
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "Accept": "application/json",
+    }
+
+    with httpx.Client(timeout=DISCOVERY_TIMEOUT, follow_redirects=True) as client:
+        response = client.get(f"{api_base.rstrip('/')}/models", headers=headers)
+        if response.status_code >= 400:
+            return []
+        payload = response.json()
+
+    items = payload.get("data") or payload.get("models") or []
+    return _unique_strings(item.get("id") or item.get("name") for item in items if isinstance(item, dict))
+
+
+def _discover_gemini_models(api_base: str | None, api_key: str | None) -> list[str]:
+    if not api_base or not api_key:
+        return []
+
+    with httpx.Client(timeout=DISCOVERY_TIMEOUT, follow_redirects=True) as client:
+        response = client.get(
+            f"{api_base.rstrip('/')}/models",
+            params={"key": api_key},
+            headers={"Accept": "application/json"},
+        )
+        if response.status_code >= 400:
+            return []
+        payload = response.json()
+
+    items = payload.get("models") or []
+    models: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        methods = item.get("supportedGenerationMethods") or []
+        if methods and not any(method in {"generateContent", "streamGenerateContent"} for method in methods):
+            continue
+        name = item.get("name") or ""
+        if name.startswith("models/"):
+            name = name.split("/", 1)[1]
+        if name:
+            models.append(name)
+    return _unique_strings(models)
+
+
+def _unique_strings(values) -> list[str]:
+    seen: set[str] = set()
+    output: list[str] = []
+    for value in values:
+        if not value or not isinstance(value, str):
+            continue
+        if value in seen:
+            continue
+        seen.add(value)
+        output.append(value)
+    return output
 
 
 def _selection_from_full_model(model: str) -> ModelSelection:
@@ -321,6 +480,18 @@ def _display_model_for_provider(spec: ProviderSpec | None, model: str) -> str:
         if _normalize_provider_name(prefix) == spec.name:
             return f"{_model_prefix(spec)}/{remainder}"
     return f"{_model_prefix(spec)}/{model}"
+
+
+def _option_model_for_provider(spec: ProviderSpec | None, model: str) -> str:
+    if spec is None:
+        return model
+    if spec.is_gateway or spec.is_local or spec.is_direct:
+        return _strip_provider_prefix(spec, model)
+    if "/" in model:
+        prefix, remainder = model.split("/", 1)
+        if _normalize_provider_name(prefix) == spec.name:
+            return remainder
+    return model
 
 
 def _model_prefix(spec: ProviderSpec) -> str:

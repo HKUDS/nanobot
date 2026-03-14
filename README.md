@@ -230,7 +230,7 @@ Examples:
 
 Behavior:
 
-- `/model` shows the current config path, current provider/model, and all switchable model options for providers that are actually usable from the current config
+- `/model` shows the current config path, current provider/model, and all switchable model options discovered from provider endpoints that are actually usable from the current config
 - It only shows providers that are already usable, for example providers with API keys or local providers with `apiBase`
 - Saving a change updates `~/.nanobot/config.json` (or the active `--config` file) directly
 - v1 behavior is config-write only: restart nanobot after changing `/model`
