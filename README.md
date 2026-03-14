@@ -1146,7 +1146,6 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot channels status` | Show channel status |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
-In interactive chat and connected channels, use `/model` to see the current session model, `/model <name>` to switch, and `/model default` to reset.
 
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>

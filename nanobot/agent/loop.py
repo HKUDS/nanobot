@@ -63,14 +63,11 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
-        provider_factory: Callable[[str], LLMProvider] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
-        self._provider_factory = provider_factory
-        self._provider_cache: dict[str, LLMProvider] = {}
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
@@ -93,7 +90,6 @@ class AgentLoop:
             web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
-            provider_factory=provider_factory,
         )
 
         self._running = False
@@ -111,7 +107,6 @@ class AgentLoop:
             context_window_tokens=context_window_tokens,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
-            provider_factory=provider_factory,
         )
         self._register_default_tools()
 
@@ -155,87 +150,12 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(
-        self,
-        channel: str,
-        chat_id: str,
-        message_id: str | None = None,
-        model: str | None = None,
-    ) -> None:
+    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        if tool := self.tools.get("message"):
-            if hasattr(tool, "set_context"):
-                tool.set_context(channel, chat_id, message_id)
-        if tool := self.tools.get("spawn"):
-            if hasattr(tool, "set_context"):
-                tool.set_context(channel, chat_id, model)
-        if tool := self.tools.get("cron"):
-            if hasattr(tool, "set_context"):
-                tool.set_context(channel, chat_id)
-
-    def _get_provider_for_model(self, model: str) -> LLMProvider:
-        """Resolve the provider instance for a model, caching when needed."""
-        if model == self.model or self._provider_factory is None:
-            return self.provider
-        provider = self._provider_cache.get(model)
-        if provider is None:
-            provider = self._provider_factory(model)
-            self._provider_cache[model] = provider
-        return provider
-
-    def _get_session_model(self, session: Session) -> str:
-        """Return the effective model for this session."""
-        model = session.metadata.get("model")
-        return model.strip() if isinstance(model, str) and model.strip() else self.model
-
-    def _build_model_status(self, session: Session) -> str:
-        """Format the current and default model for user-visible output."""
-        current_model = self._get_session_model(session)
-        lines = [f"Current model: {current_model}", f"Default model: {self.model}"]
-        if current_model == self.model:
-            lines.append("This session is using the default model.")
-        else:
-            lines.append("This session has a model override.")
-        lines.append("Use `/model <name>` to switch, or `/model default` to reset.")
-        return "\n".join(lines)
-
-    def _handle_model_command(self, session: Session, msg: InboundMessage) -> OutboundMessage:
-        """Show or change the model for the current session."""
-        parts = msg.content.strip().split(maxsplit=1)
-        if len(parts) == 1 or not parts[1].strip():
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=self._build_model_status(session),
-            )
-
-        requested_model = parts[1].strip()
-        if requested_model.lower() in {"default", "reset", "clear"}:
-            session.metadata.pop("model", None)
-            self.sessions.save(session)
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=f"Model reset to default: {self.model}",
-            )
-
-        try:
-            self._get_provider_for_model(requested_model)
-        except Exception as exc:
-            logger.warning("Rejected model change to {}: {}", requested_model, exc)
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=f"Unable to use model `{requested_model}`: {exc}",
-            )
-
-        session.metadata["model"] = requested_model
-        self.sessions.save(session)
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=f"Model set for this session: {requested_model}",
-        )
+        for name in ("message", "spawn", "cron"):
+            if tool := self.tools.get(name):
+                if hasattr(tool, "set_context"):
+                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -259,12 +179,8 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
-        provider: LLMProvider | None = None,
-        model: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop."""
-        active_provider = provider or self.provider
-        active_model = model or self.model
         messages = initial_messages
         iteration = 0
         final_content = None
@@ -275,10 +191,10 @@ class AgentLoop:
 
             tool_defs = self.tools.get_definitions()
 
-            response = await active_provider.chat_with_retry(
+            response = await self.provider.chat_with_retry(
                 messages=messages,
                 tools=tool_defs,
-                model=active_model,
+                model=self.model,
             )
 
             if response.has_tool_calls:
@@ -430,23 +346,17 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            active_model = self._get_session_model(session)
-            active_provider = self._get_provider_for_model(active_model)
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session, model=active_model)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"), active_model)
+            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(
-                messages,
-                provider=active_provider,
-                model=active_model,
-            )
+            final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session, model=active_model)
+            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -457,12 +367,10 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
 
         # Slash commands
-        raw_cmd = msg.content.strip()
-        cmd = raw_cmd.lower()
+        cmd = msg.content.strip().lower()
         if cmd == "/new":
-            active_model = self._get_session_model(session)
             try:
-                if not await self.memory_consolidator.archive_unconsolidated(session, model=active_model):
+                if not await self.memory_consolidator.archive_unconsolidated(session):
                     return OutboundMessage(
                         channel=msg.channel,
                         chat_id=msg.chat_id,
@@ -485,7 +393,6 @@ class AgentLoop:
             lines = [
                 "🐈 nanobot commands:",
                 "/new — Start a new conversation",
-                "/model [name] — Show or change the model for this session",
                 "/stop — Stop the current task",
                 "/restart — Restart the bot",
                 "/help — Show available commands",
@@ -493,14 +400,9 @@ class AgentLoop:
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
             )
-        if cmd == "/model" or cmd.startswith("/model "):
-            return self._handle_model_command(session, msg)
+        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
-        active_model = self._get_session_model(session)
-        active_provider = self._get_provider_for_model(active_model)
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session, model=active_model)
-
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"), active_model)
+        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
@@ -522,10 +424,7 @@ class AgentLoop:
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages,
-            on_progress=on_progress or _bus_progress,
-            provider=active_provider,
-            model=active_model,
+            initial_messages, on_progress=on_progress or _bus_progress,
         )
 
         if final_content is None:
@@ -533,7 +432,7 @@ class AgentLoop:
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session, model=active_model)
+        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None

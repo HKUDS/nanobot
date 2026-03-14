@@ -4,7 +4,7 @@ import asyncio
 import json
 import uuid
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from loguru import logger
 
@@ -32,12 +32,9 @@ class SubagentManager:
         web_proxy: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
-        provider_factory: Callable[[str], LLMProvider] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.provider = provider
-        self._provider_factory = provider_factory
-        self._provider_cache: dict[str, LLMProvider] = {}
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
@@ -48,16 +45,6 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
-    def _get_provider_for_model(self, model: str) -> LLMProvider:
-        """Resolve the provider instance for the requested model."""
-        if model == self.model or self._provider_factory is None:
-            return self.provider
-        provider = self._provider_cache.get(model)
-        if provider is None:
-            provider = self._provider_factory(model)
-            self._provider_cache[model] = provider
-        return provider
-
     async def spawn(
         self,
         task: str,
@@ -65,16 +52,14 @@ class SubagentManager:
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
         session_key: str | None = None,
-        model: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin = {"channel": origin_channel, "chat_id": origin_chat_id}
-        active_model = model or self.model
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, active_model)
+            self._run_subagent(task_id, task, display_label, origin)
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -98,12 +83,9 @@ class SubagentManager:
         task: str,
         label: str,
         origin: dict[str, str],
-        model: str | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
-        active_model = model or self.model
-        provider = self._get_provider_for_model(active_model)
 
         try:
             # Build subagent tools (no message tool, no spawn tool)
@@ -136,10 +118,10 @@ class SubagentManager:
             while iteration < max_iterations:
                 iteration += 1
 
-                response = await provider.chat_with_retry(
+                response = await self.provider.chat_with_retry(
                     messages=messages,
                     tools=tools.get_definitions(),
-                    model=active_model,
+                    model=self.model,
                 )
 
                 if response.has_tool_calls:
