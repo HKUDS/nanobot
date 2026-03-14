@@ -1,6 +1,8 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import io
+from dataclasses import dataclass, field
 import os
 import select
 import signal
@@ -22,12 +24,15 @@ if sys.platform == "win32":
 import typer
 from prompt_toolkit import print_formatted_text
 from prompt_toolkit import PromptSession
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI, HTML
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.application import run_in_terminal
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
@@ -43,7 +48,9 @@ app = typer.Typer(
 )
 
 console = Console()
+_stderr_console = Console(stderr=True, highlight=False)
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
+_CLI_SESSION_KEY = "cli:direct"
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -51,6 +58,29 @@ EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 
 _PROMPT_SESSION: PromptSession | None = None
 _SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
+
+
+@dataclass
+class TeamViewState:
+    active: bool = False
+    team_id: str | None = None
+    focus_index: int = 0
+    detail_member: str | None = None
+    members: list[str] = field(default_factory=list)
+    suppress_board_once: bool = False
+
+    def targets(self) -> list[str | None]:
+        return [None, *self.members]
+
+    def focused_member(self) -> str | None:
+        targets = self.targets()
+        if not targets:
+            return None
+        idx = min(self.focus_index, len(targets) - 1)
+        return targets[idx]
+
+
+_TEAM_VIEW = TeamViewState()
 
 
 def _flush_pending_tty_input() -> None:
@@ -91,7 +121,7 @@ def _restore_terminal() -> None:
         pass
 
 
-def _init_prompt_session() -> None:
+def _init_prompt_session(key_bindings: KeyBindings | None = None) -> None:
     """Create the prompt_toolkit session with persistent file history."""
     global _PROMPT_SESSION, _SAVED_TERM_ATTRS
 
@@ -111,6 +141,7 @@ def _init_prompt_session() -> None:
         history=FileHistory(str(history_file)),
         enable_open_in_editor=False,
         multiline=False,   # Enter submits (single line mode)
+        key_bindings=key_bindings,
     )
 
 
@@ -174,7 +205,129 @@ def _is_exit_command(command: str) -> bool:
     return command.lower() in EXIT_COMMANDS
 
 
-async def _read_interactive_input_async() -> str:
+def _sync_team_view(team_manager) -> None:
+    sk = _CLI_SESSION_KEY
+    if not team_manager.has_active_team(sk):
+        _TEAM_VIEW.active = False
+        _TEAM_VIEW.team_id = None
+        _TEAM_VIEW.focus_index = 0
+        _TEAM_VIEW.detail_member = None
+        _TEAM_VIEW.members = []
+        _TEAM_VIEW.suppress_board_once = False
+        return
+    if _TEAM_VIEW.team_id != team_manager.active_team_id(sk):
+        _TEAM_VIEW.focus_index = 0
+        _TEAM_VIEW.detail_member = None
+    _TEAM_VIEW.active = True
+    _TEAM_VIEW.team_id = team_manager.active_team_id(sk)
+    _TEAM_VIEW.members = team_manager.list_members(sk)
+    max_index = max(len(_TEAM_VIEW.targets()) - 1, 0)
+    _TEAM_VIEW.focus_index = min(_TEAM_VIEW.focus_index, max_index)
+    focused = _TEAM_VIEW.focused_member()
+    if _TEAM_VIEW.detail_member and focused:
+        _TEAM_VIEW.detail_member = focused
+
+
+def _move_team_focus(team_manager, step: int) -> None:
+    _sync_team_view(team_manager)
+    targets = _TEAM_VIEW.targets()
+    if len(targets) <= 1:
+        return
+    _TEAM_VIEW.focus_index = (_TEAM_VIEW.focus_index + step) % len(targets)
+    if _TEAM_VIEW.detail_member is not None:
+        _TEAM_VIEW.detail_member = _TEAM_VIEW.focused_member()
+
+def _render_compact_board(team_manager) -> str:
+    """Render the team board as a bordered Rich Panel to a string."""
+    _sync_team_view(team_manager)
+    if not _TEAM_VIEW.active:
+        return ""
+    buf = io.StringIO()
+    w = min(console.width, 72)
+    c = Console(file=buf, force_terminal=True, width=w, highlight=False)
+
+    if _TEAM_VIEW.detail_member:
+        snap = team_manager.get_member_snapshot(_CLI_SESSION_KEY, _TEAM_VIEW.detail_member)
+        if not snap:
+            return ""
+        task = snap.get("task")
+        lines: list[str] = []
+        lines.append(f" Role: {snap['role']}")
+        lines.append(f" Status: [magenta]{snap['status']}[/magenta]")
+        if task:
+            lines.append(f" Task: {task['id']}: {task['title']} ({task['status']})")
+            if task.get("plan"):
+                lines.append(f" Plan: {task['plan'].replace(chr(10), ' ')[:50]}...")
+            if task.get("result"):
+                lines.append(f" Result: {task['result'].replace(chr(10), ' ')[:50]}...")
+        else:
+            lines.append(" Task: —")
+        lines.append("")
+        if snap["recent_messages"]:
+            for mail in snap["recent_messages"][-3:]:
+                body = mail.content.replace("\n", " ")[:42]
+                lines.append(f" [dim]{mail.from_agent} -> {mail.to_agent}:[/dim] {body}")
+        else:
+            lines.append(" [dim]No recent messages[/dim]")
+        lines.append("")
+        lines.append(" [dim]Esc: back to board[/dim]")
+        c.print(Panel(
+            "\n".join(lines),
+            title=f"[bold]{snap['name']}[/bold]",
+            border_style="cyan",
+            padding=(0, 0),
+        ))
+    else:
+        snap = team_manager.get_board_snapshot(_CLI_SESSION_KEY)
+        if not snap:
+            return ""
+        focused = _TEAM_VIEW.focused_member()
+        lines = []
+        for row in snap["members"]:
+            is_active = row["status"] in ("working", "active", "waiting_approval")
+            icon = "●" if is_active else "○"
+            color = "green" if row["status"] in ("working", "active") else ("yellow" if row["status"] == "waiting_approval" else "dim")
+            marker = ">" if focused == row["name"] else " "
+            lines.append(
+                f" {marker} [{color}]{icon}[/{color}] "
+                f"[bold]{row['name']:<14}[/bold] "
+                f"[{color}]{row['status']:<16}[/{color}] "
+                f"{row['task']}"
+            )
+        n_a = len(snap["approvals"])
+        lines.append("")
+        lines.append(f" {len(snap['tasks'])} tasks · {n_a} approval(s) pending")
+        if n_a:
+            lines.append(" [yellow]Approve via commands:[/yellow] `/team approve <id>` | `/team reject <id> <reason>` | `/team manual <id> <instruction>`")
+        if snap.get("recent_updates"):
+            lines.append("")
+            lines.append(" Updates:")
+            for u in snap["recent_updates"][-3:]:
+                lines.append(f" [dim]- {u[:72]}[/dim]")
+        lines.append("")
+        lines.append(" [dim]Shift+↑↓ navigate  Enter: details  Esc: back[/dim]")
+        c.print(Panel(
+            "\n".join(lines),
+            title=f"[bold]Team: {snap['team_id']}[/bold] ({snap['status']})",
+            border_style="cyan",
+            padding=(0, 0),
+        ))
+
+    return buf.getvalue()
+
+
+def _prompt_message(team_manager):
+    if team_manager is not None:
+        _sync_team_view(team_manager)
+    if _TEAM_VIEW.active and team_manager is not None:
+        if _TEAM_VIEW.suppress_board_once:
+            _TEAM_VIEW.suppress_board_once = False
+            return HTML("<b fg='ansiblue'>You:</b> ")
+        return ANSI(_render_compact_board(team_manager) + "> ")
+    return HTML("<b fg='ansiblue'>You:</b> ")
+
+
+async def _read_interactive_input_async(team_manager=None) -> str:
     """Read user input using prompt_toolkit (handles paste, history, display).
 
     prompt_toolkit natively handles:
@@ -187,11 +340,11 @@ async def _read_interactive_input_async() -> str:
     try:
         with patch_stdout():
             return await _PROMPT_SESSION.prompt_async(
-                HTML("<b fg='ansiblue'>You:</b> "),
+                (lambda: _prompt_message(team_manager)) if team_manager else _prompt_message(None),
+                refresh_interval=0.5 if team_manager else None,
             )
     except EOFError as exc:
         raise KeyboardInterrupt from exc
-
 
 
 def version_callback(value: bool):
@@ -436,6 +589,8 @@ def gateway(
         web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
+        team_max_workers=config.agents.defaults.team_max_workers,
+        team_worker_max_iterations=config.agents.defaults.team_worker_max_iterations,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
@@ -628,6 +783,8 @@ def agent(
         web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
+        team_max_workers=config.agents.defaults.team_max_workers,
+        team_worker_max_iterations=config.agents.defaults.team_worker_max_iterations,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
@@ -662,7 +819,38 @@ def agent(
     else:
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
-        _init_prompt_session()
+        bindings = KeyBindings()
+
+        @bindings.add("s-up", filter=Condition(lambda: _TEAM_VIEW.active))
+        def _team_up(event):
+            _move_team_focus(agent_loop.team, -1)
+            event.app.invalidate()
+
+        @bindings.add("s-down", filter=Condition(lambda: _TEAM_VIEW.active))
+        def _team_down(event):
+            _move_team_focus(agent_loop.team, 1)
+            event.app.invalidate()
+
+        @bindings.add("enter", filter=Condition(lambda: _TEAM_VIEW.active))
+        def _team_enter(event):
+            if event.current_buffer.text.strip():
+                event.current_buffer.validate_and_handle()
+                return
+            focused = _TEAM_VIEW.focused_member()
+            if focused:
+                _TEAM_VIEW.detail_member = focused
+                event.app.invalidate()
+            else:
+                return
+
+        @bindings.add("escape", filter=Condition(lambda: _TEAM_VIEW.active and _TEAM_VIEW.detail_member is not None))
+        def _team_escape(event):
+            if event.current_buffer.text:
+                return
+            _TEAM_VIEW.detail_member = None
+            event.app.invalidate()
+
+        _init_prompt_session(key_bindings=bindings)
         console.print(f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n")
 
         if ":" in session_id:
@@ -724,7 +912,7 @@ def agent(
                 while True:
                     try:
                         _flush_pending_tty_input()
-                        user_input = await _read_interactive_input_async()
+                        user_input = await _read_interactive_input_async(agent_loop.team)
                         command = user_input.strip()
                         if not command:
                             continue
@@ -733,6 +921,10 @@ def agent(
                             _restore_terminal()
                             console.print("\nGoodbye!")
                             break
+
+                        lowered = command.lower()
+                        if lowered.startswith("/btw "):
+                            _TEAM_VIEW.suppress_board_once = True
 
                         turn_done.clear()
                         turn_response.clear()
@@ -749,6 +941,7 @@ def agent(
 
                         if turn_response:
                             _print_agent_response(turn_response[0], render_markdown=markdown)
+                        _sync_team_view(agent_loop.team)
                     except KeyboardInterrupt:
                         _restore_terminal()
                         console.print("\nGoodbye!")

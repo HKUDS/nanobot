@@ -1,8 +1,14 @@
 """Tool registry for dynamic tool management."""
 
-from typing import Any
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
 
 class ToolRegistry:
@@ -68,3 +74,30 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools
+
+
+def build_base_tools(
+    workspace: Path,
+    exec_config: "ExecToolConfig",
+    web_search_config: "WebSearchConfig | None" = None,
+    web_proxy: str | None = None,
+    restrict_to_workspace: bool = False,
+) -> ToolRegistry:
+    """Build a ToolRegistry pre-loaded with filesystem, shell, and web tools."""
+    from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+    from nanobot.agent.tools.shell import ExecTool
+    from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+
+    tools = ToolRegistry()
+    allowed_dir = workspace if restrict_to_workspace else None
+    for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
+        tools.register(cls(workspace=workspace, allowed_dir=allowed_dir))
+    tools.register(ExecTool(
+        working_dir=str(workspace),
+        timeout=exec_config.timeout,
+        restrict_to_workspace=restrict_to_workspace,
+        path_append=exec_config.path_append,
+    ))
+    tools.register(WebSearchTool(config=web_search_config, proxy=web_proxy))
+    tools.register(WebFetchTool(proxy=web_proxy))
+    return tools
