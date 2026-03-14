@@ -225,10 +225,13 @@ class TestTraceRequestContextManager:
 
         observability._client = mock_client
         observability._enabled = True
-        async with observability.trace_request(
-            name="request", input="hello", metadata={"k": "v"}
-        ) as obs:
-            assert obs is mock_obs
+
+        fake_langfuse = MagicMock()
+        with patch.dict("sys.modules", {"langfuse": fake_langfuse}):
+            async with observability.trace_request(
+                name="request", input="hello", metadata={"k": "v"}
+            ) as obs:
+                assert obs is mock_obs
         mock_client.start_as_current_observation.assert_called_once_with(
             name="request",
             as_type="span",
@@ -548,10 +551,11 @@ class TestTraceRequestPropagateAttributes:
 
         # propagate_attributes is imported locally inside trace_request as:
         # from langfuse import propagate_attributes as _propagate
-        # We need to patch it in the langfuse module so the local import picks it up.
-        import langfuse
+        # We need to fake the langfuse module so the local import picks it up.
+        fake_langfuse = MagicMock()
+        fake_langfuse.propagate_attributes = mock_propagate
 
-        with patch.object(langfuse, "propagate_attributes", mock_propagate):
+        with patch.dict("sys.modules", {"langfuse": fake_langfuse}):
             async with observability.trace_request(
                 name="request",
                 session_id="sess-123",
@@ -579,15 +583,15 @@ class TestTraceRequestPropagateAttributes:
         observability._client = mock_client
         observability._enabled = True
 
-        import langfuse
+        fake_langfuse = MagicMock()
 
-        with patch.object(langfuse, "propagate_attributes") as mock_propagate:
+        with patch.dict("sys.modules", {"langfuse": fake_langfuse}):
             async with observability.trace_request(
                 name="request",
             ) as obs:
                 assert obs is mock_obs
 
-            mock_propagate.assert_not_called()
+            fake_langfuse.propagate_attributes.assert_not_called()
 
 
 class TestLitellmCallbackWiring:
