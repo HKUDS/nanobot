@@ -25,7 +25,7 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import LLMProvider, ToolCallRequest, short_tool_id
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -165,6 +165,36 @@ class AgentLoop:
             return None
         return re.sub(r"<think>[\s\S]*?</think>", "", text).strip() or None
 
+    # Regex for models that emit tool calls as XML text instead of structured API.
+    # Format: <tool_call><function=NAME><parameter=KEY>VALUE</parameter>...</function></tool_call>
+    _XML_TOOL_CALL_RE = re.compile(
+        r"<tool_call>\s*<function=(\w+)>([\s\S]*?)</function>\s*</tool_call>"
+    )
+    _XML_PARAM_RE = re.compile(r"<parameter=(\w+)>([\s\S]*?)</parameter>")
+
+    @classmethod
+    def _parse_text_tool_calls(cls, text: str) -> list[ToolCallRequest]:
+        """Parse XML-formatted tool calls from LLM text content.
+
+        Some models (especially open-source / domestic models accessed via
+        compatible APIs) don't use the structured function-calling API and
+        instead output tool calls as XML text.  This method extracts them
+        so the agent loop can execute them normally.
+        """
+        results: list[ToolCallRequest] = []
+        for m in cls._XML_TOOL_CALL_RE.finditer(text):
+            func_name = m.group(1)
+            body = m.group(2)
+            arguments: dict[str, Any] = {}
+            for pm in cls._XML_PARAM_RE.finditer(body):
+                arguments[pm.group(1)] = pm.group(2)
+            results.append(ToolCallRequest(
+                id=short_tool_id(),
+                name=func_name,
+                arguments=arguments,
+            ))
+        return results
+
     @staticmethod
     def _tool_hint(tool_calls: list) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
@@ -197,6 +227,22 @@ class AgentLoop:
                 tools=tool_defs,
                 model=self.model,
             )
+
+            # Fallback: some models emit tool calls as XML text instead of
+            # using the structured function-calling API.  Parse them here so
+            # the rest of the loop can handle them normally.
+            if (
+                not response.has_tool_calls
+                and response.content
+                and "<tool_call>" in response.content
+            ):
+                parsed = self._parse_text_tool_calls(response.content)
+                if parsed:
+                    logger.info("Parsed {} text-format tool call(s) from response", len(parsed))
+                    response.tool_calls = parsed
+                    response.content = (
+                        self._XML_TOOL_CALL_RE.sub("", response.content).strip() or None
+                    )
 
             if response.has_tool_calls:
                 if on_progress:
