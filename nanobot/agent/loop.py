@@ -582,16 +582,41 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_message: Callable[[OutboundMessage], Awaitable[None]] | None = None,
         confirmation_supported: bool = False,
     ) -> AgentResponse:
-        """Process a message directly (for CLI, HTTP gateway, or cron usage)."""
+        """Process a message directly (for CLI, HTTP gateway, or cron usage).
+
+        Args:
+            on_message: If provided, called for every MessageTool send in
+                addition to the normal bus publish.  This allows SSE streaming
+                endpoints to capture intermediate bot messages without
+                registering a fake channel.
+        """
         self._confirmation_supported = confirmation_supported
         self._pending_actions = []
         await self._fetch_and_sync_scopes()
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
-        return AgentResponse(
-            content=response.content if response else "",
-            pending_actions=list(self._pending_actions),
-        )
+
+        original_cb: Callable[[OutboundMessage], Awaitable[None]] | None = None
+        mt = self.tools.get("message")
+        if on_message and isinstance(mt, MessageTool):
+            original_cb = mt._send_callback
+
+            async def _tee_callback(msg: OutboundMessage) -> None:
+                if original_cb:
+                    await original_cb(msg)
+                await on_message(msg)
+
+            mt.set_send_callback(_tee_callback)
+
+        try:
+            msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+            response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+            return AgentResponse(
+                content=response.content if response else "",
+                pending_actions=list(self._pending_actions),
+            )
+        finally:
+            if original_cb is not None and isinstance(mt, MessageTool):
+                mt.set_send_callback(original_cb)

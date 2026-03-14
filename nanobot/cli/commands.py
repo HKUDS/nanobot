@@ -444,6 +444,99 @@ def gateway(
                 ],
             })
 
+        async def handle_agent_run_stream(request):
+            """SSE streaming variant of /agent/run.
+
+            Sends three event types:
+              - progress: ephemeral thinking/tool-hint text
+              - message:  real bot messages (from MessageTool)
+              - done:     final event with pending_actions and optional response
+            """
+            import json as _json
+            body = await request.json()
+
+            resp = web.StreamResponse(
+                status=200,
+                reason="OK",
+                headers={
+                    "Content-Type": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+            await resp.prepare(request)
+
+            queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+            async def _on_progress(content: str, *, tool_hint: bool = False) -> None:
+                await queue.put({
+                    "type": "progress",
+                    "content": content,
+                    "tool_hint": tool_hint,
+                })
+
+            async def _on_message(msg) -> None:
+                await queue.put({
+                    "type": "message",
+                    "content": msg.content,
+                })
+
+            async def _run_agent():
+                try:
+                    result = await agent.process_direct(
+                        body["message"],
+                        session_key=body.get("session_key", "http:direct"),
+                        channel=body.get("channel", "http"),
+                        chat_id=body.get("chat_id", "direct"),
+                        on_progress=_on_progress,
+                        on_message=_on_message,
+                        confirmation_supported=body.get("confirmation_supported", False),
+                    )
+                    await queue.put({
+                        "type": "done",
+                        "response": result.content,
+                        "pending_actions": [
+                            {
+                                "action_id": pa.action_id,
+                                "tool_call_id": pa.tool_call_id,
+                                "tool_name": pa.tool_name,
+                                "arguments": pa.arguments,
+                            }
+                            for pa in result.pending_actions
+                        ],
+                    })
+                except Exception as exc:
+                    logger.exception("SSE agent run failed")
+                    await queue.put({
+                        "type": "error",
+                        "content": str(exc),
+                    })
+                finally:
+                    await queue.put(None)
+
+            agent_task = asyncio.create_task(_run_agent())
+
+            try:
+                while True:
+                    event = await queue.get()
+                    if event is None:
+                        break
+                    payload = f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
+                    await resp.write(payload.encode("utf-8"))
+            except (ConnectionResetError, asyncio.CancelledError):
+                agent_task.cancel()
+            finally:
+                if not agent_task.done():
+                    agent_task.cancel()
+                    try:
+                        await agent_task
+                    except asyncio.CancelledError:
+                        pass
+
+            await resp.write_eof()
+            return resp
+
         async def handle_execute_tool(request):
             body = await request.json()
             tool_name = body.get("tool_name")
@@ -478,6 +571,7 @@ def gateway(
 
         web_app = web.Application(middlewares=[auth_middleware])
         web_app.router.add_post("/agent/run", handle_agent_run)
+        web_app.router.add_post("/agent/run/stream", handle_agent_run_stream)
         web_app.router.add_post("/agent/execute-tool", handle_execute_tool)
         web_app.router.add_post("/agent/sync-scopes", handle_sync_scopes)
         runner = web.AppRunner(web_app)
