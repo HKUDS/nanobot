@@ -385,7 +385,7 @@ def _print_deprecated_memory_window_notice(config: Config) -> None:
         )
 
 def _should_send_background_response(
-    response: str | None,
+    response: str,
     *,
     ok_signal: str,
     send_ok_signal_messages: bool,
@@ -462,7 +462,7 @@ def gateway(
     )
 
     # Set cron callback (needs agent)
-    async def on_cron_job(job: CronJob) -> str | None:
+    async def on_cron_job(job: CronJob) -> str:
         """Execute a cron job through the agent."""
         from nanobot.agent.tools.cron import CronTool
         from nanobot.agent.tools.message import MessageTool
