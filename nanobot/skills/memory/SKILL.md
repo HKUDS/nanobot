@@ -21,7 +21,9 @@ Choose the search method based on file size:
 Examples:
 - **Linux/macOS:** `grep -i "keyword" memory/HISTORY.md`
 - **Windows:** `findstr /i "keyword" memory\HISTORY.md`
-- **Cross-platform Python:** `python -c "from pathlib import Path; text = Path('memory/HISTORY.md').read_text(encoding='utf-8'); print('\n'.join([l for l in text.splitlines() if 'keyword' in l.lower()][-20:]))"`
+- **Cross-platform (ripgrep):** `rg -i "keyword" memory/HISTORY.md`
+
+If your provider or gateway blocks inline shell snippets, fall back to `read_file` and filter in-memory.
 
 Prefer targeted command-line search for large history files.
 
