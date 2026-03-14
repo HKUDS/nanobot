@@ -3,7 +3,7 @@
 PYTHON ?= python3
 
 install:
-	$(PYTHON) -m pip install -e ".[dev]"
+	$(PYTHON) -m pip install -e ".[dev,web]"
 
 install-all:
 	$(PYTHON) -m pip install -e ".[dev,reranker,oauth]"

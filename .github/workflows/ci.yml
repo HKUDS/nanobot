@@ -72,6 +72,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,web]"
       - name: Run tests with coverage
         run: python -m pytest tests/ -x -q --cov=nanobot --cov-report=term-missing --cov-fail-under=85
