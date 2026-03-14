@@ -560,12 +560,11 @@ def gateway(
         if channel == "cli":
             return  # No external channel available to deliver to
 
-        should_send_response = _should_send_background_response(
+        if not _should_send_background_response(
             response,
             ok_signal=heartbeat_cfg.ok_signal,
             send_ok_signal_messages=heartbeat_cfg.send_ok_signal_messages,
-        )
-        if not should_send_response:
+        ):
             return
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
 
