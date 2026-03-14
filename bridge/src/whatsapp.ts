@@ -285,6 +285,24 @@ export class WhatsAppClient {
     await this.sendMessage(to, caption || '', mediaPath, mediaType);
   }
 
+  async sendReaction(to: string, message_id: string, emoji: string): Promise<void> {
+    if (!this.sock) {
+      throw new Error('Not connected');
+    }
+
+    // Send reaction using Baileys API
+    await this.sock.sendMessage(to, {
+      react: {
+        text: emoji,
+        key: {
+          remoteJid: to,
+          fromMe: false,
+          id: message_id
+        }
+      }
+    });
+  }
+
   async disconnect(): Promise<void> {
     if (this.sock) {
       this.sock.end(undefined);

@@ -7,11 +7,13 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { WhatsAppClient, InboundMessage } from './whatsapp.js';
 
 interface SendCommand {
-  type: 'send';
+  type: 'send' | 'send_reaction';
   to: string;
   text?: string;
   media_path?: string;
   media_type?: 'image' | 'audio' | 'video' | 'document';
+  message_id?: string;  // For reaction
+  emoji?: string;       // For reaction
 }
 
 interface BridgeMessage {
@@ -97,8 +99,13 @@ export class BridgeServer {
   private async handleCommand(cmd: SendCommand): Promise<void> {
     if (!this.wa) return;
     
-    // Unified send method (text or media)
-    await this.wa.sendMessage(cmd.to, cmd.text || '', cmd.media_path, cmd.media_type || undefined);
+    if (cmd.type === 'send_reaction' && cmd.message_id && cmd.emoji) {
+      // Send reaction to a message
+      await this.wa.sendReaction(cmd.to, cmd.message_id, cmd.emoji);
+    } else {
+      // Unified send method (text or media)
+      await this.wa.sendMessage(cmd.to, cmd.text || '', cmd.media_path, cmd.media_type || undefined);
+    }
   }
 
   private broadcast(msg: BridgeMessage): void {
