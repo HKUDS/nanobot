@@ -1126,21 +1126,6 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
 
-Example:
-
-```json
-{
-  "tools": {
-    "restrictToWorkspace": true,
-    "allowedPaths": [
-      "/dev/null",
-      "/tmp/example"
-    ]
-  }
-}
-```
-
-
 ## 🧩 Multiple Instances
 
 Run multiple nanobot instances simultaneously with separate configs and runtime data. Use `--config` as the main entrypoint, and optionally use `--workspace` to override the workspace for a specific run.
