@@ -49,6 +49,7 @@ class FeishuConfig(Base):
         "THUMBSUP"  # Emoji type for message reactions (e.g. THUMBSUP, OK, DONE, SMILE)
     )
     group_policy: Literal["open", "mention"] = "mention"  # "mention" responds when @mentioned, "open" responds to all
+    bot_names: dict[str, str] = Field(default_factory=dict)  # open_id -> display name, e.g. {"ou_xxx": "徐阶"}
 
 
 class DingTalkConfig(Base):
