@@ -14,17 +14,17 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.discord import (
     DiscordChannel,
+    DiscordConfig,
     _generate_waveform,
     _get_ogg_duration,
 )
-from nanobot.config.schema import DiscordConfig
 
 
 def _make_config(**kwargs) -> DiscordConfig:
     return DiscordConfig(
         enabled=True,
         token="Bot-test-token",
-        allow_from=[],  # empty = allow all
+        allow_from=["*"],
         **kwargs,
     )
 
@@ -33,6 +33,34 @@ def _make_channel(groq_api_key: str = "test-groq-key") -> DiscordChannel:
     ch = DiscordChannel(_make_config(), MessageBus(), groq_api_key=groq_api_key)
     ch._http = MagicMock()  # replaced per test
     return ch
+
+
+class _FakeStreamResponse:
+    def __init__(self, content: bytes):
+        self._content = content
+
+    def raise_for_status(self):
+        return None
+
+    async def aread(self) -> bytes:
+        return self._content
+
+
+class _FakeStreamContext:
+    def __init__(self, content: bytes):
+        self._resp = _FakeStreamResponse(content)
+
+    async def __aenter__(self):
+        return self._resp
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+def _make_stream_http(content: bytes) -> MagicMock:
+    fake_http = MagicMock()
+    fake_http.stream = MagicMock(side_effect=lambda method, url: _FakeStreamContext(content))
+    return fake_http
 
 
 # ---------------------------------------------------------------------------
@@ -102,17 +130,10 @@ async def test_voice_in_transcribes_ogg_attachment(tmp_path, monkeypatch):
     ch = _make_channel(groq_api_key="gk-123")
 
     # Fake HTTP: download returns audio bytes
-    fake_http = AsyncMock()
-    fake_resp = MagicMock()
-    fake_resp.content = b"fake-ogg-data"
-    fake_resp.raise_for_status = MagicMock()
-    fake_http.get = AsyncMock(return_value=fake_resp)
-    ch._http = fake_http
+    ch._http = _make_stream_http(b"fake-ogg-data")
 
     # Redirect media_dir to tmp_path
-    monkeypatch.setattr(
-        "nanobot.channels.discord.Path.home", lambda: tmp_path
-    )
+    monkeypatch.setattr("nanobot.channels.discord.get_media_dir", lambda channel=None: tmp_path / (channel or ""))
 
     # Fake transcription provider
     mock_transcribe = AsyncMock(return_value="hello from voice")
@@ -151,14 +172,9 @@ async def test_voice_in_skips_transcription_without_api_key(tmp_path, monkeypatc
     """No GROQ key → audio attachment treated as regular [attachment: ...], no crash."""
     ch = _make_channel(groq_api_key="")  # no key
 
-    fake_http = AsyncMock()
-    fake_resp = MagicMock()
-    fake_resp.content = b"fake-ogg-data"
-    fake_resp.raise_for_status = MagicMock()
-    fake_http.get = AsyncMock(return_value=fake_resp)
-    ch._http = fake_http
+    ch._http = _make_stream_http(b"fake-ogg-data")
 
-    monkeypatch.setattr("nanobot.channels.discord.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.channels.discord.get_media_dir", lambda channel=None: tmp_path / (channel or ""))
 
     captured: dict[str, Any] = {}
 
@@ -190,14 +206,9 @@ async def test_voice_in_non_audio_attachment_not_transcribed(tmp_path, monkeypat
     """A .png attachment should NOT trigger transcription."""
     ch = _make_channel(groq_api_key="gk-123")
 
-    fake_http = AsyncMock()
-    fake_resp = MagicMock()
-    fake_resp.content = b"fake-png-data"
-    fake_resp.raise_for_status = MagicMock()
-    fake_http.get = AsyncMock(return_value=fake_resp)
-    ch._http = fake_http
+    ch._http = _make_stream_http(b"fake-png-data")
 
-    monkeypatch.setattr("nanobot.channels.discord.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.channels.discord.get_media_dir", lambda channel=None: tmp_path / (channel or ""))
 
     captured: dict[str, Any] = {}
 
@@ -231,14 +242,9 @@ async def test_voice_in_failed_transcription_falls_back_to_attachment(tmp_path, 
     """If transcription returns empty string, fall back to [attachment: ...]."""
     ch = _make_channel(groq_api_key="gk-123")
 
-    fake_http = AsyncMock()
-    fake_resp = MagicMock()
-    fake_resp.content = b"fake-ogg-data"
-    fake_resp.raise_for_status = MagicMock()
-    fake_http.get = AsyncMock(return_value=fake_resp)
-    ch._http = fake_http
+    ch._http = _make_stream_http(b"fake-ogg-data")
 
-    monkeypatch.setattr("nanobot.channels.discord.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.channels.discord.get_media_dir", lambda channel=None: tmp_path / (channel or ""))
 
     captured: dict[str, Any] = {}
 

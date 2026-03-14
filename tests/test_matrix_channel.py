@@ -12,7 +12,7 @@ from nanobot.channels.matrix import (
     TYPING_NOTICE_TIMEOUT_MS,
     MatrixChannel,
 )
-from nanobot.config.schema import MatrixConfig
+from nanobot.channels.matrix import MatrixConfig
 
 _ROOM_SEND_UNSET = object()
 
@@ -159,6 +159,7 @@ class _FakeAsyncClient:
 
 
 def _make_config(**kwargs) -> MatrixConfig:
+    kwargs.setdefault("allow_from", ["*"])
     return MatrixConfig(
         enabled=True,
         homeserver="https://matrix.org",
@@ -274,7 +275,7 @@ async def test_stop_stops_sync_forever_before_close(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_room_invite_joins_when_allow_list_is_empty() -> None:
+async def test_room_invite_ignores_when_allow_list_is_empty() -> None:
     channel = MatrixChannel(_make_config(allow_from=[]), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
     channel.client = client
@@ -284,8 +285,21 @@ async def test_room_invite_joins_when_allow_list_is_empty() -> None:
 
     await channel._on_room_invite(room, event)
 
-    assert client.join_calls == ["!room:matrix.org"]
+    assert client.join_calls == []
 
+
+@pytest.mark.asyncio
+async def test_room_invite_joins_when_sender_allowed() -> None:
+    channel = MatrixChannel(_make_config(allow_from=["@alice:matrix.org"]), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    room = SimpleNamespace(room_id="!room:matrix.org")
+    event = SimpleNamespace(sender="@alice:matrix.org")
+
+    await channel._on_room_invite(room, event)
+
+    assert client.join_calls == ["!room:matrix.org"]
 
 @pytest.mark.asyncio
 async def test_room_invite_respects_allow_list_when_configured() -> None:
@@ -1162,6 +1176,8 @@ async def test_send_progress_keeps_typing_keepalive_running() -> None:
 
     assert "!room:matrix.org" in channel._typing_tasks
     assert client.typing_calls[-1] == ("!room:matrix.org", True, TYPING_NOTICE_TIMEOUT_MS)
+
+    await channel.stop()
 
 
 @pytest.mark.asyncio
