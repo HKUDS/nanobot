@@ -41,6 +41,8 @@ class AgentDefaults(Base):
     # Deprecated compatibility field: accepted from old configs but ignored at runtime.
     memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    team_max_workers: int = 5
+    team_worker_max_iterations: int = 25
 
     @property
     def should_warn_deprecated_memory_window(self) -> bool:

@@ -8,6 +8,7 @@ import os
 import re
 import sys
 from contextlib import AsyncExitStack
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -15,15 +16,14 @@ from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryConsolidator
+from nanobot.agent.team import TeamManager
+from nanobot.agent.team.tools import TeamTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.shell import ExecTool
+from nanobot.agent.tools.registry import ToolRegistry, build_base_tools
 from nanobot.agent.tools.spawn import SpawnTool
-from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -59,6 +59,8 @@ class AgentLoop:
         web_search_config: WebSearchConfig | None = None,
         web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
+        team_max_workers: int = 5,
+        team_worker_max_iterations: int = 25,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
@@ -93,6 +95,22 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
+        self.team = TeamManager(
+            provider=provider,
+            workspace=workspace,
+            bus=bus,
+            sessions=self.sessions,
+            model=self.model,
+            temperature=provider.generation.temperature,
+            max_tokens=provider.generation.max_tokens,
+            reasoning_effort=provider.generation.reasoning_effort,
+            web_search_config=self.web_search_config,
+            web_proxy=web_proxy,
+            exec_config=self.exec_config,
+            restrict_to_workspace=restrict_to_workspace,
+            max_workers=team_max_workers,
+            worker_max_iterations=team_worker_max_iterations,
+        )
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -115,21 +133,18 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
-        extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
-        self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
-        for cls in (WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        self.tools.register(ExecTool(
-            working_dir=str(self.workspace),
-            timeout=self.exec_config.timeout,
+        extra_read = [BUILTIN_SKILLS_DIR] if self.restrict_to_workspace else None
+        self.tools = build_base_tools(
+            workspace=self.workspace,
+            exec_config=self.exec_config,
+            web_search_config=self.web_search_config,
+            web_proxy=self.web_proxy,
             restrict_to_workspace=self.restrict_to_workspace,
-            path_append=self.exec_config.path_append,
-        ))
-        self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
-        self.tools.register(WebFetchTool(proxy=self.web_proxy))
+            extra_read_dirs=extra_read,
+        )
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
+        self.tools.register(TeamTool(manager=self.team))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
@@ -157,7 +172,7 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
+        for name in ("message", "spawn", "cron", "team"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
@@ -288,7 +303,12 @@ class AgentLoop:
             except (asyncio.CancelledError, Exception):
                 pass
         sub_cancelled = await self.subagents.cancel_by_session(msg.session_key)
-        total = cancelled + sub_cancelled
+        team_cancelled = await self.team.cancel_by_session(msg.session_key)
+        if team_cancelled:
+            session = self.sessions.get_or_create(msg.session_key)
+            session.metadata.pop("nano_team_active", None)
+            self.sessions.save(session)
+        total = cancelled + sub_cancelled + team_cancelled
         content = f"Stopped {total} task(s)." if total else "No active task to stop."
         await self.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
@@ -391,10 +411,12 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
 
         # Slash commands
-        cmd = msg.content.strip().lower()
+        raw = msg.content.strip()
+        cmd = raw.lower()
         if cmd == "/new":
             snapshot = session.messages[session.last_consolidated:]
             session.clear()
+            session.metadata.pop("nano_team_active", None)
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
 
@@ -409,11 +431,176 @@ class AgentLoop:
                 "/new — Start a new conversation",
                 "/stop — Stop the current task",
                 "/restart — Restart the bot",
+                "/team <goal> — Start or instruct nano team mode",
+                "/team status — Show nano team state",
+                "/team log [n] — Show detailed collaboration logs (default 20)",
+                "/team approve <task_id> — Approve a pending task",
+                "/team reject <task_id> <reason> — Reject a pending task",
+                "/team manual <task_id> <instruction> — Send change request",
+                "/team stop — Stop nano team mode",
+                "/btw <instruction> — Async side task via single subagent",
                 "/help — Show available commands",
             ]
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
             )
+        current_message = msg.content
+        if cmd.startswith("/btw"):
+            arg = raw[4:].strip()
+            if not arg:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="Usage: /btw <instruction>",
+                )
+            started = await self.subagents.spawn(
+                task=arg,
+                label="btw",
+                origin_channel=msg.channel,
+                origin_chat_id=msg.chat_id,
+                session_key=key,
+            )
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=started)
+
+        if cmd == "/team":
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    "Usage:\n"
+                    "/team <goal>\n"
+                    "/team status\n"
+                    "/team log [n]\n"
+                    "/team approve <task_id>\n"
+                    "/team reject <task_id> <reason>\n"
+                    "/team manual <task_id> <instruction>\n"
+                    "/team stop"
+                ),
+            )
+
+        if cmd.startswith("/teams "):
+            cmd = "/team " + raw[7:].strip().lower()
+            raw = "/team " + raw[7:].strip()
+
+        if cmd.startswith("/team "):
+            instruction = raw[6:].strip()
+            parts = instruction.split(maxsplit=2)
+            lowered = (parts[0] if parts else "").lower()
+            if lowered == "status":
+                content = self.team.status_text(key)
+                session.metadata["nano_team_active"] = bool(self.team.has_unfinished_run(key))
+                self.sessions.save(session)
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=content,
+                    metadata={"team_text": True},
+                )
+            if lowered == "log":
+                n = 20
+                if len(parts) > 1:
+                    try:
+                        n = max(1, min(200, int(parts[1])))
+                    except (TypeError, ValueError):
+                        n = 20
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=self.team.log_text(key, n=n),
+                    metadata={"team_text": True},
+                )
+            if lowered == "stop":
+                if msg.channel == "cli":
+                    content = await self.team.stop_mode(key, with_snapshot=True)
+                else:
+                    content = await self.team.stop_mode(key)
+                session.metadata.pop("nano_team_active", None)
+                self.sessions.save(session)
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=content,
+                    metadata={"team_text": True},
+                )
+            if lowered == "approve":
+                task_id = parts[1] if len(parts) > 1 else ""
+                if not task_id:
+                    return OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content="Usage: /team approve <task_id>",
+                    )
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=self.team.approve_for_session(key, task_id),
+                    metadata={"team_text": True},
+                )
+            if lowered == "reject":
+                task_id = parts[1] if len(parts) > 1 else ""
+                reason = parts[2] if len(parts) > 2 else ""
+                if not task_id or not reason.strip():
+                    return OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content="Usage: /team reject <task_id> <reason>",
+                    )
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=self.team.reject_for_session(key, task_id, reason.strip()),
+                    metadata={"team_text": True},
+                )
+            if lowered == "manual":
+                task_id = parts[1] if len(parts) > 1 else ""
+                instruction_text = parts[2] if len(parts) > 2 else ""
+                if not task_id or not instruction_text.strip():
+                    return OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content="Usage: /team manual <task_id> <instruction>",
+                    )
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=self.team.request_changes_for_session(key, task_id, instruction_text.strip()),
+                    metadata={"team_text": True},
+                )
+
+            content = await self.team.start_or_route_goal(key, instruction)
+            session.metadata["nano_team_active"] = self.team.is_active(key)
+            self.sessions.save(session)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=content,
+                metadata={"team_text": True},
+            )
+
+        if session.metadata.get("nano_team_active"):
+            if not self.team.is_active(key):
+                session.metadata.pop("nano_team_active", None)
+                self.sessions.save(session)
+            else:
+                if msg.channel != "cli" and self.team.has_pending_approval(key):
+                    approval_reply = self.team.handle_approval_reply(key, raw)
+                    if approval_reply:
+                        return OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content=approval_reply,
+                            metadata={"team_text": True},
+                        )
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=(
+                        "Team mode is active. Supported input:\n"
+                        "- /team <instruction|status|log|approve|reject|manual|stop>\n"
+                        "- /btw <instruction>"
+                    ),
+                )
+
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
@@ -424,7 +611,7 @@ class AgentLoop:
         history = session.get_history(max_messages=0)
         initial_messages = self.context.build_messages(
             history=history,
-            current_message=msg.content,
+            current_message=current_message,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
         )
@@ -460,7 +647,6 @@ class AgentLoop:
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""
-        from datetime import datetime
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
