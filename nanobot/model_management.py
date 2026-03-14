@@ -47,6 +47,8 @@ HOSTED_PROVIDER_BASES = {
 }
 
 DISCOVERY_TIMEOUT = 3.0
+MINIMAX_ANTHROPIC_BASE_KEYWORD = "api.minimaxi.com/anthropic"
+MINIMAX_SHORTCUT_MODEL = "MiniMax-M2.5"
 
 
 @dataclass(frozen=True)
@@ -81,7 +83,8 @@ def handle_model_command(command_text: str) -> str:
 
     try:
         if len(command_parts) == 2:
-            selection = _selection_from_full_model(command_parts[1])
+            shortcut = _shortcut_selections(config).get(_normalize_shortcut(command_parts[1]))
+            selection = shortcut or _selection_from_full_model(command_parts[1])
         else:
             selection = _selection_from_provider_and_model(command_parts[1], command_parts[2])
     except ModelCommandError as exc:
@@ -119,6 +122,7 @@ def format_model_status(config: Config, config_path: Path) -> str:
     ]
 
     options = list_switchable_models(config)
+    shortcuts = _shortcut_selections(config)
     if not options:
         lines.extend(
             [
@@ -127,6 +131,12 @@ def format_model_status(config: Config, config_path: Path) -> str:
             ]
         )
         return "\n".join(lines)
+
+    if shortcuts:
+        lines.append("Available shortcuts:")
+        for name, selection in shortcuts.items():
+            lines.append(f"- /model {name} -> {selection.config_model}")
+        lines.append("")
 
     lines.append("Available models:")
     for option in options:
@@ -150,6 +160,7 @@ def list_switchable_models(config: Config) -> list[str]:
     )
 
     options: list[str] = []
+    minimax_compat = _minimax_shortcut_selection(config)
     for spec in PROVIDERS:
         if not _is_provider_available(config, spec):
             continue
@@ -159,12 +170,21 @@ def list_switchable_models(config: Config) -> list[str]:
         ]
         models = [model for model in models if model]
         if current_provider_name == spec.name and current_option_model:
-            if current_option_model not in models:
+            if spec.name == "minimax" and minimax_compat is not None:
+                pass
+            elif current_option_model not in models:
                 models.insert(0, current_option_model)
         if not models:
             continue
         for model in models:
             options.append(f"{spec.name.replace('_', '-')} {model}")
+    if minimax_compat is not None:
+        compat_option = (
+            f"{minimax_compat.provider.name.replace('_', '-')} "
+            f"{_option_model_for_provider(minimax_compat.provider, minimax_compat.config_model)}"
+        )
+        if compat_option not in options:
+            options.append(compat_option)
     return options
 
 
@@ -209,6 +229,54 @@ def _direct_examples(options: list[str]) -> list[str]:
             continue
         direct.append(f"{provider_raw}/{model}")
     return direct[:8]
+
+
+def _shortcut_selections(config: Config) -> dict[str, ModelSelection]:
+    shortcuts: dict[str, ModelSelection] = {}
+    for option in list_switchable_models(config):
+        provider_raw, model = option.split(" ", 1)
+        selection = _selection_from_provider_and_model(provider_raw, model)
+        alias = _shortcut_alias(selection)
+        if alias and alias not in shortcuts:
+            shortcuts[alias] = selection
+    minimax_compat = _minimax_shortcut_selection(config)
+    if minimax_compat is not None:
+        shortcuts["minimax"] = minimax_compat
+    return shortcuts
+
+
+def _shortcut_alias(selection: ModelSelection) -> str | None:
+    model = _option_model_for_provider(selection.provider, selection.config_model).lower()
+    if model.startswith("gpt"):
+        return "gpt"
+    if model.startswith("minimax"):
+        return "minimax"
+    return None
+
+
+def _minimax_shortcut_selection(config: Config) -> ModelSelection | None:
+    anthropic_config = getattr(config.providers, "anthropic", None)
+    if not anthropic_config or not anthropic_config.api_key or not anthropic_config.api_base:
+        return None
+    if MINIMAX_ANTHROPIC_BASE_KEYWORD not in anthropic_config.api_base:
+        return None
+    spec = find_by_name("anthropic")
+    if spec is None:
+        return None
+    model_name = _preferred_minimax_model(config)
+    return ModelSelection(
+        provider=spec,
+        config_model=f"anthropic/{model_name}",
+        display_model=f"anthropic/{model_name}",
+    )
+
+
+def _preferred_minimax_model(config: Config) -> str:
+    current_model = config.agents.defaults.model
+    current_lower = current_model.lower()
+    if "minimax" in current_lower:
+        return current_model.split("/", 1)[1] if "/" in current_model else current_model
+    return MINIMAX_SHORTCUT_MODEL
 
 
 def _provider_api_base(config: Config, spec: ProviderSpec) -> str | None:
@@ -500,3 +568,7 @@ def _model_prefix(spec: ProviderSpec) -> str:
 
 def _normalize_provider_name(provider: str) -> str:
     return provider.strip().lower().replace("-", "_")
+
+
+def _normalize_shortcut(value: str) -> str:
+    return value.strip().lower()

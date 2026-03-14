@@ -190,6 +190,128 @@ def test_handle_model_command_uses_dynamic_discovery_only(
     assert "/model gemini " not in result
 
 
+def test_handle_model_command_lists_shortcuts_for_gpt_and_minimax(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot.model_management import handle_model_command
+
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "anthropic",
+                    "model": "anthropic/MiniMax-M2.5",
+                }
+            },
+            "providers": {
+                "custom": {
+                    "apiKey": "custom-key",
+                    "apiBase": "http://127.0.0.1:8787/v1",
+                },
+                "anthropic": {
+                    "apiKey": "mini-key",
+                    "apiBase": "https://api.minimaxi.com/anthropic",
+                },
+            },
+        }
+    )
+    _write_config(config_path, config)
+    monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
+    monkeypatch.setattr(
+        "nanobot.model_management.discover_models_for_provider",
+        lambda _config, spec: ["gpt-5"] if spec.name == "custom" else [],
+    )
+
+    result = handle_model_command("/model")
+
+    assert "Available shortcuts:" in result
+    assert "/model gpt" in result
+    assert "/model minimax" in result
+
+
+def test_handle_model_command_shortcut_switches_to_gpt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot.model_management import handle_model_command
+
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "anthropic",
+                    "model": "anthropic/MiniMax-M2.5",
+                }
+            },
+            "providers": {
+                "custom": {
+                    "apiKey": "custom-key",
+                    "apiBase": "http://127.0.0.1:8787/v1",
+                },
+                "anthropic": {
+                    "apiKey": "mini-key",
+                    "apiBase": "https://api.minimaxi.com/anthropic",
+                },
+            },
+        }
+    )
+    _write_config(config_path, config)
+    monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
+    monkeypatch.setattr(
+        "nanobot.model_management.discover_models_for_provider",
+        lambda _config, spec: ["gpt-5"] if spec.name == "custom" else [],
+    )
+
+    result = handle_model_command("/model gpt")
+    updated = load_config(config_path)
+
+    assert "Saved model configuration." in result
+    assert updated.agents.defaults.provider == "custom"
+    assert updated.agents.defaults.model == "gpt-5"
+
+
+def test_handle_model_command_shortcut_switches_to_minimax(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot.model_management import handle_model_command
+
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "custom",
+                    "model": "gpt-5",
+                }
+            },
+            "providers": {
+                "custom": {
+                    "apiKey": "custom-key",
+                    "apiBase": "http://127.0.0.1:8787/v1",
+                },
+                "anthropic": {
+                    "apiKey": "mini-key",
+                    "apiBase": "https://api.minimaxi.com/anthropic",
+                },
+            },
+        }
+    )
+    _write_config(config_path, config)
+    monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
+    monkeypatch.setattr("nanobot.model_management.discover_models_for_provider", lambda *_args, **_kwargs: [])
+
+    result = handle_model_command("/model minimax")
+    updated = load_config(config_path)
+
+    assert "Saved model configuration." in result
+    assert updated.agents.defaults.provider == "anthropic"
+    assert updated.agents.defaults.model == "anthropic/MiniMax-M2.5"
+
+
 def test_handle_model_command_updates_config_from_provider_and_model_args(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
