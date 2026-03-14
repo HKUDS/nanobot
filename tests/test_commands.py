@@ -6,7 +6,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
+from nanobot.agent.tools.message import MessageTool
+from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
 from nanobot.cli.commands import app
+from nanobot.config.loader import set_config_path
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
@@ -49,6 +52,171 @@ def mock_paths():
 
         if base_dir.exists():
             shutil.rmtree(base_dir)
+
+
+def _make_background_job(
+    *,
+    message: str = "check status",
+    deliver: bool = True,
+    channel: str = "telegram",
+    to: str = "chat123",
+) -> CronJob:
+    return CronJob(
+        id="job1",
+        name="scheduled check",
+        enabled=True,
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        payload=CronPayload(
+            kind="agent_turn",
+            message=message,
+            deliver=deliver,
+            channel=channel,
+            to=to,
+        ),
+        state=CronJobState(next_run_at_ms=0),
+        created_at_ms=0,
+        updated_at_ms=0,
+    )
+
+
+@pytest.fixture
+def gateway_background_runtime(monkeypatch, tmp_path: Path):
+    def _run(
+        *,
+        config: Config | None = None,
+        cron_job: CronJob | None = None,
+        heartbeat_response: str | None = None,
+        agent_response: str = "",
+        evaluator_result: bool = True,
+        sent_message_in_turn: bool = False,
+        sessions: list[dict[str, str]] | None = None,
+        enabled_channels: list[str] | None = None,
+    ) -> dict:
+        config = config or Config()
+        config.agents.defaults.workspace = str(tmp_path / "workspace")
+
+        state: dict[str, object] = {
+            "outbound": [],
+            "evaluate_calls": [],
+            "process_direct_calls": [],
+        }
+
+        set_config_path(None)
+        monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+        monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+        monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: tmp_path / "cron")
+        monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+        monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+
+        async def _evaluate_response(response, task, provider, model):
+            state["evaluate_calls"].append({
+                "response": response,
+                "task": task,
+                "model": model,
+            })
+            return evaluator_result
+
+        monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _evaluate_response)
+
+        class _FakeBus:
+            async def publish_outbound(self, message) -> None:
+                state["outbound"].append(message)
+
+        monkeypatch.setattr("nanobot.bus.queue.MessageBus", _FakeBus)
+
+        class _FakeSessionManager:
+            def __init__(self, _workspace: Path) -> None:
+                pass
+
+            def list_sessions(self) -> list[dict[str, str]]:
+                if sessions is not None:
+                    return sessions
+                return [{"key": "telegram:chat123"}]
+
+        monkeypatch.setattr("nanobot.session.manager.SessionManager", _FakeSessionManager)
+
+        class _FakeChannelManager:
+            def __init__(self, _config, _bus) -> None:
+                self.enabled_channels = enabled_channels if enabled_channels is not None else ["telegram"]
+
+            async def start_all(self) -> None:
+                return None
+
+            async def stop_all(self) -> None:
+                return None
+
+        monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+
+        message_tool = MessageTool()
+
+        class _FakeAgentLoop:
+            def __init__(self, *args, **kwargs) -> None:
+                self.model = kwargs["model"]
+                self.channels_config = None
+                self.tools = {"message": message_tool}
+
+            async def process_direct(self, *args, **kwargs) -> str:
+                state["process_direct_calls"].append({"args": args, "kwargs": kwargs})
+                message_tool._sent_in_turn = sent_message_in_turn
+                return agent_response
+
+            async def run(self) -> None:
+                return None
+
+            async def close_mcp(self) -> None:
+                return None
+
+            def stop(self) -> None:
+                return None
+
+        monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+
+        class _FakeCronService:
+            def __init__(self, store_path: Path) -> None:
+                self.store_path = store_path
+                self.on_job = None
+
+            async def start(self) -> None:
+                if cron_job is not None and self.on_job is not None:
+                    await self.on_job(cron_job)
+
+            def stop(self) -> None:
+                return None
+
+            def status(self) -> dict[str, int]:
+                return {"jobs": 1 if cron_job else 0}
+
+        monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
+
+        class _FakeHeartbeatService:
+            def __init__(
+                self,
+                *,
+                workspace,
+                provider,
+                model,
+                on_execute,
+                on_notify,
+                interval_s,
+                enabled,
+            ) -> None:
+                self.on_notify = on_notify
+
+            async def start(self) -> None:
+                if heartbeat_response is not None:
+                    await self.on_notify(heartbeat_response)
+
+            def stop(self) -> None:
+                return None
+
+        monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _FakeHeartbeatService)
+
+        result = runner.invoke(app, ["gateway"])
+
+        assert result.exit_code == 0
+        return state
+
+    return _run
 
 
 def test_onboard_fresh_install(mock_paths):
@@ -425,6 +593,116 @@ def test_gateway_warns_about_deprecated_memory_window(monkeypatch, tmp_path: Pat
     assert isinstance(result.exception, _StopGateway)
     assert "memoryWindow" in result.stdout
     assert "contextWindowTokens" in result.stdout
+
+
+def test_gateway_cron_suppresses_exact_ok_signal_when_disabled(
+    gateway_background_runtime,
+) -> None:
+    config = Config.model_validate({
+        "gateway": {
+            "cron": {
+                "okSignal": "CRON_OK",
+                "sendOkSignalMessages": False,
+            }
+        }
+    })
+
+    state = gateway_background_runtime(
+        config=config,
+        cron_job=_make_background_job(message="check status"),
+        agent_response="  CRON_OK  ",
+    )
+
+    assert state["outbound"] == []
+    assert state["evaluate_calls"] == []
+
+
+def test_gateway_cron_posts_non_token_response_when_evaluator_approves(
+    gateway_background_runtime,
+) -> None:
+    config = Config.model_validate({
+        "gateway": {
+            "cron": {
+                "okSignal": "CRON_OK",
+                "sendOkSignalMessages": False,
+            }
+        }
+    })
+
+    state = gateway_background_runtime(
+        config=config,
+        cron_job=_make_background_job(message="check status"),
+        agent_response="deployment failed on staging",
+        evaluator_result=True,
+    )
+
+    assert len(state["evaluate_calls"]) == 1
+    outbound = state["outbound"]
+    assert len(outbound) == 1
+    assert outbound[0].channel == "telegram"
+    assert outbound[0].chat_id == "chat123"
+    assert outbound[0].content == "deployment failed on staging"
+
+
+def test_gateway_cron_skips_fallback_publish_when_message_tool_already_sent(
+    gateway_background_runtime,
+) -> None:
+    state = gateway_background_runtime(
+        cron_job=_make_background_job(message="check status"),
+        agent_response="deployment failed on staging",
+        sent_message_in_turn=True,
+    )
+
+    assert state["outbound"] == []
+    assert state["evaluate_calls"] == []
+
+
+def test_gateway_heartbeat_suppresses_exact_ok_signal_when_disabled(
+    gateway_background_runtime,
+) -> None:
+    config = Config.model_validate({
+        "gateway": {
+            "heartbeat": {
+                "okSignal": "HEARTBEAT_OK",
+                "sendOkSignalMessages": False,
+            }
+        }
+    })
+
+    state = gateway_background_runtime(
+        config=config,
+        heartbeat_response=" HEARTBEAT_OK ",
+    )
+
+    assert state["outbound"] == []
+
+
+def test_gateway_heartbeat_posts_non_token_response_to_latest_session(
+    gateway_background_runtime,
+) -> None:
+    state = gateway_background_runtime(
+        heartbeat_response="deployment failed on staging",
+        sessions=[{"key": "telegram:ops-room"}],
+        enabled_channels=["telegram"],
+    )
+
+    outbound = state["outbound"]
+    assert len(outbound) == 1
+    assert outbound[0].channel == "telegram"
+    assert outbound[0].chat_id == "ops-room"
+    assert outbound[0].content == "deployment failed on staging"
+
+
+def test_gateway_heartbeat_does_not_post_when_only_cli_target_exists(
+    gateway_background_runtime,
+) -> None:
+    state = gateway_background_runtime(
+        heartbeat_response="deployment failed on staging",
+        sessions=[],
+        enabled_channels=[],
+    )
+
+    assert state["outbound"] == []
 
 def test_gateway_uses_config_directory_for_cron_store(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
