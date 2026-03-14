@@ -25,7 +25,7 @@ class WhatsAppConfig(Base):
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
-    react_emoji: str | None = None  # Optional: emoji to react with on incoming messages (e.g., "👍")
+    react_emoji: str = "👍"  # Default reaction emoji for incoming messages
 
 
 class WhatsAppChannel(BaseChannel):
