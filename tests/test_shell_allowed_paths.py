@@ -56,3 +56,14 @@ class TestExecToolAllowedPaths:
         allowed_file = tmp_path / "data.txt"
         result = tool._guard_command(f"cat {allowed_file}", str(tmp_path))
         assert result is None
+
+    def test_allows_sibling_media_path_when_allowlisted(self, tmp_path):
+        media_dir = tmp_path.parent / "media"
+        media_file = media_dir / "upload.txt"
+        tool = ExecTool(
+            working_dir=str(tmp_path),
+            restrict_to_workspace=True,
+            allowed_paths=[str(media_dir)],
+        )
+        result = tool._guard_command(f"cat {media_file}", str(tmp_path))
+        assert result is None
