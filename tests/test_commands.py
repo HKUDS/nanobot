@@ -1,3 +1,4 @@
+import re
 import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,6 +11,13 @@ from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_model
+
+
+def _strip_ansi(text):
+    """Remove ANSI escape codes from text."""
+    ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
+    return ansi_escape.sub("", text)
+
 
 runner = CliRunner()
 
@@ -115,6 +123,64 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     assert config.get_provider_name() == "openai_codex"
 
 
+def test_config_matches_explicit_ollama_prefix_without_api_key():
+    config = Config()
+    config.agents.defaults.model = "ollama/llama3.2"
+
+    assert config.get_provider_name() == "ollama"
+    assert config.get_api_base() == "http://localhost:11434"
+
+
+def test_config_explicit_ollama_provider_uses_default_localhost_api_base():
+    config = Config()
+    config.agents.defaults.provider = "ollama"
+    config.agents.defaults.model = "llama3.2"
+
+    assert config.get_provider_name() == "ollama"
+    assert config.get_api_base() == "http://localhost:11434"
+
+
+def test_config_auto_detects_ollama_from_local_api_base():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "llama3.2"}},
+            "providers": {"ollama": {"apiBase": "http://localhost:11434"}},
+        }
+    )
+
+    assert config.get_provider_name() == "ollama"
+    assert config.get_api_base() == "http://localhost:11434"
+
+
+def test_config_prefers_ollama_over_vllm_when_both_local_providers_configured():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "llama3.2"}},
+            "providers": {
+                "vllm": {"apiBase": "http://localhost:8000"},
+                "ollama": {"apiBase": "http://localhost:11434"},
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "ollama"
+    assert config.get_api_base() == "http://localhost:11434"
+
+
+def test_config_falls_back_to_vllm_when_ollama_not_configured():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "llama3.2"}},
+            "providers": {
+                "vllm": {"apiBase": "http://localhost:8000"},
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "vllm"
+    assert config.get_api_base() == "http://localhost:8000"
+
+
 def test_find_by_model_prefers_explicit_prefix_over_generic_codex_keyword():
     spec = find_by_model("github-copilot/gpt-5.3-codex")
 
@@ -150,21 +216,20 @@ def mock_agent_runtime(tmp_path):
         patch("nanobot.cli.commands._print_agent_response") as mock_print_response,
         patch("nanobot.bus.queue.MessageBus"),
         patch("nanobot.cron.service.CronService"),
-        patch("nanobot.dispatch.NativeDispatcher") as mock_native_dispatcher_cls,
-        patch("nanobot.dispatch.ACPDispatcher"),
+        patch("nanobot.dispatch.native.AgentLoop") as mock_agent_loop_cls,
     ):
-        runtime = MagicMock()
-        runtime.channels_config = None
-        runtime.process_direct = AsyncMock(return_value="mock-response")
-        runtime.close = AsyncMock(return_value=None)
-        mock_native_dispatcher_cls.return_value = runtime
+        agent_loop = MagicMock()
+        agent_loop.channels_config = None
+        agent_loop.process_direct = AsyncMock(return_value="mock-response")
+        agent_loop.close_mcp = AsyncMock(return_value=None)
+        mock_agent_loop_cls.return_value = agent_loop
 
         yield {
             "config": config,
             "load_config": mock_load_config,
             "sync_templates": mock_sync_templates,
-            "native_dispatcher_cls": mock_native_dispatcher_cls,
-            "runtime": runtime,
+            "agent_loop_cls": mock_agent_loop_cls,
+            "agent_loop": agent_loop,
             "print_response": mock_print_response,
         }
 
@@ -173,10 +238,11 @@ def test_agent_help_shows_workspace_and_config_options():
     result = runner.invoke(app, ["agent", "--help"])
 
     assert result.exit_code == 0
-    assert "--workspace" in result.stdout
-    assert "-w" in result.stdout
-    assert "--config" in result.stdout
-    assert "-c" in result.stdout
+    stripped_output = _strip_ansi(result.stdout)
+    assert "--workspace" in stripped_output
+    assert "-w" in stripped_output
+    assert "--config" in stripped_output
+    assert "-c" in stripped_output
 
 
 def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_runtime):
@@ -187,10 +253,10 @@ def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_
     assert mock_agent_runtime["sync_templates"].call_args.args == (
         mock_agent_runtime["config"].workspace_path,
     )
-    assert mock_agent_runtime["native_dispatcher_cls"].call_args.kwargs[
-        "config"
-    ].workspace_path == (mock_agent_runtime["config"].workspace_path)
-    mock_agent_runtime["runtime"].process_direct.assert_awaited_once()
+    assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == (
+        mock_agent_runtime["config"].workspace_path
+    )
+    mock_agent_runtime["agent_loop"].process_direct.assert_awaited_once()
     mock_agent_runtime["print_response"].assert_called_once_with(
         "mock-response", render_markdown=True
     )
@@ -225,21 +291,17 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.cron.service.CronService", lambda _store: object())
 
-    class _FakeRuntime:
+    class _FakeAgentLoop:
         def __init__(self, *args, **kwargs) -> None:
             pass
 
         async def process_direct(self, *_args, **_kwargs) -> str:
             return "ok"
 
-        async def close(self) -> None:
+        async def close_mcp(self) -> None:
             return None
 
-        def stop(self) -> None:
-            return None
-
-    monkeypatch.setattr("nanobot.dispatch.NativeDispatcher", lambda *args, **kwargs: _FakeRuntime())
-    monkeypatch.setattr("nanobot.dispatch.ACPDispatcher", lambda *args, **kwargs: _FakeRuntime())
+    monkeypatch.setattr("nanobot.dispatch.native.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr(
         "nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None
     )
@@ -258,10 +320,7 @@ def test_agent_overrides_workspace_path(mock_agent_runtime):
     assert result.exit_code == 0
     assert mock_agent_runtime["config"].agents.defaults.workspace == str(workspace_path)
     assert mock_agent_runtime["sync_templates"].call_args.args == (workspace_path,)
-    assert (
-        mock_agent_runtime["native_dispatcher_cls"].call_args.kwargs["config"].workspace_path
-        == workspace_path
-    )
+    assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == workspace_path
 
 
 def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime, tmp_path: Path):
@@ -278,10 +337,17 @@ def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime,
     assert mock_agent_runtime["load_config"].call_args.args == (config_path.resolve(),)
     assert mock_agent_runtime["config"].agents.defaults.workspace == str(workspace_path)
     assert mock_agent_runtime["sync_templates"].call_args.args == (workspace_path,)
-    assert (
-        mock_agent_runtime["native_dispatcher_cls"].call_args.kwargs["config"].workspace_path
-        == workspace_path
-    )
+    assert mock_agent_runtime["agent_loop_cls"].call_args.kwargs["workspace"] == workspace_path
+
+
+def test_agent_warns_about_deprecated_memory_window(mock_agent_runtime):
+    mock_agent_runtime["config"].agents.defaults.memory_window = 100
+
+    result = runner.invoke(app, ["agent", "-m", "hello"])
+
+    assert result.exit_code == 0
+    assert "memoryWindow" in result.stdout
+    assert "contextWindowTokens" in result.stdout
 
 
 def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Path) -> None:
@@ -345,19 +411,41 @@ def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) 
     assert config.workspace_path == override
 
 
-def test_gateway_uses_workspace_root_for_cron_store(monkeypatch, tmp_path: Path) -> None:
+def test_gateway_warns_about_deprecated_memory_window(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
     config_file.write_text("{}")
 
     config = Config()
-    workspace = tmp_path / "config-workspace"
-    config.agents.defaults.workspace = str(workspace)
+    config.agents.defaults.memory_window = 100
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._make_provider",
+        lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
+    )
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGateway)
+    assert "memoryWindow" in result.stdout
+    assert "contextWindowTokens" in result.stdout
+
+
+def test_gateway_uses_config_directory_for_cron_store(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
     seen: dict[str, Path] = {}
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: workspace / "cron")
+    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: config_file.parent / "cron")
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
@@ -373,4 +461,48 @@ def test_gateway_uses_workspace_root_for_cron_store(monkeypatch, tmp_path: Path)
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
     assert isinstance(result.exception, _StopGateway)
-    assert seen["cron_store"] == workspace / "cron" / "jobs.json"
+    assert seen["cron_store"] == config_file.parent / "cron" / "jobs.json"
+
+
+def test_gateway_uses_configured_port_when_cli_flag_is_missing(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.gateway.port = 18791
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._make_provider",
+        lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
+    )
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGateway)
+    assert "port 18791" in result.stdout
+
+
+def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.gateway.port = 18791
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._make_provider",
+        lambda _config: (_ for _ in ()).throw(_StopGateway("stop")),
+    )
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file), "--port", "18792"])
+
+    assert isinstance(result.exception, _StopGateway)
+    assert "port 18792" in result.stdout

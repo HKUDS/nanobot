@@ -9,8 +9,7 @@ from nanobot.utils.helpers import ensure_dir
 
 
 def get_data_dir() -> Path:
-    """Return the workspace root used as runtime data root."""
-    return get_workspace_path()
+    return ensure_dir(load_config().root_path)
 
 
 def get_runtime_subdir(name: str) -> Path:

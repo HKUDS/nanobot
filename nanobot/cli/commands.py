@@ -7,22 +7,35 @@ import select
 import signal
 import sys
 from pathlib import Path
-from typing import Callable, Literal, cast
+from typing import Any, Callable, Literal, cast
+
+# Force UTF-8 encoding for Windows console
+if sys.platform == "win32":
+    if sys.stdout.encoding != "utf-8":
+        os.environ["PYTHONIOENCODING"] = "utf-8"
+        # Re-open stdout/stderr with UTF-8 encoding
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 import typer
+from prompt_toolkit import print_formatted_text
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import ANSI, HTML
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.application import run_in_terminal
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.table import Table
 from rich.text import Text
 
-from prompt_toolkit import PromptSession
-from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.history import FileHistory
-from prompt_toolkit.patch_stdout import patch_stdout
-
 from nanobot import __logo__, __version__
+from nanobot.config.paths import get_workspace_path
 from nanobot.config.schema import Config
-from nanobot.utils.helpers import get_workspace_path, sync_workspace_templates
+from nanobot.utils.helpers import sync_workspace_templates
 
 app = typer.Typer(
     name="nanobot",
@@ -96,7 +109,9 @@ def _init_prompt_session() -> None:
     except Exception:
         pass
 
-    history_file = Path.home() / ".nanobot" / "history" / "cli_history"
+    from nanobot.config.paths import get_cli_history_path
+
+    history_file = get_cli_history_path()
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
     _PROMPT_SESSION = PromptSession(
@@ -106,14 +121,59 @@ def _init_prompt_session() -> None:
     )
 
 
+def _make_console() -> Console:
+    return Console(file=sys.stdout)
+
+
+def _render_interactive_ansi(render_fn) -> str:
+    """Render Rich output to ANSI so prompt_toolkit can print it safely."""
+    ansi_console = Console(
+        force_terminal=True,
+        color_system=console.color_system or "standard",
+        width=console.width,
+    )
+    with ansi_console.capture() as capture:
+        render_fn(ansi_console)
+    return capture.get()
+
+
 def _print_agent_response(response: str, render_markdown: bool) -> None:
     """Render assistant response with consistent terminal styling."""
+    console = _make_console()
     content = response or ""
     body = Markdown(content) if render_markdown else Text(content)
     console.print()
     console.print(f"[cyan]{__logo__} nanobot[/cyan]")
     console.print(body)
     console.print()
+
+
+async def _print_interactive_line(text: str) -> None:
+    """Print async interactive updates with prompt_toolkit-safe Rich styling."""
+
+    def _write() -> None:
+        ansi = _render_interactive_ansi(lambda c: c.print(f"  [dim]↳ {text}[/dim]"))
+        print_formatted_text(ANSI(ansi), end="")
+
+    await run_in_terminal(_write)
+
+
+async def _print_interactive_response(response: str, render_markdown: bool) -> None:
+    """Print async interactive replies with prompt_toolkit-safe Rich styling."""
+
+    def _write() -> None:
+        content = response or ""
+        ansi = _render_interactive_ansi(
+            lambda c: (
+                c.print(),
+                c.print(f"[cyan]{__logo__} nanobot[/cyan]"),
+                c.print(Markdown(content) if render_markdown else Text(content)),
+                c.print(),
+            )
+        )
+        print_formatted_text(ANSI(ansi), end="")
+
+    await run_in_terminal(_write)
 
 
 def _is_exit_command(command: str) -> bool:
@@ -162,6 +222,10 @@ def main(
     """nanobot - Personal AI Assistant."""
     global _CLI_CONFIG_PATH, _CLI_DISPATCHER_OVERRIDE, _CLI_ACP_CONFIG_OVERRIDE
 
+    _CLI_CONFIG_PATH = None
+    _CLI_DISPATCHER_OVERRIDE = None
+    _CLI_ACP_CONFIG_OVERRIDE = None
+
     from nanobot.config.loader import set_config_path
 
     if config:
@@ -206,8 +270,14 @@ def onboard():
         save_config(Config())
         console.print(f"[green]✓[/green] Created config at {config_path}")
 
-    config = load_config(config_path=config_path)
-    workspace = get_workspace_path(str(config.workspace_path))
+    console.print(
+        "[dim]Config template now uses `maxTokens` + `contextWindowTokens`; `memoryWindow` is no longer a runtime setting.[/dim]"
+    )
+
+    _onboard_plugins(config_path)
+
+    # Create workspace
+    workspace = get_workspace_path()
 
     if not workspace.exists():
         workspace.mkdir(parents=True, exist_ok=True)
@@ -225,10 +295,47 @@ def onboard():
     )
 
 
+def _merge_missing_defaults(existing: Any, defaults: Any) -> Any:
+    """Recursively fill in missing values from defaults without overwriting user config."""
+    if not isinstance(existing, dict) or not isinstance(defaults, dict):
+        return existing
+
+    merged = dict(existing)
+    for key, value in defaults.items():
+        if key not in merged:
+            merged[key] = value
+        else:
+            merged[key] = _merge_missing_defaults(merged[key], value)
+    return merged
+
+
+def _onboard_plugins(config_path: Path) -> None:
+    """Inject default config for all discovered channels (built-in + plugins)."""
+    import json
+
+    from nanobot.channels.registry import discover_all
+
+    all_channels = discover_all()
+    if not all_channels:
+        return
+
+    with open(config_path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    channels = data.setdefault("channels", {})
+    for name, cls in all_channels.items():
+        if name not in channels:
+            channels[name] = cls.default_config()
+        else:
+            channels[name] = _merge_missing_defaults(channels[name], cls.default_config())
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
-    from nanobot.providers.custom_provider import CustomProvider
-    from nanobot.providers.litellm_provider import LiteLLMProvider
+    from nanobot.providers.base import GenerationSettings
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
@@ -238,43 +345,56 @@ def _make_provider(config: Config):
 
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
-        return OpenAICodexProvider(default_model=model)
-
+        provider = OpenAICodexProvider(default_model=model)
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
-    if provider_name == "custom":
-        return CustomProvider(
+    elif provider_name == "custom":
+        from nanobot.providers.custom_provider import CustomProvider
+
+        provider = CustomProvider(
             api_key=p.api_key if p else "no-key",
             api_base=config.get_api_base(model) or "http://localhost:8000/v1",
             default_model=model,
         )
-
-    # Azure OpenAI: direct Azure endpoint with deployment-style model.
-    if provider_name == "azure_openai":
+    # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
+    elif provider_name == "azure_openai":
         if not p or not p.api_key or not p.api_base:
             console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
-            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai")
+            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
+            console.print("Use the model field to specify the deployment name.")
             raise typer.Exit(1)
-        return AzureOpenAIProvider(
+        provider = AzureOpenAIProvider(
             api_key=p.api_key,
             api_base=p.api_base,
             default_model=model,
         )
+    else:
+        from nanobot.providers.litellm_provider import LiteLLMProvider
+        from nanobot.providers.registry import find_by_name
 
-    from nanobot.providers.registry import find_by_name
+        spec = find_by_name(provider_name) if provider_name else None
+        if (
+            not model.startswith("bedrock/")
+            and not (p and p.api_key)
+            and not (spec and (spec.is_oauth or spec.is_local))
+        ):
+            console.print("[red]Error: No API key configured.[/red]")
+            console.print("Set one in ~/.nanobot/config.json under providers section")
+            raise typer.Exit(1)
+        provider = LiteLLMProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            provider_name=provider_name,
+        )
 
-    spec = find_by_name(provider_name) if provider_name else None
-    if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
-        console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers section")
-        raise typer.Exit(1)
-
-    return LiteLLMProvider(
-        api_key=p.api_key if p else None,
-        api_base=config.get_api_base(model),
-        default_model=model,
-        extra_headers=p.extra_headers if p else None,
-        provider_name=provider_name,
+    defaults = config.agents.defaults
+    provider.generation = GenerationSettings(
+        temperature=defaults.temperature,
+        max_tokens=defaults.max_tokens,
+        reasoning_effort=defaults.reasoning_effort,
     )
+    return provider
 
 
 def _parse_acp_override(raw: str) -> dict[str, object]:
@@ -290,13 +410,14 @@ def _load_runtime_config(
     dispatcher: str | None = None,
     acp_config: str | None = None,
 ) -> Config:
+    """Load config and apply CLI runtime overrides."""
     from nanobot.config.loader import load_config, set_config_path
 
     effective_config = config
     if effective_config is None and _CLI_CONFIG_PATH is not None:
         effective_config = str(_CLI_CONFIG_PATH)
 
-    config_path = None
+    config_path: Path | None = None
     if effective_config:
         config_path = Path(effective_config).expanduser().resolve()
         if not config_path.exists():
@@ -306,7 +427,6 @@ def _load_runtime_config(
         console.print(f"[dim]Using config: {config_path}[/dim]")
 
     loaded = load_config(config_path)
-
     if workspace:
         loaded.agents.defaults.workspace = workspace
 
@@ -329,6 +449,16 @@ def _load_runtime_config(
     return loaded
 
 
+def _print_deprecated_memory_window_notice(config: Config) -> None:
+    """Warn when running with old memoryWindow-only config."""
+    if config.agents.defaults.should_warn_deprecated_memory_window:
+        console.print(
+            "[yellow]Hint:[/yellow] Detected deprecated `memoryWindow` without "
+            "`contextWindowTokens`. `memoryWindow` is ignored; run "
+            "[cyan]nanobot onboard[/cyan] to refresh your config template."
+        )
+
+
 # ============================================================================
 # Gateway / Server
 # ============================================================================
@@ -336,7 +466,7 @@ def _load_runtime_config(
 
 @app.command()
 def gateway(
-    port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
@@ -369,8 +499,9 @@ def gateway(
             max_tokens: int = 4096,
             temperature: float = 0.7,
             reasoning_effort: str | None = None,
+            tool_choice: str | dict[str, object] | None = None,
         ) -> LLMResponse:
-            del messages, tools, model, max_tokens, temperature, reasoning_effort
+            del messages, tools, model, max_tokens, temperature, reasoning_effort, tool_choice
             return LLMResponse(content="", tool_calls=[])
 
         def get_default_model(self) -> str:
@@ -381,9 +512,11 @@ def gateway(
 
         logging.basicConfig(level=logging.DEBUG)
 
-    console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-
     runtime_config = _load_runtime_config(config, workspace, dispatcher, acp_config)
+    _print_deprecated_memory_window_notice(runtime_config)
+    port = port if port is not None else runtime_config.gateway.port
+
+    console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     provider = None
@@ -399,6 +532,7 @@ def gateway(
             console.print(
                 "[yellow]Warning: No LLM provider configured, heartbeat is disabled for ACP backend.[/yellow]"
             )
+
     session_manager = (
         SessionManager(runtime_config.workspace_path)
         if runtime_config.dispatch.backend == "native"
@@ -428,9 +562,7 @@ def gateway(
             session_manager=session_manager,
         )
 
-    # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
-        """Execute a cron job through the agent."""
         response = await runtime.process_direct(
             job.payload.message,
             session_key=f"cron:{job.id}",
@@ -464,7 +596,7 @@ def gateway(
                 if channel in enabled and chat_id:
                     return channel, chat_id
             return "cli", "direct"
-        # Prefer the most recently updated non-internal session on an enabled channel.
+
         for item in session_manager.list_sessions():
             key = item.get("key") or ""
             if ":" not in key:
@@ -474,12 +606,9 @@ def gateway(
                 continue
             if channel in enabled and chat_id:
                 return channel, chat_id
-        # Fallback keeps prior behavior but remains explicit.
         return "cli", "direct"
 
-    # Create heartbeat service
     async def on_heartbeat_execute(tasks: str) -> str:
-        """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
 
         async def _silent(*_args, **_kwargs):
@@ -494,12 +623,11 @@ def gateway(
         )
 
     async def on_heartbeat_notify(response: str) -> None:
-        """Deliver a heartbeat response to the user's channel."""
         from nanobot.bus.events import OutboundMessage
 
         channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
-            return  # No external channel available to deliver to
+            return
         await bus.publish_outbound(
             OutboundMessage(channel=channel, chat_id=chat_id, content=response)
         )
@@ -510,6 +638,7 @@ def gateway(
         console.print(
             "[yellow]Warning: Heartbeat disabled because no provider is available.[/yellow]"
         )
+
     heartbeat = HeartbeatService(
         workspace=runtime_config.workspace_path,
         provider=provider or _DisabledHeartbeatProvider(),
@@ -541,6 +670,11 @@ def gateway(
             )
         except KeyboardInterrupt:
             console.print("\nShutting down...")
+        except Exception:
+            import traceback
+
+            console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
+            console.print(traceback.format_exc())
         finally:
             await runtime.close()
             heartbeat.stop()
@@ -578,13 +712,15 @@ def agent(
     ),
 ):
     """Interact with the agent directly."""
+    from loguru import logger
+
     from nanobot.bus.queue import MessageBus
     from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
     from nanobot.dispatch import ACPDispatcher, NativeDispatcher
-    from loguru import logger
 
     runtime_config = _load_runtime_config(config, workspace, dispatcher, acp_config)
+    _print_deprecated_memory_window_notice(runtime_config)
     sync_workspace_templates(runtime_config.workspace_path)
 
     bus = MessageBus()
@@ -637,7 +773,7 @@ def agent(
         console.print(f"  [dim]↳ {content}[/dim]")
 
     if message:
-        # Single message mode — direct call, no bus needed
+
         async def run_once():
             with _thinking_ctx():
                 response = await runtime.process_direct(
@@ -648,7 +784,6 @@ def agent(
 
         asyncio.run(run_once())
     else:
-        # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
 
         _init_prompt_session()
@@ -661,12 +796,21 @@ def agent(
         else:
             cli_channel, cli_chat_id = "cli", session_id
 
-        def _exit_on_sigint(signum, frame):
+        def _handle_signal(signum, frame):
+            sig_name = signal.Signals(signum).name
             _restore_terminal()
-            console.print("\nGoodbye!")
-            os._exit(0)
+            console.print(f"\nReceived {sig_name}, goodbye!")
+            sys.exit(0)
 
-        signal.signal(signal.SIGINT, _exit_on_sigint)
+        signal.signal(signal.SIGINT, _handle_signal)
+        signal.signal(signal.SIGTERM, _handle_signal)
+        # SIGHUP is not available on Windows
+        if hasattr(signal, "SIGHUP"):
+            signal.signal(signal.SIGHUP, _handle_signal)
+        # Ignore SIGPIPE to prevent silent process termination when writing to closed pipes
+        # SIGPIPE is not available on Windows
+        if hasattr(signal, "SIGPIPE"):
+            signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         async def run_interactive():
             bus_task = asyncio.create_task(runtime.run())
@@ -686,14 +830,15 @@ def agent(
                             elif ch and not is_tool_hint and not ch.send_progress:
                                 pass
                             else:
-                                console.print(f"  [dim]↳ {msg.content}[/dim]")
+                                await _print_interactive_line(msg.content)
+
                         elif not turn_done.is_set():
                             if msg.content:
                                 turn_response.append(msg.content)
                             turn_done.set()
                         elif msg.content:
-                            console.print()
-                            _print_agent_response(msg.content, render_markdown=markdown)
+                            await _print_interactive_response(msg.content, render_markdown=markdown)
+
                     except asyncio.TimeoutError:
                         continue
                     except asyncio.CancelledError:
@@ -761,6 +906,7 @@ app.add_typer(channels_app, name="channels")
 @channels_app.command("status")
 def channels_status():
     """Show channel status."""
+    from nanobot.channels.registry import discover_all
     from nanobot.config.loader import load_config
 
     config = load_config()
@@ -768,51 +914,19 @@ def channels_status():
     table = Table(title="Channel Status")
     table.add_column("Channel", style="cyan")
     table.add_column("Enabled", style="green")
-    table.add_column("Configuration", style="yellow")
 
-    # WhatsApp
-    wa = config.channels.whatsapp
-    table.add_row("WhatsApp", "✓" if wa.enabled else "✗", wa.bridge_url)
-
-    dc = config.channels.discord
-    table.add_row("Discord", "✓" if dc.enabled else "✗", dc.gateway_url)
-
-    # Feishu
-    fs = config.channels.feishu
-    fs_config = f"app_id: {fs.app_id[:10]}..." if fs.app_id else "[dim]not configured[/dim]"
-    table.add_row("Feishu", "✓" if fs.enabled else "✗", fs_config)
-
-    # Mochat
-    mc = config.channels.mochat
-    mc_base = mc.base_url or "[dim]not configured[/dim]"
-    table.add_row("Mochat", "✓" if mc.enabled else "✗", mc_base)
-
-    # Telegram
-    tg = config.channels.telegram
-    tg_config = f"token: {tg.token[:10]}..." if tg.token else "[dim]not configured[/dim]"
-    table.add_row("Telegram", "✓" if tg.enabled else "✗", tg_config)
-
-    # Slack
-    slack = config.channels.slack
-    slack_config = "socket" if slack.app_token and slack.bot_token else "[dim]not configured[/dim]"
-    table.add_row("Slack", "✓" if slack.enabled else "✗", slack_config)
-
-    # DingTalk
-    dt = config.channels.dingtalk
-    dt_config = (
-        f"client_id: {dt.client_id[:10]}..." if dt.client_id else "[dim]not configured[/dim]"
-    )
-    table.add_row("DingTalk", "✓" if dt.enabled else "✗", dt_config)
-
-    # QQ
-    qq = config.channels.qq
-    qq_config = f"app_id: {qq.app_id[:10]}..." if qq.app_id else "[dim]not configured[/dim]"
-    table.add_row("QQ", "✓" if qq.enabled else "✗", qq_config)
-
-    # Email
-    em = config.channels.email
-    em_config = em.imap_host if em.imap_host else "[dim]not configured[/dim]"
-    table.add_row("Email", "✓" if em.enabled else "✗", em_config)
+    for name, cls in sorted(discover_all().items()):
+        section = getattr(config.channels, name, None)
+        if section is None:
+            enabled = False
+        elif isinstance(section, dict):
+            enabled = section.get("enabled", False)
+        else:
+            enabled = getattr(section, "enabled", False)
+        table.add_row(
+            cls.display_name,
+            "[green]\u2713[/green]" if enabled else "[dim]\u2717[/dim]",
+        )
 
     console.print(table)
 
@@ -821,9 +935,10 @@ def _get_bridge_dir() -> Path:
     """Get the bridge directory, setting it up if needed."""
     import shutil
     import subprocess
-    from nanobot.config.paths import get_bridge_install_dir
 
     # User's bridge location
+    from nanobot.config.paths import get_bridge_install_dir
+
     user_bridge = get_bridge_install_dir()
 
     # Check if already built
@@ -831,7 +946,8 @@ def _get_bridge_dir() -> Path:
         return user_bridge
 
     # Check for npm
-    if not shutil.which("npm"):
+    npm_path = shutil.which("npm")
+    if not npm_path:
         console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
         raise typer.Exit(1)
 
@@ -861,10 +977,10 @@ def _get_bridge_dir() -> Path:
     # Install and build
     try:
         console.print("  Installing dependencies...")
-        subprocess.run(["npm", "install"], cwd=user_bridge, check=True, capture_output=True)
+        subprocess.run([npm_path, "install"], cwd=user_bridge, check=True, capture_output=True)
 
         console.print("  Building...")
-        subprocess.run(["npm", "run", "build"], cwd=user_bridge, check=True, capture_output=True)
+        subprocess.run([npm_path, "run", "build"], cwd=user_bridge, check=True, capture_output=True)
 
         console.print("[green]✓[/green] Bridge ready\n")
     except subprocess.CalledProcessError as e:
@@ -879,7 +995,9 @@ def _get_bridge_dir() -> Path:
 @channels_app.command("login")
 def channels_login():
     """Link device via QR code."""
+    import shutil
     import subprocess
+
     from nanobot.config.loader import load_config
     from nanobot.config.paths import get_runtime_subdir
 
@@ -890,16 +1008,67 @@ def channels_login():
     console.print("Scan the QR code to connect.\n")
 
     env = {**os.environ}
-    if config.channels.whatsapp.bridge_token:
-        env["BRIDGE_TOKEN"] = config.channels.whatsapp.bridge_token
+    wa_cfg = getattr(config.channels, "whatsapp", None) or {}
+    bridge_token = (
+        wa_cfg.get("bridgeToken", "")
+        if isinstance(wa_cfg, dict)
+        else getattr(wa_cfg, "bridge_token", "")
+    )
+    if bridge_token:
+        env["BRIDGE_TOKEN"] = bridge_token
     env["AUTH_DIR"] = str(get_runtime_subdir("whatsapp-auth"))
 
+    npm_path = shutil.which("npm")
+    if not npm_path:
+        console.print("[red]npm not found. Please install Node.js.[/red]")
+        raise typer.Exit(1)
+
     try:
-        subprocess.run(["npm", "start"], cwd=bridge_dir, check=True, env=env)
+        subprocess.run([npm_path, "start"], cwd=bridge_dir, check=True, env=env)
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Bridge failed: {e}[/red]")
-    except FileNotFoundError:
-        console.print("[red]npm not found. Please install Node.js.[/red]")
+
+
+# ============================================================================
+# Plugin Commands
+# ============================================================================
+
+plugins_app = typer.Typer(help="Manage channel plugins")
+app.add_typer(plugins_app, name="plugins")
+
+
+@plugins_app.command("list")
+def plugins_list():
+    """List all discovered channels (built-in and plugins)."""
+    from nanobot.channels.registry import discover_all, discover_channel_names
+    from nanobot.config.loader import load_config
+
+    config = load_config()
+    builtin_names = set(discover_channel_names())
+    all_channels = discover_all()
+
+    table = Table(title="Channel Plugins")
+    table.add_column("Name", style="cyan")
+    table.add_column("Source", style="magenta")
+    table.add_column("Enabled", style="green")
+
+    for name in sorted(all_channels):
+        cls = all_channels[name]
+        source = "builtin" if name in builtin_names else "plugin"
+        section = getattr(config.channels, name, None)
+        if section is None:
+            enabled = False
+        elif isinstance(section, dict):
+            enabled = section.get("enabled", False)
+        else:
+            enabled = getattr(section, "enabled", False)
+        table.add_row(
+            cls.display_name,
+            source,
+            "[green]yes[/green]" if enabled else "[dim]no[/dim]",
+        )
+
+    console.print(table)
 
 
 # ============================================================================
@@ -910,7 +1079,7 @@ def channels_login():
 @app.command()
 def status():
     """Show nanobot status."""
-    from nanobot.config.loader import load_config, get_config_path
+    from nanobot.config.loader import get_config_path, load_config
 
     config_path = get_config_path()
     config = load_config()

@@ -1,8 +1,12 @@
 """Base LLM provider interface."""
 
+import asyncio
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
+
+from loguru import logger
 
 
 @dataclass
@@ -11,6 +15,24 @@ class ToolCallRequest:
     id: str
     name: str
     arguments: dict[str, Any]
+    provider_specific_fields: dict[str, Any] | None = None
+    function_provider_specific_fields: dict[str, Any] | None = None
+
+    def to_openai_tool_call(self) -> dict[str, Any]:
+        """Serialize to an OpenAI-style tool_call payload."""
+        tool_call = {
+            "id": self.id,
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "arguments": json.dumps(self.arguments, ensure_ascii=False),
+            },
+        }
+        if self.provider_specific_fields:
+            tool_call["provider_specific_fields"] = self.provider_specific_fields
+        if self.function_provider_specific_fields:
+            tool_call["function"]["provider_specific_fields"] = self.function_provider_specific_fields
+        return tool_call
 
 
 @dataclass
@@ -29,6 +51,21 @@ class LLMResponse:
         return len(self.tool_calls) > 0
 
 
+@dataclass(frozen=True)
+class GenerationSettings:
+    """Default generation parameters for LLM calls.
+
+    Stored on the provider so every call site inherits the same defaults
+    without having to pass temperature / max_tokens / reasoning_effort
+    through every layer.  Individual call sites can still override by
+    passing explicit keyword arguments to chat() / chat_with_retry().
+    """
+
+    temperature: float = 0.7
+    max_tokens: int = 4096
+    reasoning_effort: str | None = None
+
+
 class LLMProvider(ABC):
     """
     Abstract base class for LLM providers.
@@ -37,9 +74,28 @@ class LLMProvider(ABC):
     while maintaining a consistent interface.
     """
 
+    _CHAT_RETRY_DELAYS = (1, 2, 4)
+    _TRANSIENT_ERROR_MARKERS = (
+        "429",
+        "rate limit",
+        "500",
+        "502",
+        "503",
+        "504",
+        "overloaded",
+        "timeout",
+        "timed out",
+        "connection",
+        "server error",
+        "temporarily unavailable",
+    )
+
+    _SENTINEL = object()
+
     def __init__(self, api_key: str | None = None, api_base: str | None = None):
         self.api_key = api_key
         self.api_base = api_base
+        self.generation: GenerationSettings = GenerationSettings()
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -110,6 +166,7 @@ class LLMProvider(ABC):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request.
@@ -120,11 +177,92 @@ class LLMProvider(ABC):
             model: Model identifier (provider-specific).
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
+            tool_choice: Tool selection strategy ("auto", "required", or specific tool dict).
         
         Returns:
             LLMResponse with content and/or tool calls.
         """
         pass
+
+    @classmethod
+    def _is_transient_error(cls, content: str | None) -> bool:
+        err = (content or "").lower()
+        return any(marker in err for marker in cls._TRANSIENT_ERROR_MARKERS)
+
+    async def chat_with_retry(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: object = _SENTINEL,
+        temperature: object = _SENTINEL,
+        reasoning_effort: object = _SENTINEL,
+        tool_choice: str | dict[str, Any] | None = None,
+    ) -> LLMResponse:
+        """Call chat() with retry on transient provider failures.
+
+        Parameters default to ``self.generation`` when not explicitly passed,
+        so callers no longer need to thread temperature / max_tokens /
+        reasoning_effort through every layer.
+        """
+        if max_tokens is self._SENTINEL:
+            max_tokens = self.generation.max_tokens
+        if temperature is self._SENTINEL:
+            temperature = self.generation.temperature
+        if reasoning_effort is self._SENTINEL:
+            reasoning_effort = self.generation.reasoning_effort
+
+        for attempt, delay in enumerate(self._CHAT_RETRY_DELAYS, start=1):
+            try:
+                response = await self.chat(
+                    messages=messages,
+                    tools=tools,
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    reasoning_effort=reasoning_effort,
+                    tool_choice=tool_choice,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                response = LLMResponse(
+                    content=f"Error calling LLM: {exc}",
+                    finish_reason="error",
+                )
+
+            if response.finish_reason != "error":
+                return response
+            if not self._is_transient_error(response.content):
+                return response
+
+            err = (response.content or "").lower()
+            logger.warning(
+                "LLM transient error (attempt {}/{}), retrying in {}s: {}",
+                attempt,
+                len(self._CHAT_RETRY_DELAYS),
+                delay,
+                err[:120],
+            )
+            await asyncio.sleep(delay)
+
+        try:
+            return await self.chat(
+                messages=messages,
+                tools=tools,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+                tool_choice=tool_choice,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            return LLMResponse(
+                content=f"Error calling LLM: {exc}",
+                finish_reason="error",
+            )
 
     @abstractmethod
     def get_default_model(self) -> str:

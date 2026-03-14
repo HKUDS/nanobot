@@ -7,7 +7,7 @@ import re
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -15,7 +15,8 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import FeishuConfig
+from nanobot.config.schema import Base
+from pydantic import Field
 
 import importlib.util
 
@@ -231,6 +232,19 @@ def _extract_post_text(content_json: dict) -> str:
     return text
 
 
+class FeishuConfig(Base):
+    """Feishu/Lark channel configuration using WebSocket long connection."""
+
+    enabled: bool = False
+    app_id: str = ""
+    app_secret: str = ""
+    encrypt_key: str = ""
+    verification_token: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+    react_emoji: str = "THUMBSUP"
+    group_policy: Literal["open", "mention"] = "mention"
+
+
 class FeishuChannel(BaseChannel):
     """
     Feishu/Lark channel using WebSocket long connection.
@@ -244,11 +258,17 @@ class FeishuChannel(BaseChannel):
     """
 
     name = "feishu"
+    display_name = "Feishu"
 
-    def __init__(self, config: FeishuConfig, bus: MessageBus, groq_api_key: str = ""):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return FeishuConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = FeishuConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: FeishuConfig = config
-        self.groq_api_key = groq_api_key
         self._client: Any = None
         self._ws_client: Any = None
         self._ws_thread: threading.Thread | None = None
@@ -351,6 +371,27 @@ class FeishuChannel(BaseChannel):
         """
         self._running = False
         logger.info("Feishu bot stopped")
+
+    def _is_bot_mentioned(self, message: Any) -> bool:
+        """Check if the bot is @mentioned in the message."""
+        raw_content = message.content or ""
+        if "@_all" in raw_content:
+            return True
+
+        for mention in getattr(message, "mentions", None) or []:
+            mid = getattr(mention, "id", None)
+            if not mid:
+                continue
+            # Bot mentions have no user_id (None or "") but a valid open_id
+            if not getattr(mid, "user_id", None) and (getattr(mid, "open_id", None) or "").startswith("ou_"):
+                return True
+        return False
+
+    def _is_group_message_for_bot(self, message: Any) -> bool:
+        """Allow group messages when policy is open or bot is @mentioned."""
+        if self.config.group_policy == "open":
+            return True
+        return self._is_bot_mentioned(message)
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
@@ -753,8 +794,9 @@ class FeishuChannel(BaseChannel):
                     None, self._download_file_sync, message_id, file_key, msg_type
                 )
                 if not filename:
-                    ext = {"audio": ".opus", "media": ".mp4"}.get(msg_type, "")
-                    filename = f"{file_key[:16]}{ext}"
+                    filename = file_key[:16]
+                if msg_type == "audio" and not filename.endswith(".opus"):
+                    filename = f"{filename}.opus"
 
         if data and filename:
             file_path = media_dir / filename
@@ -892,6 +934,10 @@ class FeishuChannel(BaseChannel):
             chat_type = message.chat_type
             msg_type = message.message_type
 
+            if chat_type == "group" and not self._is_group_message_for_bot(message):
+                logger.debug("Feishu: skipping group message (not mentioned)")
+                return
+
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
 
@@ -927,16 +973,10 @@ class FeishuChannel(BaseChannel):
                 if file_path:
                     media_paths.append(file_path)
 
-                # Transcribe audio using Groq Whisper
-                if msg_type == "audio" and file_path and self.groq_api_key:
-                    try:
-                        from nanobot.providers.transcription import GroqTranscriptionProvider
-                        transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
-                        transcription = await transcriber.transcribe(file_path)
-                        if transcription:
-                            content_text = f"[transcription: {transcription}]"
-                    except Exception as e:
-                        logger.warning("Failed to transcribe audio: {}", e)
+                if msg_type == "audio" and file_path:
+                    transcription = await self.transcribe_audio(file_path)
+                    if transcription:
+                        content_text = f"[transcription: {transcription}]"
 
                 content_parts.append(content_text)
 

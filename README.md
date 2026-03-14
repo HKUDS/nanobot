@@ -20,6 +20,7 @@
 
 ## 📢 News
 
+- **2026-03-08** 🚀 Released **v0.1.4.post4** — a reliability-packed release with safer defaults, better multi-instance support, sturdier MCP, and major channel and provider improvements. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post4) for details.
 - **2026-03-07** 🚀 Azure OpenAI provider, WhatsApp media, QQ group chats, and more Telegram/Feishu polish.
 - **2026-03-06** 🪄 Lighter providers, smarter media handling, and sturdier memory and CLI compatibility.
 - **2026-03-05** ⚡️ Telegram draft streaming, MCP SSE support, and broader channel reliability fixes.
@@ -63,7 +64,7 @@
 
 ## Key Features of nanobot:
 
-🪶 **Ultra-Lightweight**: Just ~4,000 lines of core agent code — 99% smaller than Clawdbot.
+🪶 **Ultra-Lightweight**: A super lightweight implementation of OpenClaw — 99% smaller, significantly faster.
 
 🔬 **Research-Ready**: Clean, readable code that's easy to understand, modify, and extend for research.
 
@@ -76,6 +77,25 @@
 <p align="center">
   <img src="nanobot_arch.png" alt="nanobot architecture" width="800">
 </p>
+
+## Table of Contents
+
+- [News](#-news)
+- [Key Features](#key-features-of-nanobot)
+- [Architecture](#️-architecture)
+- [Features](#-features)
+- [Install](#-install)
+- [Quick Start](#-quick-start)
+- [Chat Apps](#-chat-apps)
+- [Agent Social Network](#-agent-social-network)
+- [Configuration](#️-configuration)
+- [Multiple Instances](#-multiple-instances)
+- [CLI Reference](#-cli-reference)
+- [Docker](#-docker)
+- [Linux Service](#-linux-service)
+- [Project Structure](#-project-structure)
+- [Contribute & Roadmap](#-contribute--roadmap)
+- [Star History](#-star-history)
 
 ## ✨ Features
 
@@ -122,11 +142,36 @@ uv tool install nanobot-ai
 pip install nanobot-ai
 ```
 
+### Update to latest version
+
+**PyPI / pip**
+
+```bash
+pip install -U nanobot-ai
+nanobot --version
+```
+
+**uv**
+
+```bash
+uv tool upgrade nanobot-ai
+nanobot --version
+```
+
+**Using WhatsApp?** Rebuild the local bridge after upgrading:
+
+```bash
+rm -rf ~/.nanobot/bridge
+nanobot channels login
+```
+
 ## 🚀 Quick Start
 
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global)
+>
+> For web search capability setup, please see [Web Search](#web-search).
 
 **1. Initialize**
 
@@ -171,7 +216,9 @@ That's it! You have a working AI assistant in 2 minutes.
 
 ## 💬 Chat Apps
 
-Connect nanobot to your favorite chat platform.
+Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](.docs/CHANNEL_PLUGIN_GUIDE.md).
+
+> Channel plugin support is available in the `main` branch; not yet published to PyPI.
 
 | Channel | What you need |
 |---------|---------------|
@@ -184,6 +231,7 @@ Connect nanobot to your favorite chat platform.
 | **Slack** | Bot token + App-Level token |
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
+| **Wecom** | Bot ID + Bot Secret |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -374,7 +422,7 @@ pip install nanobot-ai[matrix]
 
 | Option | Description |
 |--------|-------------|
-| `allowFrom` | User IDs allowed to interact. Empty = all senders. |
+| `allowFrom` | User IDs allowed to interact. Empty denies all; use `["*"]` to allow everyone. |
 | `groupPolicy` | `open` (default), `mention`, or `allowlist`. |
 | `groupAllowFrom` | Room allowlist (used when policy is `allowlist`). |
 | `allowRoomMentions` | Accept `@room` mentions in mention mode. |
@@ -428,7 +476,7 @@ nanobot gateway
 ```
 
 > WhatsApp bridge updates are not applied automatically for existing installations.
-> If you upgrade nanobot and need the latest WhatsApp bridge, run:
+> After upgrading nanobot, rebuild the local bridge with:
 > `rm -rf ~/.nanobot/bridge && nanobot channels login`
 
 </details>
@@ -458,7 +506,8 @@ Uses **WebSocket** long connection — no public IP required.
       "appSecret": "xxx",
       "encryptKey": "",
       "verificationToken": "",
-      "allowFrom": ["ou_YOUR_OPEN_ID"]
+      "allowFrom": ["ou_YOUR_OPEN_ID"],
+      "groupPolicy": "mention"
     }
   }
 }
@@ -466,6 +515,7 @@ Uses **WebSocket** long connection — no public IP required.
 
 > `encryptKey` and `verificationToken` are optional for Long Connection mode.
 > `allowFrom`: Add your open_id (find it in nanobot logs when you message the bot). Use `["*"]` to allow all users.
+> `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all group messages). Private chats always respond.
 
 **3. Run**
 
@@ -496,6 +546,7 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
 **3. Configure**
 
 > - `allowFrom`: Add your openid (find it in nanobot logs when you message the bot). Use `["*"]` for public access.
+> - `msgFormat`: Optional. Use `"plain"` (default) for maximum compatibility with legacy QQ clients, or `"markdown"` for richer formatting on newer clients.
 > - For production: submit a review in the bot console and publish. See [QQ Bot Docs](https://bot.q.qq.com/wiki/) for the full publishing flow.
 
 ```json
@@ -505,7 +556,8 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
       "enabled": true,
       "appId": "YOUR_APP_ID",
       "secret": "YOUR_APP_SECRET",
-      "allowFrom": ["YOUR_OPENID"]
+      "allowFrom": ["YOUR_OPENID"],
+      "msgFormat": "plain"
     }
   }
 }
@@ -653,6 +705,46 @@ nanobot gateway
 
 </details>
 
+<details>
+<summary><b>Wecom (企业微信)</b></summary>
+
+> Here we use [wecom-aibot-sdk-python](https://github.com/chengyongru/wecom_aibot_sdk) (community Python version of the official [@wecom/aibot-node-sdk](https://www.npmjs.com/package/@wecom/aibot-node-sdk)).
+>
+> Uses **WebSocket** long connection — no public IP required.
+
+**1. Install the optional dependency**
+
+```bash
+pip install nanobot-ai[wecom]
+```
+
+**2. Create a WeCom AI Bot**
+
+Go to the WeCom admin console → Intelligent Robot → Create Robot → select **API mode** with **long connection**. Copy the Bot ID and Secret.
+
+**3. Configure**
+
+```json
+{
+  "channels": {
+    "wecom": {
+      "enabled": true,
+      "botId": "your_bot_id",
+      "secret": "your_bot_secret",
+      "allowFrom": ["your_id"]
+    }
+  }
+}
+```
+
+**4. Run**
+
+```bash
+nanobot gateway
+```
+
+</details>
+
 ## 🌐 Agent Social Network
 
 🐈 nanobot is capable of linking to the agent social network (agent community). **Just send one message and your nanobot joins automatically!**
@@ -672,15 +764,17 @@ Config file: `~/.nanobot/config.json`
 
 > [!TIP]
 > - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
+> - **VolcEngine / BytePlus Coding Plan**: Use dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan` instead of the pay-per-use `volcengine` / `byteplus` providers.
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
-> - **VolcEngine Coding Plan**: If you're on VolcEngine's coding plan, set `"apiBase": "https://ark.cn-beijing.volces.com/api/coding/v3"` in your volcengine provider config.
-> - **Alibaba Cloud Coding Plan**: If you're on the Alibaba Cloud Coding Plan (BaiLian), set `"apiBase": "https://coding.dashscope.aliyuncs.com/v1"` in your dashscope provider config.
+> - **Alibaba Cloud BaiLian**: If you're using Alibaba Cloud BaiLian's OpenAI-compatible endpoint, set `"apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"` in your dashscope provider config.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
 | `custom` | Any OpenAI-compatible endpoint (direct, no LiteLLM) | — |
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
+| `volcengine` | LLM (VolcEngine, pay-per-use) | [Coding Plan](https://www.volcengine.com/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [volcengine.com](https://www.volcengine.com) |
+| `byteplus` | LLM (VolcEngine international, pay-per-use) | [Coding Plan](https://www.byteplus.com/en/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [byteplus.com](https://www.byteplus.com) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `azure_openai` | LLM (Azure OpenAI) | [portal.azure.com](https://portal.azure.com) |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
@@ -690,10 +784,10 @@ Config file: `~/.nanobot/config.json`
 | `minimax` | LLM (MiniMax direct) | [platform.minimaxi.com](https://platform.minimaxi.com) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
 | `siliconflow` | LLM (SiliconFlow/硅基流动) | [siliconflow.cn](https://siliconflow.cn) |
-| `volcengine` | LLM (VolcEngine/火山引擎) | [volcengine.com](https://www.volcengine.com) |
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
+| `ollama` | LLM (local, Ollama) | — |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
@@ -756,6 +850,37 @@ Connects directly to any OpenAI-compatible endpoint — LM Studio, llama.cpp, To
 ```
 
 > For local servers that don't require a key, set `apiKey` to any non-empty string (e.g. `"no-key"`).
+
+</details>
+
+<details>
+<summary><b>Ollama (local)</b></summary>
+
+Run a local model with Ollama, then add to config:
+
+**1. Start Ollama** (example):
+```bash
+ollama run llama3.2
+```
+
+**2. Add to config** (partial — merge into `~/.nanobot/config.json`):
+```json
+{
+  "providers": {
+    "ollama": {
+      "apiBase": "http://localhost:11434"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "ollama",
+      "model": "llama3.2"
+    }
+  }
+}
+```
+
+> `provider: "auto"` also works when `providers.ollama.apiBase` is configured, but setting `"provider": "ollama"` is the clearest option.
 
 </details>
 
@@ -841,6 +966,102 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 </details>
 
 
+### Web Search
+
+> [!TIP]
+> Use `proxy` in `tools.web` to route all web requests (search + fetch) through a proxy:
+> ```json
+> { "tools": { "web": { "proxy": "http://127.0.0.1:7890" } } }
+> ```
+
+nanobot supports multiple web search providers. Configure in `~/.nanobot/config.json` under `tools.web.search`.
+
+| Provider | Config fields | Env var fallback | Free |
+|----------|--------------|------------------|------|
+| `brave` (default) | `apiKey` | `BRAVE_API_KEY` | No |
+| `tavily` | `apiKey` | `TAVILY_API_KEY` | No |
+| `jina` | `apiKey` | `JINA_API_KEY` | Free tier (10M tokens) |
+| `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
+| `duckduckgo` | — | — | Yes |
+
+When credentials are missing, nanobot automatically falls back to DuckDuckGo.
+
+**Brave** (default):
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "brave",
+        "apiKey": "BSA..."
+      }
+    }
+  }
+}
+```
+
+**Tavily:**
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "tavily",
+        "apiKey": "tvly-..."
+      }
+    }
+  }
+}
+```
+
+**Jina** (free tier with 10M tokens):
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "jina",
+        "apiKey": "jina_..."
+      }
+    }
+  }
+}
+```
+
+**SearXNG** (self-hosted, no API key needed):
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "searxng",
+        "baseUrl": "https://searx.example"
+      }
+    }
+  }
+}
+```
+
+**DuckDuckGo** (zero config):
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "duckduckgo"
+      }
+    }
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `provider` | string | `"brave"` | Search backend: `brave`, `tavily`, `jina`, `searxng`, `duckduckgo` |
+| `apiKey` | string | `""` | API key for Brave or Tavily |
+| `baseUrl` | string | `""` | Base URL for SearXNG |
+| `maxResults` | integer | `5` | Results per search (1–10) |
+
 ### MCP (Model Context Protocol)
 
 > [!TIP]
@@ -891,6 +1112,28 @@ Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 }
 ```
 
+Use `enabledTools` to register only a subset of tools from an MCP server:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"],
+        "enabledTools": ["read_file", "mcp_filesystem_write_file"]
+      }
+    }
+  }
+}
+```
+
+`enabledTools` accepts either the raw MCP tool name (for example `read_file`) or the wrapped nanobot tool name (for example `mcp_filesystem_write_file`).
+
+- Omit `enabledTools`, or set it to `["*"]`, to register all tools.
+- Set `enabledTools` to `[]` to register no tools from that server.
+- Set `enabledTools` to a non-empty list of names to register only that subset.
+
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
 
@@ -900,13 +1143,13 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 > [!TIP]
 > For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
-> **Change in source / post-`v0.1.4.post3`:** In `v0.1.4.post3` and earlier, an empty `allowFrom` means "allow all senders". In newer versions (including building from source), **empty `allowFrom` denies all access by default**. To allow all senders, set `"allowFrom": ["*"]`.
+> In `v0.1.4.post3` and earlier, an empty `allowFrom` allowed all senders. Since `v0.1.4.post4`, empty `allowFrom` denies all access by default. To allow all senders, set `"allowFrom": ["*"]`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
-| `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. Empty = allow everyone; non-empty = only listed users can interact. |
+| `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
 
 
 ## 🧩 Multiple Instances
@@ -1153,7 +1396,7 @@ nanobot/
 │   ├── subagent.py #    Background task execution
 │   └── tools/      #    Built-in tools (incl. spawn)
 ├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
-├── channels/       # 📱 Chat channel integrations
+├── channels/       # 📱 Chat channel integrations (supports plugins)
 ├── bus/            # 🚌 Message routing
 ├── cron/           # ⏰ Scheduled tasks
 ├── heartbeat/      # 💓 Proactive wake-up

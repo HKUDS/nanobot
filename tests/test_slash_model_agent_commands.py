@@ -32,26 +32,7 @@ def _make_loop():
 
 
 @pytest.mark.asyncio
-async def test_agentloop_set_model_updates_runtime_model() -> None:
-    loop = _make_loop()
-
-    response = await loop._process_message(
-        InboundMessage(
-            channel="cli",
-            sender_id="user",
-            chat_id="chat",
-            content="/set_model anthropic/claude-3-7-sonnet",
-        )
-    )
-
-    assert response is not None
-    assert response.content == "Model switched to: anthropic/claude-3-7-sonnet"
-    assert loop.model == "anthropic/claude-3-7-sonnet"
-    assert loop.subagents.model == "anthropic/claude-3-7-sonnet"
-
-
-@pytest.mark.asyncio
-async def test_agentloop_help_mentions_new_commands() -> None:
+async def test_agentloop_help_matches_main_command_set() -> None:
     loop = _make_loop()
 
     response = await loop._process_message(
@@ -64,44 +45,9 @@ async def test_agentloop_help_mentions_new_commands() -> None:
     )
 
     assert response is not None
-    assert "/models" in response.content
-    assert "/set_model" in response.content
-    assert "/agents" in response.content
-    assert "/set_agent" in response.content
-
-
-@pytest.mark.asyncio
-async def test_agentloop_set_agent_default_is_explicit_noop() -> None:
-    loop = _make_loop()
-
-    response = await loop._process_message(
-        InboundMessage(
-            channel="cli",
-            sender_id="user",
-            chat_id="chat",
-            content="/set_agent default",
-        )
-    )
-
-    assert response is not None
-    assert response.content == "Native backend uses fixed agent: default (no change applied)"
-
-
-@pytest.mark.asyncio
-async def test_agentloop_set_agent_rejects_unknown_agent() -> None:
-    loop = _make_loop()
-
-    response = await loop._process_message(
-        InboundMessage(
-            channel="cli",
-            sender_id="user",
-            chat_id="chat",
-            content="/set_agent build",
-        )
-    )
-
-    assert response is not None
-    assert response.content == "Native backend supports only: default"
+    assert "/restart" in response.content
+    assert "/models" not in response.content
+    assert "/set_model" not in response.content
 
 
 class _DummyACPConn:

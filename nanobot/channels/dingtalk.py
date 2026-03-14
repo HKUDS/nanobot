@@ -11,11 +11,12 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 from loguru import logger
+from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import DingTalkConfig
+from nanobot.config.schema import Base
 
 try:
     from dingtalk_stream import (
@@ -57,6 +58,8 @@ class NanobotDingTalkHandler(CallbackHandler):
             content = ""
             if chatbot_msg.text:
                 content = chatbot_msg.text.content.strip()
+            elif chatbot_msg.extensions.get("content", {}).get("recognition"):
+                content = chatbot_msg.extensions["content"]["recognition"].strip()
             if not content:
                 content = message.data.get("text", {}).get("content", "").strip()
 
@@ -100,6 +103,15 @@ class NanobotDingTalkHandler(CallbackHandler):
             return AckMessage.STATUS_OK, "Error"
 
 
+class DingTalkConfig(Base):
+    """DingTalk channel configuration using Stream mode."""
+
+    enabled: bool = False
+    client_id: str = ""
+    client_secret: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+
+
 class DingTalkChannel(BaseChannel):
     """
     DingTalk channel using Stream Mode.
@@ -112,11 +124,18 @@ class DingTalkChannel(BaseChannel):
     """
 
     name = "dingtalk"
+    display_name = "DingTalk"
     _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
     _AUDIO_EXTS = {".amr", ".mp3", ".wav", ".ogg", ".m4a", ".aac"}
     _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
-    def __init__(self, config: DingTalkConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return DingTalkConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = DingTalkConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: DingTalkConfig = config
         self._client: Any = None

@@ -13,16 +13,50 @@ from slackify_markdown import slackify_markdown
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
+from pydantic import Field
+
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import SlackConfig
+from nanobot.config.schema import Base
+
+
+class SlackDMConfig(Base):
+    """Slack DM policy configuration."""
+
+    enabled: bool = True
+    policy: str = "open"
+    allow_from: list[str] = Field(default_factory=list)
+
+
+class SlackConfig(Base):
+    """Slack channel configuration."""
+
+    enabled: bool = False
+    mode: str = "socket"
+    webhook_path: str = "/slack/events"
+    bot_token: str = ""
+    app_token: str = ""
+    user_token_read_only: bool = True
+    reply_in_thread: bool = True
+    react_emoji: str = "eyes"
+    allow_from: list[str] = Field(default_factory=list)
+    group_policy: str = "mention"
+    group_allow_from: list[str] = Field(default_factory=list)
+    dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
 
 
 class SlackChannel(BaseChannel):
     """Slack channel using Socket Mode."""
 
     name = "slack"
+    display_name = "Slack"
 
-    def __init__(self, config: SlackConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return SlackConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = SlackConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: SlackConfig = config
         self._web_client: AsyncWebClient | None = None
@@ -81,8 +115,8 @@ class SlackChannel(BaseChannel):
             slack_meta = msg.metadata.get("slack", {}) if msg.metadata else {}
             thread_ts = slack_meta.get("thread_ts")
             channel_type = slack_meta.get("channel_type")
-            # Only reply in thread for channel/group messages; DMs don't use threads
-            thread_ts_param = thread_ts if use_thread else None
+            # Slack DMs don't use threads; channel/group replies may keep thread_ts.
+            thread_ts_param = thread_ts if thread_ts and channel_type != "im" else None
 
             # Slack rejects empty text payloads. Keep media-only messages media-only,
             # but send a single blank message when the bot has no text or files to send.
@@ -278,4 +312,3 @@ class SlackChannel(BaseChannel):
             if parts:
                 rows.append(" · ".join(parts))
         return "\n".join(rows)
-
