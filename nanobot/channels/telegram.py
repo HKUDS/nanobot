@@ -534,7 +534,8 @@ class TelegramChannel(BaseChannel):
                 getattr(media_file, "file_name", None),
             )
             media_dir = get_media_dir("telegram")
-            file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
+            unique_id = getattr(media_file, "file_unique_id", media_file.file_id)
+            file_path = media_dir / f"{unique_id}{ext}"
             await file.download_to_drive(str(file_path))
             path_str = str(file_path)
             if media_type in ("voice", "audio"):
