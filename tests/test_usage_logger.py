@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from nanobot.utils.usage_logger import UsageLogger
 
 
@@ -55,14 +57,16 @@ def test_log_skips_empty_usage(tmp_path: Path) -> None:
     assert not log_file.exists()
 
 
-def test_log_directory_created_on_init(tmp_path: Path) -> None:
-    """UsageLogger should create the logs/ directory on init."""
+def test_log_directory_created_lazily(tmp_path: Path) -> None:
+    """UsageLogger should NOT create the logs/ directory on init (lazy creation)."""
     logs_dir = tmp_path / "logs"
     assert not logs_dir.exists()
 
-    UsageLogger(tmp_path)
+    logger = UsageLogger(tmp_path)
+    assert not logs_dir.exists()  # dir not created yet
 
-    assert logs_dir.is_dir()
+    logger.log(model="x", usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2})
+    assert logs_dir.is_dir()  # created on first write
 
 
 def test_log_optional_fields_omitted_when_none(tmp_path: Path) -> None:
@@ -88,3 +92,43 @@ def test_log_includes_provider_when_set(tmp_path: Path) -> None:
     log_file = tmp_path / "logs" / "usage.jsonl"
     record = json.loads(log_file.read_text().strip())
     assert record["provider"] == "openrouter"
+
+
+
+
+@pytest.mark.asyncio
+async def test_integration_agent_loop_logs_usage(tmp_path: Path) -> None:
+    """Integration: AgentLoop should log usage after each LLM call."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMResponse
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="hello",
+        tool_calls=[],
+        usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+    ))
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+    )
+
+    messages = [{"role": "user", "content": "hi"}]
+    final, tools_used, _ = await loop._run_agent_loop(
+        messages, session_key="test:session"
+    )
+
+    assert final == "hello"
+    log_file = tmp_path / "logs" / "usage.jsonl"
+    assert log_file.exists()
+
+    record = json.loads(log_file.read_text().strip())
+    assert record["model"] == "test-model"
+    assert record["prompt_tokens"] == 100
+    assert record["session_id"] == "test:session"
