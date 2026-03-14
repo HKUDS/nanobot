@@ -44,7 +44,7 @@ class SubagentManager:
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
-        self.configured_allowed_paths = allowed_paths or []
+        self.allowed_paths = allowed_paths or []
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
@@ -97,7 +97,7 @@ class SubagentManager:
             if self.restrict_to_workspace:
                 allowed_dirs = [
                     self.workspace.resolve(),
-                    *[Path(p).expanduser().resolve() for p in self.configured_allowed_paths],
+                    *[Path(p).expanduser().resolve() for p in self.allowed_paths],
                 ]
             tools.register(ReadFileTool(workspace=self.workspace, allowed_dirs=allowed_dirs))
             tools.register(WriteFileTool(workspace=self.workspace, allowed_dirs=allowed_dirs))
@@ -108,7 +108,7 @@ class SubagentManager:
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
                 path_append=self.exec_config.path_append,
-                allowed_paths=self.configured_allowed_paths,
+                allowed_paths=self.allowed_paths,
             ))
             tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
             tools.register(WebFetchTool(proxy=self.web_proxy))
