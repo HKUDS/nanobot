@@ -18,6 +18,7 @@ from nanobot.providers.registry import find_by_model, find_gateway
 _ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
 _ANTHROPIC_EXTRA_KEYS = frozenset({"thinking_blocks"})
 _ALNUM = string.ascii_letters + string.digits
+_MINIMAX_ANTHROPIC_BASE_KEYWORD = "api.minimaxi.com/anthropic"
 
 def _short_tool_id() -> str:
     """Generate a 9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
@@ -105,6 +106,19 @@ class LiteLLMProvider(LLMProvider):
                 model = f"{spec.litellm_prefix}/{model}"
 
         return model
+
+    def _normalize_requested_model(self, model: str | None) -> str:
+        """Prefer the provider's normalized default model for legacy MiniMax compatibility."""
+        requested = model or self.default_model
+        if requested == self.default_model:
+            return requested
+        if not self.api_base or _MINIMAX_ANTHROPIC_BASE_KEYWORD not in self.api_base:
+            return requested
+        if not self.default_model.lower().startswith("anthropic/minimax"):
+            return requested
+        if not requested.lower().startswith("minimax/"):
+            return requested
+        return self.default_model
 
     @staticmethod
     def _canonicalize_explicit_prefix(model: str, spec_name: str, canonical_prefix: str) -> str:
@@ -229,7 +243,7 @@ class LiteLLMProvider(LLMProvider):
         Returns:
             LLMResponse with content and/or tool calls.
         """
-        original_model = model or self.default_model
+        original_model = self._normalize_requested_model(model)
         model = self._resolve_model(original_model)
         extra_msg_keys = self._extra_msg_keys(original_model, model)
 
