@@ -7,40 +7,40 @@ from typing import Any
 from nanobot.agent.tools.base import Tool
 
 
-def _is_allowed_path(resolved: Path, allowed_dirs: list[Path] | None = None) -> bool:
-    """Return True if resolved is inside at least one allowed directory."""
-    if not allowed_dirs:
+def _is_allowed_path(resolved: Path, allowed_paths: list[Path] | None = None) -> bool:
+    """Return True if resolved is inside at least one allowed path root."""
+    if not allowed_paths:
         return True
 
-    for allowed_dir in allowed_dirs:
+    for allowed_path in allowed_paths:
         try:
-            resolved.relative_to(allowed_dir.resolve())
+            resolved.relative_to(allowed_path.resolve())
             return True
         except ValueError:
             continue
     return False
 
 
-def _format_allowed_dirs(allowed_dirs: list[Path] | None = None) -> str:
-    """Format allowlisted directories for user-facing error messages."""
-    if not allowed_dirs:
+def _format_allowed_paths(allowed_paths: list[Path] | None = None) -> str:
+    """Format allowlisted paths for user-facing error messages."""
+    if not allowed_paths:
         return ""
-    return ", ".join(str(p) for p in allowed_dirs)
+    return ", ".join(str(p) for p in allowed_paths)
 
 
 def _resolve_path(
     path: str,
     workspace: Path | None = None,
-    allowed_dirs: list[Path] | None = None,
+    allowed_paths: list[Path] | None = None,
 ) -> Path:
-    """Resolve path against workspace (if relative) and enforce directory restriction."""
+    """Resolve path against workspace (if relative) and enforce path restriction."""
     p = Path(path).expanduser()
     if not p.is_absolute() and workspace:
         p = workspace / p
     resolved = p.resolve()
-    if not _is_allowed_path(resolved, allowed_dirs):
+    if not _is_allowed_path(resolved, allowed_paths):
         raise PermissionError(
-            f"Path {path} is outside allowed directories: {_format_allowed_dirs(allowed_dirs)}"
+            f"Path {path} is outside allowed paths: {_format_allowed_paths(allowed_paths)}"
         )
     return resolved
 
@@ -48,12 +48,12 @@ def _resolve_path(
 class _FsTool(Tool):
     """Shared base for filesystem tools — common init and path resolution."""
 
-    def __init__(self, workspace: Path | None = None, allowed_dirs: list[Path] | None = None):
+    def __init__(self, workspace: Path | None = None, allowed_paths: list[Path] | None = None):
         self._workspace = workspace
-        self._allowed_dirs = allowed_dirs
+        self._allowed_paths = allowed_paths
 
     def _resolve(self, path: str) -> Path:
-        return _resolve_path(path, self._workspace, self._allowed_dirs)
+        return _resolve_path(path, self._workspace, self._allowed_paths)
 
 
 # ---------------------------------------------------------------------------

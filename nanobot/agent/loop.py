@@ -116,14 +116,14 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        allowed_dirs = None
+        allowed_paths = None
         if self.restrict_to_workspace:
-            allowed_dirs = [
+            allowed_paths = [
                 self.workspace.resolve(),
                 *[Path(p).expanduser().resolve() for p in self.allowed_paths],
             ]
         for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dirs=allowed_dirs))
+            self.tools.register(cls(workspace=self.workspace, allowed_paths=allowed_paths))
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
