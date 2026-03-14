@@ -537,17 +537,12 @@ def gateway(
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
-        heartbeat_prompt = (
-            f"{tasks}\n\n"
-            "If the work completes successfully and there is nothing user-facing to report, "
-            f"reply with {hb_cfg.ok_signal} exactly."
-        )
 
         async def _silent(*_args, **_kwargs):
             pass
 
         return await agent.process_direct(
-            heartbeat_prompt,
+            tasks,
             session_key="heartbeat",
             channel=channel,
             chat_id=chat_id,

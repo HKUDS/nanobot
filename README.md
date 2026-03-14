@@ -1277,7 +1277,7 @@ Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). If the file has tasks, the agent executes them and delivers results to your most recently active chat channel.
 
-If a heartbeat run completes successfully and there is nothing user-facing to report, the agent may reply with `HEARTBEAT_OK`. By default that token is still posted to the channel for backward compatibility. Set `gateway.heartbeat.sendOkSignalMessages` to `false` to suppress it.
+The default heartbeat template also instructs the agent to reply with `HEARTBEAT_OK` when all heartbeat work completes successfully and there is nothing user-facing to report. By default that token is still posted to the channel for backward compatibility. Set `gateway.heartbeat.sendOkSignalMessages` to `false` to suppress it.
 
 **Setup:** edit `~/.nanobot/workspace/HEARTBEAT.md` (created automatically by `nanobot onboard`):
 
