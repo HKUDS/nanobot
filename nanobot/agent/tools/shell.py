@@ -125,17 +125,24 @@ class ExecTool(Tool):
             output_parts.append(f"\nExit code: {process.returncode}")
 
             result = "\n".join(output_parts) if output_parts else "(no output)"
-
-            # Head + tail truncation to preserve both start and end of output
-            max_len = self._MAX_OUTPUT
+            
+            # Truncate very long output (configurable via environment variables)
+            try:
+                max_len = int(os.getenv("NANOBOT_MAX_OUTPUT", "10000"))
+            except ValueError:
+                max_len = 10000
+            
+            truncate_mode = os.getenv("NANOBOT_TRUNCATE_MODE", "head").lower()
+            
             if len(result) > max_len:
-                half = max_len // 2
-                result = (
-                    result[:half]
-                    + f"\n\n... ({len(result) - max_len:,} chars truncated) ...\n\n"
-                    + result[-half:]
-                )
-
+                truncated_count = len(result) - max_len
+                if truncate_mode == "tail":
+                    # Keep the last max_len characters
+                    result = f"... (truncated, {truncated_count} more chars)\n" + result[-max_len:]
+                else:
+                    # Default: keep the first max_len characters
+                    result = result[:max_len] + f"\n... (truncated, {truncated_count} more chars)"
+            
             return result
 
         except Exception as e:
