@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -124,6 +125,18 @@ class DiscordChannel(BaseChannel):
             if not chunks:
                 return
 
+            # Filter valid media files
+            valid_media: list[str] = []
+            for media_path in msg.media:
+                if not os.path.exists(media_path):
+                    logger.warning("Media file does not exist: {}", media_path)
+                    continue
+                file_size = os.path.getsize(media_path)
+                if file_size > MAX_ATTACHMENT_BYTES:
+                    logger.warning("Media file too large ({} bytes): {}", file_size, media_path)
+                    continue
+                valid_media.append(media_path)
+
             for i, chunk in enumerate(chunks):
                 payload: dict[str, Any] = {"content": chunk}
 
@@ -132,18 +145,41 @@ class DiscordChannel(BaseChannel):
                     payload["message_reference"] = {"message_id": msg.reply_to}
                     payload["allowed_mentions"] = {"replied_user": False}
 
-                if not await self._send_payload(url, headers, payload):
+                # Only attach media to the first chunk
+                files = None
+                if i == 0 and valid_media:
+                    files = {}
+                    for idx, media_path in enumerate(valid_media):
+                        try:
+                            files[f"files[{idx}]"] = (os.path.basename(media_path), open(media_path, "rb"), "application/octet-stream")
+                        except Exception as e:
+                            logger.warning("Failed to open media file {}: {}", media_path, e)
+                            continue
+
+                success = await self._send_payload(url, headers, payload, files)
+                # Close file handles
+                if files:
+                    for file_tuple in files.values():
+                        if hasattr(file_tuple[1], 'close'):
+                            file_tuple[1].close()
+
+                if not success:
                     break  # Abort remaining chunks on failure
         finally:
             await self._stop_typing(msg.chat_id)
 
     async def _send_payload(
-        self, url: str, headers: dict[str, str], payload: dict[str, Any]
+        self, url: str, headers: dict[str, str], payload: dict[str, Any], files: dict[str, Any] | None = None
     ) -> bool:
         """Send a single Discord API payload with retry on rate-limit. Returns True on success."""
         for attempt in range(3):
             try:
-                response = await self._http.post(url, headers=headers, json=payload)
+                if files:
+                    # Use multipart/form-data for attachments
+                    data = {"payload_json": json.dumps(payload)}
+                    response = await self._http.post(url, headers=headers, data=data, files=files)
+                else:
+                    response = await self._http.post(url, headers=headers, json=payload)
                 if response.status_code == 429:
                     data = response.json()
                     retry_after = float(data.get("retry_after", 1.0))
