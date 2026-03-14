@@ -1,7 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -60,7 +60,8 @@ class ProviderConfig(Base):
 
     api_key: str = ""
     api_base: str | None = None
-    extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    extra_body: dict[str, Any] | None = None  # Forwarded to request body (provider-specific)
+    extra_headers: dict[str, str] | None = None  # Real HTTP headers (e.g. APP-Code for AiHubMix)
 
 
 class ProvidersConfig(Base):
@@ -88,6 +89,7 @@ class ProvidersConfig(Base):
     byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+    plugins: dict[str, ProviderConfig] = Field(default_factory=dict)  # Third-party provider configs
 
 
 class HeartbeatConfig(Base):
@@ -165,15 +167,26 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
 
+    def _provider_config_by_name(self, name: str | None) -> "ProviderConfig | None":
+        """Get provider config by name from built-ins or plugins."""
+        if not name:
+            return None
+        normalized = name.replace("-", "_")
+        direct = getattr(self.providers, normalized, None)
+        if direct is not None:
+            return direct
+        return self.providers.plugins.get(normalized)
+
     def _match_provider(
         self, model: str | None = None
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import PROVIDERS
 
-        forced = self.agents.defaults.provider
-        if forced != "auto":
-            p = getattr(self.providers, forced, None)
+        forced_raw = self.agents.defaults.provider
+        forced = forced_raw.replace("-", "_")
+        if forced_raw != "auto":
+            p = self._provider_config_by_name(forced)
             return (p, forced) if p else (None, None)
 
         model_lower = (model or self.agents.defaults.model).lower()
@@ -187,14 +200,14 @@ class Config(BaseSettings):
 
         # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
         for spec in PROVIDERS:
-            p = getattr(self.providers, spec.name, None)
+            p = self._provider_config_by_name(spec.name)
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_local or p.api_key:
                     return p, spec.name
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
-            p = getattr(self.providers, spec.name, None)
+            p = self._provider_config_by_name(spec.name)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
                 if spec.is_oauth or spec.is_local or p.api_key:
                     return p, spec.name
@@ -222,10 +235,14 @@ class Config(BaseSettings):
         for spec in PROVIDERS:
             if spec.is_oauth:
                 continue
-            p = getattr(self.providers, spec.name, None)
+            p = self._provider_config_by_name(spec.name)
             if p and p.api_key:
                 return p, spec.name
         return None, None
+
+    def get_provider_config(self, name: str) -> "ProviderConfig | None":
+        """Get provider config by provider name from built-ins or plugins."""
+        return self._provider_config_by_name(name)
 
     def get_provider(self, model: str | None = None) -> ProviderConfig | None:
         """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""

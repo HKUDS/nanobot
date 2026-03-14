@@ -2,9 +2,12 @@
 Provider Registry — single source of truth for LLM provider metadata.
 
 Adding a new provider:
-  1. Add a ProviderSpec to PROVIDERS below.
-  2. Add a field to ProvidersConfig in config/schema.py.
-  Done. Env vars, prefixing, config matching, status display all derive from here.
+    Recommended: publish a plugin package with entry point group
+    ``nanobot.provider_specs`` (and optional ``nanobot.provider_factories``).
+
+    Built-in development path (this repository only):
+    1. Add a ProviderSpec to BUILTIN_PROVIDERS below.
+    2. Add/adjust provider runtime factory as needed.
 
 Order matters — it controls match priority and fallback. Gateways first.
 Every entry writes out all fields so you can copy-paste as a template.
@@ -12,8 +15,11 @@ Every entry writes out all fields so you can copy-paste as a template.
 
 from __future__ import annotations
 
+import importlib.metadata as importlib_metadata
 from dataclasses import dataclass
 from typing import Any
+
+from loguru import logger
 
 
 @dataclass(frozen=True)
@@ -69,7 +75,7 @@ class ProviderSpec:
 # PROVIDERS — the registry. Order = priority. Copy any entry as template.
 # ---------------------------------------------------------------------------
 
-PROVIDERS: tuple[ProviderSpec, ...] = (
+BUILTIN_PROVIDERS: tuple[ProviderSpec, ...] = (
     # === Custom (direct OpenAI-compatible endpoint, bypasses LiteLLM) ======
     ProviderSpec(
         name="custom",
@@ -454,6 +460,66 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         model_overrides=(),
     ),
 )
+
+
+def _iter_entry_points(group: str) -> list[Any]:
+    """Return entry points for a group, compatible with Python 3.11+ APIs."""
+    entry_points = importlib_metadata.entry_points()
+    if hasattr(entry_points, "select"):
+        return list(entry_points.select(group=group))
+    return list(entry_points.get(group, []))
+
+
+def _coerce_specs(raw: Any, source: str) -> list[ProviderSpec]:
+    """Normalize plugin return value into a list of ProviderSpec."""
+    if isinstance(raw, ProviderSpec):
+        return [raw]
+    if isinstance(raw, (list, tuple, set)):
+        specs = list(raw)
+        if all(isinstance(item, ProviderSpec) for item in specs):
+            return specs
+    logger.warning("Ignore provider plugin {}: expected ProviderSpec or list[ProviderSpec]", source)
+    return []
+
+
+def load_plugin_providers() -> tuple[ProviderSpec, ...]:
+    """Load provider specs from Python entry points.
+
+    Entry point group: ``nanobot.provider_specs``
+
+    Each entry point should resolve to one of:
+      1) a ``ProviderSpec`` object
+      2) an iterable of ``ProviderSpec``
+      3) a callable returning 1) or 2)
+    """
+    discovered: list[ProviderSpec] = []
+    for ep in _iter_entry_points("nanobot.provider_specs"):
+        try:
+            loaded = ep.load()
+            obj = loaded() if callable(loaded) else loaded
+            discovered.extend(_coerce_specs(obj, ep.name))
+        except Exception as exc:
+            logger.warning("Failed loading provider plugin {}: {}", ep.name, exc)
+
+    existing_names = {spec.name for spec in BUILTIN_PROVIDERS}
+    unique_plugins: list[ProviderSpec] = []
+    for spec in discovered:
+        if spec.name in existing_names:
+            logger.warning("Ignore provider plugin {}: duplicate provider name", spec.name)
+            continue
+        unique_plugins.append(spec)
+        existing_names.add(spec.name)
+    return tuple(unique_plugins)
+
+
+PROVIDERS: tuple[ProviderSpec, ...] = BUILTIN_PROVIDERS + load_plugin_providers()
+
+
+def reload_providers() -> tuple[ProviderSpec, ...]:
+    """Reload provider specs (built-in + plugin entry points) for current process."""
+    global PROVIDERS
+    PROVIDERS = BUILTIN_PROVIDERS + load_plugin_providers()
+    return PROVIDERS
 
 
 # ---------------------------------------------------------------------------

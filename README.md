@@ -924,31 +924,83 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
 <details>
 <summary><b>Adding a New Provider (Developer Guide)</b></summary>
 
-nanobot uses a **Provider Registry** (`nanobot/providers/registry.py`) as the single source of truth.
-Adding a new provider only takes **2 steps** — no if-elif chains to touch.
+nanobot supports provider plugins via Python entry points.
+Recommended way: publish a package (for example `plugin-bot-xxx`) and install it with `pip install plugin-bot-xxx`.
 
-**Step 1.** Add a `ProviderSpec` entry to `PROVIDERS` in `nanobot/providers/registry.py`:
+Complete example (Alibaba BaiLian plugin): `examples/provider-plugin-bailian/`
+
+**Step 1.** Export a `ProviderSpec` from your package:
 
 ```python
-ProviderSpec(
-    name="myprovider",                   # config field name
-    keywords=("myprovider", "mymodel"),  # model-name keywords for auto-matching
-    env_key="MYPROVIDER_API_KEY",        # env var for LiteLLM
-    display_name="My Provider",          # shown in `nanobot status`
-    litellm_prefix="myprovider",         # auto-prefix: model → myprovider/model
-    skip_prefixes=("myprovider/",),      # don't double-prefix
+# plugin_bot_xxx/provider.py
+from nanobot.providers.registry import ProviderSpec
+
+SPEC = ProviderSpec(
+    name="myprovider",                   # provider id (snake_case)
+    keywords=("myprovider", "mymodel"),
+    env_key="MYPROVIDER_API_KEY",
+    display_name="My Provider",
+    litellm_prefix="myprovider",
+    skip_prefixes=("myprovider/",),
 )
 ```
 
-**Step 2.** Add a field to `ProvidersConfig` in `nanobot/config/schema.py`:
+**Step 2.** Register it in your plugin `pyproject.toml`:
 
-```python
-class ProvidersConfig(BaseModel):
-    ...
-    myprovider: ProviderConfig = ProviderConfig()
+```toml
+[project.entry-points."nanobot.provider_specs"]
+myprovider = "plugin_bot_xxx.provider:SPEC"
 ```
 
-That's it! Environment variables, model prefixing, config matching, and `nanobot status` display will all work automatically.
+`nanobot` will auto-discover this provider at startup.
+
+Optional: if you need a custom provider class (not LiteLLM-only), also register a factory:
+
+```toml
+[project.entry-points."nanobot.provider_factories"]
+myprovider = "plugin_bot_xxx.provider_factory:create_provider"
+```
+
+Factory signature:
+
+```python
+def create_provider(*, config, model, provider_name, provider_config):
+    ...
+```
+
+Config for plugin providers goes under `providers.plugins`:
+
+```json
+{
+  "providers": {
+    "plugins": {
+      "myprovider": {
+        "apiKey": "your-key",
+        "apiBase": "https://api.example.com/v1"
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "myprovider",
+      "model": "myprovider/chat-model"
+    }
+  }
+}
+```
+
+If you are contributing directly to this repository, editing the built-in registry still works:
+
+```python
+ProviderSpec(
+    name="myprovider",
+    keywords=("myprovider", "mymodel"),
+    env_key="MYPROVIDER_API_KEY",
+    display_name="My Provider",
+    litellm_prefix="myprovider",
+    skip_prefixes=("myprovider/",),
+)
+```
 
 **Common `ProviderSpec` options:**
 
@@ -1267,6 +1319,7 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
 | `nanobot provider login openai-codex` | OAuth login for providers |
+| `nanobot provider reload` | Reload provider plugins in current process |
 | `nanobot channels login` | Link WhatsApp (scan QR) |
 | `nanobot channels status` | Show channel status |
 

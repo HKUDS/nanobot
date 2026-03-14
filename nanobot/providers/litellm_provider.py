@@ -38,11 +38,13 @@ class LiteLLMProvider(LLMProvider):
         api_key: str | None = None,
         api_base: str | None = None,
         default_model: str = "anthropic/claude-opus-4-5",
+        extra_body: dict[str, Any] | None = None,
         extra_headers: dict[str, str] | None = None,
         provider_name: str | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
+        self.extra_body = extra_body or {}
         self.extra_headers = extra_headers or {}
 
         # Detect gateway / local deployment.
@@ -266,6 +268,10 @@ class LiteLLMProvider(LLMProvider):
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
+
+        # Pass provider-specific request body fields (e.g. DashScope extra_body)
+        if self.extra_body:
+            kwargs["extra_body"] = self.extra_body
         
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
