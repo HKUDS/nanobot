@@ -216,7 +216,9 @@ That's it! You have a working AI assistant in 2 minutes.
 
 ## 💬 Chat Apps
 
-Connect nanobot to your favorite chat platform.
+Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](.docs/CHANNEL_PLUGIN_GUIDE.md).
+
+> Channel plugin support is available in the `main` branch; not yet published to PyPI.
 
 | Channel | What you need |
 |---------|---------------|
@@ -1370,7 +1372,7 @@ nanobot/
 │   ├── subagent.py #    Background task execution
 │   └── tools/      #    Built-in tools (incl. spawn)
 ├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
-├── channels/       # 📱 Chat channel integrations
+├── channels/       # 📱 Chat channel integrations (supports plugins)
 ├── bus/            # 🚌 Message routing
 ├── cron/           # ⏰ Scheduled tasks
 ├── heartbeat/      # 💓 Proactive wake-up

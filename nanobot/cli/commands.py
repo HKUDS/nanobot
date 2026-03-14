@@ -240,6 +240,8 @@ def onboard():
 
     console.print("[dim]Config template now uses `maxTokens` + `contextWindowTokens`; `memoryWindow` is no longer a runtime setting.[/dim]")
 
+    _onboard_plugins(config_path)
+
     # Create workspace
     workspace = get_workspace_path()
 
@@ -257,7 +259,26 @@ def onboard():
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
 
 
+def _onboard_plugins(config_path: Path) -> None:
+    """Inject default config for all discovered channels (built-in + plugins)."""
+    import json
 
+    from nanobot.channels.registry import discover_all
+
+    all_channels = discover_all()
+    if not all_channels:
+        return
+
+    with open(config_path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    channels = data.setdefault("channels", {})
+    for name, cls in all_channels.items():
+        if name not in channels:
+            channels[name] = cls.default_config()
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 
 def _make_provider(config: Config):
@@ -731,7 +752,7 @@ app.add_typer(channels_app, name="channels")
 @channels_app.command("status")
 def channels_status():
     """Show channel status."""
-    from nanobot.channels.registry import discover_channel_names, load_channel_class
+    from nanobot.channels.registry import discover_all
     from nanobot.config.loader import load_config
 
     config = load_config()
@@ -740,16 +761,16 @@ def channels_status():
     table.add_column("Channel", style="cyan")
     table.add_column("Enabled", style="green")
 
-    for modname in sorted(discover_channel_names()):
-        section = getattr(config.channels, modname, None)
-        enabled = section and getattr(section, "enabled", False)
-        try:
-            cls = load_channel_class(modname)
-            display = cls.display_name
-        except ImportError:
-            display = modname.title()
+    for name, cls in sorted(discover_all().items()):
+        section = getattr(config.channels, name, None)
+        if section is None:
+            enabled = False
+        elif isinstance(section, dict):
+            enabled = section.get("enabled", False)
+        else:
+            enabled = getattr(section, "enabled", False)
         table.add_row(
-            display,
+            cls.display_name,
             "[green]\u2713[/green]" if enabled else "[dim]\u2717[/dim]",
         )
 
@@ -831,8 +852,10 @@ def channels_login():
     console.print("Scan the QR code to connect.\n")
 
     env = {**os.environ}
-    if config.channels.whatsapp.bridge_token:
-        env["BRIDGE_TOKEN"] = config.channels.whatsapp.bridge_token
+    wa_cfg = getattr(config.channels, "whatsapp", None) or {}
+    bridge_token = wa_cfg.get("bridgeToken", "") if isinstance(wa_cfg, dict) else getattr(wa_cfg, "bridge_token", "")
+    if bridge_token:
+        env["BRIDGE_TOKEN"] = bridge_token
     env["AUTH_DIR"] = str(get_runtime_subdir("whatsapp-auth"))
 
     try:
@@ -841,6 +864,48 @@ def channels_login():
         console.print(f"[red]Bridge failed: {e}[/red]")
     except FileNotFoundError:
         console.print("[red]npm not found. Please install Node.js.[/red]")
+
+
+# ============================================================================
+# Plugin Commands
+# ============================================================================
+
+plugins_app = typer.Typer(help="Manage channel plugins")
+app.add_typer(plugins_app, name="plugins")
+
+
+@plugins_app.command("list")
+def plugins_list():
+    """List all discovered channels (built-in and plugins)."""
+    from nanobot.channels.registry import discover_all, discover_channel_names
+    from nanobot.config.loader import load_config
+
+    config = load_config()
+    builtin_names = set(discover_channel_names())
+    all_channels = discover_all()
+
+    table = Table(title="Channel Plugins")
+    table.add_column("Name", style="cyan")
+    table.add_column("Source", style="magenta")
+    table.add_column("Enabled", style="green")
+
+    for name in sorted(all_channels):
+        cls = all_channels[name]
+        source = "builtin" if name in builtin_names else "plugin"
+        section = getattr(config.channels, name, None)
+        if section is None:
+            enabled = False
+        elif isinstance(section, dict):
+            enabled = section.get("enabled", False)
+        else:
+            enabled = getattr(section, "enabled", False)
+        table.add_row(
+            cls.display_name,
+            source,
+            "[green]yes[/green]" if enabled else "[dim]no[/dim]",
+        )
+
+    console.print(table)
 
 
 # ============================================================================

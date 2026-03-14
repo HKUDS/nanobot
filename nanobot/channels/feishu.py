@@ -7,7 +7,7 @@ import re
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -15,7 +15,8 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import FeishuConfig
+from nanobot.config.schema import Base
+from pydantic import Field
 
 import importlib.util
 
@@ -231,6 +232,19 @@ def _extract_post_text(content_json: dict) -> str:
     return text
 
 
+class FeishuConfig(Base):
+    """Feishu/Lark channel configuration using WebSocket long connection."""
+
+    enabled: bool = False
+    app_id: str = ""
+    app_secret: str = ""
+    encrypt_key: str = ""
+    verification_token: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+    react_emoji: str = "THUMBSUP"
+    group_policy: Literal["open", "mention"] = "mention"
+
+
 class FeishuChannel(BaseChannel):
     """
     Feishu/Lark channel using WebSocket long connection.
@@ -246,7 +260,13 @@ class FeishuChannel(BaseChannel):
     name = "feishu"
     display_name = "Feishu"
 
-    def __init__(self, config: FeishuConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return FeishuConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = FeishuConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: FeishuConfig = config
         self._client: Any = None

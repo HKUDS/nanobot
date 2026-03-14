@@ -2,14 +2,15 @@
 
 import asyncio
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import QQConfig
+from nanobot.config.schema import Base
+from pydantic import Field
 
 try:
     import botpy
@@ -50,13 +51,28 @@ def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
     return _Bot
 
 
+class QQConfig(Base):
+    """QQ channel configuration using botpy SDK."""
+
+    enabled: bool = False
+    app_id: str = ""
+    secret: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+
+
 class QQChannel(BaseChannel):
     """QQ channel using botpy SDK with WebSocket connection."""
 
     name = "qq"
     display_name = "QQ"
 
-    def __init__(self, config: QQConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return QQConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = QQConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: QQConfig = config
         self._client: "botpy.Client | None" = None

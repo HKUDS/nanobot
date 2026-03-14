@@ -5,7 +5,7 @@ import pytest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.qq import QQChannel
-from nanobot.config.schema import QQConfig
+from nanobot.channels.qq import QQConfig
 
 
 class _FakeApi:

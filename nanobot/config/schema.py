@@ -214,23 +214,14 @@ class WecomConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
     welcome_message: str = ""  # Welcome message for enter_chat event
 
+    Built-in and plugin channel configs are stored as extra fields (dicts).
+    Each channel parses its own config in __init__.
+    """
 
-class ChannelsConfig(Base):
-    """Configuration for chat channels."""
+    model_config = ConfigDict(extra="allow")
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
-    whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
-    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
-    discord: DiscordConfig = Field(default_factory=DiscordConfig)
-    feishu: FeishuConfig = Field(default_factory=FeishuConfig)
-    mochat: MochatConfig = Field(default_factory=MochatConfig)
-    dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
-    email: EmailConfig = Field(default_factory=EmailConfig)
-    slack: SlackConfig = Field(default_factory=SlackConfig)
-    qq: QQConfig = Field(default_factory=QQConfig)
-    matrix: MatrixConfig = Field(default_factory=MatrixConfig)
-    wecom: WecomConfig = Field(default_factory=WecomConfig)
 
 
 class AgentDefaults(Base):

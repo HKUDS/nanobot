@@ -6,7 +6,7 @@ import pytest
 from nanobot.bus.queue import MessageBus
 import nanobot.channels.dingtalk as dingtalk_module
 from nanobot.channels.dingtalk import DingTalkChannel, NanobotDingTalkHandler
-from nanobot.config.schema import DingTalkConfig
+from nanobot.channels.dingtalk import DingTalkConfig
 
 
 class _FakeResponse:
