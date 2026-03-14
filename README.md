@@ -216,7 +216,9 @@ That's it! You have a working AI assistant in 2 minutes.
 
 ## 💬 Chat Apps
 
-Connect nanobot to your favorite chat platform.
+Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](.docs/CHANNEL_PLUGIN_GUIDE.md).
+
+> Channel plugin support is available in the `main` branch; not yet published to PyPI.
 
 | Channel | What you need |
 |---------|---------------|
@@ -544,6 +546,7 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
 **3. Configure**
 
 > - `allowFrom`: Add your openid (find it in nanobot logs when you message the bot). Use `["*"]` for public access.
+> - `msgFormat`: Optional. Use `"plain"` (default) for maximum compatibility with legacy QQ clients, or `"markdown"` for richer formatting on newer clients.
 > - For production: submit a review in the bot console and publish. See [QQ Bot Docs](https://bot.q.qq.com/wiki/) for the full publishing flow.
 
 ```json
@@ -553,7 +556,8 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
       "enabled": true,
       "appId": "YOUR_APP_ID",
       "secret": "YOUR_APP_SECRET",
-      "allowFrom": ["YOUR_OPENID"]
+      "allowFrom": ["YOUR_OPENID"],
+      "msgFormat": "plain"
     }
   }
 }
@@ -1370,7 +1374,7 @@ nanobot/
 │   ├── subagent.py #    Background task execution
 │   └── tools/      #    Built-in tools (incl. spawn)
 ├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
-├── channels/       # 📱 Chat channel integrations
+├── channels/       # 📱 Chat channel integrations (supports plugins)
 ├── bus/            # 🚌 Message routing
 ├── cron/           # ⏰ Scheduled tasks
 ├── heartbeat/      # 💓 Proactive wake-up
