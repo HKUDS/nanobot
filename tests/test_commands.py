@@ -569,3 +569,20 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
 
     assert isinstance(result.exception, _StopGateway)
     assert "port 18792" in result.stdout
+
+
+def test_config_gemini_with_api_base_matches_provider():
+    """Gemini with apiBase configured should match gemini provider and return the base."""
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"model": "gemini-3-flash"}},
+            "providers": {
+                "gemini": {
+                    "apiKey": "test-key",
+                    "apiBase": "http://127.0.0.1:8045",
+                },
+            },
+        }
+    )
+    assert config.get_provider_name() == "gemini"
+    assert config.get_api_base() == "http://127.0.0.1:8045"
