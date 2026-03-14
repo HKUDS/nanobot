@@ -213,15 +213,28 @@ def onboard():
 
 
 
-def _make_provider(config: Config):
+def _make_provider(
+    config: Config,
+    model: str | None = None,
+    *,
+    emit_errors: bool = True,
+):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
-    model = config.agents.defaults.model
+    model = model or config.agents.defaults.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
+
+    def _fail(lines: list[str]) -> None:
+        if emit_errors:
+            for line in lines:
+                console.print(line)
+            raise typer.Exit(1)
+        text = " ".join(line.replace("[red]", "").replace("[/red]", "") for line in lines)
+        raise ValueError(text)
 
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
@@ -237,10 +250,11 @@ def _make_provider(config: Config):
     # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
     elif provider_name == "azure_openai":
         if not p or not p.api_key or not p.api_base:
-            console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
-            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
-            console.print("Use the model field to specify the deployment name.")
-            raise typer.Exit(1)
+            _fail([
+                "[red]Error: Azure OpenAI requires api_key and api_base.[/red]",
+                "Set them in ~/.nanobot/config.json under providers.azure_openai section",
+                "Use the model field to specify the deployment name.",
+            ])
         provider = AzureOpenAIProvider(
             api_key=p.api_key,
             api_base=p.api_base,
@@ -251,9 +265,10 @@ def _make_provider(config: Config):
         from nanobot.providers.registry import find_by_name
         spec = find_by_name(provider_name)
         if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and (spec.is_oauth or spec.is_local)):
-            console.print("[red]Error: No API key configured.[/red]")
-            console.print("Set one in ~/.nanobot/config.json under providers section")
-            raise typer.Exit(1)
+            _fail([
+                "[red]Error: No API key configured.[/red]",
+                "Set one in ~/.nanobot/config.json under providers section",
+            ])
         provider = LiteLLMProvider(
             api_key=p.api_key if p else None,
             api_base=config.get_api_base(model),
@@ -334,6 +349,11 @@ def gateway(
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
+    provider_factory = lambda requested_model: _make_provider(
+        config,
+        requested_model,
+        emit_errors=False,
+    )
     session_manager = SessionManager(config.workspace_path)
 
     # Create cron service first (callback set after agent creation)
@@ -356,6 +376,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        provider_factory=provider_factory,
     )
 
     # Set cron callback (needs agent)
@@ -514,6 +535,11 @@ def agent(
 
     bus = MessageBus()
     provider = _make_provider(config)
+    provider_factory = lambda requested_model: _make_provider(
+        config,
+        requested_model,
+        emit_errors=False,
+    )
 
     # Create cron service for tool usage (no callback needed for CLI unless running)
     cron_store_path = get_cron_dir() / "jobs.json"
@@ -538,6 +564,7 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        provider_factory=provider_factory,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on

@@ -160,6 +160,7 @@ class MemoryConsolidator:
         context_window_tokens: int,
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
+        provider_factory: Callable[[str], LLMProvider] | None = None,
     ):
         self.store = MemoryStore(workspace)
         self.provider = provider
@@ -168,15 +169,36 @@ class MemoryConsolidator:
         self.context_window_tokens = context_window_tokens
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
+        self._provider_factory = provider_factory
+        self._provider_cache: dict[str, LLMProvider] = {}
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
 
-    async def consolidate_messages(self, messages: list[dict[str, object]]) -> bool:
+    def _get_provider_for_model(self, model: str) -> LLMProvider:
+        """Resolve the provider instance for the requested model."""
+        if model == self.model or self._provider_factory is None:
+            return self.provider
+        provider = self._provider_cache.get(model)
+        if provider is None:
+            provider = self._provider_factory(model)
+            self._provider_cache[model] = provider
+        return provider
+
+    async def consolidate_messages(
+        self,
+        messages: list[dict[str, object]],
+        model: str | None = None,
+    ) -> bool:
         """Archive a selected message chunk into persistent memory."""
-        return await self.store.consolidate(messages, self.provider, self.model)
+        active_model = model or self.model
+        return await self.store.consolidate(
+            messages,
+            self._get_provider_for_model(active_model),
+            active_model,
+        )
 
     def pick_consolidation_boundary(
         self,
@@ -200,8 +222,13 @@ class MemoryConsolidator:
 
         return last_boundary
 
-    def estimate_session_prompt_tokens(self, session: Session) -> tuple[int, str]:
+    def estimate_session_prompt_tokens(
+        self,
+        session: Session,
+        model: str | None = None,
+    ) -> tuple[int, str]:
         """Estimate current prompt size for the normal session history view."""
+        active_model = model or self.model
         history = session.get_history(max_messages=0)
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
         probe_messages = self._build_messages(
@@ -211,30 +238,37 @@ class MemoryConsolidator:
             chat_id=chat_id,
         )
         return estimate_prompt_tokens_chain(
-            self.provider,
-            self.model,
+            self._get_provider_for_model(active_model),
+            active_model,
             probe_messages,
             self._get_tool_definitions(),
         )
 
-    async def archive_unconsolidated(self, session: Session) -> bool:
+    async def archive_unconsolidated(self, session: Session, model: str | None = None) -> bool:
         """Archive the full unconsolidated tail for /new-style session rollover."""
+        active_model = model or self.model
         lock = self.get_lock(session.key)
         async with lock:
             snapshot = session.messages[session.last_consolidated:]
             if not snapshot:
                 return True
-            return await self.consolidate_messages(snapshot)
+            if active_model == self.model:
+                return await self.consolidate_messages(snapshot)
+            return await self.consolidate_messages(snapshot, model=active_model)
 
-    async def maybe_consolidate_by_tokens(self, session: Session) -> None:
+    async def maybe_consolidate_by_tokens(self, session: Session, model: str | None = None) -> None:
         """Loop: archive old messages until prompt fits within half the context window."""
         if not session.messages or self.context_window_tokens <= 0:
             return
 
+        active_model = model or self.model
         lock = self.get_lock(session.key)
         async with lock:
             target = self.context_window_tokens // 2
-            estimated, source = self.estimate_session_prompt_tokens(session)
+            if active_model == self.model:
+                estimated, source = self.estimate_session_prompt_tokens(session)
+            else:
+                estimated, source = self.estimate_session_prompt_tokens(session, model=active_model)
             if estimated <= 0:
                 return
             if estimated < self.context_window_tokens:
@@ -274,11 +308,18 @@ class MemoryConsolidator:
                     source,
                     len(chunk),
                 )
-                if not await self.consolidate_messages(chunk):
+                if active_model == self.model:
+                    ok = await self.consolidate_messages(chunk)
+                else:
+                    ok = await self.consolidate_messages(chunk, model=active_model)
+                if not ok:
                     return
                 session.last_consolidated = end_idx
                 self.sessions.save(session)
 
-                estimated, source = self.estimate_session_prompt_tokens(session)
+                if active_model == self.model:
+                    estimated, source = self.estimate_session_prompt_tokens(session)
+                else:
+                    estimated, source = self.estimate_session_prompt_tokens(session, model=active_model)
                 if estimated <= 0:
                     return
