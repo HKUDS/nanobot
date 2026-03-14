@@ -538,8 +538,8 @@ class DingTalkChannel(BaseChannel):
         filename: str,
         sender_id: str,
     ) -> str | None:
-        """Download a DingTalk file to a local temp directory, return local path."""
-        import tempfile
+        """Download a DingTalk file to the media directory, return local path."""
+        from nanobot.config.paths import get_media_dir
 
         try:
             token = await self._get_access_token()
@@ -568,8 +568,8 @@ class DingTalkChannel(BaseChannel):
                 logger.error("DingTalk file download failed: status={}", file_resp.status_code)
                 return None
 
-            # Save to local temp directory
-            download_dir = Path(tempfile.gettempdir()) / "nanobot_dingtalk" / sender_id
+            # Save to media directory (accessible under workspace)
+            download_dir = get_media_dir("dingtalk") / sender_id
             download_dir.mkdir(parents=True, exist_ok=True)
             file_path = download_dir / filename
             await asyncio.to_thread(file_path.write_bytes, file_resp.content)

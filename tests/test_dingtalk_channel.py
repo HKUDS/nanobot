@@ -194,14 +194,17 @@ async def test_download_dingtalk_file(tmp_path, monkeypatch) -> None:
     ])
     channel._http._responses[1].content = file_content
 
-    # Redirect temp dir to tmp_path
-    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    # Redirect media dir to tmp_path
+    monkeypatch.setattr(
+        "nanobot.config.paths.get_media_dir",
+        lambda channel_name=None: tmp_path / channel_name if channel_name else tmp_path,
+    )
 
     result = await channel._download_dingtalk_file("code123", "test.xlsx", "user1")
 
     assert result is not None
     assert result.endswith("test.xlsx")
-    assert (tmp_path / "nanobot_dingtalk" / "user1" / "test.xlsx").read_bytes() == file_content
+    assert (tmp_path / "dingtalk" / "user1" / "test.xlsx").read_bytes() == file_content
 
     # Verify API calls
     assert channel._http.calls[0]["method"] == "POST"
