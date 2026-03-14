@@ -25,3 +25,27 @@ def test_create_provider_supports_minimax_via_anthropic_compatible_endpoint() ->
     assert provider.default_model == "anthropic/MiniMax-M2.5"
     assert provider.api_key == "mini-key"
     assert provider.api_base == "https://api.minimaxi.com/anthropic"
+
+
+def test_create_provider_appends_v1_for_anthropic_compatible_minimax_endpoint() -> None:
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "anthropic",
+                    "model": "anthropic/MiniMax-M2.5",
+                }
+            },
+            "providers": {
+                "anthropic": {
+                    "apiKey": "mini-key",
+                    "apiBase": "https://api.minimaxi.com/anthropic",
+                }
+            },
+        }
+    )
+
+    provider = create_provider(config)
+
+    assert provider.default_model == "anthropic/MiniMax-M2.5"
+    assert provider.api_base == "https://api.minimaxi.com/anthropic"

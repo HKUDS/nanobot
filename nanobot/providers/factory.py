@@ -52,6 +52,7 @@ def create_provider(config: Config):
         provider_config,
         model,
     )
+    resolved_api_base = api_base_override or config.get_api_base(model)
 
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         provider = OpenAICodexProvider(default_model=model)
@@ -62,7 +63,7 @@ def create_provider(config: Config):
             raise ProviderConfigurationError("`providers.custom.apiKey` is missing.")
         provider = CustomProvider(
             api_key=provider_config.api_key,
-            api_base=api_base_override or config.get_api_base(model) or provider_config.api_base,
+            api_base=resolved_api_base or provider_config.api_base,
             default_model=model,
         )
     elif provider_name == "azure_openai":
@@ -88,7 +89,7 @@ def create_provider(config: Config):
                 )
         provider = LiteLLMProvider(
             api_key=provider_config.api_key if provider_config else None,
-            api_base=api_base_override or config.get_api_base(model),
+            api_base=resolved_api_base,
             default_model=model,
             extra_headers=provider_config.extra_headers if provider_config else None,
             provider_name=provider_name,
