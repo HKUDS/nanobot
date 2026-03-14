@@ -567,7 +567,9 @@ class TestConsolidationDeduplicationGuard:
         await started.wait()
 
         release.set()
-        await asyncio.sleep(0.05)
+        consolidation_tasks = getattr(loop, "_consolidation_tasks", None)
+        if consolidation_tasks:
+            await asyncio.gather(*consolidation_tasks)
 
         loop.sessions.invalidate(session_key)
         reloaded = loop.sessions.get_or_create(session_key)
