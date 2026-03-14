@@ -395,6 +395,15 @@ def _make_provider(config: Config):
             api_base=p.api_base,
             default_model=model,
         )
+    # Gemini with custom endpoint: use native google-genai SDK
+    elif provider_name == "gemini" and config.get_api_base(model):
+        from nanobot.providers.gemini_native_provider import GeminiNativeProvider
+        provider = GeminiNativeProvider(
+            api_key=p.api_key if p else "",
+            api_base=config.get_api_base(model),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+        )
     else:
         from nanobot.providers.litellm_provider import LiteLLMProvider
         from nanobot.providers.registry import find_by_name
