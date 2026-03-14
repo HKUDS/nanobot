@@ -383,3 +383,118 @@ def test_parse_response_no_usage():
 
     result = provider._parse_response(mock_response)
     assert result.usage == {}
+
+
+@pytest.mark.asyncio
+async def test_chat_basic_text():
+    """Test the full chat() flow with a mocked genai client."""
+    from nanobot.providers.gemini_native_provider import GeminiNativeProvider
+
+    provider = GeminiNativeProvider(
+        api_key="test-key",
+        api_base="http://localhost:8045",
+        default_model="gemini-3-flash",
+    )
+
+    # Build mock response
+    mock_part = MagicMock()
+    mock_part.text = "Hello!"
+    mock_part.function_call = None
+
+    mock_content = MagicMock()
+    mock_content.parts = [mock_part]
+
+    mock_candidate = MagicMock()
+    mock_candidate.content = mock_content
+
+    mock_usage = MagicMock()
+    mock_usage.prompt_token_count = 5
+    mock_usage.candidates_token_count = 3
+    mock_usage.total_token_count = 8
+
+    mock_response = MagicMock()
+    mock_response.candidates = [mock_candidate]
+    mock_response.usage_metadata = mock_usage
+
+    # Mock the client
+    mock_aio_models = AsyncMock()
+    mock_aio_models.generate_content = AsyncMock(return_value=mock_response)
+
+    mock_aio = MagicMock()
+    mock_aio.models = mock_aio_models
+
+    mock_client = MagicMock()
+    mock_client.aio = mock_aio
+
+    provider._client = mock_client
+
+    messages = [{"role": "user", "content": "Hi"}]
+    result = await provider.chat(messages)
+
+    assert result.content == "Hello!"
+    assert result.finish_reason == "stop"
+    assert result.usage["total_tokens"] == 8
+
+    # Verify the SDK was called with correct params
+    call_kwargs = mock_aio_models.generate_content.call_args
+    assert call_kwargs.kwargs["model"] == "gemini-3-flash"
+    assert isinstance(call_kwargs.kwargs["contents"], list)
+
+
+@pytest.mark.asyncio
+async def test_chat_error_handling():
+    """Test that exceptions are caught and returned as error responses."""
+    from nanobot.providers.gemini_native_provider import GeminiNativeProvider
+
+    provider = GeminiNativeProvider(
+        api_key="test-key",
+        api_base="http://localhost:8045",
+        default_model="gemini-3-flash",
+    )
+
+    mock_aio_models = AsyncMock()
+    mock_aio_models.generate_content = AsyncMock(side_effect=Exception("Connection refused"))
+
+    mock_aio = MagicMock()
+    mock_aio.models = mock_aio_models
+
+    mock_client = MagicMock()
+    mock_client.aio = mock_aio
+
+    provider._client = mock_client
+
+    messages = [{"role": "user", "content": "Hi"}]
+    result = await provider.chat(messages)
+
+    assert result.finish_reason == "error"
+    assert "Connection refused" in result.content
+
+
+@pytest.mark.asyncio
+async def test_chat_strips_gemini_prefix():
+    """Test that gemini/ prefix is stripped from model name."""
+    from nanobot.providers.gemini_native_provider import GeminiNativeProvider
+
+    provider = GeminiNativeProvider(
+        api_key="test-key",
+        api_base="http://localhost:8045",
+        default_model="gemini/gemini-3-flash",
+    )
+
+    mock_aio_models = AsyncMock()
+    mock_aio_models.generate_content = AsyncMock(
+        return_value=MagicMock(candidates=[], text="ok", usage_metadata=None)
+    )
+
+    mock_aio = MagicMock()
+    mock_aio.models = mock_aio_models
+
+    mock_client = MagicMock()
+    mock_client.aio = mock_aio
+
+    provider._client = mock_client
+
+    await provider.chat([{"role": "user", "content": "test"}])
+
+    call_kwargs = mock_aio_models.generate_content.call_args
+    assert call_kwargs.kwargs["model"] == "gemini-3-flash"
