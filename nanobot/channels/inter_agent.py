@@ -25,7 +25,7 @@ Configuration (config.json)
 ----------------------------
 {
   "channels": {
-    "interAgent": {
+    "interagent": {
       "enabled": true,
       "apiPort": 18801,
       "instanceName": "bob",
@@ -106,7 +106,7 @@ _FINAL_SIGNALS = [
 class InterAgentChannel(BaseChannel):
     """HTTP API channel for real-time inter-agent communication."""
 
-    name = "inter_agent"
+    name = "interagent"
     display_name = "Inter-Agent"
 
     # ------------------------------------------------------------------
@@ -209,7 +209,7 @@ class InterAgentChannel(BaseChannel):
             chat_id=session_id,
             content=message,
             metadata={"from_instance": from_instance, "round_count": round_count},
-            session_key_override=f"inter_agent:{session_id}",
+            session_key_override=f"interagent:{session_id}",
         ))
 
         # Wait for the agent to respond (2-minute timeout)

@@ -23,6 +23,21 @@ def test_default_config():
     assert cfg["maxRoundsPerSession"] == 30
 
 
+def test_channel_name_is_getattr_compatible():
+    """Channel name must be a single lowercase word so ChannelsConfig.extra fields
+    are accessible via getattr(channels_config, channel.name) in manager._init_channels."""
+    from nanobot.config.schema import ChannelsConfig
+    cfg = ChannelsConfig.model_validate({
+        InterAgentChannel.name: {"enabled": True, "apiPort": 18804}
+    })
+    section = getattr(cfg, InterAgentChannel.name, None)
+    assert section is not None, (
+        f"getattr(ChannelsConfig, '{InterAgentChannel.name}') returned None — "
+        "channel name must match the config.json key exactly (no camelCase conversion)"
+    )
+    assert section.get("enabled") is True
+
+
 def test_config_from_dict():
     cfg = InterAgentConfig.model_validate({
         "enabled": True,
@@ -152,7 +167,7 @@ async def test_chat_round_trip():
         await asyncio.sleep(0.05)
         from nanobot.bus.events import OutboundMessage
         await bus.publish_outbound(OutboundMessage(
-            channel="inter_agent",
+            channel="interagent",
             chat_id="collab_test_001",
             content="方案已审阅，建议补充安全测评维度。",
         ))
