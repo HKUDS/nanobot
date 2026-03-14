@@ -52,18 +52,23 @@ class TestExecToolAllowedPaths:
         assert result is None
 
     def test_allows_absolute_path_inside_workspace(self, tmp_path):
-        tool = ExecTool(working_dir=str(tmp_path), restrict_to_workspace=True)
-        allowed_file = tmp_path / "data.txt"
-        result = tool._guard_command(f"cat {allowed_file}", str(tmp_path))
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+        allowed_file = workspace / "data.txt"
+        result = tool._guard_command(f"cat {allowed_file}", str(workspace))
         assert result is None
 
     def test_allows_sibling_media_path_when_allowlisted(self, tmp_path):
-        media_dir = tmp_path.parent / "media"
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        media_dir = tmp_path / "media"
+        media_dir.mkdir()
         media_file = media_dir / "upload.txt"
         tool = ExecTool(
-            working_dir=str(tmp_path),
+            working_dir=str(workspace),
             restrict_to_workspace=True,
             allowed_paths=[str(media_dir)],
         )
-        result = tool._guard_command(f"cat {media_file}", str(tmp_path))
+        result = tool._guard_command(f"cat {media_file}", str(workspace))
         assert result is None
