@@ -1,7 +1,4 @@
-from nanobot.cli.commands import (
-    _should_publish_background_response,
-    _with_background_ok_instruction,
-)
+from nanobot.cli.commands import _should_publish_background_response
 from nanobot.config.schema import Config
 
 
@@ -29,15 +26,6 @@ def test_background_ok_signal_can_be_posted_raw() -> None:
         ok_signal="HEARTBEAT_OK",
         send_ok_signal_messages=True,
     ) is True
-
-
-def test_background_prompt_adds_exact_ok_instruction() -> None:
-    prompt = _with_background_ok_instruction("Run the scheduled task.", "CRON_OK")
-
-    assert "Run the scheduled task." in prompt
-    assert "reply with CRON_OK exactly" in prompt
-
-
 def test_gateway_ok_signal_config_accepts_camel_case() -> None:
     config = Config.model_validate({
         "gateway": {

@@ -384,16 +384,6 @@ def _print_deprecated_memory_window_notice(config: Config) -> None:
             "[cyan]nanobot onboard[/cyan] to refresh your config template."
         )
 
-
-def _with_background_ok_instruction(prompt: str, ok_signal: str) -> str:
-    """Tell the agent how to indicate success-without-user-output for background runs."""
-    return (
-        f"{prompt}\n\n"
-        "If the work completes successfully and there is nothing user-facing to report, "
-        f"reply with {ok_signal} exactly."
-    )
-
-
 def _should_publish_background_response(
     response: str | None,
     *,
@@ -478,9 +468,10 @@ def gateway(
         reminder_note = (
             "[Scheduled Task] Timer finished.\n\n"
             f"Task '{job.name}' has been triggered.\n"
-            f"Scheduled instruction: {job.payload.message}"
+            f"Scheduled instruction: {job.payload.message}\n\n"
+            "If the work completes successfully and there is nothing user-facing to report, "
+            f"reply with {cron_cfg.ok_signal} exactly."
         )
-        reminder_note = _with_background_ok_instruction(reminder_note, cron_cfg.ok_signal)
 
         cron_tool = agent.tools.get("cron")
         cron_token = None
@@ -546,7 +537,11 @@ def gateway(
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
-        heartbeat_prompt = _with_background_ok_instruction(tasks, hb_cfg.ok_signal)
+        heartbeat_prompt = (
+            f"{tasks}\n\n"
+            "If the work completes successfully and there is nothing user-facing to report, "
+            f"reply with {hb_cfg.ok_signal} exactly."
+        )
 
         async def _silent(*_args, **_kwargs):
             pass
