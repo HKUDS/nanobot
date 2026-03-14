@@ -220,9 +220,14 @@ class MemoryStore:
 
 
 class MemoryConsolidator:
-    """Owns consolidation policy, locking, and session offset updates."""
+    """Owns consolidation policy, locking, and session offset updates.
+
+    Consolidation runs asynchronously in the background when sessions are idle,
+    so it doesn't block user interactions.
+    """
 
     _MAX_CONSOLIDATION_ROUNDS = 5
+    _IDLE_CHECK_INTERVAL = 30  # seconds between idle checks
 
     def __init__(
         self,
@@ -242,10 +247,56 @@ class MemoryConsolidator:
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+        self._background_task: asyncio.Task[None] | None = None
+        self._stop_event = asyncio.Event()
+        self._session_last_activity: dict[str, float] = {}  # session_key -> last activity timestamp
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
+
+    def record_activity(self, session_key: str) -> None:
+        """Record that a session is active (for idle detection)."""
+        self._session_last_activity[session_key] = asyncio.get_event_loop().time()
+
+    async def start_background_task(self) -> None:
+        """Start the background task that checks for idle sessions and consolidates."""
+        if self._background_task is not None and not self._background_task.done():
+            return  # Already running
+        self._stop_event.clear()
+        self._background_task = asyncio.create_task(self._idle_consolidation_loop())
+
+    async def stop_background_task(self) -> None:
+        """Stop the background task."""
+        self._stop_event.set()
+        if self._background_task is not None and not self._background_task.done():
+            self._background_task.cancel()
+            try:
+                await self._background_task
+            except asyncio.CancelledError:
+                pass
+            self._background_task = None
+
+    async def _idle_consolidation_loop(self) -> None:
+        """Background loop that checks for idle sessions and triggers consolidation."""
+        while not self._stop_event.is_set():
+            try:
+                await asyncio.sleep(self._IDLE_CHECK_INTERVAL)
+                if self._stop_event.is_set():
+                    break
+
+                # Check all sessions for idleness
+                current_time = asyncio.get_event_loop().time()
+                for session in list(self.sessions.all()):
+                    last_active = self._session_last_activity.get(session.key, 0)
+                    if current_time - last_active > self._IDLE_CHECK_INTERVAL * 2:
+                        # Session is idle, trigger consolidation
+                        await self.maybe_consolidate_by_tokens_async(session)
+
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Error in background consolidation loop")
 
     async def consolidate_messages(self, messages: list[dict[str, object]]) -> bool:
         """Archive a selected message chunk into persistent memory."""
@@ -299,8 +350,26 @@ class MemoryConsolidator:
                 return True
             return await self.consolidate_messages(snapshot)
 
-    async def maybe_consolidate_by_tokens(self, session: Session) -> None:
-        """Loop: archive old messages until prompt fits within half the context window."""
+    def maybe_consolidate_by_tokens(self, session: Session) -> None:
+        """Schedule token-based consolidation to run asynchronously in background.
+
+        This method is synchronous and just schedules the consolidation task.
+        The actual consolidation runs in the background when the session is idle.
+        """
+        if not session.messages or self.context_window_tokens <= 0:
+            return
+        # Schedule for background execution
+        asyncio.create_task(self._schedule_consolidation(session))
+
+    async def _schedule_consolidation(self, session: Session) -> None:
+        """Internal method to run consolidation asynchronously."""
+        await self.maybe_consolidate_by_tokens_async(session)
+
+    async def maybe_consolidate_by_tokens_async(self, session: Session) -> None:
+        """Async version: Loop and archive old messages until prompt fits within half the context window.
+
+        This is called from the background task when a session is idle.
+        """
         if not session.messages or self.context_window_tokens <= 0:
             return
 
@@ -355,3 +424,11 @@ class MemoryConsolidator:
                 estimated, source = self.estimate_session_prompt_tokens(session)
                 if estimated <= 0:
                     return
+
+            logger.debug(
+                "Token consolidation complete for {}: {}/{} via {}",
+                session.key,
+                estimated,
+                self.context_window_tokens,
+                source,
+            )

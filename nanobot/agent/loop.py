@@ -251,6 +251,8 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
+        # Start background consolidation task
+        await self.memory_consolidator.start_background_task()
         logger.info("Agent loop started")
 
         while self._running:
@@ -330,10 +332,11 @@ class AgentLoop:
                 pass  # MCP SDK cancel scope cleanup is noisy but harmless
             self._mcp_stack = None
 
-    def stop(self) -> None:
-        """Stop the agent loop."""
+    async def stop(self) -> None:
+        """Stop the agent loop and background tasks."""
         self._running = False
-        logger.info("Agent loop stopping")
+        await self.memory_consolidator.stop_background_task()
+        logger.info("Agent loop stopped")
 
     async def _process_message(
         self,
@@ -349,7 +352,8 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+            self.memory_consolidator.record_activity(key)
+            await self.memory_consolidator.maybe_consolidate_by_tokens_async(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             messages = self.context.build_messages(
@@ -359,7 +363,6 @@ class AgentLoop:
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -368,6 +371,7 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
+        self.memory_consolidator.record_activity(key)
 
         # Slash commands
         cmd = msg.content.strip().lower()
@@ -403,7 +407,8 @@ class AgentLoop:
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
             )
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        # Record activity and schedule background consolidation for non-slash commands
+        self.memory_consolidator.record_activity(key)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
@@ -435,7 +440,6 @@ class AgentLoop:
 
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
