@@ -559,6 +559,9 @@ class LangfuseConfig(Base):
     public_key: str = ""
     secret_key: str = ""
     host: str = "https://cloud.langfuse.com"
+    environment: str = "development"
+    sample_rate: float = 1.0
+    debug: bool = False
 
 
 class Config(BaseSettings):

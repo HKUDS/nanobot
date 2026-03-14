@@ -113,7 +113,7 @@ class MockProvider:
         self._summary = summary
         self.called = False
 
-    async def chat(self, *, messages, tools, model, temperature, max_tokens):
+    async def chat(self, *, messages, tools, model, temperature, max_tokens, metadata=None):
         self.called = True
         return LLMResponse(content=self._summary)
 

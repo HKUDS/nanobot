@@ -109,6 +109,7 @@ class LLMProvider(ABC):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        metadata: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request.
@@ -137,6 +138,7 @@ class LLMProvider(ABC):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        metadata: dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """Stream a chat completion response.
 
@@ -149,6 +151,7 @@ class LLMProvider(ABC):
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
+            metadata=metadata,
         )
         yield StreamChunk(
             content_delta=response.content,

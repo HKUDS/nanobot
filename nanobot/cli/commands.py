@@ -414,6 +414,7 @@ def gateway(
 
     # Initialize langfuse observability (auto-instruments litellm via OTEL)
     from nanobot.agent.observability import init_langfuse
+    from nanobot.agent.observability import shutdown as shutdown_langfuse
 
     init_langfuse(config.langfuse)
 
@@ -551,8 +552,119 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            shutdown_langfuse()
 
     asyncio.run(run())
+
+
+# ============================================================================
+# Web UI
+# ============================================================================
+
+
+@app.command()
+def ui(
+    port: int = typer.Option(8000, "--port", "-p", help="Web UI port"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """Start the nanobot web UI (FastAPI + assistant-ui)."""
+    try:
+        import uvicorn  # noqa: F401
+    except ImportError:
+        console.print(
+            "[red]Error: Web UI requires extra dependencies.[/red]\n"
+            "Install with: pip install nanobot-ai[web]"
+        )
+        raise typer.Exit(1)
+
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.observability import init_langfuse
+    from nanobot.agent.observability import shutdown as shutdown_langfuse
+    from nanobot.bus.queue import MessageBus
+    from nanobot.channels.web import WebChannel
+    from nanobot.config.loader import get_data_dir, load_config
+    from nanobot.cron.service import CronService
+    from nanobot.session.manager import SessionManager
+    from nanobot.web.app import create_app
+
+    if verbose:
+        import logging
+
+        logging.basicConfig(level=logging.DEBUG)
+
+    console.print(f"{__logo__} Starting nanobot web UI on http://{host}:{port}")
+
+    config = load_config()
+
+    # Observability
+    init_langfuse(config.langfuse)
+
+    bus = MessageBus()
+    provider = _make_provider(config)
+    session_manager = SessionManager(config.workspace_path)
+
+    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    cron = CronService(cron_store_path)
+
+    agent_loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        config=_make_agent_config(config),
+        brave_api_key=config.tools.web.search.api_key or None,
+        exec_config=config.tools.exec,
+        cron_service=cron,
+        session_manager=session_manager,
+        mcp_servers=config.tools.mcp_servers,
+        channels_config=config.channels,
+        routing_config=config.agents.routing,
+    )
+
+    web_channel = WebChannel(config=None, bus=bus)
+
+    # Check for built frontend static files
+    frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
+    app = create_app(
+        agent_loop,
+        session_manager,
+        web_channel,
+        static_dir=frontend_dist if frontend_dist.is_dir() else None,
+    )
+
+    console.print(f"[green]✓[/green] Agent initialized (model: {agent_loop.model})")
+    if frontend_dist.is_dir():
+        console.print(f"[green]✓[/green] Serving frontend from {frontend_dist}")
+    else:
+        console.print("[yellow]ℹ[/yellow] No built frontend found — API-only mode")
+        console.print("  Run frontend dev server: cd frontend && npm run dev")
+
+    import uvicorn
+
+    async def _run():
+        uvi_config = uvicorn.Config(
+            app,
+            host=host,
+            port=port,
+            log_level="info" if verbose else "warning",
+        )
+        server = uvicorn.Server(uvi_config)
+
+        await web_channel.start()
+        try:
+            await asyncio.gather(
+                agent_loop.run(),
+                server.serve(),
+            )
+        except KeyboardInterrupt:
+            console.print("\nShutting down...")
+        finally:
+            await web_channel.stop()
+            await agent_loop.close_mcp()
+            agent_loop.stop()
+            shutdown_langfuse()
+
+    asyncio.run(_run())
 
 
 # ============================================================================
@@ -588,6 +700,7 @@ def agent(
 
     # Initialize langfuse observability (auto-instruments litellm via OTEL)
     from nanobot.agent.observability import init_langfuse
+    from nanobot.agent.observability import shutdown as shutdown_langfuse
 
     init_langfuse(config.langfuse)
 
@@ -665,6 +778,7 @@ def agent(
                     await asyncio.wait_for(_drain_pending_tasks(), timeout=2.0)
                 except TimeoutError:
                     pass
+                shutdown_langfuse()
 
         watchdog: threading.Timer | None = None
         if timeout_s > 0:
@@ -784,6 +898,7 @@ def agent(
                 await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
                 await agent_loop.close_mcp()
                 await _drain_pending_tasks()
+                shutdown_langfuse()
 
         asyncio.run(run_interactive())
 
@@ -1120,6 +1235,7 @@ def cron_run(
 
     # Initialize langfuse observability (auto-instruments litellm via OTEL)
     from nanobot.agent.observability import init_langfuse
+    from nanobot.agent.observability import shutdown as shutdown_langfuse
 
     init_langfuse(config.langfuse)
 
@@ -1156,7 +1272,11 @@ def cron_run(
     async def run():
         return await service.run_job(job_id, force=force)
 
-    if asyncio.run(run()):
+    try:
+        success = asyncio.run(run())
+    finally:
+        shutdown_langfuse()
+    if success:
         console.print("[green]✓[/green] Job executed")
         if result_holder:
             _print_agent_response(result_holder[0], render_markdown=True)

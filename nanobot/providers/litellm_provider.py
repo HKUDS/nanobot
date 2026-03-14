@@ -176,6 +176,7 @@ class LiteLLMProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        metadata: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -228,6 +229,9 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+
+        if metadata:
+            kwargs["metadata"] = metadata
 
         try:
             response = await acompletion(**kwargs)
@@ -293,6 +297,7 @@ class LiteLLMProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        metadata: dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """Stream chat completion tokens via ``litellm.acompletion(stream=True)``."""
         original_model = model or self.default_model
@@ -309,6 +314,7 @@ class LiteLLMProvider(LLMProvider):
             "max_tokens": max_tokens,
             "temperature": temperature,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         kwargs["timeout"] = self._timeout_s
         kwargs["num_retries"] = self._max_retries
@@ -324,6 +330,8 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+        if metadata:
+            kwargs["metadata"] = metadata
 
         try:
             response = await acompletion(**kwargs)

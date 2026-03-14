@@ -29,6 +29,7 @@ class _ScriptedProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        metadata: dict[str, Any] | None = None,
     ) -> LLMResponse:
         if self._idx >= len(self._responses):
             return LLMResponse(content="{}")

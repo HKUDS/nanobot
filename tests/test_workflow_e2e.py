@@ -46,6 +46,7 @@ class ScriptedProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        metadata: dict[str, Any] | None = None,
     ) -> LLMResponse:
         self.call_log.append(
             {
@@ -245,7 +246,13 @@ class TestWorkflowErrorHandling:
                 return "test-model"
 
             async def chat(
-                self, messages, tools=None, model=None, max_tokens=4096, temperature=0.7
+                self,
+                messages,
+                tools=None,
+                model=None,
+                max_tokens=4096,
+                temperature=0.7,
+                metadata=None,
             ) -> LLMResponse:
                 raise RuntimeError("rate_limit: 429 too many requests")
 
