@@ -45,7 +45,7 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
+    """Search the web using Brave Search API or Tavily API."""
 
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
@@ -58,17 +58,76 @@ class WebSearchTool(Tool):
         "required": ["query"]
     }
 
-    def __init__(self, api_key: str | None = None, max_results: int = 5, proxy: str | None = None):
+    def __init__(self, api_key: str | None = None, max_results: int = 5, proxy: str | None = None, provider: str = ""):
         self._init_api_key = api_key
+        self._provider = provider
         self.max_results = max_results
         self.proxy = proxy
 
     @property
     def api_key(self) -> str:
         """Resolve API key at call time so env/config changes are picked up."""
-        return self._init_api_key or os.environ.get("BRAVE_API_KEY", "")
+        return self._init_api_key or os.environ.get("BRAVE_API_KEY", "") or os.environ.get("TAVILY_API_KEY", "")
+
+    @property
+    def provider(self) -> str:
+        """Resolve provider at call time."""
+        return self._provider or os.environ.get("WEB_SEARCH_PROVIDER", "")
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
+        provider = self.provider.lower() if self.provider else ""
+
+        # Use configured provider or auto-detect based on API key format
+        if provider == "tavily" or (not provider and self.api_key.startswith("tvly-")):
+            return await self._tavily_search(query, count)
+        elif provider == "brave" or self.api_key:
+            return await self._brave_search(query, count)
+        else:
+            return (
+                "Error: No search API key configured. Set provider to 'tavily' or 'brave' "
+                "in config, and set the corresponding API key (TAVILY_API_KEY or BRAVE_API_KEY), "
+                "then restart."
+            )
+
+    async def _tavily_search(self, query: str, count: int | None = None) -> str:
+        """Search using Tavily API."""
+        try:
+            from tavily import TavilyClient
+
+            n = min(max(count or self.max_results, 1), 10)
+            logger.debug("WebSearch (Tavily): {}", "proxy enabled" if self.proxy else "direct connection")
+
+            client = TavilyClient(api_key=self.api_key)
+            response = client.search(
+                query=query,
+                max_results=n,
+                include_answer=True,
+                include_raw_content=False,
+                include_domains=None
+            )
+
+            results = response.get("results", [])
+            if not results:
+                return f"No results for: {query}"
+
+            lines = [f"Results for: {query}\n"]
+            for i, item in enumerate(results, 1):
+                title = item.get("title", "")
+                url = item.get("url", "")
+                content = item.get("content", "")[:200] if item.get("content") else ""
+                lines.append(f"{i}. {title}\n   {url}")
+                if content:
+                    lines.append(f"   {content}...")
+            return "\n".join(lines)
+        except ImportError:
+            logger.error("Tavily SDK not installed. Run: pip install tavily-python")
+            return "Error: Tavily SDK not installed. Run: pip install tavily-python"
+        except Exception as e:
+            logger.error("WebSearch (Tavily) error: {}", e)
+            return f"Error: {e}"
+
+    async def _brave_search(self, query: str, count: int | None = None) -> str:
+        """Search using Brave Search API."""
         if not self.api_key:
             return (
                 "Error: Brave Search API key not configured. Set it in "
@@ -78,7 +137,7 @@ class WebSearchTool(Tool):
 
         try:
             n = min(max(count or self.max_results, 1), 10)
-            logger.debug("WebSearch: {}", "proxy enabled" if self.proxy else "direct connection")
+            logger.debug("WebSearch (Brave): {}", "proxy enabled" if self.proxy else "direct connection")
             async with httpx.AsyncClient(proxy=self.proxy) as client:
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",

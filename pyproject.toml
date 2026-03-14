@@ -48,6 +48,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+tavily = [
+    "tavily-python>=0.5.0",
+]
 wecom = [
     "wecom-aibot-sdk-python>=0.1.2",
 ]
