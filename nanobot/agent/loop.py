@@ -60,6 +60,7 @@ class AgentLoop:
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
+        allowed_paths: list[str] | None = None,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
@@ -78,6 +79,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.configured_allowed_paths = allowed_paths or []
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -91,6 +93,7 @@ class AgentLoop:
             web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            allowed_paths=self.configured_allowed_paths,
         )
 
         self._running = False
@@ -117,7 +120,7 @@ class AgentLoop:
         if self.restrict_to_workspace:
             allowed_dirs = [
                 self.workspace.resolve(),
-                *[Path(p).expanduser().resolve() for p in self.exec_config.allowed_paths],
+                *[Path(p).expanduser().resolve() for p in self.configured_allowed_paths],
             ]
         for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dirs=allowed_dirs))
@@ -126,7 +129,7 @@ class AgentLoop:
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
             path_append=self.exec_config.path_append,
-            allowed_paths=self.exec_config.allowed_paths,
+            allowed_paths=self.configured_allowed_paths,
         ))
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))

@@ -330,7 +330,6 @@ class ExecToolConfig(Base):
 
     timeout: int = 60
     path_append: str = ""
-    allowed_paths: list[str] = Field(default_factory=list)
 
 
 class MCPServerConfig(Base):
@@ -351,6 +350,7 @@ class ToolsConfig(Base):
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
+    allowed_paths: list[str] = Field(default_factory=list)
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 

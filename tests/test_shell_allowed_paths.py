@@ -1,6 +1,16 @@
-import pytest
-
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.config.schema import Config
+
+
+def test_config_accepts_tools_allowed_paths() -> None:
+    config = Config.model_validate({
+        "tools": {
+            "restrictToWorkspace": True,
+            "allowedPaths": ["/dev/null", "/tmp/example"],
+        }
+    })
+    assert config.tools.restrict_to_workspace is True
+    assert config.tools.allowed_paths == ["/dev/null", "/tmp/example"]
 
 
 class TestExecToolAllowedPaths:

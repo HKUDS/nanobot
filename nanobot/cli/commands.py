@@ -400,6 +400,7 @@ def gateway(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        allowed_paths=config.tools.allowed_paths,
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
@@ -583,6 +584,7 @@ def agent(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        allowed_paths=config.tools.allowed_paths,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
     )
