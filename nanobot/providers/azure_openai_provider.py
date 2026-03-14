@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any
 from urllib.parse import urljoin
@@ -21,7 +22,7 @@ class AzureOpenAIProvider(LLMProvider):
     Features:
     - Hardcoded API version 2024-10-21
     - Uses model field as Azure deployment name in URL path
-    - Uses api-key header instead of Authorization Bearer
+    - Supports both api-key and Entra ID OAuth authentication
     - Uses max_completion_tokens instead of max_tokens
     - Direct HTTP calls, bypasses LiteLLM
     """
@@ -31,14 +32,38 @@ class AzureOpenAIProvider(LLMProvider):
         api_key: str = "",
         api_base: str = "",
         default_model: str = "gpt-5.2-chat",
+        use_entra_auth: bool = False,
+        client_id: str = "",
+        client_secret: str = "",
+        tenant_id: str = "",
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.api_version = "2024-10-21"
         
+        # Determine authentication method
+        # If api_key is empty, fall back to OAuth
+        self.use_entra_auth = use_entra_auth or (not api_key)
+        
+        if self.use_entra_auth:
+            # OAuth authentication
+            if not client_id or not client_secret or not tenant_id:
+                raise ValueError(
+                    "Entra ID OAuth requires client_id, client_secret, and tenant_id"
+                )
+            self.client_id = client_id
+            self.client_secret = client_secret
+            self.tenant_id = tenant_id
+            
+            # Token cache
+            self._access_token: str | None = None
+            self._token_expires_at: float = 0
+        else:
+            # API key authentication
+            if not api_key:
+                raise ValueError("Azure OpenAI api_key is required")
+        
         # Validate required parameters
-        if not api_key:
-            raise ValueError("Azure OpenAI api_key is required")
         if not api_base:
             raise ValueError("Azure OpenAI api_base is required")
         
@@ -61,13 +86,55 @@ class AzureOpenAIProvider(LLMProvider):
         )
         return f"{url}?api-version={self.api_version}"
 
-    def _build_headers(self) -> dict[str, str]:
-        """Build headers for Azure OpenAI API with api-key header."""
-        return {
+    async def _get_access_token(self) -> str:
+        """Get or refresh Entra ID OAuth access token."""
+        # Return cached token if still valid (with 5 min buffer)
+        if self._access_token and time.time() < (self._token_expires_at - 300):
+            return self._access_token
+        
+        # Request new token
+        token_endpoint = (
+            f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
+        )
+        
+        data = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "scope": "https://cognitiveservices.azure.com/.default",
+            "grant_type": "client_credentials",
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                token_endpoint,
+                data=data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            response.raise_for_status()
+            token_data = response.json()
+            
+            self._access_token = token_data["access_token"]
+            # expires_in is in seconds
+            self._token_expires_at = time.time() + token_data.get("expires_in", 3600)
+            
+            return self._access_token
+
+    async def _build_headers(self) -> dict[str, str]:
+        """Build headers for Azure OpenAI API with api-key or OAuth Bearer token."""
+        headers = {
             "Content-Type": "application/json",
-            "api-key": self.api_key,  # Azure OpenAI uses api-key header, not Authorization
             "x-session-affinity": uuid.uuid4().hex,  # For cache locality
         }
+        
+        if self.use_entra_auth:
+            # Use OAuth Bearer token
+            access_token = await self._get_access_token()
+            headers["Authorization"] = f"Bearer {access_token}"
+        else:
+            # Use api-key header
+            headers["api-key"] = self.api_key
+        
+        return headers
 
     @staticmethod
     def _supports_temperature(
@@ -137,7 +204,7 @@ class AzureOpenAIProvider(LLMProvider):
         """
         deployment_name = model or self.default_model
         url = self._build_chat_url(deployment_name)
-        headers = self._build_headers()
+        headers = await self._build_headers()
         payload = self._prepare_request_payload(
             deployment_name, messages, tools, max_tokens, temperature, reasoning_effort,
             tool_choice=tool_choice,
