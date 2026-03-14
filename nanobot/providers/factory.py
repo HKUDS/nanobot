@@ -1,0 +1,72 @@
+"""Shared LLM provider construction and validation."""
+
+from __future__ import annotations
+
+from nanobot.config.schema import Config
+
+
+class ProviderConfigurationError(ValueError):
+    """Raised when the configured provider cannot be constructed safely."""
+
+
+def create_provider(config: Config):
+    """Create the active LLM provider from config or raise ProviderConfigurationError."""
+    from nanobot.providers.base import GenerationSettings
+    from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
+    from nanobot.providers.custom_provider import CustomProvider
+    from nanobot.providers.litellm_provider import LiteLLMProvider
+    from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+    from nanobot.providers.registry import find_by_name
+
+    model = config.agents.defaults.model
+    provider_name = config.get_provider_name(model)
+    provider_config = config.get_provider(model)
+
+    if provider_name == "openai_codex" or model.startswith("openai-codex/"):
+        provider = OpenAICodexProvider(default_model=model)
+    elif provider_name == "custom":
+        if not provider_config or not provider_config.api_base:
+            raise ProviderConfigurationError("`providers.custom.apiBase` is missing.")
+        if not provider_config.api_key:
+            raise ProviderConfigurationError("`providers.custom.apiKey` is missing.")
+        provider = CustomProvider(
+            api_key=provider_config.api_key,
+            api_base=config.get_api_base(model) or provider_config.api_base,
+            default_model=model,
+        )
+    elif provider_name == "azure_openai":
+        if not provider_config or not provider_config.api_key:
+            raise ProviderConfigurationError("`providers.azure_openai.apiKey` is missing.")
+        if not provider_config.api_base:
+            raise ProviderConfigurationError("`providers.azure_openai.apiBase` is missing.")
+        provider = AzureOpenAIProvider(
+            api_key=provider_config.api_key,
+            api_base=provider_config.api_base,
+            default_model=model,
+        )
+    else:
+        spec = find_by_name(provider_name) if provider_name else None
+        if not spec:
+            raise ProviderConfigurationError(
+                f"Unknown provider `{provider_name or 'auto'}` for model `{model}`."
+            )
+        if not model.startswith("bedrock/") and not spec.is_local and not spec.is_oauth:
+            if not provider_config or not provider_config.api_key:
+                raise ProviderConfigurationError(
+                    f"`providers.{spec.name}.apiKey` is missing."
+                )
+        provider = LiteLLMProvider(
+            api_key=provider_config.api_key if provider_config else None,
+            api_base=config.get_api_base(model),
+            default_model=model,
+            extra_headers=provider_config.extra_headers if provider_config else None,
+            provider_name=provider_name,
+        )
+
+    defaults = config.agents.defaults
+    provider.generation = GenerationSettings(
+        temperature=defaults.temperature,
+        max_tokens=defaults.max_tokens,
+        reasoning_effort=defaults.reasoning_effort,
+    )
+    return provider

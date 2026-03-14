@@ -212,6 +212,29 @@ nanobot agent
 
 That's it! You have a working AI assistant in 2 minutes.
 
+## /model Command
+
+Inside chat channels and `nanobot agent`, `/model` now reads the active config file and manages model selection through:
+
+- `agents.defaults.provider`
+- `agents.defaults.model`
+
+Examples:
+
+```text
+/model
+/model openai gpt-4o
+/model openai/gpt-4o
+/model ollama llama3.2
+```
+
+Behavior:
+
+- `/model` shows the current config path, current provider/model, and all switchable model options for providers that are actually usable from the current config
+- It only shows providers that are already usable, for example providers with API keys or local providers with `apiBase`
+- Saving a change updates `~/.nanobot/config.json` (or the active `--config` file) directly
+- v1 behavior is config-write only: restart nanobot after changing `/model`
+
 ## 💬 Chat Apps
 
 Connect nanobot to your favorite chat platform.

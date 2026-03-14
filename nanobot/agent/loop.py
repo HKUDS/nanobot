@@ -393,12 +393,21 @@ class AgentLoop:
             lines = [
                 "🐈 nanobot commands:",
                 "/new — Start a new conversation",
+                "/model — Show or change the configured model",
                 "/stop — Stop the current task",
                 "/restart — Restart the bot",
                 "/help — Show available commands",
             ]
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
+            )
+        if cmd == "/model" or cmd.startswith("/model "):
+            from nanobot.model_management import handle_model_command
+
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=handle_model_command(msg.content),
             )
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
