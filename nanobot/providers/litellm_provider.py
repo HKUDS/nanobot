@@ -249,6 +249,11 @@ class LiteLLMProvider(LLMProvider):
             "temperature": temperature,
         }
 
+        # LiteLLM strips the `openrouter/` prefix unless the provider is
+        # passed explicitly, which breaks native OpenRouter model IDs.
+        if self._gateway and self._gateway.name == "openrouter":
+            kwargs["custom_llm_provider"] = "openrouter"
+
         # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
         self._apply_model_overrides(model, kwargs)
 
