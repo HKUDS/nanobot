@@ -3,7 +3,8 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+import os
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -28,6 +29,13 @@ class TelegramConfig(Base):
 
     enabled: bool = False
     token: str = ""  # Bot token from @BotFather
+
+    @model_validator(mode="after")
+    def _load_from_env(self) -> "TelegramConfig":
+        if not self.token:
+            self.token = os.getenv("TELEGRAM_TOKEN", "")
+        return self
+
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
     proxy: str | None = (
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
@@ -65,6 +73,13 @@ class DiscordConfig(Base):
 
     enabled: bool = False
     token: str = ""  # Bot token from Discord Developer Portal
+
+    @model_validator(mode="after")
+    def _load_from_env(self) -> "DiscordConfig":
+        if not self.token:
+            self.token = os.getenv("DISCORD_TOKEN", "")
+        return self
+
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377  # GUILDS + GUILD_MESSAGES + DIRECT_MESSAGES + MESSAGE_CONTENT
@@ -181,6 +196,15 @@ class SlackConfig(Base):
     webhook_path: str = "/slack/events"
     bot_token: str = ""  # xoxb-...
     app_token: str = ""  # xapp-...
+
+    @model_validator(mode="after")
+    def _load_from_env(self) -> "SlackConfig":
+        if not self.bot_token:
+            self.bot_token = os.getenv("SLACK_BOT_TOKEN", "")
+        if not self.app_token:
+            self.app_token = os.getenv("SLACK_APP_TOKEN", "")
+        return self
+
     user_token_read_only: bool = True
     reply_in_thread: bool = True
     react_emoji: str = "eyes"
@@ -268,6 +292,17 @@ class ProviderConfig(Base):
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
+    @model_validator(mode="after")
+    def _load_from_env(self) -> "ProvidersConfig":
+        from nanobot.providers.registry import PROVIDERS
+
+        for spec in PROVIDERS:
+            if not spec.env_key:
+                continue
+            p = getattr(self, spec.name, None)
+            if p and not p.api_key:
+                p.api_key = os.getenv(spec.env_key, "")
+        return self
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
