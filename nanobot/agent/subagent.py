@@ -91,16 +91,22 @@ class SubagentManager:
         try:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
-            allowed_dir = self.workspace if self.restrict_to_workspace else None
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            allowed_dirs = None
+            if self.restrict_to_workspace:
+                allowed_dirs = [
+                    self.workspace.resolve(),
+                    *[Path(p).expanduser().resolve() for p in self.exec_config.allowed_paths],
+                ]
+            tools.register(ReadFileTool(workspace=self.workspace, allowed_dirs=allowed_dirs))
+            tools.register(WriteFileTool(workspace=self.workspace, allowed_dirs=allowed_dirs))
+            tools.register(EditFileTool(workspace=self.workspace, allowed_dirs=allowed_dirs))
+            tools.register(ListDirTool(workspace=self.workspace, allowed_dirs=allowed_dirs))
             tools.register(ExecTool(
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
                 path_append=self.exec_config.path_append,
+                allowed_paths=self.exec_config.allowed_paths,
             ))
             tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
             tools.register(WebFetchTool(proxy=self.web_proxy))

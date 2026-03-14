@@ -7,31 +7,53 @@ from typing import Any
 from nanobot.agent.tools.base import Tool
 
 
+def _is_allowed_path(resolved: Path, allowed_dirs: list[Path] | None = None) -> bool:
+    """Return True if resolved is inside at least one allowed directory."""
+    if not allowed_dirs:
+        return True
+
+    for allowed_dir in allowed_dirs:
+        try:
+            resolved.relative_to(allowed_dir.resolve())
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _format_allowed_dirs(allowed_dirs: list[Path] | None = None) -> str:
+    """Format allowlisted directories for user-facing error messages."""
+    if not allowed_dirs:
+        return ""
+    return ", ".join(str(p) for p in allowed_dirs)
+
+
 def _resolve_path(
-    path: str, workspace: Path | None = None, allowed_dir: Path | None = None
+    path: str,
+    workspace: Path | None = None,
+    allowed_dirs: list[Path] | None = None,
 ) -> Path:
     """Resolve path against workspace (if relative) and enforce directory restriction."""
     p = Path(path).expanduser()
     if not p.is_absolute() and workspace:
         p = workspace / p
     resolved = p.resolve()
-    if allowed_dir:
-        try:
-            resolved.relative_to(allowed_dir.resolve())
-        except ValueError:
-            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
+    if not _is_allowed_path(resolved, allowed_dirs):
+        raise PermissionError(
+            f"Path {path} is outside allowed directories: {_format_allowed_dirs(allowed_dirs)}"
+        )
     return resolved
 
 
 class _FsTool(Tool):
     """Shared base for filesystem tools — common init and path resolution."""
 
-    def __init__(self, workspace: Path | None = None, allowed_dir: Path | None = None):
+    def __init__(self, workspace: Path | None = None, allowed_dirs: list[Path] | None = None):
         self._workspace = workspace
-        self._allowed_dir = allowed_dir
+        self._allowed_dirs = allowed_dirs
 
     def _resolve(self, path: str) -> Path:
-        return _resolve_path(path, self._workspace, self._allowed_dir)
+        return _resolve_path(path, self._workspace, self._allowed_dirs)
 
 
 # ---------------------------------------------------------------------------

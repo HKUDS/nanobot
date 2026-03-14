@@ -20,6 +20,7 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
+        allowed_paths: list[str] | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -37,6 +38,7 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+        self.allowed_paths = allowed_paths or []
 
     @property
     def name(self) -> str:
@@ -141,6 +143,14 @@ class ExecTool(Tool):
         except Exception as e:
             return f"Error executing command: {str(e)}"
 
+    def _is_allowed_absolute_path(self, path: Path, cwd_path: Path) -> bool:
+        """Return True if an absolute path is allowed under cwd or configured extras."""
+        allowed_roots = [cwd_path, *[Path(p).expanduser().resolve() for p in self.allowed_paths]]
+        for root in allowed_roots:
+            if path == root or root in path.parents:
+                return True
+        return False
+
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
@@ -166,8 +176,8 @@ class ExecTool(Tool):
                     p = Path(expanded).expanduser().resolve()
                 except Exception:
                     continue
-                if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
-                    return "Error: Command blocked by safety guard (path outside working dir)"
+                if p.is_absolute() and not self._is_allowed_absolute_path(p, cwd_path):
+                    return "Error: Command blocked by safety guard (path outside allowed directories)"
 
         return None
 

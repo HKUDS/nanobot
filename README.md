@@ -1122,8 +1122,25 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | Option | Default | Description |
 |--------|---------|-------------|
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
+| `tools.exec.allowedPaths` | `[]` | Extra absolute paths allowed when `tools.restrictToWorkspace` is `true`. Useful for narrowly scoped exceptions such as `/etc/rancher/k3s` or `~/.config/systemd/user`. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
+
+Example:
+
+```json
+{
+  "tools": {
+    "restrictToWorkspace": true,
+    "exec": {
+      "allowedPaths": [
+        "/home/ubuntu/.config/systemd/user",
+        "/etc/rancher/k3s"
+      ]
+    }
+  }
+}
+```
 
 
 ## 🧩 Multiple Instances
