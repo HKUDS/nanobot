@@ -30,12 +30,6 @@ class TelegramConfig(Base):
     enabled: bool = False
     token: str = ""  # Bot token from @BotFather
 
-    @model_validator(mode="after")
-    def _load_from_env(self) -> "TelegramConfig":
-        if not self.token:
-            self.token = os.getenv("TELEGRAM_TOKEN", "")
-        return self
-
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
     proxy: str | None = (
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
@@ -73,12 +67,6 @@ class DiscordConfig(Base):
 
     enabled: bool = False
     token: str = ""  # Bot token from Discord Developer Portal
-
-    @model_validator(mode="after")
-    def _load_from_env(self) -> "DiscordConfig":
-        if not self.token:
-            self.token = os.getenv("DISCORD_TOKEN", "")
-        return self
 
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
@@ -197,14 +185,6 @@ class SlackConfig(Base):
     bot_token: str = ""  # xoxb-...
     app_token: str = ""  # xapp-...
 
-    @model_validator(mode="after")
-    def _load_from_env(self) -> "SlackConfig":
-        if not self.bot_token:
-            self.bot_token = os.getenv("SLACK_BOT_TOKEN", "")
-        if not self.app_token:
-            self.app_token = os.getenv("SLACK_APP_TOKEN", "")
-        return self
-
     user_token_read_only: bool = True
     reply_in_thread: bool = True
     react_emoji: str = "eyes"
@@ -291,18 +271,6 @@ class ProviderConfig(Base):
 
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
-
-    @model_validator(mode="after")
-    def _load_from_env(self) -> "ProvidersConfig":
-        from nanobot.providers.registry import PROVIDERS
-
-        for spec in PROVIDERS:
-            if not spec.env_key:
-                continue
-            p = getattr(self, spec.name, None)
-            if p and not p.api_key:
-                p.api_key = os.getenv(spec.env_key, "")
-        return self
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -389,6 +357,30 @@ class ToolsConfig(Base):
 
 
 class Config(BaseSettings):
+
+    @model_validator(mode="after")
+    def _load_env_fallbacks(self) -> "Config":
+        """Load standard environment variables as fallbacks if not configured."""
+        # 1. Channels
+        if not self.channels.telegram.token:
+            self.channels.telegram.token = os.getenv("TELEGRAM_TOKEN", "")
+        if not self.channels.discord.token:
+            self.channels.discord.token = os.getenv("DISCORD_TOKEN", "")
+        if not self.channels.slack.bot_token:
+            self.channels.slack.bot_token = os.getenv("SLACK_BOT_TOKEN", "")
+        if not self.channels.slack.app_token:
+            self.channels.slack.app_token = os.getenv("SLACK_APP_TOKEN", "")
+
+        # 2. Providers
+        from nanobot.providers.registry import PROVIDERS
+        for spec in PROVIDERS:
+            if not spec.env_key:
+                continue
+            p = getattr(self.providers, spec.name, None)
+            if p and not p.api_key:
+                p.api_key = os.getenv(spec.env_key, "")
+
+        return self
     """Root configuration for nanobot."""
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
