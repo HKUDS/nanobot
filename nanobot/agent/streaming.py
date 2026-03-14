@@ -90,6 +90,7 @@ class StreamingLLMCaller:
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
+                metadata={"generation_name": "chat_completion"},
             )
             latency_ms = (time.monotonic() - t0) * 1000
             bind_trace().debug(
@@ -117,6 +118,7 @@ class StreamingLLMCaller:
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            metadata={"generation_name": "chat_completion"},
         ):
             if chunk.content_delta:
                 content_parts.append(chunk.content_delta)

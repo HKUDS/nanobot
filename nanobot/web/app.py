@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,19 +12,26 @@ from fastapi.staticfiles import StaticFiles
 
 from nanobot.web.routes import router
 
+if TYPE_CHECKING:
+    from nanobot.channels.web import WebChannel
+
 
 def create_app(
     agent_loop: Any,
     session_manager: Any,
+    web_channel: WebChannel,
     *,
     static_dir: Path | None = None,
+    uploads_dir: Path | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
     Args:
         agent_loop: An initialized AgentLoop instance.
         session_manager: An initialized SessionManager instance.
+        web_channel: The WebChannel bridging HTTP to the message bus.
         static_dir: Optional path to built frontend static files to serve.
+        uploads_dir: Directory for saving uploaded file attachments.
     """
 
     @asynccontextmanager
@@ -46,6 +53,12 @@ def create_app(
     # Store references accessible from routes via request.app.state
     app.state.agent_loop = agent_loop
     app.state.session_manager = session_manager
+    app.state.web_channel = web_channel
+
+    # Uploads directory for file attachments
+    _uploads = uploads_dir or Path.home() / ".nanobot" / "workspace" / "uploads"
+    _uploads.mkdir(parents=True, exist_ok=True)
+    app.state.uploads_dir = _uploads
 
     # CORS for local development (React dev server on :5173)
     app.add_middleware(

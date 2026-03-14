@@ -59,11 +59,40 @@ def mock_session_manager():
 
 
 @pytest.fixture()
-def app(mock_agent_loop, mock_session_manager):
+def mock_web_channel():
+    """Create a mock WebChannel that streams a canned response."""
+    import asyncio
+
+    from nanobot.bus.events import OutboundMessage
+
+    channel = MagicMock()
+    channel.name = "web"
+
+    def fake_register_stream(chat_id):
+        q: asyncio.Queue[OutboundMessage | None] = asyncio.Queue()
+        # Pre-fill with a final response so the stream terminates
+        q.put_nowait(
+            OutboundMessage(
+                channel="web",
+                chat_id=chat_id,
+                content="Hello world!",
+                metadata={},
+            )
+        )
+        return q
+
+    channel.register_stream = MagicMock(side_effect=fake_register_stream)
+    channel.unregister_stream = MagicMock()
+    channel.publish_user_message = AsyncMock()
+    return channel
+
+
+@pytest.fixture()
+def app(mock_agent_loop, mock_session_manager, mock_web_channel):
     """Create a test FastAPI app."""
     from nanobot.web.app import create_app
 
-    return create_app(mock_agent_loop, mock_session_manager)
+    return create_app(mock_agent_loop, mock_session_manager, mock_web_channel)
 
 
 @pytest.fixture()
@@ -256,11 +285,11 @@ class TestModels:
 class TestAppFactory:
     """Tests for the FastAPI app factory."""
 
-    def test_create_app_no_static(self, mock_agent_loop, mock_session_manager):
+    def test_create_app_no_static(self, mock_agent_loop, mock_session_manager, mock_web_channel):
         """Should create app without static directory."""
         from nanobot.web.app import create_app
 
-        app = create_app(mock_agent_loop, mock_session_manager)
+        app = create_app(mock_agent_loop, mock_session_manager, mock_web_channel)
         assert app is not None
         assert app.title == "Nanobot Web UI"
 

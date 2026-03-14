@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from nanobot.agent.observability import score_current_trace
 from nanobot.agent.observability import span as langfuse_span
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.streaming import strip_think
@@ -96,6 +97,13 @@ class AnswerVerifier:
                 parsed = json.loads(raw)
                 confidence = int(parsed.get("confidence", 5))
                 issues = parsed.get("issues", [])
+
+                # Report verification confidence as a Langfuse score.
+                score_current_trace(
+                    name="verification_confidence",
+                    value=confidence,
+                    comment="; ".join(issues) if issues else "passed",
+                )
 
                 if confidence >= 3 and not issues:
                     logger.debug("Verification passed (confidence={})", confidence)

@@ -1,6 +1,11 @@
 import { useState, type FC } from "react";
 import { MenuIcon, PanelLeftIcon } from "lucide-react";
-import { AssistantRuntimeProvider } from "@assistant-ui/react";
+import {
+  AssistantRuntimeProvider,
+  CompositeAttachmentAdapter,
+  SimpleImageAttachmentAdapter,
+  SimpleTextAttachmentAdapter,
+} from "@assistant-ui/react";
 import { useDataStreamRuntime } from "@assistant-ui/react-data-stream";
 import { Thread } from "@/components/thread";
 import { ThreadList } from "@/components/thread-list";
@@ -13,7 +18,7 @@ const Logo: FC = () => {
   return (
     <div className="flex items-center gap-2 px-2 font-medium text-sm">
       <span className="text-xl">🤖</span>
-      <span className="text-foreground/90">Nanobot</span>
+      <span className="text-foreground/90">LangostIA</span>
     </div>
   );
 };
@@ -86,6 +91,12 @@ export default function App() {
   const runtime = useDataStreamRuntime({
     api: "/api/chat",
     protocol: "data-stream",
+    adapters: {
+      attachments: new CompositeAttachmentAdapter([
+        new SimpleImageAttachmentAdapter(),
+        new SimpleTextAttachmentAdapter(),
+      ]),
+    },
   });
 
   return (

@@ -47,19 +47,73 @@ def init_langfuse(config: LangfuseConfig) -> None:
         return
 
     try:
+        import atexit
+        import os as _os
+
         from langfuse import Langfuse
+
+        from nanobot import __version__
+
+        # Set OTEL service name before Langfuse creates the TracerProvider
+        _os.environ.setdefault("OTEL_SERVICE_NAME", "nanobot")
 
         _client = Langfuse(
             public_key=config.public_key,
             secret_key=config.secret_key,
             host=config.host,
+            environment=config.environment,
+            release=__version__,
+            sample_rate=config.sample_rate,
+            debug=config.debug,
         )
         _enabled = True
+
+        # Safety net: ensure pending spans are flushed even on ungraceful exit.
+        atexit.register(shutdown)
+
+        # Verify credentials early so misconfiguration is visible at startup.
+        try:
+            if not _client.auth_check():
+                logger.warning(
+                    "Langfuse auth_check failed — traces may not be exported. "
+                    "Check public_key / secret_key / host."
+                )
+        except Exception:  # crash-barrier: auth check is best-effort
+            logger.opt(exception=True).debug("Langfuse auth_check raised")
+
         logger.info("Langfuse observability initialized (host={})", config.host)
 
-        # Langfuse v4 auto-instruments litellm via its OTEL TracerProvider —
-        # do NOT also register litellm's own "otel" callback, as that creates
-        # duplicate traces (litellm_request + raw_gen_ai_request).
+        # Enable litellm OTEL callback so LLM calls emit spans through the
+        # global TracerProvider that Langfuse v4 just configured.  The
+        # LangfuseSpanProcessor recognises litellm's instrumentation scope
+        # and maps the spans to GENERATION observations nested under the
+        # active trace_request context.
+        try:
+            import litellm as _litellm
+
+            if "otel" not in _litellm.success_callback:
+                _litellm.success_callback.append("otel")
+            if "otel" not in _litellm.failure_callback:
+                _litellm.failure_callback.append("otel")
+            # Force litellm to create its own litellm_request span rather than
+            # writing gen_ai attributes onto the parent span — this prevents
+            # the root "request" observation from being reclassified as a
+            # GENERATION and avoids duplicated input/output/cost data.
+            _os.environ.setdefault("USE_OTEL_LITELLM_REQUEST_SPAN", "true")
+            # Suppress the raw_gen_ai_request sub-span that litellm creates
+            # under each litellm_request.  Without this, every LLM call
+            # produces two GENERATIONs with identical usage/cost, causing
+            # Langfuse to double-count costs.
+            #
+            # We monkey-patch _maybe_log_raw_request instead of setting
+            # turn_off_message_logging=True because that flag also suppresses
+            # input/output attributes on the primary litellm_request span
+            # (both are gated by the same check in set_attributes line ~175).
+            from litellm.integrations.opentelemetry import OpenTelemetry as _OtelCls
+
+            _OtelCls._maybe_log_raw_request = lambda self, *a, **kw: None  # type: ignore[assignment]
+        except Exception:  # crash-barrier: litellm import/config is optional
+            logger.opt(exception=True).debug("Could not enable litellm OTEL callback")
 
         # Suppress benign warnings from litellm/langfuse loggers.
         try:
@@ -80,6 +134,16 @@ def init_langfuse(config: LangfuseConfig) -> None:
                     return "No active span in current context" not in record.getMessage()
 
             logging.getLogger("langfuse").addFilter(_SpanCtxFilter())
+
+            # OTEL SDK warns when litellm's async callback sets attributes on
+            # a span that has already been ended.  These are harmless in
+            # production (the attributes are simply ignored).
+            class _EndedSpanFilter(logging.Filter):
+                def filter(self, record: logging.LogRecord) -> bool:
+                    msg = record.getMessage()
+                    return "ended span" not in msg and "set_status on an ended span" not in msg
+
+            logging.getLogger("opentelemetry.sdk.trace").addFilter(_EndedSpanFilter())
         except Exception:  # crash-barrier: filter setup is optional
             pass
 
@@ -245,6 +309,9 @@ async def trace_request(
     name: str = "request",
     input: Any | None = None,
     metadata: dict[str, Any] | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    tags: list[str] | None = None,
 ) -> AsyncIterator[Any]:
     """Create a top-level langfuse observation wrapping an entire request.
 
@@ -258,13 +325,28 @@ async def trace_request(
         return
 
     try:
-        async with _client.start_as_current_observation(
+        from langfuse import propagate_attributes as _propagate
+
+        with _client.start_as_current_observation(
             name=name,
             as_type="span",
             input=input,
             metadata=metadata,
         ) as obs:
-            yield obs
+            # propagate_attributes must be called INSIDE start_as_current_observation
+            # so the root span is already "current" — this sets userId/sessionId
+            # on the root AND propagates them to all child spans.
+            with (
+                _propagate(
+                    session_id=session_id,
+                    user_id=user_id,
+                    trace_name=name,
+                    tags=tags or [],
+                )
+                if (session_id or user_id)
+                else contextlib.nullcontext()
+            ):
+                yield obs
     except Exception:  # crash-barrier: tracing must never break the agent
         logger.opt(exception=True).debug("Langfuse trace_request failed")
         yield None
@@ -287,7 +369,7 @@ async def tool_span(
         return
 
     try:
-        async with _client.start_as_current_observation(
+        with _client.start_as_current_observation(
             name=f"tool:{name}",
             as_type="tool",
             input=input,
@@ -316,7 +398,7 @@ async def span(
         return
 
     try:
-        async with _client.start_as_current_observation(
+        with _client.start_as_current_observation(
             name=name,
             as_type="span",
             input=input,

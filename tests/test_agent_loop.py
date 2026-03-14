@@ -49,6 +49,7 @@ class ScriptedProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        metadata: dict[str, Any] | None = None,
     ) -> LLMResponse:
         self.call_log.append(
             {

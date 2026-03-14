@@ -555,7 +555,7 @@ class DelegationDispatcher:
                 metadata={
                     "target_role": role.name,
                     "from_role": from_role,
-                    "depth": depth,
+                    "depth": str(depth),
                 },
             ):
                 result, used_tools = await self.execute_delegated_agent(role, task, context)

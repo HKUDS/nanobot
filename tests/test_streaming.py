@@ -20,14 +20,18 @@ class FakeStreamProvider(LLMProvider):
         self._chat_calls = 0
         self._stream_calls = 0
 
-    async def chat(self, messages, tools=None, model=None, max_tokens=4096, temperature=0.7):
+    async def chat(
+        self, messages, tools=None, model=None, max_tokens=4096, temperature=0.7, metadata=None
+    ):
         self._chat_calls += 1
         return LLMResponse(content="non-streaming fallback", finish_reason="stop")
 
     def get_default_model(self):
         return "fake-model"
 
-    async def stream_chat(self, messages, tools=None, model=None, max_tokens=4096, temperature=0.7):
+    async def stream_chat(
+        self, messages, tools=None, model=None, max_tokens=4096, temperature=0.7, metadata=None
+    ):
         self._stream_calls += 1
         for chunk in self._chunks:
             yield chunk
@@ -71,7 +75,13 @@ class TestBaseProviderStreamFallback:
     async def test_fallback_yields_single_chunk(self):
         class SimpleProvider(LLMProvider):
             async def chat(
-                self, messages, tools=None, model=None, max_tokens=4096, temperature=0.7
+                self,
+                messages,
+                tools=None,
+                model=None,
+                max_tokens=4096,
+                temperature=0.7,
+                metadata=None,
             ):
                 return LLMResponse(
                     content="hello world", finish_reason="stop", usage={"total_tokens": 5}

@@ -245,7 +245,7 @@ async def summarize_and_compress(
         try:
             async with langfuse_span(
                 name="compress",
-                metadata={"middle_msgs": len(middle), "model": model},
+                metadata={"middle_msgs": str(len(middle)), "model": model},
             ):
                 resp = await provider.chat(
                     messages=[

@@ -46,6 +46,7 @@ class FakeProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        metadata: dict[str, Any] | None = None,
     ) -> LLMResponse:
         return LLMResponse(content=self._text)
 
@@ -381,6 +382,7 @@ class ScriptedProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        metadata: dict[str, Any] | None = None,
     ) -> LLMResponse:
         self.call_log.append({"model": model, "temperature": temperature})
         if self._index >= len(self._responses):

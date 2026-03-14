@@ -163,7 +163,7 @@ class Coordinator:
             name="classify",
             input=message[:200],
             metadata={"model": model},
-        ):
+        ) as classify_obs:
             try:
                 response = await self._provider.chat(
                     messages=[
@@ -174,6 +174,7 @@ class Coordinator:
                     model=model,
                     temperature=0.0,
                     max_tokens=128,
+                    metadata={"generation_name": "classify"},
                 )
                 raw = (response.content or "").strip()
                 parsed_role, confidence, needs_orchestration, relevant_roles = self._parse_response(
@@ -205,6 +206,11 @@ class Coordinator:
                     latency_ms,
                     raw,
                 )
+                if classify_obs is not None:
+                    try:
+                        classify_obs.update(output=raw[:200])
+                    except Exception:  # crash-barrier: tracing is optional
+                        pass
                 return role_name, confidence
             except Exception:  # crash-barrier: LLM-based classification
                 logger.warning("Coordinator classification failed, using default role")

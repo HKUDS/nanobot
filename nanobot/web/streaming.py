@@ -1,15 +1,17 @@
 """SSE streaming adapter for the Vercel AI SDK Data Stream Protocol.
 
-Converts AgentLoop.process_direct() on_progress callbacks into SSE events
-that assistant-ui can consume natively.
+Consumes ``OutboundMessage`` events from the ``WebChannel`` per-request
+queue and translates them into SSE events that ``@assistant-ui/react``
+can consume natively.
+
+The agent loop publishes messages to the bus — the WebChannel dispatcher
+routes them to the SSE queue registered for this request.
 
 Protocol reference (Vercel AI SDK Data Stream):
-    0:"text"              — text token
-    2:[{"toolCallId":...}] — tool call streaming start
+    0:"text"              — text delta
     9:{"toolCallId":...,"toolName":...,"args":{}}  — tool call
     a:{"toolCallId":...,"result":"..."}             — tool result
-    e:{"finishReason":"stop","usage":{}}            — finish
-    d:{"finishReason":"stop","usage":{}}            — done (alternative)
+    d:{"finishReason":"stop","usage":{}}            — done
 """
 
 from __future__ import annotations
@@ -19,9 +21,13 @@ import json
 import re
 import uuid
 from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from nanobot.channels.web import WebChannel
 
 # ---------------------------------------------------------------------------
-# Tool hint parser
+# Tool hint parser  (agent publishes "🔧 Calling `tool_name` …" progress)
 # ---------------------------------------------------------------------------
 
 _TOOL_HINT_PATTERN = re.compile(
@@ -29,14 +35,8 @@ _TOOL_HINT_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-_TOOL_RESULT_PATTERN = re.compile(
-    r"✅\s*(?:Result|Done|Completed)\s*(?:from\s+`?(\w+)`?)?\s*:?\s*(.*)",
-    re.IGNORECASE | re.DOTALL,
-)
-
 
 def _parse_tool_hint(text: str) -> dict | None:
-    """Try to parse a tool hint from on_progress output."""
     m = _TOOL_HINT_PATTERN.search(text)
     if m:
         return {"tool_name": m.group(1), "args_hint": m.group(2) or ""}
@@ -49,96 +49,104 @@ def _parse_tool_hint(text: str) -> dict | None:
 
 
 async def stream_agent_response(
-    agent_loop,  # AgentLoop instance
+    web_channel: WebChannel,
+    chat_id: str,
     content: str,
-    session_key: str,
+    *,
+    media: list[str] | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Run agent and yield SSE-formatted events in Vercel AI SDK Data Stream Protocol.
+    """Publish a user message and stream agent responses as Data Stream events.
 
-    Each yielded string is a complete SSE ``data:`` line (without the ``data: `` prefix,
-    that is added by sse-starlette).
+    1. Register an SSE queue on the WebChannel for *chat_id*.
+    2. Publish the user message to the bus via WebChannel.
+    3. Consume ``OutboundMessage`` events from the queue, translating them to
+       the Vercel AI SDK Data Stream Protocol.
+    4. Terminate when a non-progress final response arrives.
     """
-    text_queue: asyncio.Queue[str | None] = asyncio.Queue()
-    tool_calls_active: dict[str, str] = {}  # toolCallId -> toolName
-    streamed_text_len = 0  # track how much text we've already emitted
-
-    async def on_progress(
-        content: str, *, tool_hint: bool = False, streaming: bool = False
-    ) -> None:
-        """Callback invoked by AgentLoop during processing."""
-        nonlocal streamed_text_len
-        if tool_hint:
-            # Try to parse as tool invocation hint
-            parsed = _parse_tool_hint(content)
-            if parsed:
-                call_id = f"call_{uuid.uuid4().hex[:12]}"
-                tool_calls_active[call_id] = parsed["tool_name"]
-                # Emit tool call start event (type 9)
-                event = {
-                    "toolCallId": call_id,
-                    "toolName": parsed["tool_name"],
-                    "args": {},
-                }
-                await text_queue.put(f"9:{json.dumps(event)}\n")
-            else:
-                # Unknown tool hint format — emit as text
-                await text_queue.put(f'0:"{_escape_text(content)}"\n')
-        else:
-            # Regular text content — emit only the new delta
-            if content and len(content) > streamed_text_len:
-                delta = content[streamed_text_len:]
-                streamed_text_len = len(content)
-                await text_queue.put(f'0:"{_escape_text(delta)}"\n')
-
-    async def _run_agent():
-        """Run the agent and signal completion."""
-        nonlocal streamed_text_len
-        try:
-            result = await agent_loop.process_direct(
-                content,
-                session_key=session_key,
-                channel="web",
-                chat_id=session_key.split(":", 1)[-1] if ":" in session_key else "default",
-                on_progress=on_progress,
-            )
-            # Emit final result only if nothing was streamed via on_progress
-            if result and streamed_text_len == 0:
-                await text_queue.put(f'0:"{_escape_text(result)}"\n')
-        finally:
-            await text_queue.put(None)  # Signal completion
-
-    # Start agent processing in background
-    task = asyncio.create_task(_run_agent())
+    queue = web_channel.register_stream(chat_id)
+    tool_calls_active: dict[str, str] = {}
 
     try:
-        while True:
-            event = await text_queue.get()
-            if event is None:
-                break
-            yield event
+        # Publish user message → bus → agent
+        await web_channel.publish_user_message(
+            chat_id,
+            content,
+            media=media,
+            metadata=metadata,
+        )
 
-        # Emit tool results for any active calls (mark as completed)
-        for call_id, tool_name in tool_calls_active.items():
-            result_event = {
-                "toolCallId": call_id,
-                "result": "completed",
-            }
+        # Consume outbound messages until complete
+        streamed_text_len = 0
+        last_msg = None
+        while True:
+            try:
+                msg = await asyncio.wait_for(queue.get(), timeout=300)
+            except asyncio.TimeoutError:
+                # Safety: don't hang forever if agent stalls
+                yield f'0:"{_escape_text("[timeout — no response from agent]")}"\n'
+                break
+
+            if msg is None:
+                break
+
+            meta = msg.metadata or {}
+            is_progress = meta.get("_progress", False)
+            is_tool_hint = meta.get("_tool_hint", False)
+            is_streaming = meta.get("_streaming", False)
+
+            text = msg.content or ""
+
+            if is_tool_hint and text:
+                parsed = _parse_tool_hint(text)
+                if parsed:
+                    call_id = f"call_{uuid.uuid4().hex[:12]}"
+                    tool_calls_active[call_id] = parsed["tool_name"]
+                    event = {
+                        "toolCallId": call_id,
+                        "toolName": parsed["tool_name"],
+                        "args": {},
+                    }
+                    yield f"9:{json.dumps(event)}\n"
+                else:
+                    yield f'0:"{_escape_text(text)}"\n'
+
+            elif is_streaming and text:
+                # Streaming delta — agent sends cumulative text; emit only new part
+                if len(text) > streamed_text_len:
+                    delta = text[streamed_text_len:]
+                    streamed_text_len = len(text)
+                    yield f'0:"{_escape_text(delta)}"\n'
+
+            elif is_progress and text:
+                # Generic progress text — emit as text delta
+                yield f'0:"{_escape_text(text)}"\n'
+
+            elif not is_progress:
+                # Final response from agent
+                last_msg = msg
+                if text:
+                    yield f'0:"{_escape_text(text)}"\n'
+                break
+
+        # Close any open tool calls
+        for call_id in tool_calls_active:
+            result_event = {"toolCallId": call_id, "result": "completed"}
             yield f"a:{json.dumps(result_event)}\n"
 
-        # Emit finish event
-        finish = {"finishReason": "stop", "usage": {"promptTokens": 0, "completionTokens": 0}}
+        # Finish event — surface token usage from the agent's response metadata
+        usage_meta = (last_msg.metadata or {}).get("usage", {}) if last_msg else {}
+        finish = {
+            "finishReason": "stop",
+            "usage": {
+                "promptTokens": usage_meta.get("prompt_tokens", 0),
+                "completionTokens": usage_meta.get("completion_tokens", 0),
+            },
+        }
         yield f"d:{json.dumps(finish)}\n"
 
-    except asyncio.CancelledError:
-        task.cancel()
-        raise
     finally:
-        if not task.done():
-            task.cancel()
-            try:
-                await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
+        web_channel.unregister_stream(chat_id)
 
 
 def _escape_text(text: str) -> str:

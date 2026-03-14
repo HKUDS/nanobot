@@ -414,6 +414,7 @@ def gateway(
 
     # Initialize langfuse observability (auto-instruments litellm via OTEL)
     from nanobot.agent.observability import init_langfuse
+    from nanobot.agent.observability import shutdown as shutdown_langfuse
 
     init_langfuse(config.langfuse)
 
@@ -551,6 +552,7 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            shutdown_langfuse()
 
     asyncio.run(run())
 
@@ -577,7 +579,10 @@ def ui(
         raise typer.Exit(1)
 
     from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.observability import init_langfuse
+    from nanobot.agent.observability import shutdown as shutdown_langfuse
     from nanobot.bus.queue import MessageBus
+    from nanobot.channels.web import WebChannel
     from nanobot.config.loader import get_data_dir, load_config
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
@@ -591,6 +596,10 @@ def ui(
     console.print(f"{__logo__} Starting nanobot web UI on http://{host}:{port}")
 
     config = load_config()
+
+    # Observability
+    init_langfuse(config.langfuse)
+
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
@@ -611,12 +620,15 @@ def ui(
         routing_config=config.agents.routing,
     )
 
+    web_channel = WebChannel(config=None, bus=bus)
+
     # Check for built frontend static files
     frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
     app = create_app(
         agent_loop,
         session_manager,
+        web_channel,
         static_dir=frontend_dist if frontend_dist.is_dir() else None,
     )
 
@@ -629,7 +641,30 @@ def ui(
 
     import uvicorn
 
-    uvicorn.run(app, host=host, port=port, log_level="info" if verbose else "warning")
+    async def _run():
+        uvi_config = uvicorn.Config(
+            app,
+            host=host,
+            port=port,
+            log_level="info" if verbose else "warning",
+        )
+        server = uvicorn.Server(uvi_config)
+
+        await web_channel.start()
+        try:
+            await asyncio.gather(
+                agent_loop.run(),
+                server.serve(),
+            )
+        except KeyboardInterrupt:
+            console.print("\nShutting down...")
+        finally:
+            await web_channel.stop()
+            await agent_loop.close_mcp()
+            agent_loop.stop()
+            shutdown_langfuse()
+
+    asyncio.run(_run())
 
 
 # ============================================================================
@@ -665,6 +700,7 @@ def agent(
 
     # Initialize langfuse observability (auto-instruments litellm via OTEL)
     from nanobot.agent.observability import init_langfuse
+    from nanobot.agent.observability import shutdown as shutdown_langfuse
 
     init_langfuse(config.langfuse)
 
@@ -742,6 +778,7 @@ def agent(
                     await asyncio.wait_for(_drain_pending_tasks(), timeout=2.0)
                 except TimeoutError:
                     pass
+                shutdown_langfuse()
 
         watchdog: threading.Timer | None = None
         if timeout_s > 0:
@@ -861,6 +898,7 @@ def agent(
                 await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
                 await agent_loop.close_mcp()
                 await _drain_pending_tasks()
+                shutdown_langfuse()
 
         asyncio.run(run_interactive())
 
@@ -1197,6 +1235,7 @@ def cron_run(
 
     # Initialize langfuse observability (auto-instruments litellm via OTEL)
     from nanobot.agent.observability import init_langfuse
+    from nanobot.agent.observability import shutdown as shutdown_langfuse
 
     init_langfuse(config.langfuse)
 
@@ -1233,7 +1272,11 @@ def cron_run(
     async def run():
         return await service.run_job(job_id, force=force)
 
-    if asyncio.run(run()):
+    try:
+        success = asyncio.run(run())
+    finally:
+        shutdown_langfuse()
+    if success:
         console.print("[green]✓[/green] Job executed")
         if result_holder:
             _print_agent_response(result_holder[0], render_markdown=True)

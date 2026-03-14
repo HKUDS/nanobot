@@ -1019,48 +1019,14 @@ class AgentLoop:
                 try:
                     # Route through coordinator if enabled (skip system messages)
                     role_applied = False
-                    if self._coordinator and msg.channel != "system":
-                        t0_classify = time.monotonic()
-                        role_name, confidence = await self._coordinator.classify(msg.content)
-                        classify_latency_ms = (time.monotonic() - t0_classify) * 1000
-                        # Confidence-aware: fall back to default on low confidence
-                        threshold = (
-                            self._routing_config.confidence_threshold
-                            if self._routing_config
-                            else 0.6
-                        )
-                        if confidence < threshold:
-                            role_name = (
-                                self._routing_config.default_role
-                                if self._routing_config
-                                else "general"
-                            )
-                            logger.info(
-                                "Low confidence ({:.2f} < {:.2f}), using default role '{}'",
-                                confidence,
-                                threshold,
-                                role_name,
-                            )
-                        role = (
-                            self._coordinator.route_direct(role_name)
-                            or self._coordinator.registry.get_default()
-                            or AgentRoleConfig(name=role_name, description="General assistant")
-                        )
-                        self._record_route_trace(
-                            "route",
-                            role=role.name,
-                            confidence=confidence,
-                            latency_ms=classify_latency_ms,
-                            message_excerpt=msg.content,
-                        )
-                        self._apply_role_for_turn(role)
-                        role_applied = True
 
-                    # Wrap with timeout to prevent infinite processing
-                    timeout = self.message_timeout if self.message_timeout > 0 else None
+                    # Wrap entire request (classify + process) in a single trace
                     async with trace_request(
                         name="request",
                         input=msg.content[:200],
+                        session_id=msg.session_key,
+                        user_id=msg.sender_id,
+                        tags=[msg.channel],
                         metadata={
                             "channel": msg.channel,
                             "sender": msg.sender_id,
@@ -1069,6 +1035,45 @@ class AgentLoop:
                             "role": self.role_name,
                         },
                     ):
+                        if self._coordinator and msg.channel != "system":
+                            t0_classify = time.monotonic()
+                            role_name, confidence = await self._coordinator.classify(msg.content)
+                            classify_latency_ms = (time.monotonic() - t0_classify) * 1000
+                            # Confidence-aware: fall back to default on low confidence
+                            threshold = (
+                                self._routing_config.confidence_threshold
+                                if self._routing_config
+                                else 0.6
+                            )
+                            if confidence < threshold:
+                                role_name = (
+                                    self._routing_config.default_role
+                                    if self._routing_config
+                                    else "general"
+                                )
+                                logger.info(
+                                    "Low confidence ({:.2f} < {:.2f}), using default role '{}'",
+                                    confidence,
+                                    threshold,
+                                    role_name,
+                                )
+                            role = (
+                                self._coordinator.route_direct(role_name)
+                                or self._coordinator.registry.get_default()
+                                or AgentRoleConfig(name=role_name, description="General assistant")
+                            )
+                            self._record_route_trace(
+                                "route",
+                                role=role.name,
+                                confidence=confidence,
+                                latency_ms=classify_latency_ms,
+                                message_excerpt=msg.content,
+                            )
+                            self._apply_role_for_turn(role)
+                            role_applied = True
+
+                        # Wrap with timeout to prevent infinite processing
+                        timeout = self.message_timeout if self.message_timeout > 0 else None
                         if timeout:
                             response = await asyncio.wait_for(
                                 self._process_message(msg), timeout=timeout
@@ -1570,21 +1575,6 @@ class AgentLoop:
             on_progress=(on_progress or _bus_progress) if self.config.streaming_enabled else None,
         )
 
-        # Annotate the active langfuse span with request metadata
-        update_current_span(
-            metadata={
-                "channel": msg.channel,
-                "sender": msg.sender_id,
-                "model": self.model,
-                "role": self.role_name,
-                "session_key": key,
-                "llm_calls": self._turn_llm_calls,
-                "prompt_tokens": self._turn_tokens_prompt,
-                "completion_tokens": self._turn_tokens_completion,
-                "total_tokens": self._turn_tokens_prompt + self._turn_tokens_completion,
-            },
-        )
-
         if final_content is None:
             final_content = await self._attempt_recovery(msg, all_msgs)
 
@@ -1592,6 +1582,24 @@ class AgentLoop:
             final_content = self._build_no_answer_explanation(msg.content, all_msgs)
             # Ensure fallback responses are recorded in the session log.
             all_msgs = self.context.add_assistant_message(all_msgs, final_content)
+
+        # Annotate the active langfuse span with request metadata + output.
+        # Token counts are intentionally omitted — the authoritative values
+        # are on the child GENERATION observations emitted by litellm's OTEL
+        # callback.  Duplicating them here with our internal streaming counter
+        # creates a confusing discrepancy (the streaming counter under-counts
+        # when the provider applies prompt-caching or tool-token adjustments).
+        update_current_span(
+            output=final_content[:500] if final_content else None,
+            metadata={
+                "channel": msg.channel,
+                "sender": msg.sender_id,
+                "model": self.model,
+                "role": self.role_name,
+                "session_key": key,
+                "llm_calls": str(self._turn_llm_calls),
+            },
+        )
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
@@ -1623,11 +1631,16 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
                 return None
 
+        response_meta = dict(msg.metadata or {})
+        response_meta["usage"] = {
+            "prompt_tokens": self._turn_tokens_prompt,
+            "completion_tokens": self._turn_tokens_completion,
+        }
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
-            metadata=msg.metadata or {},
+            metadata=response_meta,
         )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
@@ -1670,6 +1683,9 @@ class AgentLoop:
         async with trace_request(
             name="request",
             input=content[:200],
+            session_id=session_key,
+            user_id="cli",
+            tags=[channel],
             metadata={
                 "channel": channel,
                 "sender": "user",
