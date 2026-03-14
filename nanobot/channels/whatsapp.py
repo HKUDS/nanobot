@@ -96,34 +96,49 @@ class WhatsAppChannel(BaseChannel):
             self._ws = None
 
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through WhatsApp."""
+        """Send message through WhatsApp (unified method)."""
         if not self._ws or not self._connected:
             logger.warning("WhatsApp bridge not connected")
             return
 
         try:
-            # Check if there are media attachments in content
+            # Parse media tags from content
             import re
             media_pattern = r'\[(image|file|video|audio):\s*([^\]]+)\]'
             media_matches = re.findall(media_pattern, msg.content or '')
             
             if media_matches:
-                # Send media messages
+                # Extract caption (remove media tags from text)
+                caption = msg.content or ''
                 for media_type, media_path in media_matches:
-                    payload = {
-                        "type": "send_media",
-                        "to": msg.chat_id,
-                        "media_path": media_path.strip(),
-                        "media_type": media_type,
-                        "caption": (msg.content or '').replace(f'[{media_type}: {media_path}]', '').strip()
-                    }
-                    await self._ws.send(json.dumps(payload, ensure_ascii=False))
-            else:
-                # Send text message
+                    caption = caption.replace(f'[{media_type}: {media_path}]', '').strip()
+                
+                # Send first media with caption
                 payload = {
                     "type": "send",
                     "to": msg.chat_id,
-                    "text": msg.content
+                    "text": caption,
+                    "media_path": media_matches[0][1].strip(),
+                    "media_type": media_matches[0][0]
+                }
+                await self._ws.send(json.dumps(payload, ensure_ascii=False))
+                
+                # Send additional media without caption
+                for media_type, media_path in media_matches[1:]:
+                    payload = {
+                        "type": "send",
+                        "to": msg.chat_id,
+                        "text": "",
+                        "media_path": media_path.strip(),
+                        "media_type": media_type
+                    }
+                    await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            else:
+                # Send pure text
+                payload = {
+                    "type": "send",
+                    "to": msg.chat_id,
+                    "text": msg.content or ''
                 }
                 await self._ws.send(json.dumps(payload, ensure_ascii=False))
         except Exception as e:
