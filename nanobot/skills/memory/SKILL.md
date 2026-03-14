@@ -35,3 +35,9 @@ Write important facts immediately using `edit_file` or `write_file`:
 ## Auto-consolidation
 
 Old conversations are automatically summarized and appended to HISTORY.md when the session grows large. Long-term facts are extracted to MEMORY.md. You don't need to manage this.
+
+## Group Chat Silent Records (Feishu / Multi-bot)
+
+When operating in a Feishu group chat with multiple bots, messages from other bots and unmentioned user messages are silently recorded to `memory/HISTORY.md` with the `(silent)` tag.
+
+When the user asks you to review, evaluate, or comment on what another bot or user said in the group, **always search `memory/HISTORY.md` first** to retrieve the relevant context — do not look up session files of other instances.
