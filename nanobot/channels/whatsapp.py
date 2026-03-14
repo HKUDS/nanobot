@@ -4,13 +4,25 @@ import asyncio
 import json
 import mimetypes
 from collections import OrderedDict
+from typing import Any
 
 from loguru import logger
+
+from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import WhatsAppConfig
+from nanobot.config.schema import Base
+
+
+class WhatsAppConfig(Base):
+    """WhatsApp channel configuration."""
+
+    enabled: bool = False
+    bridge_url: str = "ws://localhost:3001"
+    bridge_token: str = ""
+    allow_from: list[str] = Field(default_factory=list)
 
 
 class WhatsAppChannel(BaseChannel):
@@ -24,9 +36,14 @@ class WhatsAppChannel(BaseChannel):
     name = "whatsapp"
     display_name = "WhatsApp"
 
-    def __init__(self, config: WhatsAppConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return WhatsAppConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = WhatsAppConfig.model_validate(config)
         super().__init__(config, bus)
-        self.config: WhatsAppConfig = config
         self._ws = None
         self._connected = False
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
