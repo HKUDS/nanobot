@@ -139,6 +139,10 @@ export class WhatsAppClient {
           fallbackContent = '[Video]';
           const path = await this.downloadMedia(msg, unwrapped.videoMessage.mimetype ?? undefined);
           if (path) mediaPaths.push(path);
+        } else if (unwrapped.audioMessage) {
+          fallbackContent = '[Voice Message]';
+          const path = await this.downloadMedia(msg, unwrapped.audioMessage.mimetype ?? undefined);
+          if (path) mediaPaths.push(path);
         }
 
         const finalContent = content || (mediaPaths.length === 0 ? fallbackContent : '') || '';
@@ -228,6 +232,42 @@ export class WhatsAppClient {
     }
 
     await this.sock.sendMessage(to, { text });
+  }
+
+  async sendMedia(to: string, mediaPath: string, mediaType: string, caption?: string): Promise<void> {
+    if (!this.sock) {
+      throw new Error('Not connected');
+    }
+
+    const mediaMap: Record<string, string> = {
+      'image': 'image',
+      'audio': 'audio',
+      'video': 'video',
+      'document': 'document',
+      'file': 'document',
+    };
+
+    const baileysType = mediaMap[mediaType] || 'document';
+    
+    // Build media message based on type
+    const mediaMessage: any = { [baileysType]: { url: mediaPath } };
+    
+    // Add caption for image/video/document
+    if (caption && ['image', 'video', 'document'].includes(baileysType)) {
+      mediaMessage.caption = caption;
+    }
+    
+    // Add mimetype for audio
+    if (baileysType === 'audio') {
+      mediaMessage.mimetype = 'audio/mp4';
+    }
+    
+    // Add fileName for document
+    if (baileysType === 'document') {
+      mediaMessage.fileName = mediaPath.split('/').pop() || 'file';
+    }
+
+    await this.sock.sendMessage(to, mediaMessage);
   }
 
   async disconnect(): Promise<void> {

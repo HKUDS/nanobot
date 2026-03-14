@@ -102,12 +102,30 @@ class WhatsAppChannel(BaseChannel):
             return
 
         try:
-            payload = {
-                "type": "send",
-                "to": msg.chat_id,
-                "text": msg.content
-            }
-            await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            # Check if there are media attachments in content
+            import re
+            media_pattern = r'\[(image|file|video|audio):\s*([^\]]+)\]'
+            media_matches = re.findall(media_pattern, msg.content or '')
+            
+            if media_matches:
+                # Send media messages
+                for media_type, media_path in media_matches:
+                    payload = {
+                        "type": "send_media",
+                        "to": msg.chat_id,
+                        "media_path": media_path.strip(),
+                        "media_type": media_type,
+                        "caption": (msg.content or '').replace(f'[{media_type}: {media_path}]', '').strip()
+                    }
+                    await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            else:
+                # Send text message
+                payload = {
+                    "type": "send",
+                    "to": msg.chat_id,
+                    "text": msg.content
+                }
+                await self._ws.send(json.dumps(payload, ensure_ascii=False))
         except Exception as e:
             logger.error("Error sending WhatsApp message: {}", e)
 
