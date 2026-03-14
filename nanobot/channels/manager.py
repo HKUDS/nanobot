@@ -36,8 +36,15 @@ class ChannelManager:
 
         groq_key = self.config.providers.groq.api_key
 
+        def _to_camel(snake: str) -> str:
+            parts = snake.split("_")
+            return parts[0] + "".join(p.title() for p in parts[1:])
+
         for name, cls in discover_all().items():
+            # Try snake_case first (attribute), then camelCase (model_extra for plugin channels)
             section = getattr(self.config.channels, name, None)
+            if section is None:
+                section = (self.config.channels.model_extra or {}).get(_to_camel(name))
             if section is None:
                 continue
             enabled = (
