@@ -191,6 +191,8 @@ class AgentLoop:
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        synthesis_retries = 0
+        _MAX_SYNTHESIS_RETRIES = 2
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -239,15 +241,18 @@ class AgentLoop:
                     break
                 # When the model returns empty content after executing tool calls,
                 # it likely finished the task but forgot to synthesize a response.
-                # Continue the loop so it gets a chance to produce a summary instead
-                # of falling through to the "I've completed processing" fallback.
+                # Retry up to _MAX_SYNTHESIS_RETRIES times so it gets a chance to
+                # produce a summary instead of falling through to the
+                # "I've completed processing" fallback.
                 # Fixes: https://github.com/HKUDS/nanobot/issues/235
                 #        https://github.com/HKUDS/nanobot/issues/640
-                if clean is None and tools_used:
+                if clean is None and tools_used and synthesis_retries < _MAX_SYNTHESIS_RETRIES:
+                    synthesis_retries += 1
                     logger.warning(
                         "LLM returned empty content after tool calls — retrying synthesis "
-                        "(iteration {})",
-                        iteration,
+                        "(attempt {}/{})",
+                        synthesis_retries,
+                        _MAX_SYNTHESIS_RETRIES,
                     )
                     messages = self.context.add_assistant_message(
                         messages,
