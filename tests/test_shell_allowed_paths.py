@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.config.schema import Config
 
@@ -11,6 +14,26 @@ def test_config_accepts_tools_allowed_paths() -> None:
     })
     assert config.tools.restrict_to_workspace is True
     assert config.tools.allowed_paths == ["/dev/null", "/tmp/example"]
+
+
+def test_config_accepts_home_allowed_path() -> None:
+    config = Config.model_validate({
+        "tools": {
+            "restrictToWorkspace": True,
+            "allowedPaths": ["~/.nanobot"],
+        }
+    })
+    assert config.tools.allowed_paths == ["~/.nanobot"]
+
+
+def test_config_rejects_relative_allowed_path() -> None:
+    with pytest.raises(ValidationError, match="tools.allowedPaths entries must be absolute paths"):
+        Config.model_validate({
+            "tools": {
+                "restrictToWorkspace": True,
+                "allowedPaths": ["tmp/example"],
+            }
+        })
 
 
 class TestExecToolAllowedPaths:

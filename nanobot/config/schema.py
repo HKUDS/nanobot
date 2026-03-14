@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -352,6 +352,15 @@ class ToolsConfig(Base):
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     allowed_paths: list[str] = Field(default_factory=list)
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
+
+    @field_validator("allowed_paths")
+    @classmethod
+    def validate_allowed_paths(cls, values: list[str]) -> list[str]:
+        """Require allowed paths to be absolute after expanding '~'."""
+        for value in values:
+            if not Path(value).expanduser().is_absolute():
+                raise ValueError("tools.allowedPaths entries must be absolute paths")
+        return values
 
 
 class Config(BaseSettings):
