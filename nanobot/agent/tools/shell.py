@@ -177,7 +177,7 @@ class ExecTool(Tool):
                 except Exception:
                     continue
                 if p.is_absolute() and not self._is_allowed_absolute_path(p, cwd_path):
-                    return "Error: Command blocked by safety guard (path outside allowed directories)"
+                    return "Error: Command blocked by safety guard (path outside working dir)"
 
         return None
 
