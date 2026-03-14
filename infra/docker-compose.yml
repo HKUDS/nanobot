@@ -18,9 +18,7 @@ services:
   playwright-mcp:
     image: mcr.microsoft.com/playwright/mcp:latest
     container_name: playwright-mcp
-    restart: "no"
-    ports:
-      - "127.0.0.1:8931:8931"
+    restart: on-failure:3
     command:
       - "--headless"
       - "--host"
@@ -28,15 +26,19 @@ services:
       - "--port"
       - "8931"
       - "--no-sandbox"
+      - "--allowed-hosts"
+      - "playwright-mcp,localhost,playwright-mcp:8931,localhost:8931"
     volumes:
       - playwright-storage:/home/pwuser/.config/playwright
     networks:
-      - nanobot-net
+      - playwright-net
     mem_limit: 1g
     cpus: "1.0"
 
 networks:
   nanobot-net:
+    external: true
+  playwright-net:
     external: true
 
 volumes:

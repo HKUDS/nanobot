@@ -4,15 +4,20 @@ x-common-config: &common-config
     dockerfile: Dockerfile
   volumes:
     - ~/.nanobot:/root/.nanobot
-    - /home/admin/nanobot:/app
+    - .:/app
+  networks:
+    - nanobot-net
 
 services:
   nanobot-gateway:
     container_name: nanobot-gateway
     <<: *common-config
+    networks:
+      - nanobot-net
+      - playwright-net
     command: ["gateway"]
     environment:
-      - NANOBOT_BRIDGE=1
+      - NANOBOT_BRIDGE=0
     restart: unless-stopped
     logging:
       driver: json-file
@@ -37,3 +42,9 @@ services:
     command: ["status"]
     stdin_open: true
     tty: true
+
+networks:
+  nanobot-net:
+    external: true
+  playwright-net:
+    external: true

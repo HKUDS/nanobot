@@ -142,6 +142,25 @@ write_file(
 )
 ```
 
+## Browser Automation (Playwright MCP)
+
+For JavaScript-heavy pages, login flows, screenshots, and sites that block plain HTTP requests, use the Playwright MCP tools instead of `web_fetch`.
+
+**IMPORTANT: Before using any `mcp_playwright_*` tool, read the skill guide first:**
+```
+read_file("~/.nanobot/workspace/skills/playwright/SKILL.md")
+```
+
+The skill explains when to use Playwright vs `web_fetch`, how the persistent Playwright MCP service is exposed on the internal Docker network, and how to forward screenshots back to the user with `message(media=[...])`.
+
+Available tools:
+- `mcp_playwright_browser_navigate` — go to a URL
+- `mcp_playwright_browser_snapshot` — get page accessibility tree and refs
+- `mcp_playwright_browser_click` — click an element
+- `mcp_playwright_browser_fill_form` — fill form fields
+- `mcp_playwright_browser_take_screenshot` — capture a screenshot
+- `mcp_playwright_browser_evaluate` — run JavaScript on the page
+
 ---
 
 ## Adding Custom Tools
