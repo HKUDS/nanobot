@@ -223,15 +223,17 @@ Examples:
 
 ```text
 /model
-/model openai gpt-4o
-/model openai/gpt-4o
+/model gpt-4o
+/model claude-sonnet-4-5
 /model ollama llama3.2
 ```
 
 Behavior:
 
-- `/model` shows the current config path, current provider/model, and all switchable model options discovered from provider endpoints that are actually usable from the current config
-- It only shows providers that are already usable, for example providers with API keys or local providers with `apiBase`
+- `/model` shows the current config path, current provider/model, the active provider URL, and the model options discovered from that provider endpoint
+- `/model <model>` saves the selected model for the current provider only
+- `/model <provider> <model>` is accepted only when `<provider>` matches the current provider
+- It does not switch providers; if you want another provider, update config first and then use `/model`
 - Saving a change updates `~/.nanobot/config.json` (or the active `--config` file) directly
 - v1 behavior is config-write only: restart nanobot after changing `/model`
 

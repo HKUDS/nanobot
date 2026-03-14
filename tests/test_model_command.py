@@ -61,98 +61,7 @@ def test_discover_openai_compatible_models_parses_model_ids(monkeypatch: pytest.
     assert models == ["gpt-4o", "gpt-4.1"]
 
 
-def test_handle_model_command_lists_current_state_and_switchable_options(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from nanobot.model_management import handle_model_command
-
-    config_path = tmp_path / "config.json"
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "anthropic",
-                    "model": "anthropic/claude-sonnet-4-5",
-                }
-            },
-            "providers": {
-                "anthropic": {"apiKey": "ant-key"},
-                "openai": {"apiKey": "oa-key"},
-                "gemini": {"apiKey": "gm-key"},
-            },
-        }
-    )
-    _write_config(config_path, config)
-    monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
-    monkeypatch.setattr(
-        "nanobot.model_management.discover_models_for_provider",
-        lambda _config, spec: {
-            "anthropic": ["claude-sonnet-4-5", "claude-opus-4-5"],
-            "openai": ["gpt-4.1", "gpt-4o"],
-            "gemini": ["gemini-2.0-flash", "gemini-2.5-pro"],
-        }.get(spec.name, []),
-    )
-
-    result = handle_model_command("/model")
-
-    assert "Model Configuration" in result
-    assert str(config_path) in result
-    assert "Current provider: anthropic" in result
-    assert "Current model: anthropic/claude-sonnet-4-5" in result
-    assert "/model anthropic claude-sonnet-4-5" in result
-    assert "/model openai gpt-4.1" in result
-    assert "/model openai gpt-4o" in result
-    assert "/model gemini gemini-2.5-pro" in result
-    assert "/model gemini gemini-2.0-flash" in result
-    assert "/model openai/gpt-4o" in result
-    assert "/model gemini/gemini-2.5-pro" in result
-
-
-def test_handle_model_command_hides_unusable_providers(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from nanobot.model_management import handle_model_command
-
-    config_path = tmp_path / "config.json"
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "anthropic",
-                    "model": "anthropic/claude-sonnet-4-5",
-                }
-            },
-            "providers": {
-                "anthropic": {"apiKey": "ant-key"},
-                "openai": {"apiKey": ""},
-                "gemini": {"apiKey": ""},
-                "ollama": {"apiBase": "http://localhost:11434"},
-            },
-        }
-    )
-    _write_config(config_path, config)
-    monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
-    monkeypatch.setattr(
-        "nanobot.model_management.discover_models_for_provider",
-        lambda _config, spec: {
-            "anthropic": ["claude-sonnet-4-5"],
-            "openai": ["gpt-4o"],
-            "gemini": ["gemini-2.5-pro"],
-            "ollama": ["llama3.2"],
-        }.get(spec.name, []),
-    )
-
-    result = handle_model_command("/model")
-
-    assert "/model anthropic claude-sonnet-4-5" in result
-    assert "/model ollama llama3.2" in result
-    assert "/model openai gpt-4o" not in result
-    assert "/model gemini gemini-2.5-pro" not in result
-
-
-def test_handle_model_command_uses_dynamic_discovery_only(
+def test_handle_model_command_lists_only_current_provider_models(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -175,22 +84,27 @@ def test_handle_model_command_uses_dynamic_discovery_only(
     )
     _write_config(config_path, config)
     monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
-    monkeypatch.setattr(
-        "nanobot.model_management.discover_models_for_provider",
-        lambda _config, spec: {
-            "openai": ["gpt-4.1-mini"],
-            "gemini": [],
-        }.get(spec.name, []),
-    )
+
+    calls: list[str] = []
+
+    def _discover(_config, spec):
+        calls.append(spec.name)
+        return ["gpt-4.1", "gpt-4o-mini"] if spec.name == "openai" else ["gemini-2.5-pro"]
+
+    monkeypatch.setattr("nanobot.model_management.discover_models_for_provider", _discover)
 
     result = handle_model_command("/model")
 
-    assert "/model openai gpt-4.1-mini" in result
-    assert "/model openai gpt-4o" in result
-    assert "/model gemini " not in result
+    assert "Model Configuration" in result
+    assert "Current provider: openai" in result
+    assert "Current model: openai/gpt-4o" in result
+    assert "/model gpt-4.1" in result
+    assert "/model gpt-4o-mini" in result
+    assert "gemini-2.5-pro" not in result
+    assert calls == ["openai"]
 
 
-def test_handle_model_command_lists_shortcuts_for_gpt_and_minimax(
+def test_handle_model_command_updates_model_with_single_argument(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -201,210 +115,11 @@ def test_handle_model_command_lists_shortcuts_for_gpt_and_minimax(
         {
             "agents": {
                 "defaults": {
-                    "provider": "anthropic",
-                    "model": "anthropic/MiniMax-M2.5",
+                    "provider": "openai",
+                    "model": "openai/gpt-4o",
                 }
             },
             "providers": {
-                "custom": {
-                    "apiKey": "custom-key",
-                    "apiBase": "http://127.0.0.1:8787/v1",
-                },
-                "anthropic": {
-                    "apiKey": "mini-key",
-                    "apiBase": "https://api.minimaxi.com/anthropic",
-                },
-            },
-        }
-    )
-    _write_config(config_path, config)
-    monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
-    monkeypatch.setattr(
-        "nanobot.model_management.discover_models_for_provider",
-        lambda _config, spec: ["gpt-5"] if spec.name == "custom" else [],
-    )
-
-    result = handle_model_command("/model")
-
-    assert "Available shortcuts:" in result
-    assert "/model gpt" in result
-    assert "/model minimax" in result
-
-
-def test_handle_model_command_shortcut_switches_to_gpt(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from nanobot.model_management import handle_model_command
-
-    config_path = tmp_path / "config.json"
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "anthropic",
-                    "model": "anthropic/MiniMax-M2.5",
-                }
-            },
-            "providers": {
-                "custom": {
-                    "apiKey": "custom-key",
-                    "apiBase": "http://127.0.0.1:8787/v1",
-                },
-                "anthropic": {
-                    "apiKey": "mini-key",
-                    "apiBase": "https://api.minimaxi.com/anthropic",
-                },
-            },
-        }
-    )
-    _write_config(config_path, config)
-    monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
-    monkeypatch.setattr(
-        "nanobot.model_management.discover_models_for_provider",
-        lambda _config, spec: ["gpt-5"] if spec.name == "custom" else [],
-    )
-
-    result = handle_model_command("/model gpt")
-    updated = load_config(config_path)
-
-    assert "Saved model configuration." in result
-    assert updated.agents.defaults.provider == "custom"
-    assert updated.agents.defaults.model == "gpt-5"
-
-
-def test_handle_model_command_shortcut_switches_to_minimax(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from nanobot.model_management import handle_model_command
-
-    config_path = tmp_path / "config.json"
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "custom",
-                    "model": "gpt-5",
-                }
-            },
-            "providers": {
-                "custom": {
-                    "apiKey": "custom-key",
-                    "apiBase": "http://127.0.0.1:8787/v1",
-                },
-                "anthropic": {
-                    "apiKey": "mini-key",
-                    "apiBase": "https://api.minimaxi.com/anthropic",
-                },
-            },
-        }
-    )
-    _write_config(config_path, config)
-    monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
-    monkeypatch.setattr("nanobot.model_management.discover_models_for_provider", lambda *_args, **_kwargs: [])
-
-    result = handle_model_command("/model minimax")
-    updated = load_config(config_path)
-
-    assert "Saved model configuration." in result
-    assert updated.agents.defaults.provider == "anthropic"
-    assert updated.agents.defaults.model == "anthropic/MiniMax-M2.5"
-
-
-def test_handle_model_command_minimax_provider_form_uses_compatible_anthropic_endpoint(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from nanobot.model_management import handle_model_command
-
-    config_path = tmp_path / "config.json"
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "custom",
-                    "model": "gpt-5",
-                }
-            },
-            "providers": {
-                "custom": {
-                    "apiKey": "custom-key",
-                    "apiBase": "http://127.0.0.1:8787/v1",
-                },
-                "anthropic": {
-                    "apiKey": "mini-key",
-                    "apiBase": "https://api.minimaxi.com/anthropic",
-                },
-            },
-        }
-    )
-    _write_config(config_path, config)
-    monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
-
-    result = handle_model_command("/model minimax MiniMax-M2.5")
-    updated = load_config(config_path)
-
-    assert "Saved model configuration." in result
-    assert updated.agents.defaults.provider == "anthropic"
-    assert updated.agents.defaults.model == "anthropic/MiniMax-M2.5"
-
-
-def test_handle_model_command_minimax_full_model_uses_compatible_anthropic_endpoint(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from nanobot.model_management import handle_model_command
-
-    config_path = tmp_path / "config.json"
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "custom",
-                    "model": "gpt-5",
-                }
-            },
-            "providers": {
-                "custom": {
-                    "apiKey": "custom-key",
-                    "apiBase": "http://127.0.0.1:8787/v1",
-                },
-                "anthropic": {
-                    "apiKey": "mini-key",
-                    "apiBase": "https://api.minimaxi.com/anthropic",
-                },
-            },
-        }
-    )
-    _write_config(config_path, config)
-    monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
-
-    result = handle_model_command("/model minimax/MiniMax-M2.5")
-    updated = load_config(config_path)
-
-    assert "Saved model configuration." in result
-    assert updated.agents.defaults.provider == "anthropic"
-    assert updated.agents.defaults.model == "anthropic/MiniMax-M2.5"
-
-
-def test_handle_model_command_updates_config_from_provider_and_model_args(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from nanobot.model_management import handle_model_command
-
-    config_path = tmp_path / "config.json"
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "anthropic",
-                    "model": "anthropic/claude-sonnet-4-5",
-                }
-            },
-            "providers": {
-                "anthropic": {"apiKey": "ant-key"},
                 "openai": {"apiKey": "oa-key"},
             },
         }
@@ -412,48 +127,15 @@ def test_handle_model_command_updates_config_from_provider_and_model_args(
     _write_config(config_path, config)
     monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
 
-    result = handle_model_command("/model openai gpt-4o")
-    updated = load_config(config_path)
-
-    assert "Saved model configuration." in result
-    assert "Restart nanobot to apply." in result
-    assert updated.agents.defaults.provider == "openai"
-    assert updated.agents.defaults.model == "openai/gpt-4o"
-
-
-def test_handle_model_command_updates_config_from_full_model_id(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from nanobot.model_management import handle_model_command
-
-    config_path = tmp_path / "config.json"
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "anthropic",
-                    "model": "anthropic/claude-sonnet-4-5",
-                }
-            },
-            "providers": {
-                "anthropic": {"apiKey": "ant-key"},
-                "openai": {"apiKey": "oa-key"},
-            },
-        }
-    )
-    _write_config(config_path, config)
-    monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
-
-    result = handle_model_command("/model openai/gpt-4o")
+    result = handle_model_command("/model gpt-4.1")
     updated = load_config(config_path)
 
     assert "Saved model configuration." in result
     assert updated.agents.defaults.provider == "openai"
-    assert updated.agents.defaults.model == "openai/gpt-4o"
+    assert updated.agents.defaults.model == "openai/gpt-4.1"
 
 
-def test_handle_model_command_rejects_missing_provider_credentials(
+def test_handle_model_command_accepts_explicit_current_provider(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -464,46 +146,11 @@ def test_handle_model_command_rejects_missing_provider_credentials(
         {
             "agents": {
                 "defaults": {
-                    "provider": "anthropic",
-                    "model": "anthropic/claude-sonnet-4-5",
+                    "provider": "ollama",
+                    "model": "llama3.2",
                 }
             },
             "providers": {
-                "anthropic": {"apiKey": "ant-key"},
-                "openai": {"apiKey": ""},
-            },
-        }
-    )
-    _write_config(config_path, config)
-    monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
-
-    result = handle_model_command("/model openai gpt-4o")
-    updated = load_config(config_path)
-
-    assert "Cannot switch to `openai/gpt-4o`." in result
-    assert "providers.openai.apiKey" in result
-    assert str(config_path) in result
-    assert updated.agents.defaults.provider == "anthropic"
-    assert updated.agents.defaults.model == "anthropic/claude-sonnet-4-5"
-
-
-def test_handle_model_command_normalizes_local_provider_models(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from nanobot.model_management import handle_model_command
-
-    config_path = tmp_path / "config.json"
-    config = Config.model_validate(
-        {
-            "agents": {
-                "defaults": {
-                    "provider": "anthropic",
-                    "model": "anthropic/claude-sonnet-4-5",
-                }
-            },
-            "providers": {
-                "anthropic": {"apiKey": "ant-key"},
                 "ollama": {"apiBase": "http://localhost:11434"},
             },
         }
@@ -511,12 +158,70 @@ def test_handle_model_command_normalizes_local_provider_models(
     _write_config(config_path, config)
     monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
 
-    result = handle_model_command("/model ollama llama3.2")
+    result = handle_model_command("/model ollama llama3.3")
     updated = load_config(config_path)
 
     assert "Saved model configuration." in result
     assert updated.agents.defaults.provider == "ollama"
-    assert updated.agents.defaults.model == "llama3.2"
+    assert updated.agents.defaults.model == "llama3.3"
+
+
+def test_handle_model_command_rejects_provider_switching(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot.model_management import handle_model_command
+
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "openai",
+                    "model": "openai/gpt-4o",
+                }
+            },
+            "providers": {
+                "openai": {"apiKey": "oa-key"},
+                "gemini": {"apiKey": "gm-key"},
+            },
+        }
+    )
+    _write_config(config_path, config)
+    monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
+
+    result = handle_model_command("/model gemini gemini-2.5-pro")
+    updated = load_config(config_path)
+
+    assert "Current provider is `openai`" in result
+    assert updated.agents.defaults.provider == "openai"
+    assert updated.agents.defaults.model == "openai/gpt-4o"
+
+
+def test_handle_model_command_handles_invalid_shell_quoting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot.model_management import handle_model_command
+
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "anthropic",
+                    "model": "anthropic/claude-sonnet-4-5",
+                }
+            },
+            "providers": {"anthropic": {"apiKey": "ant-key"}},
+        }
+    )
+    _write_config(config_path, config)
+    monkeypatch.setattr("nanobot.model_management.get_config_path", lambda: config_path)
+
+    result = handle_model_command('/model "')
+
+    assert "Invalid command syntax." in result
 
 
 @pytest.mark.asyncio
@@ -550,4 +255,4 @@ async def test_agent_loop_handles_model_command(
 
     assert response is not None
     assert "Model Configuration" in response.content
-    assert "/model anthropic claude-sonnet-4-5" in response.content
+    assert "/model claude-sonnet-4-5" in response.content
