@@ -973,6 +973,51 @@ def status():
 
 
 # ============================================================================
+# Skill Commands
+# ============================================================================
+
+
+skill_app = typer.Typer(help="Manage skills")
+app.add_typer(skill_app, name="skill")
+
+
+@skill_app.command("status")
+def skill_status(
+    as_json: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """Show installed skill status."""
+    from nanobot.config.loader import load_config
+    from nanobot.agent.skills import SkillsLoader
+
+    config = load_config()
+    loader = SkillsLoader(config.workspace_path)
+    skills = loader.list_skills_with_status()
+
+    if as_json:
+        console.print_json(data=skills)
+        return
+
+    table = Table(title="Skill Status")
+    table.add_column("Skill", style="cyan")
+    table.add_column("Status")
+    table.add_column("Source", style="yellow")
+    table.add_column("Details")
+
+    for skill in skills:
+        status = skill["status"]
+        if status == "ready":
+            status_text = "[green]ready[/green]"
+        elif status == "warning":
+            status_text = "[yellow]warning[/yellow]"
+        else:
+            status_text = "[red]error[/red]"
+        table.add_row(skill["name"], status_text, skill["source"], skill["details"])
+
+    console.print(table)
+
+
+
+# ============================================================================
 # OAuth Login
 # ============================================================================
 
