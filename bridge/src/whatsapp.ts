@@ -226,19 +226,31 @@ export class WhatsAppClient {
     return null;
   }
 
-  async sendMessage(to: string, text: string): Promise<void> {
+  async sendMessage(
+    to: string,
+    text: string,
+    mediaPath?: string,
+    mediaType?: 'image' | 'audio' | 'video' | 'document'
+  ): Promise<void> {
     if (!this.sock) {
       throw new Error('Not connected');
     }
 
-    await this.sock.sendMessage(to, { text });
+    if (mediaPath) {
+      // Send media with optional caption
+      const mediaMessage = this.buildMediaMessage(mediaPath, mediaType, text);
+      await this.sock.sendMessage(to, mediaMessage);
+    } else {
+      // Send pure text
+      await this.sock.sendMessage(to, { text });
+    }
   }
 
-  async sendMedia(to: string, mediaPath: string, mediaType: string, caption?: string): Promise<void> {
-    if (!this.sock) {
-      throw new Error('Not connected');
-    }
-
+  private buildMediaMessage(
+    mediaPath: string,
+    mediaType: string = 'document',
+    caption?: string
+  ): any {
     const mediaMap: Record<string, string> = {
       'image': 'image',
       'audio': 'audio',
@@ -248,26 +260,29 @@ export class WhatsAppClient {
     };
 
     const baileysType = mediaMap[mediaType] || 'document';
-    
-    // Build media message based on type
     const mediaMessage: any = { [baileysType]: { url: mediaPath } };
-    
-    // Add caption for image/video/document
+
+    // Caption for image/video/document
     if (caption && ['image', 'video', 'document'].includes(baileysType)) {
       mediaMessage.caption = caption;
     }
-    
-    // Add mimetype for audio
+
+    // Mimetype for audio
     if (baileysType === 'audio') {
       mediaMessage.mimetype = 'audio/mp4';
     }
-    
-    // Add fileName for document
+
+    // Filename for document
     if (baileysType === 'document') {
       mediaMessage.fileName = mediaPath.split('/').pop() || 'file';
     }
 
-    await this.sock.sendMessage(to, mediaMessage);
+    return mediaMessage;
+  }
+
+  async sendMedia(to: string, mediaPath: string, mediaType: string, caption?: string): Promise<void> {
+    // Deprecated: use sendMessage() instead
+    await this.sendMessage(to, caption || '', mediaPath, mediaType);
   }
 
   async disconnect(): Promise<void> {
