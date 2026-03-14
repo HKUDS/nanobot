@@ -104,8 +104,7 @@ class TestOrphanedToolMessages:
             {"role": "tool", "content": "result2", "tool_call_id": "c2", "name": "fn"},
         ]
         history = session.get_history()
-        # Should skip all tool messages since there's no user/assistant
-        assert len(history) == 0 or history[0]["role"] in ("user", "assistant")
+        assert len(history) == 0
 
 
 class TestEndToEndToolMessageValidation:
@@ -129,7 +128,7 @@ class TestEndToEndToolMessageValidation:
     def test_e2e_slice_lands_exactly_on_tool_message(self) -> None:
         """Reproduce #2007: slice starts with tool message after its assistant was cut."""
         session = Session(key="test:e2e-exact")
-        # Build: [user, assistant(tool_call), tool, assistant, user, ...]
+        # Build: [user, assistant(tool_call), tool, assistant, user, assistant]
         session.add_message("user", "first question")
         session.add_message(
             "assistant", "",
@@ -145,8 +144,10 @@ class TestEndToEndToolMessageValidation:
         history = session.get_history(max_messages=4)
         sanitized = LLMProvider._sanitize_empty_content(history)
         _validate_tool_message_invariant(sanitized)
-        # First message must not be tool
-        assert sanitized[0]["role"] != "tool"
+        # Should skip orphaned tool, start at assistant "here is the answer"
+        assert len(sanitized) == 3
+        assert sanitized[0]["role"] == "assistant"
+        assert sanitized[0]["content"] == "here is the answer"
 
     def test_e2e_multiple_tool_calls_in_one_turn(self) -> None:
         """Assistant calls multiple tools in one turn; slice must not orphan any."""
@@ -222,3 +223,222 @@ class TestEndToEndToolMessageValidation:
             history = session.get_history(max_messages=size)
             sanitized = LLMProvider._sanitize_empty_content(history)
             _validate_tool_message_invariant(sanitized)
+
+
+class TestTurnCompleteSlicing:
+    """Tests for turn-complete history slicing (#2007 enhancement).
+
+    Ensures that when max_messages slicing lands on an assistant(tool_calls),
+    all its tool responses are present — otherwise the entire turn is skipped.
+    """
+
+    def test_complete_turn_at_start_is_kept(self) -> None:
+        """Assistant(tool_calls) at start with all tool responses → kept."""
+        session = Session(key="test:complete-turn")
+        session.add_message("user", "earlier question")
+        session.add_message("assistant", "earlier answer")
+        session.add_message(
+            "assistant", "",
+            tool_calls=[{"id": "call_1", "function": {"name": "search", "arguments": "{}"}}],
+        )
+        session.add_message("tool", "result", tool_call_id="call_1", name="search")
+        session.add_message("assistant", "done")
+        session.add_message("user", "follow up")
+
+        # max_messages=4 -> last 4: [assistant(tool_calls), tool, assistant, user]
+        # This is a complete turn starting with assistant(tool_calls), should be kept
+        history = session.get_history(max_messages=4)
+        assert len(history) == 4
+        assert history[0]["role"] == "assistant"
+        assert history[0].get("tool_calls")
+        assert history[1]["role"] == "tool"
+        assert history[2]["role"] == "assistant"
+        _validate_tool_message_invariant(history)
+
+    def test_incomplete_turn_at_start_is_skipped(self) -> None:
+        """Assistant(tool_calls) at start with missing tool responses → skipped."""
+        session = Session(key="test:incomplete-turn")
+        session.add_message("user", "first")
+        session.add_message(
+            "assistant", "",
+            tool_calls=[{"id": "call_1", "function": {"name": "search", "arguments": "{}"}}],
+        )
+        session.add_message("tool", "result", tool_call_id="call_1", name="search")
+        session.add_message("assistant", "answer")
+        session.add_message("user", "second")
+        session.add_message("assistant", "final")
+
+        # max_messages=4 -> last 4: [tool, assistant, user, assistant]
+        # The tool is orphaned (its assistant was cut), should skip to "answer"
+        history = session.get_history(max_messages=4)
+        assert len(history) == 3
+        assert history[0]["role"] == "assistant"
+        assert history[0]["content"] == "answer"
+        assert not history[0].get("tool_calls")
+        _validate_tool_message_invariant(history)
+
+    def test_parallel_tool_calls_incomplete_is_skipped(self) -> None:
+        """Assistant with multiple tool_calls, some missing → entire turn skipped."""
+        session = Session(key="test:parallel-incomplete")
+        session.add_message("user", "do two things")
+        session.add_message(
+            "assistant", "",
+            tool_calls=[
+                {"id": "call_a", "function": {"name": "tool_a", "arguments": "{}"}},
+                {"id": "call_b", "function": {"name": "tool_b", "arguments": "{}"}},
+            ],
+        )
+        session.add_message("tool", "result a", tool_call_id="call_a", name="tool_a")
+        session.add_message("tool", "result b", tool_call_id="call_b", name="tool_b")
+        session.add_message("assistant", "done")
+        session.add_message("user", "thanks")
+        session.add_message("assistant", "welcome")
+
+        # Total: 7 messages [0-6]
+        # max_messages=5 -> last 5: indices [2-6] = [tool_b, assistant, user, assistant, ...]
+        # Wait — index 2 is tool_a, not tool_b. Let me recount:
+        # [0]=user, [1]=assistant(tc), [2]=tool_a, [3]=tool_b, [4]=assistant, [5]=user, [6]=assistant
+        # max_messages=5 -> last 5: indices [2-6] = [tool_a, tool_b, assistant, user, assistant]
+        # tool_a and tool_b are orphaned (their assistant was cut)
+        history = session.get_history(max_messages=5)
+        # Should skip orphaned tools and start at assistant "done"
+        assert len(history) == 3
+        assert history[0]["role"] == "assistant"
+        assert history[0]["content"] == "done"
+        _validate_tool_message_invariant(history)
+
+    def test_parallel_tool_calls_complete_is_kept(self) -> None:
+        """Assistant with multiple tool_calls, all present → kept."""
+        session = Session(key="test:parallel-complete")
+        session.add_message("user", "earlier")
+        session.add_message("assistant", "earlier answer")
+        session.add_message(
+            "assistant", "",
+            tool_calls=[
+                {"id": "call_a", "function": {"name": "tool_a", "arguments": "{}"}},
+                {"id": "call_b", "function": {"name": "tool_b", "arguments": "{}"}},
+            ],
+        )
+        session.add_message("tool", "result a", tool_call_id="call_a", name="tool_a")
+        session.add_message("tool", "result b", tool_call_id="call_b", name="tool_b")
+        session.add_message("assistant", "done")
+        session.add_message("user", "thanks")
+
+        # Total: 7 messages [0-6]
+        # max_messages=5 -> last 5: indices [2-6] = [assistant(tool_calls), tool_a, tool_b, assistant, user]
+        # Complete turn with both tools present, should be kept
+        history = session.get_history(max_messages=5)
+        assert len(history) == 5
+        assert history[0]["role"] == "assistant"
+        assert len(history[0].get("tool_calls", [])) == 2
+        assert history[1]["role"] == "tool"
+        assert history[2]["role"] == "tool"
+        _validate_tool_message_invariant(history)
+
+        # max_messages=4 -> last 4: indices [3-6] = [tool_a, tool_b, assistant, user]
+        # tool_a and tool_b are orphaned (their assistant was cut), should skip
+        history = session.get_history(max_messages=4)
+        assert history[0]["role"] in ("user", "assistant")
+        if history[0]["role"] == "assistant":
+            assert not history[0].get("tool_calls")  # plain assistant
+        _validate_tool_message_invariant(history)
+
+    def test_multiple_incomplete_turns_skipped(self) -> None:
+        """Multiple incomplete turns at start → all skipped to first valid boundary."""
+        session = Session(key="test:multi-incomplete")
+        # Build: user, then complete turn 1, complete turn 2, then valid messages
+        session.add_message("user", "start")
+        session.add_message(
+            "assistant", "",
+            tool_calls=[{"id": "c1", "function": {"name": "f1", "arguments": "{}"}}],
+        )
+        session.add_message("tool", "r1", tool_call_id="c1", name="f1")
+        session.add_message(
+            "assistant", "",
+            tool_calls=[{"id": "c2", "function": {"name": "f2", "arguments": "{}"}}],
+        )
+        session.add_message("tool", "r2", tool_call_id="c2", name="f2")
+        session.add_message("assistant", "final")
+        session.add_message("user", "question")
+        session.add_message("assistant", "answer")
+
+        # Total: 8 messages [0-7]
+        # max_messages=6 -> last 6: indices [2-7] = [tool(c1), assistant(c2), tool(c2), assistant, user, assistant]
+        # tool(c1) is orphaned (its assistant was cut)
+        # assistant(c2)+tool(c2) is a complete turn, should be kept
+        history = session.get_history(max_messages=6)
+        # Should skip orphaned tool(c1) and start at assistant(c2)
+        assert history[0]["role"] == "assistant"
+        assert history[0].get("tool_calls")
+        assert history[0]["tool_calls"][0]["id"] == "c2"
+        _validate_tool_message_invariant(history)
+
+        # max_messages=4 -> last 4: indices [4-7] = [tool(c2), assistant, user, assistant]
+        # tool(c2) is orphaned, should skip to assistant "final"
+        history = session.get_history(max_messages=4)
+        assert history[0]["role"] in ("user", "assistant")
+        if history[0]["role"] == "assistant":
+            assert not history[0].get("tool_calls")
+        _validate_tool_message_invariant(history)
+
+    def test_assistant_with_extra_tool_responses_is_valid(self) -> None:
+        """Assistant(tool_calls) followed by its tool responses is valid.
+
+        Tests that the logic correctly validates complete turns.
+        """
+        session = Session(key="test:extra-tools")
+        session.add_message("user", "question")
+        session.add_message(
+            "assistant", "",
+            tool_calls=[{"id": "call_1", "function": {"name": "search", "arguments": "{}"}}],
+        )
+        session.add_message("tool", "result 1", tool_call_id="call_1", name="search")
+        session.add_message("assistant", "answer")
+        session.add_message("user", "follow up")
+
+        # max_messages=5 -> all messages
+        history = session.get_history(max_messages=5)
+        # Should keep the complete turn
+        assert history[0]["role"] == "user"
+        assert history[1]["role"] == "assistant"
+        assert history[1].get("tool_calls")
+        assert history[2]["role"] == "tool"
+        _validate_tool_message_invariant(history)
+
+    def test_max_messages_landing_on_incomplete_assistant(self) -> None:
+        """Exact scenario: max_messages lands right on assistant(tool_calls) with missing tools."""
+        session = Session(key="test:exact-landing")
+        for i in range(5):
+            session.add_message("user", f"q{i}")
+            session.add_message("assistant", f"a{i}")
+        # Add complete turn
+        session.add_message(
+            "assistant", "",
+            tool_calls=[{"id": "c1", "function": {"name": "search", "arguments": "{}"}}],
+        )
+        session.add_message("tool", "result", tool_call_id="c1", name="search")
+        session.add_message("assistant", "done")
+        session.add_message("user", "next")
+
+        # max_messages=4 -> last 4: [assistant(tool_calls), tool, assistant, user]
+        # This is complete, should be kept
+        history = session.get_history(max_messages=4)
+        assert history[0]["role"] == "assistant"
+        assert history[0].get("tool_calls")
+        _validate_tool_message_invariant(history)
+
+        # max_messages=2 -> last 2: [assistant "done", user]
+        # No tool calls, should be kept
+        history = session.get_history(max_messages=2)
+        assert len(history) == 2
+        assert history[0]["role"] == "assistant"
+        assert not history[0].get("tool_calls")
+        _validate_tool_message_invariant(history)
+
+        # max_messages=3 -> last 3: [tool, assistant "done", user]
+        # tool is orphaned, should skip to assistant
+        history = session.get_history(max_messages=3)
+        assert history[0]["role"] in ("user", "assistant")
+        if history[0]["role"] == "assistant":
+            assert not history[0].get("tool_calls")
+        _validate_tool_message_invariant(history)

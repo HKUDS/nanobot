@@ -44,17 +44,47 @@ class Session:
         self.updated_at = datetime.now()
 
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input, aligned to a user turn."""
+        """Return unconsolidated messages for LLM input, aligned to a complete turn boundary."""
         unconsolidated = self.messages[self.last_consolidated:]
         sliced = unconsolidated[-max_messages:]
 
-        # Drop leading non-user/non-assistant messages to avoid orphaned tool_result blocks
-        for i, m in enumerate(sliced):
-            if m.get("role") in ("user", "assistant"):
-                sliced = sliced[i:]
-                break
-        else:
-            sliced = []
+        # Find a valid start: skip orphaned tool messages and incomplete
+        # assistant(tool_calls) turns to ensure every tool message has a
+        # matching preceding assistant.
+        start = 0
+        while start < len(sliced):
+            msg = sliced[start]
+            role = msg.get("role")
+
+            if role == "user":
+                break  # user is always a safe boundary
+
+            if role == "assistant":
+                tool_calls = msg.get("tool_calls")
+                if not tool_calls:
+                    break  # plain assistant text, safe boundary
+
+                # assistant with tool_calls: verify all tool responses follow
+                expected_ids = {tc["id"] for tc in tool_calls if isinstance(tc, dict)}
+                found_ids = set()
+                j = start + 1
+                while j < len(sliced) and sliced[j].get("role") == "tool":
+                    tid = sliced[j].get("tool_call_id")
+                    if tid:
+                        found_ids.add(tid)
+                    j += 1
+
+                if expected_ids <= found_ids:
+                    break  # complete turn, safe to start here
+
+                # incomplete turn — skip this assistant and its partial tools
+                start = j
+                continue
+
+            # tool message without preceding assistant — skip
+            start += 1
+
+        sliced = sliced[start:] if start < len(sliced) else []
 
         out: list[dict[str, Any]] = []
         for m in sliced:
