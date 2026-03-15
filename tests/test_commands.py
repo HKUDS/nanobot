@@ -456,6 +456,52 @@ def test_gateway_uses_config_directory_for_cron_store(monkeypatch, tmp_path: Pat
     assert seen["cron_store"] == config_file.parent / "cron" / "jobs.json"
 
 
+def test_gateway_passes_notification_level_to_heartbeat_service(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    config.gateway.heartbeat.notification_level = "error"
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: config_file.parent / "cron")
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
+    monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            pass
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+    class _FakeAgentLoop:
+        def __init__(self, *args, **kwargs) -> None:
+            self.model = "test-model"
+
+    class _StopHeartbeat:
+        def __init__(self, *args, **kwargs) -> None:
+            seen.update(kwargs)
+            raise _StopGateway("stop")
+
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _StopHeartbeat)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGateway)
+    assert seen["notification_level"] == "error"
+    assert seen["interval_s"] == config.gateway.heartbeat.interval_s
+    assert seen["enabled"] == config.gateway.heartbeat.enabled
+
+
 def test_gateway_uses_configured_port_when_cli_flag_is_missing(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
