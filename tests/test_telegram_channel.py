@@ -8,7 +8,7 @@ import pytest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram import TELEGRAM_REPLY_CONTEXT_MAX_LEN, TelegramChannel
-from nanobot.config.schema import TelegramConfig
+from nanobot.channels.telegram import TelegramConfig
 
 
 class _FakeHTTPXRequest:
@@ -447,6 +447,56 @@ async def test_download_message_media_returns_path_when_download_succeeds(
 
 
 @pytest.mark.asyncio
+async def test_download_message_media_uses_file_unique_id_when_available(
+    monkeypatch, tmp_path
+) -> None:
+    media_dir = tmp_path / "media" / "telegram"
+    media_dir.mkdir(parents=True)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.get_media_dir",
+        lambda channel=None: media_dir if channel else tmp_path / "media",
+    )
+
+    downloaded: dict[str, str] = {}
+
+    async def _download_to_drive(path: str) -> None:
+        downloaded["path"] = path
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    app = _FakeApp(lambda: None)
+    app.bot.get_file = AsyncMock(
+        return_value=SimpleNamespace(download_to_drive=_download_to_drive)
+    )
+    channel._app = app
+
+    msg = SimpleNamespace(
+        photo=[
+            SimpleNamespace(
+                file_id="file-id-that-should-not-be-used",
+                file_unique_id="stable-unique-id",
+                mime_type="image/jpeg",
+                file_name=None,
+            )
+        ],
+        voice=None,
+        audio=None,
+        document=None,
+        video=None,
+        video_note=None,
+        animation=None,
+    )
+
+    paths, parts = await channel._download_message_media(msg)
+
+    assert downloaded["path"].endswith("stable-unique-id.jpg")
+    assert paths == [str(media_dir / "stable-unique-id.jpg")]
+    assert parts == [f"[image: {media_dir / 'stable-unique-id.jpg'}]"]
+
+
+@pytest.mark.asyncio
 async def test_on_message_attaches_reply_to_media_when_available(monkeypatch, tmp_path) -> None:
     """When user replies to a message with media, that media is downloaded and attached to the turn."""
     media_dir = tmp_path / "media" / "telegram"
@@ -597,3 +647,19 @@ async def test_forward_command_does_not_inject_reply_context() -> None:
 
     assert len(handled) == 1
     assert handled[0]["content"] == "/new"
+
+
+@pytest.mark.asyncio
+async def test_on_help_includes_restart_command() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    update = _make_telegram_update(text="/help", chat_type="private")
+    update.message.reply_text = AsyncMock()
+
+    await channel._on_help(update, None)
+
+    update.message.reply_text.assert_awaited_once()
+    help_text = update.message.reply_text.await_args.args[0]
+    assert "/restart" in help_text

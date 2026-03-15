@@ -56,7 +56,9 @@ class WebChannel(BaseChannel):
     _TOOL_OUTPUT_MAX = 4_000   # chars forwarded to browser per tool result
     _TEXT_FILE_MAX   = 50_000  # chars read from text files injected into message
 
-    def __init__(self, config: WebConfig, bus: MessageBus, agent_loop: "AgentLoop | None" = None):
+    def __init__(self, config: "WebConfig | dict", bus: MessageBus, agent_loop: "AgentLoop | None" = None):
+        if isinstance(config, dict):
+            config = WebConfig(**config)
         super().__init__(config, bus)
         self.config: WebConfig = config
         self._agent_loop = agent_loop

@@ -35,36 +35,33 @@ class ChannelManager:
         self._init_channels()
 
     def _init_channels(self) -> None:
-        """Initialize channels discovered via pkgutil scan."""
-        from nanobot.channels.registry import discover_channel_names, load_channel_class
+        """Initialize channels discovered via pkgutil scan + entry_points plugins."""
+        from nanobot.channels.registry import discover_all
 
         groq_key = self.config.providers.groq.api_key
 
-        for modname in discover_channel_names():
-            section = getattr(self.config.channels, modname, None)
-            if not section or not getattr(section, "enabled", False):
+        for name, cls in discover_all().items():
+            section = getattr(self.config.channels, name, None)
+            if section is None:
+                continue
+            enabled = (
+                section.get("enabled", False)
+                if isinstance(section, dict)
+                else getattr(section, "enabled", False)
+            )
+            if not enabled:
                 continue
             try:
-                cls = load_channel_class(modname)
                 channel = cls(section, self.bus)
                 channel.transcription_api_key = groq_key
-                self.channels[modname] = channel
+                self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
-            except ImportError as e:
-                logger.warning("{} channel not available: {}", modname, e)
+            except Exception as e:
+                logger.warning("{} channel not available: {}", name, e)
 
-        # Web channel
-        if self.config.channels.web.enabled:
-            try:
-                from nanobot.channels.web import WebChannel
-                self.channels["web"] = WebChannel(
-                    self.config.channels.web,
-                    self.bus,
-                    agent_loop=self._agent_loop,
-                )
-                logger.info("Web channel enabled on port {}", self.config.channels.web.port)
-            except ImportError as e:
-                logger.warning("Web channel not available (install aiohttp): {}", e)
+        # Inject agent_loop into web channel (needed for direct SSE streaming)
+        if self._agent_loop and "web" in self.channels:
+            self.channels["web"]._agent_loop = self._agent_loop
 
         self._validate_allow_from()
 
