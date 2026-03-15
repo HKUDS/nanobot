@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from loguru import logger
 from pydantic import Field
-from telegram import BotCommand, ReplyParameters, Update
+from telegram import BotCommand, ReactionTypeEmoji, ReplyParameters, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
@@ -158,6 +158,7 @@ class TelegramConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     proxy: str | None = None
     reply_to_message: bool = False
+    react_emoji: str = "👀"  # Emoji reaction on incoming messages (empty string to disable)
     group_policy: Literal["open", "mention"] = "mention"
 
 
@@ -716,6 +717,7 @@ class TelegramChannel(BaseChannel):
 
         # Start typing indicator before processing
         self._start_typing(str_chat_id)
+        await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
 
         # Forward to the message bus
         await self._handle_message(
@@ -754,6 +756,19 @@ class TelegramChannel(BaseChannel):
         task = self._typing_tasks.pop(chat_id, None)
         if task and not task.done():
             task.cancel()
+
+    async def _add_reaction(self, chat_id: str, message_id: int, emoji: str) -> None:
+        """Add emoji reaction to a message (best-effort, non-blocking)."""
+        if not self._app or not emoji:
+            return
+        try:
+            await self._app.bot.set_message_reaction(
+                chat_id=int(chat_id),
+                message_id=message_id,
+                reaction=[ReactionTypeEmoji(emoji=emoji)],
+            )
+        except Exception as e:
+            logger.debug("Telegram reaction failed: {}", e)
 
     async def _typing_loop(self, chat_id: str) -> None:
         """Repeatedly send 'typing' action until cancelled."""
