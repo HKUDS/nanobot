@@ -15,7 +15,6 @@ try:
     from nio import (
         AsyncClient,
         AsyncClientConfig,
-        ContentRepositoryConfigError,
         DownloadError,
         InviteEvent,
         JoinError,
@@ -550,6 +549,12 @@ class MatrixChannel(BaseChannel):
             meta["thread_reply_to_event_id"] = reply_to
         return meta
 
+    def _thread_session_key(self, room: MatrixRoom, event: RoomMessage) -> str | None:
+        root_id = self._event_thread_root_id(event)
+        if not root_id:
+            return None
+        return f"matrix:{room.room_id}:thread:{root_id}"
+
     @staticmethod
     def _build_thread_relates_to(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
         if not metadata:
@@ -699,7 +704,9 @@ class MatrixChannel(BaseChannel):
         try:
             await self._handle_message(
                 sender_id=event.sender, chat_id=room.room_id,
-                content=event.body, metadata=self._base_metadata(room, event),
+                content=event.body,
+                session_key=self._thread_session_key(room, event),
+                metadata=self._base_metadata(room, event),
             )
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
@@ -732,6 +739,7 @@ class MatrixChannel(BaseChannel):
                 sender_id=event.sender, chat_id=room.room_id,
                 content="\n".join(parts),
                 media=[attachment["path"]] if attachment else [],
+                session_key=self._thread_session_key(room, event),
                 metadata=meta,
             )
         except Exception:
