@@ -539,7 +539,7 @@ def gateway(
             if isinstance(cron_tool, CronTool) and cron_token is not None:
                 cron_tool.reset_cron_context(cron_token)
 
-        message_tool = agent.tools.get("message")
+        message_tool = target_agent.tools.get("message")
         if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
             return response
 
@@ -573,10 +573,13 @@ def gateway(
         # Fallback keeps prior behavior but remains explicit.
         return "cli", "direct"
 
+    _heartbeat_target: dict[str, tuple[str, str] | None] = {"value": None}
+
     # Create heartbeat service
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
+        _heartbeat_target["value"] = (channel, chat_id)
         target_agent = agents_by_profile.get(channel_agent_name.get(channel, "defaults"), default_agent)
 
         async def _silent(*_args, **_kwargs):
@@ -584,7 +587,7 @@ def gateway(
 
         return await target_agent.process_direct(
             tasks,
-            session_key="heartbeat",
+            session_key=f"heartbeat:{channel}:{chat_id}",
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
@@ -593,7 +596,8 @@ def gateway(
     async def on_heartbeat_notify(response: str) -> None:
         """Deliver a heartbeat response to the user's channel."""
         from nanobot.bus.events import OutboundMessage
-        channel, chat_id = _pick_heartbeat_target()
+        channel, chat_id = _heartbeat_target.get("value") or _pick_heartbeat_target()
+        _heartbeat_target["value"] = None
         if channel == "cli":
             return  # No external channel available to deliver to
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
