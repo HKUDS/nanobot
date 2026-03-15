@@ -12,7 +12,7 @@ from litellm import acompletion
 from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-from nanobot.providers.registry import find_by_model, find_gateway
+from nanobot.providers.registry import find_by_model, find_by_name, find_gateway
 
 # Standard chat-completion message keys.
 _ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
@@ -44,6 +44,7 @@ class LiteLLMProvider(LLMProvider):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self._provider_name = provider_name  # store explicit provider name
 
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -98,8 +99,12 @@ class LiteLLMProvider(LLMProvider):
                 model = f"{prefix}/{model}"
             return model
 
-        # Standard mode: auto-prefix for known providers
-        spec = find_by_model(model)
+        # When an explicit provider_name is set in config, prioritize it
+        # over keyword-based auto-detection from the model name.
+        # e.g. provider="groq" + model="openai/gpt-oss-120b" should use
+        # Groq's prefix, not OpenAI's (which would match on "gpt" keyword).
+        explicit_spec = find_by_name(self._provider_name) if self._provider_name else None
+        spec = explicit_spec or find_by_model(model)
         if spec and spec.litellm_prefix:
             model = self._canonicalize_explicit_prefix(model, spec.name, spec.litellm_prefix)
             if not any(model.startswith(s) for s in spec.skip_prefixes):
