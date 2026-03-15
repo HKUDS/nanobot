@@ -505,7 +505,7 @@ class TestNewCommandArchival:
         return loop
 
     @pytest.mark.asyncio
-    async def test_new_does_not_clear_session_when_archive_fails(self, tmp_path: Path) -> None:
+    async def test_new_clears_session_immediately_even_if_archive_fails(self, tmp_path: Path) -> None:
         from nanobot.bus.events import InboundMessage
 
         loop = self._make_loop(tmp_path)
@@ -514,7 +514,6 @@ class TestNewCommandArchival:
             session.add_message("user", f"msg{i}")
             session.add_message("assistant", f"resp{i}")
         loop.sessions.save(session)
-        before_count = len(session.messages)
 
         async def _failing_consolidate(_messages) -> bool:
             return False
@@ -525,8 +524,12 @@ class TestNewCommandArchival:
         response = await loop._process_message(new_msg)
 
         assert response is not None
-        assert "failed" in response.content.lower()
-        assert len(loop.sessions.get_or_create("cli:test").messages) == before_count
+        assert "new session started" in response.content.lower()
+        assert loop.sessions.get_or_create("cli:test").messages == []
+
+        task = loop._archiving_tasks.get("cli:test")
+        assert task is not None
+        await task
 
     @pytest.mark.asyncio
     async def test_new_archives_only_unconsolidated_messages(self, tmp_path: Path) -> None:
@@ -554,6 +557,10 @@ class TestNewCommandArchival:
 
         assert response is not None
         assert "new session started" in response.content.lower()
+
+        task = loop._archiving_tasks.get("cli:test")
+        assert task is not None
+        await task
         assert archived_count == 3
 
     @pytest.mark.asyncio
@@ -578,3 +585,109 @@ class TestNewCommandArchival:
         assert response is not None
         assert "new session started" in response.content.lower()
         assert loop.sessions.get_or_create("cli:test").messages == []
+
+    @pytest.mark.asyncio
+    async def test_new_returns_immediately_before_archival_completes(self, tmp_path: Path) -> None:
+        from nanobot.bus.events import InboundMessage
+
+        loop = self._make_loop(tmp_path)
+        session = loop.sessions.get_or_create("cli:test")
+        for i in range(3):
+            session.add_message("user", f"msg{i}")
+            session.add_message("assistant", f"resp{i}")
+        loop.sessions.save(session)
+
+        archival_started = False
+
+        async def _slow_consolidate(messages) -> bool:
+            nonlocal archival_started
+            archival_started = True
+            await asyncio.sleep(1.0)
+            return True
+
+        loop.memory_consolidator.consolidate_messages = _slow_consolidate  # type: ignore[method-assign]
+
+        new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
+        response = await loop._process_message(new_msg)
+
+        assert response is not None
+        assert "new session started" in response.content.lower()
+        assert loop.sessions.get_or_create("cli:test").messages == []
+        assert not archival_started
+
+    @pytest.mark.asyncio
+    async def test_new_runs_background_archival_after_response(self, tmp_path: Path) -> None:
+        from nanobot.bus.events import InboundMessage
+
+        loop = self._make_loop(tmp_path)
+        session = loop.sessions.get_or_create("cli:test")
+        for i in range(3):
+            session.add_message("user", f"msg{i}")
+            session.add_message("assistant", f"resp{i}")
+        loop.sessions.save(session)
+
+        archival_started = False
+
+        async def _slow_consolidate(messages) -> bool:
+            nonlocal archival_started
+            archival_started = True
+            await asyncio.sleep(0.1)
+            return True
+
+        loop.memory_consolidator.consolidate_messages = _slow_consolidate  # type: ignore[method-assign]
+
+        new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
+        response = await loop._process_message(new_msg)
+
+        assert response is not None
+        assert "new session started" in response.content.lower()
+
+        task = loop._archiving_tasks.get("cli:test")
+        assert task is not None
+        await task
+        assert archival_started
+
+    @pytest.mark.asyncio
+    async def test_new_waits_for_previous_archival(self, tmp_path: Path) -> None:
+        from nanobot.bus.events import InboundMessage
+
+        loop = self._make_loop(tmp_path)
+        session = loop.sessions.get_or_create("cli:test")
+        for i in range(3):
+            session.add_message("user", f"msg{i}")
+            session.add_message("assistant", f"resp{i}")
+        loop.sessions.save(session)
+
+        consolidation_count = 0
+
+        async def _slow_consolidate(messages) -> bool:
+            nonlocal consolidation_count
+            consolidation_count += 1
+            await asyncio.sleep(0.1)
+            return True
+
+        loop.memory_consolidator.consolidate_messages = _slow_consolidate  # type: ignore[method-assign]
+
+        new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
+        response1 = await loop._process_message(new_msg)
+
+        assert response1 is not None
+        assert "new session started" in response1.content.lower()
+        assert loop.sessions.get_or_create("cli:test").messages == []
+
+        task1 = loop._archiving_tasks.get("cli:test")
+
+        new_msg2 = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
+        response2 = await loop._process_message(new_msg2)
+
+        assert response2 is not None
+        assert "new session started" in response2.content.lower()
+
+        if task1:
+            await task1
+
+        task2 = loop._archiving_tasks.get("cli:test")
+        if task2:
+            await task2
+
+        assert consolidation_count == 1

@@ -99,6 +99,8 @@ class AgentLoop:
         self._mcp_connected = False
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
+        self._archiving_tasks: dict[str, asyncio.Task] = {}  # session_key -> background archival task
+        self._archiving_sessions: dict[str, Session] = {}  # session_key -> session to archive
         self._processing_lock = asyncio.Lock()
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
@@ -377,24 +379,23 @@ class AgentLoop:
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            try:
-                if not await self.memory_consolidator.archive_unconsolidated(session):
-                    return OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content="Memory archival failed, session not cleared. Please try again.",
-                    )
-            except Exception:
-                logger.exception("/new archival failed for {}", session.key)
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="Memory archival failed, session not cleared. Please try again.",
-                )
+            existing_task = self._archiving_tasks.get(key)
+            if existing_task:
+                try:
+                    await existing_task
+                except Exception:
+                    logger.exception("/new: waiting on previous archival failed for {}", key)
 
-            session.clear()
-            self.sessions.save(session)
-            self.sessions.invalidate(session.key)
+            old_session = self.sessions.get_or_create(key)
+
+            if old_session.messages:
+                self._archiving_sessions[key] = old_session
+                task = asyncio.create_task(self._archive_old_session(key))
+                self._archiving_tasks[key] = task
+
+            new_session = Session(key=key)
+            self.sessions._cache[key] = new_session
+
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
         if cmd == "/help":
@@ -500,3 +501,20 @@ class AgentLoop:
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
         return response.content if response else ""
+
+    async def _archive_old_session(self, key: str) -> None:
+        """Archive old session in background after /new command."""
+        old_session = self._archiving_sessions.pop(key, None)
+        if old_session is None:
+            return
+
+        task = self._archiving_tasks.pop(key, None)
+
+        try:
+            if not await self.memory_consolidator.archive_unconsolidated(old_session):
+                logger.warning("/new archival returned false for {}", key)
+        except Exception:
+            logger.exception("/new archival failed for {}", key)
+        finally:
+            if key in self._archiving_tasks:
+                self._archiving_tasks.pop(key, None)
