@@ -48,11 +48,17 @@ class SpawnTool(Tool):
                     "type": "string",
                     "description": "Optional short label for the task (for display)",
                 },
+                "working_dir": {
+                    "type": "string",
+                    "description": "Optional working directory for the subagent. File operations will be relative to this directory. It will also inherit the AGENTS.md and skills in that directory.",
+                },
             },
             "required": ["task"],
         }
 
-    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
+    async def execute(
+        self, task: str, label: str | None = None, working_dir: str | None = None, **kwargs: Any
+    ) -> str:
         """Spawn a subagent to execute the given task."""
         return await self._manager.spawn(
             task=task,
@@ -60,4 +66,5 @@ class SpawnTool(Tool):
             origin_channel=self._origin_channel,
             origin_chat_id=self._origin_chat_id,
             session_key=self._session_key,
+            working_dir=working_dir,
         )
