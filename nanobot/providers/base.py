@@ -2,11 +2,20 @@
 
 import asyncio
 import json
+import secrets
+import string
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
+
+_ALNUM = string.ascii_letters + string.digits
+
+
+def short_tool_id() -> str:
+    """Generate a 9-char alphanumeric ID compatible with all providers."""
+    return "".join(secrets.choice(_ALNUM) for _ in range(9))
 
 
 @dataclass

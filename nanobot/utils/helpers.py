@@ -1,5 +1,7 @@
 """Utility functions for nanobot."""
 
+from __future__ import annotations
+
 import json
 import re
 from datetime import datetime
@@ -168,6 +170,45 @@ def estimate_prompt_tokens_chain(
     if estimated > 0:
         return int(estimated), "tiktoken"
     return 0, "none"
+
+
+# ---------------------------------------------------------------------------
+# Text-format XML tool-call parser
+# ---------------------------------------------------------------------------
+# Some models (especially open-source / domestic models accessed via
+# compatible APIs) don't use the structured function-calling API and instead
+# output tool calls as XML text:
+#   <tool_call><function=NAME><parameter=KEY>VALUE</parameter>...</function></tool_call>
+# These helpers extract them so the agent loop can execute them normally.
+
+_XML_TOOL_CALL_RE = re.compile(
+    r"<tool_call>\s*<function=(\w+)>([\s\S]*?)</function>\s*</tool_call>"
+)
+_XML_PARAM_RE = re.compile(r"<parameter=(\w+)>([\s\S]*?)</parameter>")
+
+
+def parse_text_tool_calls(text: str) -> list[ToolCallRequest]:
+    """Parse XML-formatted tool calls from LLM text content."""
+    from nanobot.providers.base import ToolCallRequest, short_tool_id
+
+    results: list[ToolCallRequest] = []
+    for m in _XML_TOOL_CALL_RE.finditer(text):
+        func_name = m.group(1)
+        body = m.group(2)
+        arguments: dict[str, Any] = {}
+        for pm in _XML_PARAM_RE.finditer(body):
+            arguments[pm.group(1)] = pm.group(2)
+        results.append(ToolCallRequest(
+            id=short_tool_id(),
+            name=func_name,
+            arguments=arguments,
+        ))
+    return results
+
+
+def strip_text_tool_calls(text: str) -> str | None:
+    """Remove XML tool-call blocks from text, return cleaned content or None."""
+    return _XML_TOOL_CALL_RE.sub("", text).strip() or None
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
