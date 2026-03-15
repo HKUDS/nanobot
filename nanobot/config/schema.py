@@ -41,10 +41,21 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
 
 
+class AgentProfile(Base):
+    """Named agent profile with optional overrides."""
+
+    system_prompt: str = ""  # Custom system prompt prefix
+    model: str | None = None  # Override default model
+    provider: str | None = None  # Explicit provider name; None = auto-detect
+    temperature: float | None = None
+    max_tokens: int | None = None
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    profiles: dict[str, AgentProfile] = Field(default_factory=dict)
 
 
 class ProviderConfig(Base):
