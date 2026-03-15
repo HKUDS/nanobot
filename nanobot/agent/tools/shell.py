@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from nanobot.agent.tools.base import Tool
 
 
@@ -129,6 +131,9 @@ class ExecTool(Tool):
             # Head + tail truncation to preserve both start and end of output
             max_len = self._MAX_OUTPUT
             if len(result) > max_len:
+                logger.warning(
+                    f"Shell command output truncated from {len(result)} to {max_len} characters"
+                )
                 half = max_len // 2
                 result = (
                     result[:half]
