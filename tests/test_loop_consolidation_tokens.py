@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -188,3 +189,42 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
     assert "consolidate" in order
     assert "llm" in order
     assert order.index("consolidate") < order.index("llm")
+
+
+@pytest.mark.asyncio
+async def test_post_response_consolidation_is_non_blocking(tmp_path, monkeypatch) -> None:
+    """Post-response consolidation must not block the response.
+
+    The response should be returned before background consolidation completes.
+    """
+    consolidation_started = asyncio.Event()
+    consolidation_gate = asyncio.Event()
+
+    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
+
+    original_maybe = loop.memory_consolidator.maybe_consolidate_by_tokens
+
+    call_count = [0]
+
+    async def slow_consolidate(session):
+        call_count[0] += 1
+        if call_count[0] <= 1:
+            # First call is the pre-message consolidation — let it pass through
+            return await original_maybe(session)
+        # Post-response call: signal that we started, then block until released
+        consolidation_started.set()
+        await consolidation_gate.wait()
+
+    loop.memory_consolidator.maybe_consolidate_by_tokens = slow_consolidate  # type: ignore[method-assign]
+
+    # process_direct should return the response without waiting for post-consolidation
+    result = await loop.process_direct("hello", session_key="cli:test")
+    assert result == "ok"
+
+    # Background consolidation should have started (or will start on next tick)
+    await asyncio.sleep(0.05)
+    assert consolidation_started.is_set(), "Background consolidation should have started"
+
+    # Release the background task so it can finish cleanly
+    consolidation_gate.set()
+    await asyncio.sleep(0.05)

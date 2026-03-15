@@ -99,6 +99,7 @@ class AgentLoop:
         self._mcp_connected = False
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
+        self._background_consolidation_tasks: set[asyncio.Task] = set()
         self._processing_lock = asyncio.Lock()
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
@@ -110,6 +111,19 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
         )
         self._register_default_tools()
+
+    def _schedule_background_consolidation(self, session: Session) -> None:
+        """Schedule memory consolidation as a background task (non-blocking)."""
+
+        async def _run() -> None:
+            try:
+                await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+            except Exception:
+                logger.exception("Background memory consolidation failed for {}", session.key)
+
+        task = asyncio.create_task(_run())
+        self._background_consolidation_tasks.add(task)
+        task.add_done_callback(self._background_consolidation_tasks.discard)
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -364,7 +378,7 @@ class AgentLoop:
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+            self._schedule_background_consolidation(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -454,7 +468,7 @@ class AgentLoop:
         tag_channel = msg.chat_id if chats_policy and guild_id else None
         self._save_turn(session, all_msgs, 1 + len(history), channel_id=tag_channel)
         self.sessions.save(session)
-        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        self._schedule_background_consolidation(session)
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
