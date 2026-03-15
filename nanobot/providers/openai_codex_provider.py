@@ -49,7 +49,7 @@ class OpenAICodexProvider(LLMProvider):
             "text": {"verbosity": "medium"},
             "include": ["reasoning.encrypted_content"],
             "prompt_cache_key": _prompt_cache_key(messages),
-            "tool_choice": tool_choice or "auto",
+            "tool_choice": _normalize_tool_choice(tool_choice),
             "parallel_tool_calls": True,
         }
 
@@ -88,6 +88,29 @@ def _strip_model_prefix(model: str) -> str:
     if model.startswith("openai-codex/") or model.startswith("openai_codex/"):
         return model.split("/", 1)[1]
     return model
+
+
+def _normalize_tool_choice(tool_choice: str | dict[str, Any] | None) -> str | dict[str, Any]:
+    """Normalize OpenAI-style tool_choice objects for the Codex Responses API."""
+    if tool_choice is None:
+        return "auto"
+    if isinstance(tool_choice, str):
+        return tool_choice
+    if not isinstance(tool_choice, dict):
+        return "auto"
+
+    choice_type = tool_choice.get("type")
+    if choice_type == "function":
+        name = tool_choice.get("name")
+        if not name:
+            fn = tool_choice.get("function")
+            if isinstance(fn, dict):
+                name = fn.get("name")
+        if name:
+            return {"type": "function", "name": name}
+        return "auto"
+
+    return tool_choice
 
 
 def _build_headers(account_id: str, token: str) -> dict[str, str]:
