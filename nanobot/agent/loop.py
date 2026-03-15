@@ -9,7 +9,7 @@ import re
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from loguru import logger
 
@@ -499,4 +499,11 @@ class AgentLoop:
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
-        return response.content if response else ""
+        if response:
+            return response.content
+
+        message_tool = self.tools.get("message")
+        if isinstance(message_tool, MessageTool) and message_tool._last_same_target_message:
+            return message_tool._last_same_target_message.content
+
+        return ""

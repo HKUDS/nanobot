@@ -86,6 +86,34 @@ class TestMessageToolSuppressLogic:
         assert result is not None
         assert "Hello" in result.content
 
+    @pytest.mark.asyncio
+    async def test_process_direct_returns_same_target_message_content(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        tool_call = ToolCallRequest(
+            id="call1",
+            name="message",
+            arguments={"content": "Hello from tool", "channel": "cli", "chat_id": "direct"},
+        )
+        calls = iter([
+            LLMResponse(content="", tool_calls=[tool_call]),
+            LLMResponse(content="Done", tool_calls=[]),
+        ])
+        loop.provider.chat = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        async def _silent(*_args, **_kwargs) -> None:
+            pass
+
+        response = await loop.process_direct(
+            "Hello",
+            channel="cli",
+            chat_id="direct",
+            on_progress=_silent,
+        )
+
+        assert response == "Hello from tool"
+        assert loop.bus.outbound_size == 1
+
     async def test_progress_hides_internal_reasoning(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
         tool_call = ToolCallRequest(id="call1", name="read_file", arguments={"path": "foo.txt"})
@@ -128,5 +156,7 @@ class TestMessageToolTurnTracking:
     def test_start_turn_resets(self) -> None:
         tool = MessageTool()
         tool._sent_in_turn = True
+        tool._last_same_target_message = OutboundMessage(channel="cli", chat_id="direct", content="Hello")
         tool.start_turn()
         assert not tool._sent_in_turn
+        assert tool._last_same_target_message is None
