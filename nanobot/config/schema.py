@@ -1,7 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -52,7 +52,24 @@ class AgentDefaults(Base):
 class AgentsConfig(Base):
     """Agent configuration."""
 
+    model_config = ConfigDict(extra="allow")
+
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+
+    def get_profile(self, name: str | None) -> AgentDefaults | None:
+        """Return named agent profile from agents.<name>; falls back handled by caller."""
+        profile_name = (name or "defaults").strip()
+        if not profile_name or profile_name == "defaults":
+            return self.defaults
+
+        raw: Any = (self.model_extra or {}).get(profile_name)
+        if raw is None:
+            return None
+        if isinstance(raw, AgentDefaults):
+            return raw
+        if isinstance(raw, dict):
+            return AgentDefaults.model_validate(raw)
+        return None
 
 
 class ProviderConfig(Base):

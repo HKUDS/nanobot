@@ -33,7 +33,7 @@ from rich.text import Text
 
 from nanobot import __logo__, __version__
 from nanobot.config.paths import get_workspace_path
-from nanobot.config.schema import Config
+from nanobot.config.schema import AgentDefaults, Config
 from nanobot.utils.helpers import sync_workspace_templates
 
 app = typer.Typer(
@@ -298,15 +298,25 @@ def _onboard_plugins(config_path: Path) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def _make_provider(config: Config):
+def _make_provider(config: Config, agent_cfg: AgentDefaults | None = None):
     """Create the appropriate LLM provider from config."""
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
-    model = config.agents.defaults.model
-    provider_name = config.get_provider_name(model)
-    p = config.get_provider(model)
+    cfg = agent_cfg or config.agents.defaults
+    model = cfg.model
+
+    forced_provider = (cfg.provider or "auto").replace("-", "_")
+    if forced_provider == "auto":
+        provider_name = config.get_provider_name(model)
+        p = config.get_provider(model)
+    else:
+        provider_name = forced_provider
+        p = getattr(config.providers, provider_name, None)
+        if not p:
+            console.print(f"[red]Error: Unknown provider: {provider_name}[/red]")
+            raise typer.Exit(1)
 
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
@@ -347,13 +357,23 @@ def _make_provider(config: Config):
             provider_name=provider_name,
         )
 
-    defaults = config.agents.defaults
+    defaults = cfg
     provider.generation = GenerationSettings(
         temperature=defaults.temperature,
         max_tokens=defaults.max_tokens,
         reasoning_effort=defaults.reasoning_effort,
     )
     return provider
+
+
+def _resolve_channel_agent_name(config: Config, channel_name: str) -> str:
+    """Resolve channel -> agent profile name, defaulting to agents.defaults."""
+    section = getattr(config.channels, channel_name, None)
+    if isinstance(section, dict):
+        selected = section.get("agent")
+        if isinstance(selected, str) and selected.strip():
+            return selected.strip()
+    return "defaults"
 
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
@@ -418,30 +438,75 @@ def gateway(
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
-    provider = _make_provider(config)
+    channels = ChannelManager(config, bus)
     session_manager = SessionManager(config.workspace_path)
+
+    class _RoutedAgentBus:
+        def __init__(self, shared_bus: MessageBus):
+            self._shared_bus = shared_bus
+            self._inbound: asyncio.Queue = asyncio.Queue()
+
+        async def publish_inbound(self, msg):
+            await self._inbound.put(msg)
+
+        async def consume_inbound(self):
+            return await self._inbound.get()
+
+        async def publish_outbound(self, msg):
+            await self._shared_bus.publish_outbound(msg)
+
+        async def consume_outbound(self):
+            return await self._shared_bus.consume_outbound()
+
+        @property
+        def inbound_size(self) -> int:
+            return self._inbound.qsize()
+
+        @property
+        def outbound_size(self) -> int:
+            return self._shared_bus.outbound_size
 
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_cron_dir() / "jobs.json"
     cron = CronService(cron_store_path)
 
+    channel_agent_name: dict[str, str] = {
+        name: _resolve_channel_agent_name(config, name)
+        for name in channels.enabled_channels
+    }
+    profile_names = {"defaults", *channel_agent_name.values()}
+
+    agent_buses: dict[str, _RoutedAgentBus] = {}
+    agents_by_profile: dict[str, AgentLoop] = {}
+    for profile_name in profile_names:
+        profile = config.agents.get_profile(profile_name)
+        if profile is None:
+            console.print(f"[red]Error: Unknown agent profile: {profile_name}[/red]")
+            raise typer.Exit(1)
+        agent_bus = _RoutedAgentBus(bus)
+        profile_provider = _make_provider(config, profile)
+        agents_by_profile[profile_name] = AgentLoop(
+            bus=agent_bus,
+            provider=profile_provider,
+            workspace=Path(profile.workspace).expanduser(),
+            model=profile.model,
+            max_iterations=profile.max_tool_iterations,
+            context_window_tokens=profile.context_window_tokens,
+            web_search_config=config.tools.web.search,
+            web_proxy=config.tools.web.proxy or None,
+            exec_config=config.tools.exec,
+            cron_service=cron,
+            restrict_to_workspace=config.tools.restrict_to_workspace,
+            session_manager=session_manager,
+            mcp_servers=config.tools.mcp_servers,
+            channels_config=config.channels,
+        )
+        agent_buses[profile_name] = agent_bus
+
+    default_agent = agents_by_profile["defaults"]
+
     # Create agent with cron service
-    agent = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
-        web_search_config=config.tools.web.search,
-        web_proxy=config.tools.web.proxy or None,
-        exec_config=config.tools.exec,
-        cron_service=cron,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-        session_manager=session_manager,
-        mcp_servers=config.tools.mcp_servers,
-        channels_config=config.channels,
-    )
+    agent = default_agent
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
@@ -456,12 +521,15 @@ def gateway(
             f"Scheduled instruction: {job.payload.message}"
         )
 
-        cron_tool = agent.tools.get("cron")
+        profile_name = channel_agent_name.get(job.payload.channel or "", "defaults")
+        target_agent = agents_by_profile.get(profile_name, default_agent)
+
+        cron_tool = target_agent.tools.get("cron")
         cron_token = None
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
         try:
-            response = await agent.process_direct(
+            response = await target_agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
@@ -477,7 +545,7 @@ def gateway(
 
         if job.payload.deliver and job.payload.to and response:
             should_notify = await evaluate_response(
-                response, job.payload.message, provider, agent.model,
+                response, job.payload.message, target_agent.provider, target_agent.model,
             )
             if should_notify:
                 from nanobot.bus.events import OutboundMessage
@@ -488,9 +556,6 @@ def gateway(
                 ))
         return response
     cron.on_job = on_cron_job
-
-    # Create channel manager
-    channels = ChannelManager(config, bus)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -512,11 +577,12 @@ def gateway(
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
+        target_agent = agents_by_profile.get(channel_agent_name.get(channel, "defaults"), default_agent)
 
         async def _silent(*_args, **_kwargs):
             pass
 
-        return await agent.process_direct(
+        return await target_agent.process_direct(
             tasks,
             session_key="heartbeat",
             channel=channel,
@@ -535,8 +601,8 @@ def gateway(
     hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
-        provider=provider,
-        model=agent.model,
+        provider=default_agent.provider,
+        model=default_agent.model,
         on_execute=on_heartbeat_execute,
         on_notify=on_heartbeat_notify,
         interval_s=hb_cfg.interval_s,
@@ -554,12 +620,26 @@ def gateway(
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
+    async def _route_inbound() -> None:
+        while True:
+            try:
+                msg = await asyncio.wait_for(bus.consume_inbound(), timeout=1.0)
+                profile_name = channel_agent_name.get(msg.channel, "defaults")
+                await agent_buses.get(profile_name, agent_buses["defaults"]).publish_inbound(msg)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+
     async def run():
+        router_task: asyncio.Task | None = None
         try:
             await cron.start()
             await heartbeat.start()
+            router_task = asyncio.create_task(_route_inbound())
             await asyncio.gather(
-                agent.run(),
+                router_task,
+                *(loop.run() for loop in agents_by_profile.values()),
                 channels.start_all(),
             )
         except KeyboardInterrupt:
@@ -569,10 +649,18 @@ def gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
-            await agent.close_mcp()
+            for loop in agents_by_profile.values():
+                loop.stop()
+            if router_task:
+                router_task.cancel()
+                try:
+                    await router_task
+                except asyncio.CancelledError:
+                    pass
+            for loop in agents_by_profile.values():
+                await loop.close_mcp()
             heartbeat.stop()
             cron.stop()
-            agent.stop()
             await channels.stop_all()
 
     asyncio.run(run())
