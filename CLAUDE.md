@@ -22,6 +22,8 @@ Before committing:
 make check    # lint + typecheck + import-check + prompt-check + test (full validation)
 ```
 
+Before committing, also review documentation: check that READMEs, CHANGELOG, ADRs, docstrings, and inline comments are accurate and up to date with the changes being committed.
+
 ## Python Conventions
 
 - **Target**: Python 3.10+ (use `|` union syntax, not `Union[X, Y]`)
@@ -48,7 +50,8 @@ nanobot/
 │   ├── registry.py      # AgentRegistry: maps role names to AgentRoleConfig
 │   ├── scratchpad.py    # Session-scoped JSONL artifact sharing (multi-agent)
 │   ├── skills.py        # Skill discovery and loading
-│   ├── subagent.py      # Subagent spawning
+│   ├── mission.py       # Background mission manager (async delegated tasks)
+│   ├── tool_loop.py     # Shared lightweight think→act→observe loop
 │   ├── observability.py # Langfuse OTEL tracing: init, shutdown, spans, scoring
 │   ├── tracing.py       # Correlation IDs via contextvars, structured log binding
 │   ├── memory/          # Memory subsystem
@@ -77,7 +80,7 @@ nanobot/
 │       ├── cron.py      # Scheduled task tool
 │       ├── feedback.py  # User feedback capture tool
 │       ├── message.py   # Outbound message tool
-│       ├── spawn.py     # Subagent spawning tool
+│       ├── mission.py   # Background mission launch, status, list, cancel tools
 │       └── scratchpad.py # Scratchpad read/write tools
 ├── config/              # Pydantic config models + loader with migration
 ├── channels/            # Chat platforms (Telegram, Discord, Slack, WhatsApp, ...)

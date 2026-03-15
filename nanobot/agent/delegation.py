@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from nanobot.agent.observability import span as langfuse_span
-from nanobot.agent.subagent import run_tool_loop
+from nanobot.agent.tool_loop import run_tool_loop
 from nanobot.agent.tools.base import ToolResult  # noqa: F401 — re-export for tests
 from nanobot.agent.tools.delegate import (
     DelegateParallelTool,
@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from nanobot.agent.coordinator import Coordinator
     from nanobot.agent.scratchpad import Scratchpad
     from nanobot.agent.tool_executor import ToolExecutor
+    from nanobot.agent.tools.base import Tool
     from nanobot.config.schema import ExecToolConfig
     from nanobot.providers.base import LLMProvider
 
@@ -175,6 +176,8 @@ class DelegationDispatcher:
         self.scratchpad: Scratchpad | None = None
         self.active_messages: list[dict[str, Any]] | None = None
         self.tools: ToolExecutor | None = None  # for wire_delegate_tools
+        # MCP tools injected lazily by AgentLoop after _connect_mcp()
+        self.mcp_tools: list[Tool] = []
 
     # ------------------------------------------------------------------
     # Wiring
@@ -625,6 +628,10 @@ class DelegationDispatcher:
         child_delegate = DelegateTool()
         child_delegate.set_dispatch(self.dispatch)
         tools.register(child_delegate)
+
+        # MCP tools (shared instances, injected by AgentLoop)
+        for tool in self.mcp_tools:
+            tools.register(tool)
 
         # Apply role-specific tool filters
         if role.denied_tools:

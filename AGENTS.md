@@ -33,7 +33,7 @@ make check                     # Full: lint + typecheck + import-check + prompt-
 
 ```
 nanobot/
-├── agent/               # Core: loop.py, streaming.py, verifier.py, consolidation.py, context.py, coordinator.py, delegation.py, tool_executor.py, observability.py, tracing.py, tools/, memory/
+├── agent/               # Core: loop.py, streaming.py, verifier.py, consolidation.py, context.py, coordinator.py, delegation.py, tool_executor.py, mission.py, tool_loop.py, observability.py, tracing.py, tools/, memory/
 ├── config/              # Pydantic config models + loader
 ├── channels/            # Chat platforms (base.py, retry.py, manager.py + 6 adapters)
 ├── providers/           # LLM providers (litellm → 100+ models, OpenAI Codex, custom)

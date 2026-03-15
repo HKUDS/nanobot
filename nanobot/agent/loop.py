@@ -39,11 +39,11 @@ from nanobot.agent.context import (
     summarize_and_compress,
 )
 from nanobot.agent.delegation import DelegationDispatcher
+from nanobot.agent.mission import MissionManager
 from nanobot.agent.observability import trace_request, update_current_span
 from nanobot.agent.prompt_loader import prompts
 from nanobot.agent.scratchpad import Scratchpad
 from nanobot.agent.streaming import StreamingLLMCaller, strip_think
-from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tool_executor import ToolExecutor
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.delegate import DelegateParallelTool, DelegateTool, DelegationResult
@@ -57,11 +57,16 @@ from nanobot.agent.tools.excel import (
 from nanobot.agent.tools.feedback import FeedbackTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
+from nanobot.agent.tools.mission import (
+    MissionCancelTool,
+    MissionListTool,
+    MissionStartTool,
+    MissionStatusTool,
+)
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.result_cache import CacheGetSliceTool, ToolResultCache
 from nanobot.agent.tools.scratchpad import ScratchpadReadTool, ScratchpadWriteTool
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.agent.tracing import TraceContext, bind_trace
 from nanobot.agent.verifier import AnswerVerifier
@@ -274,13 +279,16 @@ class AgentLoop:
             provider=provider,
             summary_model=config.tool_summary_model or None,
         )
-        self.subagents = SubagentManager(
+        self.missions = MissionManager(
             provider=provider,
             workspace=self.workspace,
             bus=bus,
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            max_iterations=config.mission_max_iterations,
+            max_concurrent=config.mission_max_concurrent,
+            result_max_chars=config.mission_result_max_chars,
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=self.restrict_to_workspace,
@@ -413,7 +421,6 @@ class AgentLoop:
             WebSearchTool(api_key=self.brave_api_key),
             WebFetchTool(),
             MessageTool(send_callback=self.bus.publish_outbound),
-            SpawnTool(manager=self.subagents),
             FeedbackTool(events_file=self.workspace / "memory" / "events.jsonl"),
         ):
             if _should_register(extra_tool.name):
@@ -432,6 +439,18 @@ class AgentLoop:
             delegate_parallel_tool = DelegateParallelTool()
             if _should_register(delegate_parallel_tool.name):
                 self.tools.register(delegate_parallel_tool)
+            mission_tool = MissionStartTool(manager=self.missions)
+            if _should_register(mission_tool.name):
+                self.tools.register(mission_tool)
+            mission_status = MissionStatusTool(manager=self.missions)
+            if _should_register(mission_status.name):
+                self.tools.register(mission_status)
+            mission_list = MissionListTool(manager=self.missions)
+            if _should_register(mission_list.name):
+                self.tools.register(mission_list)
+            mission_cancel = MissionCancelTool(manager=self.missions)
+            if _should_register(mission_cancel.name):
+                self.tools.register(mission_cancel)
 
         # Scratchpad tools (scratchpad instance swapped per session in _ensure_scratchpad)
         placeholder_pad = Scratchpad(self.workspace / "sessions" / "_placeholder")
@@ -480,6 +499,15 @@ class AgentLoop:
             await self._mcp_stack.__aenter__()
             await connect_mcp_servers(self._mcp_servers, self.tools._registry, self._mcp_stack)
             self._mcp_connected = True
+            # Share MCP tools with missions and delegation
+            mcp_tools = [
+                t
+                for name in self.tools._registry.tool_names
+                if name.startswith("mcp_") and (t := self.tools._registry.get(name))
+            ]
+            if mcp_tools:
+                self.missions.mcp_tools = mcp_tools
+                self._dispatcher.mcp_tools = mcp_tools
         except (RuntimeError, ConnectionError, OSError, TimeoutError, ImportError) as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
             if self._mcp_stack:
@@ -519,9 +547,9 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.set_context(channel, chat_id, message_id)
 
-        if spawn_tool := self.tools.get("spawn"):
-            if isinstance(spawn_tool, SpawnTool):
-                spawn_tool.set_context(channel, chat_id)
+        if mission_tool := self.tools.get("mission_start"):
+            if isinstance(mission_tool, MissionStartTool):
+                mission_tool.set_context(channel, chat_id)
 
         if cron_tool := self.tools.get("cron"):
             if isinstance(cron_tool, CronTool):
@@ -544,6 +572,7 @@ class AgentLoop:
         session_dir.mkdir(parents=True, exist_ok=True)
         self._scratchpad = Scratchpad(session_dir)
         self._dispatcher.scratchpad = self._scratchpad
+        self.missions.scratchpad = self._scratchpad
 
         # Update scratchpad tool references
         write_tool = self.tools.get("write_scratchpad")
@@ -1298,6 +1327,7 @@ class AgentLoop:
             default_role=self._routing_config.default_role,
         )
         self._dispatcher.coordinator = self._coordinator
+        self.missions.coordinator = self._coordinator
         self._wire_delegate_tools()
         logger.info(
             "Multi-agent routing enabled with {} roles",

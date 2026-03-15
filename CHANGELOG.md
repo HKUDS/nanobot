@@ -7,6 +7,11 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Background missions**: `MissionManager` + `MissionStartTool` / `MissionStatusTool` / `MissionListTool` / `MissionCancelTool` for asynchronous delegated task execution with coordinator routing, structured contracts, task taxonomy, grounding verification, and direct result delivery via `OutboundMessage`
+- **Mission observability**: Langfuse spans wrapping mission execution, `score_current_trace` for grounding, `TraceContext` correlation IDs, `update_current_span` for completion metadata, `tool_span` in `run_tool_loop`
+- **MCP tool sharing**: MCP tools are now available within background missions and delegated agents (shared `MCPToolWrapper` instances, respecting role-based `denied_tools`/`allowed_tools` filters)
+- **`MissionConfig`**: configurable `max_concurrent` (default 3), `max_iterations` (default 15), `result_max_chars` (default 4000) via `config.json` under `agents.defaults.mission`
+- **`tool_loop.py`**: extracted shared lightweight think→act→observe loop from deprecated `subagent.py`, used by both `MissionManager` and `DelegationDispatcher`
 - **Honest delivery**: `DeliveryResult` dataclass + `DeliverySkippedError` for truthful send confirmation
 - **Tool retry guard**: `ToolCallTracker` with 3-level escalation (warn → inject → force-stop) to prevent infinite tool loops
 - **Email validation**: `allow_to` allowlist + `proactive_send_policy` config fields; address format validation
@@ -40,6 +45,7 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 - **Channel adapters**: DingTalk, Feishu, Mochat, QQ (unmaintained, no active users)
+- **SubagentManager / SpawnTool**: replaced by `MissionManager` + background mission tools (dead code cleanup)
 
 ## [0.1.4] - 2025-03-10
 

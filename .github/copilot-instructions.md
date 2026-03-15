@@ -37,10 +37,10 @@ nanobot/
 │   ├── registry.py      # AgentRegistry: maps role names to AgentRoleConfig
 │   ├── scratchpad.py    # Session-scoped JSONL-backed artifact sharing (multi-agent)
 │   ├── skills.py        # Skill discovery and loading (YAML frontmatter in SKILL.md)
-│   ├── subagent.py      # Subagent spawning for parallel tasks
+│   ├── mission.py       # Background mission manager (async delegated tasks)
+│   ├── tool_loop.py     # Shared lightweight think→act→observe loop
 │   ├── observability.py # Langfuse OTEL tracing: init, shutdown, spans, scoring
 │   ├── tracing.py       # Correlation IDs via contextvars, structured log binding
-│   ├── observability.py # Langfuse OTEL tracing: init, shutdown, spans, scoring
 │   ├── memory/          # Memory subsystem (mem0-first with local fallback + knowledge graph)
 │   │   ├── store.py     # MemoryStore: primary public API
 │   │   ├── event.py     # MemoryEvent Pydantic model + KnowledgeTriple
@@ -66,7 +66,7 @@ nanobot/
 │       ├── feedback.py  # User feedback capture tool
 │       ├── cron.py      # Scheduled task tool
 │       ├── message.py   # Outbound message tool
-│       ├── spawn.py     # Subagent spawning tool
+│       ├── mission.py   # Background mission launch, status, list, cancel tools
 │       ├── delegate.py  # Multi-agent peer-to-peer + parallel delegation
 │       ├── result_cache.py # Large result caching + LLM summarization
 │       ├── excel.py     # Spreadsheet read, query, describe, find tools
@@ -202,6 +202,10 @@ Each top-level package has explicit import rules. Key forbidden imports:
 - **Verify after every change** — run `make lint && make typecheck` after every edit
 
 Full guidelines: `docs/refactoring-principles.md`
+
+### Pre-Commit Documentation Review
+
+Before every commit, review documentation affected by the changes: READMEs, CHANGELOG, ADRs, docstrings, and inline comments. Ensure they are accurate and up to date.
 
 ### Key ADRs
 

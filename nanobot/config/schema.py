@@ -136,6 +136,14 @@ class RerankerConfig(Base):
     model: str = ""  # Model name; blank = default (was NANOBOT_RERANKER_MODEL)
 
 
+class MissionConfig(Base):
+    """Background mission tuning."""
+
+    max_concurrent: int = 3
+    max_iterations: int = 15
+    result_max_chars: int = 4000
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -186,6 +194,9 @@ class AgentDefaults(Base):
 
     # mem0
     mem0: Mem0Config = Field(default_factory=Mem0Config)
+
+    # Missions
+    mission: MissionConfig = Field(default_factory=MissionConfig)
 
 
 class AgentConfig(Base):
@@ -278,6 +289,11 @@ class AgentConfig(Base):
     # Tools
     restrict_to_workspace: bool = False
 
+    # Missions
+    mission_max_concurrent: int = 3
+    mission_max_iterations: int = 15
+    mission_result_max_chars: int = 4000
+
     @classmethod
     def from_defaults(cls, defaults: "AgentDefaults", **overrides: Any) -> "AgentConfig":
         """Build an ``AgentConfig`` from the ``AgentDefaults`` section of the config file."""
@@ -322,6 +338,9 @@ class AgentConfig(Base):
             "mem0_verify_write": defaults.mem0.verify_write,
             "mem0_force_infer_true": defaults.mem0.force_infer_true,
             "vision_model": defaults.vision_model,
+            "mission_max_concurrent": defaults.mission.max_concurrent,
+            "mission_max_iterations": defaults.mission.max_iterations,
+            "mission_result_max_chars": defaults.mission.result_max_chars,
         }
         data.update(overrides)
         return cls(**data)  # type: ignore[arg-type]

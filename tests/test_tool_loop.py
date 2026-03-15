@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
-
 import pytest
 
-from nanobot.agent.subagent import SubagentManager, run_tool_loop
+from nanobot.agent.tool_loop import run_tool_loop
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -97,41 +92,3 @@ async def test_run_tool_loop_exhaustion_summary_fallback_to_tool_snippets() -> N
 
     assert "A" in (final or "")
     assert used == ["echo"]
-
-
-@pytest.mark.asyncio
-async def test_subagent_spawn_and_announce() -> None:
-    bus = SimpleNamespace(publish_inbound=AsyncMock())
-    manager = SubagentManager(
-        provider=_DummyProvider([LLMResponse(content="x")]),
-        workspace=Path("/tmp/work"),
-        bus=bus,
-    )
-
-    manager._run_subagent = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    msg = await manager.spawn(
-        "index files", label="index", origin_channel="cli", origin_chat_id="chat"
-    )
-    assert "started" in msg
-    await asyncio.sleep(0)
-
-    await manager._announce_result(
-        task_id="abc",
-        label="index",
-        task="index files",
-        result="ok",
-        origin={"channel": "cli", "chat_id": "chat"},
-        status="ok",
-    )
-    assert bus.publish_inbound.await_count == 1
-
-
-def test_subagent_prompt_and_running_count() -> None:
-    manager = SubagentManager(
-        provider=_DummyProvider([LLMResponse(content="x")]),
-        workspace=Path("/tmp/work"),
-        bus=SimpleNamespace(publish_inbound=AsyncMock()),
-    )
-    prompt = manager._build_subagent_prompt("task")
-    assert "/tmp/work" in prompt
-    assert manager.get_running_count() == 0
