@@ -31,6 +31,8 @@ from rich.markdown import Markdown
 from rich.table import Table
 from rich.text import Text
 
+from loguru import logger
+
 from nanobot import __logo__, __version__
 from nanobot.config.paths import get_workspace_path
 from nanobot.config.schema import Config
@@ -492,6 +494,18 @@ def gateway(
     # Create channel manager
     channels = ChannelManager(config, bus)
 
+    # Auto-start WhatsApp bridge if enabled
+    wa_cfg = getattr(config.channels, "whatsapp", None)
+    wa_enabled = False
+    if isinstance(wa_cfg, dict):
+        wa_enabled = wa_cfg.get("enabled", False)
+    elif wa_cfg is not None:
+        wa_enabled = getattr(wa_cfg, "enabled", False)
+
+    bridge_process = None
+    if wa_enabled:
+        bridge_process = _start_whatsapp_bridge(config)
+
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
         enabled = set(channels.enabled_channels)
@@ -574,6 +588,14 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            if bridge_process:
+                import subprocess
+
+                bridge_process.terminate()
+                try:
+                    bridge_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    bridge_process.kill()
 
     asyncio.run(run())
 
@@ -862,6 +884,47 @@ def _get_bridge_dir() -> Path:
         raise typer.Exit(1)
 
     return user_bridge
+
+
+def _start_whatsapp_bridge(config: Any) -> "subprocess.Popen | None":
+    """Auto-start the WhatsApp bridge for gateway mode."""
+    import shutil
+    import subprocess
+
+    from nanobot.config.paths import get_runtime_subdir
+
+    try:
+        bridge_dir = _get_bridge_dir()
+    except SystemExit:
+        logger.warning("WhatsApp bridge not available — skipping auto-start")
+        return None
+
+    env = {**os.environ}
+    wa_cfg = getattr(config.channels, "whatsapp", None) or {}
+    bridge_token = wa_cfg.get("bridgeToken", "") if isinstance(wa_cfg, dict) else getattr(wa_cfg, "bridge_token", "")
+    if bridge_token:
+        env["BRIDGE_TOKEN"] = bridge_token
+    env["AUTH_DIR"] = str(get_runtime_subdir("whatsapp-auth"))
+
+    npm_path = shutil.which("npm")
+    if not npm_path:
+        logger.warning("npm not found — WhatsApp bridge not started")
+        return None
+
+    console.print(f"{__logo__} Starting WhatsApp bridge...")
+    try:
+        process = subprocess.Popen(
+            [npm_path, "start"],
+            cwd=bridge_dir,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        console.print("[green]✓[/green] WhatsApp bridge started")
+        return process
+    except Exception as e:
+        logger.warning("Failed to start WhatsApp bridge: {}", e)
+        return None
 
 
 @channels_app.command("login")
