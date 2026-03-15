@@ -59,6 +59,7 @@ class HeartbeatService:
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
+        agent_name: str = "agent",
     ):
         self.workspace = workspace
         self.provider = provider
@@ -67,6 +68,7 @@ class HeartbeatService:
         self.on_notify = on_notify
         self.interval_s = interval_s
         self.enabled = enabled
+        self.agent_name = agent_name
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -108,7 +110,7 @@ class HeartbeatService:
     async def start(self) -> None:
         """Start the heartbeat service."""
         if not self.enabled:
-            logger.info("Heartbeat disabled")
+            logger.info("[{}] Heartbeat disabled", self.agent_name)
             return
         if self._running:
             logger.warning("Heartbeat already running")
@@ -116,7 +118,7 @@ class HeartbeatService:
 
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
-        logger.info("Heartbeat started (every {}s)", self.interval_s)
+        logger.info("[{}] Heartbeat started (every {}s)", self.agent_name, self.interval_s)
 
     def stop(self) -> None:
         """Stop the heartbeat service."""
@@ -146,28 +148,27 @@ class HeartbeatService:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
             return
 
-        logger.info("Heartbeat: checking for tasks...")
+        logger.info("[{}] Heartbeat: checking for tasks...", self.agent_name)
 
         try:
             action, tasks = await self._decide(content)
 
             if action != "run":
-                logger.info("Heartbeat: OK (nothing to report)")
+                logger.info("[{}] Heartbeat: OK (nothing to report)", self.agent_name)
                 return
 
-            logger.info("Heartbeat: tasks found, executing...")
+            logger.info("[{}] Heartbeat: tasks found, executing...", self.agent_name)
             if self.on_execute:
                 response = await self.on_execute(tasks)
-
                 if response:
                     should_notify = await evaluate_response(
                         response, tasks, self.provider, self.model,
                     )
                     if should_notify and self.on_notify:
-                        logger.info("Heartbeat: completed, delivering response")
+                        logger.info("[{}] Heartbeat: completed, delivering response", self.agent_name)
                         await self.on_notify(response)
                     else:
-                        logger.info("Heartbeat: silenced by post-run evaluation")
+                        logger.info("[{}] Heartbeat: silenced by post-run evaluation", self.agent_name)
         except Exception:
             logger.exception("Heartbeat execution failed")
 

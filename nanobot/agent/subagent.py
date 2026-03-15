@@ -8,6 +8,7 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.agent.tools.base import Tool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -46,11 +47,17 @@ class SubagentManager:
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self._extra_tools: list["Tool"] = []
+
+    def register_tool(self, tool: "Tool") -> None:
+        """Register an extra tool to be available in spawned subagents."""
+        self._extra_tools.append(tool)
 
     async def spawn(
         self,
         task: str,
         label: str | None = None,
+        include_bootstrap: bool = False,
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
         session_key: str | None = None,
@@ -61,7 +68,7 @@ class SubagentManager:
         origin = {"channel": origin_channel, "chat_id": origin_chat_id}
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin)
+            self._run_subagent(task_id, task, display_label, origin, include_bootstrap)
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -85,6 +92,7 @@ class SubagentManager:
         task: str,
         label: str,
         origin: dict[str, str],
+        include_bootstrap: bool,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -107,7 +115,15 @@ class SubagentManager:
             tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
             tools.register(WebFetchTool(proxy=self.web_proxy))
             
-            system_prompt = self._build_subagent_prompt()
+            for extra_tool in self._extra_tools:
+                tools.register(extra_tool)
+                
+            # Set context for tools that need it (e.g. AgentDelegateTool)
+            for tool_key, tool_instance in tools._tools.items():
+                if hasattr(tool_instance, "set_context"):
+                    tool_instance.set_context(origin["channel"], origin["chat_id"])
+            
+            system_prompt = self._build_subagent_prompt(include_bootstrap)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
@@ -197,7 +213,7 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         await self.bus.publish_inbound(msg)
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
     
-    def _build_subagent_prompt(self) -> str:
+    def _build_subagent_prompt(self, include_bootstrap: bool) -> str:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.context import ContextBuilder
         from nanobot.agent.skills import SkillsLoader
@@ -212,6 +228,13 @@ Stay focused on the assigned task. Your final response will be reported back to 
 
 ## Workspace
 {self.workspace}"""]
+
+        # Load global behavior guidelines (AGENTS.md, SOUL.md, TOOLS.md, etc.)
+        if include_bootstrap:
+            context_builder = ContextBuilder(self.workspace)
+            bootstrap = context_builder._load_bootstrap_files()
+            if bootstrap:
+                parts.append(bootstrap)
 
         skills_summary = SkillsLoader(self.workspace).build_skills_summary()
         if skills_summary:
