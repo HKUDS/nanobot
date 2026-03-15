@@ -126,6 +126,7 @@ class WebToolsConfig(Base):
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
+    allowed_paths: list[str] = Field(default_factory=list)
     timeout: int = 60
     path_append: str = ""
 
