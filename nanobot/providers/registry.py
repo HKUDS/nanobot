@@ -12,7 +12,7 @@ Every entry writes out all fields so you can copy-paste as a template.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -47,6 +47,7 @@ class ProviderSpec:
 
     # gateway behavior
     strip_model_prefix: bool = False  # strip "provider/" before re-prefixing
+    litellm_kwargs: dict[str, Any] = field(default_factory=dict)  # extra kwargs passed to LiteLLM
 
     # per-model param overrides, e.g. (("kimi-k2.5", {"temperature": 1.0}),)
     model_overrides: tuple[tuple[str, dict[str, Any]], ...] = ()
@@ -97,7 +98,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("openrouter",),
         env_key="OPENROUTER_API_KEY",
         display_name="OpenRouter",
-        litellm_prefix="openrouter",  # claude-3 → openrouter/claude-3
+        litellm_prefix="openrouter",  # anthropic/claude-3 → openrouter/anthropic/claude-3
         skip_prefixes=(),
         env_extras=(),
         is_gateway=True,
@@ -145,7 +146,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
-    # VolcEngine (火山引擎): OpenAI-compatible gateway
+
+    # VolcEngine (火山引擎): OpenAI-compatible gateway, pay-per-use models
     ProviderSpec(
         name="volcengine",
         keywords=("volcengine", "volces", "ark"),
@@ -162,6 +164,62 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+
+    # VolcEngine Coding Plan (火山引擎 Coding Plan): same key as volcengine
+    ProviderSpec(
+        name="volcengine_coding_plan",
+        keywords=("volcengine-plan",),
+        env_key="OPENAI_API_KEY",
+        display_name="VolcEngine Coding Plan",
+        litellm_prefix="volcengine",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://ark.cn-beijing.volces.com/api/coding/v3",
+        strip_model_prefix=True,
+        model_overrides=(),
+    ),
+
+    # BytePlus: VolcEngine international, pay-per-use models
+    ProviderSpec(
+        name="byteplus",
+        keywords=("byteplus",),
+        env_key="OPENAI_API_KEY",
+        display_name="BytePlus",
+        litellm_prefix="volcengine",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="bytepluses",
+        default_api_base="https://ark.ap-southeast.bytepluses.com/api/v3",
+        strip_model_prefix=True,
+        model_overrides=(),
+    ),
+
+    # BytePlus Coding Plan: same key as byteplus
+    ProviderSpec(
+        name="byteplus_coding_plan",
+        keywords=("byteplus-plan",),
+        env_key="OPENAI_API_KEY",
+        display_name="BytePlus Coding Plan",
+        litellm_prefix="volcengine",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="",
+        default_api_base="https://ark.ap-southeast.bytepluses.com/api/coding/v3",
+        strip_model_prefix=True,
+        model_overrides=(),
+    ),
+
+
     # === Standard providers (matched by model-name keywords) ===============
     # Anthropic: LiteLLM recognizes "claude-*" natively, no prefix needed.
     ProviderSpec(
