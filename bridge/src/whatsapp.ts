@@ -24,8 +24,9 @@ const VERSION = '0.1.0';
 
 export interface InboundMessage {
   id: string;
-  sender: string;
+  sender: string;      // Chat JID (group JID for groups, user JID for DMs)
   pn: string;
+  participant?: string; // For group messages: the individual sender's JID
   content: string;
   timestamp: number;
   isGroup: boolean;
@@ -177,6 +178,7 @@ export class WhatsAppClient {
           id: msg.key.id || '',
           sender: msg.key.remoteJid || '',
           pn: msg.key.remoteJidAlt || '',
+          ...(isGroup && msg.key.participant ? { participant: msg.key.participant } : {}),
           content: finalContent,
           timestamp: msg.messageTimestamp as number,
           isGroup,
