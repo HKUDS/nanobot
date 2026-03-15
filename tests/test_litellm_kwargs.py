@@ -45,6 +45,9 @@ async def test_openrouter_injects_litellm_kwargs() -> None:
     assert call_kwargs.get("custom_llm_provider") == "openrouter", (
         "OpenRouter gateway should pass custom_llm_provider='openrouter' to acompletion"
     )
+    assert call_kwargs["model"] == "anthropic/claude-sonnet-4-5", (
+        "Model name must NOT get an 'openrouter/' prefix — routing is via custom_llm_provider"
+    )
 
 
 @pytest.mark.asyncio
@@ -109,4 +112,7 @@ async def test_openrouter_autodetect_by_key_prefix() -> None:
     call_kwargs = mock_acompletion.call_args.kwargs
     assert call_kwargs.get("custom_llm_provider") == "openrouter", (
         "Auto-detected OpenRouter (by sk-or- prefix) should still inject custom_llm_provider"
+    )
+    assert call_kwargs["model"] == "anthropic/claude-sonnet-4-5", (
+        "Auto-detected OpenRouter must preserve native model name without openrouter/ prefix"
     )
